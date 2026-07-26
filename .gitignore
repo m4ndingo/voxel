@@ -1,0 +1,3 @@
+# Estado de runtime (montado/servido, no versionar): mundo, habitantes, texturas guardadas, logs
+data/
+*.log

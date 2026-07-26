@@ -1,0 +1,92 @@
+[
+  {
+    "id": "adoquin",
+    "name": "Adoquín",
+    "role": "Bloque · piedra irregular (cobblestone)",
+    "icon": "🪨",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/adoquin.vox.json"
+  },
+  {
+    "id": "ladrillo_piedra",
+    "name": "Ladrillo de piedra",
+    "role": "Bloque · sillar gris (stone bricks)",
+    "icon": "🧱",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/ladrillo_piedra.vox.json"
+  },
+  {
+    "id": "ladrillo",
+    "name": "Ladrillo",
+    "role": "Bloque · ladrillo rojo (bricks)",
+    "icon": "🧱",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/ladrillo.vox.json"
+  },
+  {
+    "id": "tablones",
+    "name": "Tablones",
+    "role": "Bloque · madera de roble (oak planks)",
+    "icon": "🪵",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/tablones.vox.json"
+  },
+  {
+    "id": "tronco",
+    "name": "Tronco",
+    "role": "Bloque · tronco de roble (oak log)",
+    "icon": "🌳",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/tronco.vox.json"
+  },
+  {
+    "id": "arena",
+    "name": "Arena",
+    "role": "Bloque · arena (sand)",
+    "icon": "🏜️",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/arena.vox.json"
+  },
+  {
+    "id": "arenisca",
+    "name": "Arenisca",
+    "role": "Bloque · arenisca en capas (sandstone)",
+    "icon": "🧱",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/arenisca.vox.json"
+  },
+  {
+    "id": "grava",
+    "name": "Grava",
+    "role": "Bloque · grava (gravel)",
+    "icon": "⚪",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/grava.vox.json"
+  },
+  {
+    "id": "musgo_adoquin",
+    "name": "Adoquín musgoso",
+    "role": "Bloque · adoquín con musgo (mossy)",
+    "icon": "🟩",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/musgo_adoquin.vox.json"
+  },
+  {
+    "id": "obsidiana",
+    "name": "Obsidiana",
+    "role": "Bloque · obsidiana (obsidian)",
+    "icon": "🟣",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/obsidiana.vox.json"
+  }
+]

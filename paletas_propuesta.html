@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxelForge · Propuesta de paletas temáticas</title>
+<style>
+  :root{
+    --bg:#0e1016; --panel:#161a24; --panel-2:#1d2230; --line:#2a3040;
+    --ink:#e7ecf4; --muted:#8a93a6; --accent:#f6b84a; --accent-2:#5aa0e2; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--bg); color:var(--ink);
+       font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:28px 20px 60px}
+  .wrap{max-width:1100px; margin:0 auto}
+  h1{font-size:24px; margin:0 0 4px}
+  .lead{color:var(--muted); margin:0 0 20px; max-width:780px}
+  .note{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+        padding:14px 16px; margin:0 0 28px; color:var(--muted)}
+  .note strong{color:var(--ink)}
+  .note code{background:var(--panel-2); border:1px solid var(--line); border-radius:5px;
+             padding:1px 6px; color:var(--accent-2); font-size:13px}
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:18px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+        padding:16px; display:flex; flex-direction:column; gap:10px}
+  .card h2{font-size:16px; margin:0; display:flex; align-items:center; gap:8px}
+  .card .emoji{font-size:18px}
+  .card .desc{color:var(--muted); font-size:13px; margin:0; min-height:34px}
+  .swatches{display:grid; grid-template-columns:repeat(8,1fr); gap:6px}
+  .sw{aspect-ratio:1; border-radius:6px; border:1px solid rgba(255,255,255,.08);
+      position:relative; cursor:pointer}
+  .sw:hover{outline:2px solid var(--accent); outline-offset:1px; z-index:2}
+  .sw .tip{position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
+           background:#000; color:#fff; font-size:11px; padding:3px 6px; border-radius:5px;
+           white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .1s; border:1px solid var(--line)}
+  .sw:hover .tip{opacity:1}
+  .count{color:var(--muted); font-size:12px; margin-top:2px}
+  .strip{height:14px; border-radius:5px; overflow:hidden; display:flex; margin-top:4px}
+  .strip span{flex:1}
+  footer{margin-top:34px; color:var(--muted); font-size:13px; border-top:1px solid var(--line); padding-top:16px}
+  .copied{position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
+          background:var(--accent); color:#141821; font-weight:600; padding:8px 16px;
+          border-radius:8px; opacity:0; transition:opacity .15s; pointer-events:none}
+  .copied.on{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎨 Paletas temáticas para VoxelForge — propuesta</h1>
+  <p class="lead">Candidatas de paletas <strong>agrupadas por tema/color</strong> para sustituir (o complementar)
+  la paleta única actual de 24 colores. Elige las que quieras y las integro como <strong>paletas
+  conmutables</strong> en el panel «Paleta».</p>
+
+  <div class="note">
+    <strong>Cómo se integraría</strong> (cuando apruebes las temáticas): un <strong>selector</strong> encima de las
+    muestras del panel «Paleta» para cambiar de paleta activa; <code>PALETTES = { clasica:[…], bosque:[…], … }</code>
+    reemplaza al array plano <code>PALETTE</code>; <code>buildPalette()</code> pinta la paleta elegida y se recuerda en
+    <code>localStorage</code>. Los colores personalizados (input + cuentagotas) seguirían funcionando igual.
+    <br>· <em>Pasa el ratón por cada muestra para ver el hex · clic para copiarlo.</em>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <footer>
+    ✏️ Es una propuesta: dime <strong>qué paletas dejamos</strong> (y si quieres renombrar/retocar colores o
+    fijar el nº de muestras por paleta). Con eso las cableo en el editor. Artefacto servido en
+    <code>/paletas_propuesta.html</code>.
+  </footer>
+</div>
+
+<div class="copied" id="copied">copiado</div>
+
+<script>
+// Cada paleta: {id, name, emoji, desc, colors:[[hex,nombre],…]}
+const PALETTES = [
+  { id:'clasica', name:'Clásica (actual)', emoji:'🧱',
+    desc:'La paleta que ya tiene el editor. Referencia para comparar.',
+    colors:[['#f2d5b8','piel clara'],['#d9a066','madera'],['#8a5a3b','madera osc'],['#5e3617','nogal'],
+            ['#c9ced6','piedra'],['#8f97a6','piedra media'],['#5b6172','pizarra'],['#33384a','antracita'],
+            ['#7ec850','hoja'],['#4f9e3a','hierba'],['#2f6d29','pino'],['#1c4a1c','bosque'],
+            ['#e2685a','rojo teja'],['#b8322b','carmesí'],['#e2a44a','ámbar'],['#f6d94a','oro'],
+            ['#5aa0e2','azul'],['#356fb8','añil'],['#7a5ad9','violeta'],['#3a2f6d','índigo'],
+            ['#f5f7fb','blanco'],['#c0c6d4','gris claro'],['#3a4152','gris osc'],['#101218','negro']] },
+
+  { id:'bosque', name:'Bosque encantado', emoji:'🌳',
+    desc:'Verdes, cortezas y hongos. Ideal para vegetación, árboles y setas.',
+    colors:[['#eaf7cf','brote'],['#b6e07a','hoja tierna'],['#7ec850','hoja'],['#4f9e3a','hierba'],
+            ['#2f6d29','pino'],['#1c4a1c','bosque'],['#c99b63','corteza clara'],['#8a5a3b','corteza'],
+            ['#5e3617','tronco'],['#3a2416','raíz'],['#e2685a','seta roja'],['#d94a8f','seta rosa'],
+            ['#f6d94a','polen'],['#6fd6c0','musgo lúmi'],['#a6c078','liquen'],['#f5f7fb','esporas']] },
+
+  { id:'mazmorra', name:'Mazmorra húmeda', emoji:'🏰',
+    desc:'Piedra fría, óxido, musgo y luz de antorcha. Para calabozos y ruinas.',
+    colors:[['#c9ced6','sillar'],['#8f97a6','piedra'],['#5b6172','pizarra'],['#33384a','sombra'],
+            ['#1a1d26','muro osc'],['#4f6b3a','musgo'],['#6d7a3a','moho'],['#6d4a2f','madera vieja'],
+            ['#b8632b','óxido'],['#8a3320','herrumbre'],['#f6b84a','antorcha'],['#ef8a3a','llama'],
+            ['#6fd6e2','cristal'],['#356fb8','agua'],['#c0c6d4','hueso'],['#0c0e14','abismo']] },
+
+  { id:'fuego', name:'Fuego y lava', emoji:'🔥',
+    desc:'Del basalto negro al blanco incandescente. Lava, brasas, forjas.',
+    colors:[['#1a0e0a','basalto'],['#3a1810','carbón'],['#6d1f14','ascua osc'],['#b8322b','brasa'],
+            ['#e2685a','fuego'],['#ef8a3a','llama'],['#f6b84a','ámbar'],['#f6d94a','chispa'],
+            ['#fff2b0','fulgor'],['#ffffff','incandesc.']] },
+
+  { id:'hielo', name:'Hielo y agua', emoji:'❄️',
+    desc:'Azules profundos, cian y blancos. Nieve, hielo, océano, cristal.',
+    colors:[['#0d1b33','abismo'],['#1b3a66','profundo'],['#356fb8','añil'],['#5aa0e2','mar'],
+            ['#7ecde2','cian'],['#b0e8f2','hielo'],['#e8fbff','escarcha'],['#ffffff','nieve'],
+            ['#8fa6c0','bruma'],['#c0c6d4','gris frío']] },
+
+  { id:'cienaga', name:'Ciénaga tóxica', emoji:'☠️',
+    desc:'Verdes ácidos y morados de veneno. Pantanos, limo, magia oscura.',
+    colors:[['#0e1a12','fango'],['#1c4a2a','musgo osc'],['#3a7d3a','limo'],['#7ec850','veneno'],
+            ['#b8f24a','ácido'],['#e2f26a','fósforo'],['#6d3a8a','miasma'],['#a04ad9','púrpura'],
+            ['#d98af2','esporas'],['#2a1a3a','sombra']] },
+
+  { id:'real', name:'Corte real / oro', emoji:'👑',
+    desc:'Púrpura noble, carmesí, oro y marfil. Tronos, joyas, estandartes.',
+    colors:[['#2a1030','vino osc'],['#4a1a52','púrpura'],['#7a2a6d','magenta'],['#b8326d','carmín'],
+            ['#e2685a','coral'],['#d9a066','bronce'],['#e2a44a','oro viejo'],['#f6d94a','oro'],
+            ['#fff2b0','marfil'],['#f5f7fb','nácar']] },
+
+  { id:'desierto', name:'Desierto y ruinas', emoji:'🏜️',
+    desc:'Arenas, ocres y terracota, con un toque de turquesa. Dunas y templos.',
+    colors:[['#f2e3b8','arena clara'],['#e2c88a','arena'],['#d9a066','ocre'],['#b87a3a','tierra'],
+            ['#8a5a3b','adobe'],['#5e3617','sombra'],['#c96a3a','terracota'],['#8a3320','ladrillo'],
+            ['#6fbfae','turquesa'],['#3a6d66','pátina']] },
+
+  { id:'noche', name:'Noche espectral', emoji:'👻',
+    desc:'Morados y azules oscuros con destellos fantasma y luna. Escenas nocturnas.',
+    colors:[['#0a0e1a','noche'],['#14203a','medianoche'],['#2a2a5a','índigo'],['#4a3a7d','violeta osc'],
+            ['#7a5ad9','arcano'],['#9f8ae2','lila'],['#6fe2b0','fantasma'],['#b0f2d6','fulgor verde'],
+            ['#e8eaf6','estrella'],['#f6d94a','luna']] },
+
+  { id:'piel', name:'Pieles y cabellos', emoji:'🧑',
+    desc:'Tonos de piel humanos y de fantasía + cabellos. Para personajes.',
+    colors:[['#ffe6cf','piel muy clara'],['#f2c9a0','piel clara'],['#e0a878','piel media'],['#c98a5a','piel tostada'],
+            ['#9a6b45','piel oscura'],['#6d4a30','piel muy osc'],['#b8d68a','orco'],['#8fb85a','goblin'],
+            ['#a6c0d9','no-muerto'],['#a04ad9','dracónico'],['#1a1a1a','pelo negro'],['#6d4a2f','pelo castaño'],
+            ['#d9a066','pelo rubio'],['#b8322b','pelo rojo'],['#c0c6d4','pelo canoso'],['#5aa0e2','pelo fantasía']] },
+
+  { id:'metal', name:'Metal y forja', emoji:'⚒️',
+    desc:'Hierro, acero, cobre, bronce, oro y plata. Armas, armaduras, mecanismos.',
+    colors:[['#eef1f6','plata'],['#c6ccd8','acero clv'],['#a6adba','acero'],['#6d7488','hierro'],
+            ['#464c5e','hierro osc'],['#2a2f3d','forjado'],['#c98a5a','cobre'],['#a6602f','cobre osc'],
+            ['#e2a44a','bronce'],['#f6d94a','oro']] },
+
+  { id:'pastel', name:'Aldea pastel', emoji:'🍬',
+    desc:'Colores suaves y acogedores. Objetos amables, decorados, UI cálida.',
+    colors:[['#f7d6c4','durazno'],['#f2b8a6','salmón'],['#e2a4b8','rosa'],['#c4a4e2','lavanda'],
+            ['#a4bce2','celeste'],['#a4e2c4','menta'],['#d6e2a4','lima suave'],['#f2e2a4','mantequilla'],
+            ['#f5f7fb','crema'],['#9aa3b5','gris suave']] },
+
+  { id:'retro', name:'Retro 8-bit', emoji:'🕹️',
+    desc:'Paleta limitada estilo consola clásica (16 colores, tipo PICO-8).',
+    colors:[['#000000','negro'],['#1D2B53','azul osc'],['#7E2553','vino'],['#008751','verde'],
+            ['#AB5236','marrón'],['#5F574F','gris osc'],['#C2C3C7','gris'],['#FFF1E8','blanco'],
+            ['#FF004D','rojo'],['#FFA300','naranja'],['#FFEC27','amarillo'],['#00E436','lima'],
+            ['#29ADFF','celeste'],['#83769C','malva'],['#FF77A8','rosa'],['#FFCCAA','piel']] },
+];
+
+const grid=document.getElementById('grid');
+const copied=document.getElementById('copied');
+let ct;
+function copy(hex){ navigator.clipboard&&navigator.clipboard.writeText(hex);
+  copied.textContent=hex+' copiado'; copied.classList.add('on');
+  clearTimeout(ct); ct=setTimeout(()=>copied.classList.remove('on'),900); }
+
+for(const p of PALETTES){
+  const card=document.createElement('div'); card.className='card';
+  const strip='<div class="strip">'+p.colors.map(c=>`<span style="background:${c[0]}"></span>`).join('')+'</div>';
+  card.innerHTML=`<h2><span class="emoji">${p.emoji}</span>${p.name}</h2>
+    <p class="desc">${p.desc}</p>${strip}
+    <div class="swatches"></div>
+    <div class="count">${p.colors.length} colores · id <code style="color:var(--accent-2)">${p.id}</code></div>`;
+  const sw=card.querySelector('.swatches');
+  for(const [hex,nom] of p.colors){
+    const d=document.createElement('div'); d.className='sw'; d.style.background=hex;
+    d.innerHTML=`<span class="tip">${nom} · ${hex}</span>`;
+    d.onclick=()=>copy(hex);
+    sw.appendChild(d);
+  }
+  grid.appendChild(card);
+}
+</script>
+</body>
+</html>

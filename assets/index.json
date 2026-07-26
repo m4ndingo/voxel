@@ -1,0 +1,254 @@
+[
+  {
+    "id": "alis",
+    "name": "Alis la Duplicadora",
+    "role": "Maestra de Forja del Exponente",
+    "type": "personaje",
+    "size": 32,
+    "file": "assets/alis.vox.json"
+  },
+  {
+    "id": "chef",
+    "name": "El Cocinero del Sabor SQL",
+    "role": "Chef de la Taberna 'Inyección'",
+    "type": "personaje",
+    "size": 32,
+    "file": "assets/chef.vox.json"
+  },
+  {
+    "id": "analista",
+    "name": "El Analista de Espectro",
+    "role": "Sintonizador Forense",
+    "type": "personaje",
+    "size": 32,
+    "file": "assets/analista.vox.json"
+  },
+  {
+    "id": "taberna",
+    "name": "Taberna",
+    "role": "Habitación",
+    "type": "bloque",
+    "icon": "🍺",
+    "size": {
+      "x": 112,
+      "y": 112,
+      "z": 52
+    },
+    "file": "assets/taberna.vox.json"
+  },
+  {
+    "id": "herreria",
+    "name": "Herrería",
+    "role": "Habitación",
+    "type": "bloque",
+    "icon": "🔨",
+    "size": {
+      "x": 112,
+      "y": 112,
+      "z": 52
+    },
+    "file": "assets/herreria.vox.json"
+  },
+  {
+    "id": "mazmorra",
+    "name": "Mazmorra",
+    "role": "Habitación",
+    "type": "bloque",
+    "icon": "🕯️",
+    "size": {
+      "x": 112,
+      "y": 112,
+      "z": 52
+    },
+    "file": "assets/mazmorra.vox.json"
+  },
+  {
+    "id": "cubo",
+    "name": "Cubo",
+    "role": "Bloque básico 16³",
+    "type": "objeto",
+    "icon": "🧊",
+    "size": 16,
+    "file": "assets/cubo.vox.json"
+  },
+  {
+    "id": "hierba",
+    "name": "Hierba",
+    "role": "Textura · césped sobre tierra",
+    "type": "textura",
+    "icon": "🌿",
+    "size": 16,
+    "file": "assets/hierba.vox.json",
+    "group": "Básicas"
+  },
+  {
+    "id": "tierra",
+    "name": "Tierra",
+    "role": "Textura · tierra",
+    "type": "textura",
+    "icon": "🟫",
+    "size": 16,
+    "file": "assets/tierra.vox.json",
+    "group": "Básicas"
+  },
+  {
+    "id": "madera",
+    "name": "Madera",
+    "role": "Textura · tablones",
+    "type": "textura",
+    "icon": "🪵",
+    "size": 16,
+    "file": "assets/madera.vox.json",
+    "group": "Básicas"
+  },
+  {
+    "id": "roca",
+    "name": "Roca",
+    "role": "Textura · piedra",
+    "type": "textura",
+    "icon": "🪨",
+    "size": 16,
+    "file": "assets/roca.vox.json",
+    "group": "Básicas"
+  },
+  {
+    "id": "adoquin",
+    "name": "Adoquín",
+    "role": "Bloque · piedra irregular (cobblestone)",
+    "icon": "🪨",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/adoquin.vox.json"
+  },
+  {
+    "id": "ladrillo_piedra",
+    "name": "Ladrillo de piedra",
+    "role": "Bloque · sillar gris (stone bricks)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/ladrillo_piedra.vox.json"
+  },
+  {
+    "id": "ladrillo",
+    "name": "Ladrillo",
+    "role": "Bloque · ladrillo rojo (bricks)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/ladrillo.vox.json"
+  },
+  {
+    "id": "tablones",
+    "name": "Tablones",
+    "role": "Bloque · madera de roble (oak planks)",
+    "icon": "🪵",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/tablones.vox.json"
+  },
+  {
+    "id": "tronco",
+    "name": "Tronco",
+    "role": "Bloque · tronco de roble (oak log)",
+    "icon": "🌳",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/tronco.vox.json"
+  },
+  {
+    "id": "arena",
+    "name": "Arena",
+    "role": "Bloque · arena (sand)",
+    "icon": "🏜️",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/arena.vox.json"
+  },
+  {
+    "id": "arenisca",
+    "name": "Arenisca",
+    "role": "Bloque · arenisca en capas (sandstone)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/arenisca.vox.json"
+  },
+  {
+    "id": "grava",
+    "name": "Grava",
+    "role": "Bloque · grava (gravel)",
+    "icon": "⚪",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/grava.vox.json"
+  },
+  {
+    "id": "musgo_adoquin",
+    "name": "Adoquín musgoso",
+    "role": "Bloque · adoquín con musgo (mossy)",
+    "icon": "🟩",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/musgo_adoquin.vox.json"
+  },
+  {
+    "id": "obsidiana",
+    "name": "Obsidiana",
+    "role": "Bloque · obsidiana (obsidian)",
+    "icon": "🟣",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/obsidiana.vox.json"
+  },
+  {
+    "id": "white_whool",
+    "name": "White Whool",
+    "role": "Bloque · lana blanca (white whool)",
+    "icon": "🧶",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/white_whool.vox.json"
+  },
+  {
+    "id": "red_concrete",
+    "name": "Red Concrete",
+    "role": "Bloque · Hormigón Rojo (red concrete)",
+    "icon": "🔴",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/red_concrete.vox.json"
+  },
+  {
+    "id": "snow",
+    "name": "Snow",
+    "role": "Bloque · Nieve (snow)",
+    "icon": " ",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/snow.vox.json"
+  },
+  {
+    "id": "yellow",
+    "name": "Yellow",
+    "role": "Bloque · Hormigón Amarillo (yellow concrete)",
+    "icon": " ",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/yellow_concrete.vox.json"
+  }
+]

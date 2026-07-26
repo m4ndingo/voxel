@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <base href="/" />   <!-- las rutas relativas (assets/…, fetch de habitantes) resuelven contra la raíz aunque la URL sea /map/<nombre> -->
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VoxelForge · Editor de assets RPG</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- ===================== Cabecera ===================== -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◧</span>
+      <div class="brand-txt">
+        <strong>VOXELFORGE</strong>
+        <small>Editor de assets voxel · RPG</small>
+      </div>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab is-active" data-tab="objeto">Objeto</button>
+      <button class="tab" data-tab="habitantes">Habitantes</button>
+      <button class="tab" data-tab="objetos">Objetos</button>
+      <button class="tab" data-tab="habitaciones">Habitaciones</button>
+      <button class="tab" data-tab="texturas">Texturas</button>
+      <button class="tab" data-tab="mapa">Mapa</button>
+      <button class="tab tab-play" data-tab="jugar" title="Jugar ya · habitación y personaje al azar">▶ Jugar</button>
+      <button class="tab tab-mundo" data-tab="mundo" title="Mundo · sandbox 3D en primera persona (WebGL)">🌍 Mundo</button>
+      <button class="tab tab-snip" data-tab="codigo" title="Snippets de código · guardar, editar y ejecutar contra el Mundo">🧩 Código</button>
+    </nav>
+
+    <div class="actions">
+      <button class="btn" id="btn-nuevo" title="Vaciar el lienzo">Nuevo</button>
+      <button class="btn" id="btn-guardar" title="Guardar en el servidor">Guardar</button>
+      <button class="btn" id="btn-guardar-como" title="Guardar como un habitante nuevo">Guardar como…</button>
+      <button class="btn" id="btn-exportar" title="Descargar .vox.json">Exportar</button>
+      <label class="btn" title="Cargar .vox.json">Importar
+        <input type="file" id="file-importar" accept="application/json" hidden />
+      </label>
+    </div>
+  </header>
+
+  <!-- ===================== Cuerpo ===================== -->
+  <main class="layout">
+
+    <!-- ---------- Panel izquierdo: propiedades + herramientas ---------- -->
+    <aside class="panel left">
+      <section class="card">
+        <h2>Objeto</h2>
+        <label class="field">
+          <span>Nombre</span>
+          <input type="text" id="meta-name" value="Objeto sin título" />
+        </label>
+        <label class="field">
+          <span>Tipo</span>
+          <select id="meta-type">
+            <option value="objeto">Objeto / prop</option>
+            <option value="personaje">Personaje / habitante</option>
+            <option value="decoracion">Decoración</option>
+            <option value="bloque">Bloque de habitación</option>
+            <option value="textura">Textura (pincel)</option>
+          </select>
+        </label>
+        <p class="role" id="meta-role" hidden></p>
+        <label class="field">
+          <span>Tamaño (X × Y × Z)</span>
+          <div class="size-row">
+            <input type="number" id="size-x" min="1" max="128" value="16" />
+            <span>×</span>
+            <input type="number" id="size-y" min="1" max="128" value="16" />
+            <span>×</span>
+            <input type="number" id="size-z" min="1" max="128" value="16" />
+            <button class="btn sm" id="size-apply">Aplicar</button>
+          </div>
+        </label>
+        <label class="field">
+          <span>Girar objeto 90°</span>
+          <div class="rotobj-row">
+            <button class="btn sm" id="rotobj-x" title="Volcar adelante/atrás (plano YZ) — tumba el personaje">↧ X</button>
+            <button class="btn sm" id="rotobj-y" title="Girar en horizontal (plano XZ)">↻ Y</button>
+            <button class="btn sm" id="rotobj-z" title="Girar de frente (plano XY)">⟳ Z</button>
+          </div>
+        </label>
+        <p class="dims" id="dims">— · 0 voxels</p>
+      </section>
+
+      <section class="card">
+        <h2>Herramientas</h2>
+        <div class="tools" id="tools">
+          <button class="tool" data-tool="hand" title="Mover vista (H)">✋<span>Mano</span></button>
+          <button class="tool" data-tool="orbit" title="Girar la vista 3D (arrastra) · solo 3D">🔄<span>Giro</span></button>
+          <button class="tool" data-tool="pick"  title="Cuentagotas (I)">💧<span>Color</span></button>
+          <button class="tool is-active" data-tool="paint"  title="Pincel (B)"><i class="tool-swatch"></i>✏️<span>Pincel</span></button>
+          <button class="tool" data-tool="build" title="Construir: pon un voxel sobre la cara que clicas (C) · solo 3D"><i class="tool-swatch"></i>🧱<span>Construir</span></button>
+          <button class="tool" data-tool="erase" title="Borrar (E)">🩹<span>Borrar</span></button>
+          <button class="tool" data-tool="fill"  title="Relleno (G)">🪣<span>Relleno</span></button>
+          <button class="tool" data-tool="select" title="Seleccionar (S) · en 3D y por capas">🔲<span>Selección</span></button>
+          <button class="tool" data-tool="extrude" title="Extruir la selección (X) · solo 3D">⤢<span>Extruir</span></button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Capa <span class="muted" id="layer-label">1 / 16</span></h2>
+        <div class="layer-row">
+          <button class="btn sm" id="layer-down" title="Bajar capa ([)">▼</button>
+          <input type="range" id="layer-slider" min="0" max="15" value="0" />
+          <button class="btn sm" id="layer-up" title="Subir capa (])">▲</button>
+        </div>
+        <div class="layer-actions">
+          <button class="btn sm ghost" id="layer-clear">Vaciar capa</button>
+        </div>
+      </section>
+
+      <section class="card grow">
+        <h2>Paleta</h2>
+        <select class="palette-picker" id="palette-picker" title="Paleta temática"></select>
+        <div class="palette" id="palette"></div>
+        <label class="field inline">
+          <span>Color</span>
+          <input type="color" id="color-custom" value="#8a5a3b" />
+          <code id="color-hex">#8a5a3b</code>
+        </label>
+        <label class="field inline">
+          <span>Opacidad</span>
+          <input type="range" id="color-alpha" min="0" max="100" value="100" title="Opacidad del color (menos = translúcido en el Mundo)" />
+          <code id="color-alpha-val">100%</code>
+        </label>
+        <button class="btn sm" id="btn-emit" title="Color emisivo: brilla a pleno color en el Mundo (ignora sombra y niebla)">✨ Emisivo</button>
+        <div class="texstrip-head">
+          <span>Texturas</span>
+          <button class="btn sm" id="btn-texturas" title="Ver galería de texturas">Galería ▤</button>
+        </div>
+        <select class="palette-picker" id="tex-cat" title="Categoría de texturas"></select>
+        <div class="texstrip" id="texstrip"><span class="muted">(sin texturas)</span></div>
+        <div class="tex-preview" id="tex-preview" hidden><canvas width="192" height="192"></canvas><div class="tp-name"></div></div>
+      </section>
+    </aside>
+
+    <!-- ---------- Centro: lienzo de edición (capa actual) ---------- -->
+    <section class="panel center">
+      <div class="stage-bar">
+        <div class="mode-tabs" id="mode-tabs">
+          <button data-mode="capas">Capas</button>
+          <button data-mode="3d" class="is-active">3D</button>
+        </div>
+        <h2 id="stage-title">Edición · capa 1</h2>
+        <span class="hint" id="stage-hint">clic pinta · Alt+clic color · rueda zoom · Ctrl+arrastre mueve · B/E/I/G · [ ] capa · R rota</span>
+        <div class="view-ctrl" id="ctrl-2d">
+          <button class="btn sm" id="zoom-out" title="Alejar (−)">−</button>
+          <span id="zoom-label">100%</span>
+          <button class="btn sm" id="zoom-in" title="Acercar (+)">+</button>
+          <button class="btn sm" id="zoom-reset" title="Ajustar (0)">Ajustar</button>
+        </div>
+        <div class="view-ctrl" id="ctrl-hist">
+          <button class="btn sm" id="btn-undo" title="Deshacer (Ctrl+Z)" disabled>↩ Deshacer</button>
+          <button class="btn sm" id="btn-redo" title="Rehacer (Ctrl+Y)" disabled>↪ Rehacer</button>
+        </div>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="edit" width="400" height="400"></canvas>
+        <canvas id="edit3d" width="400" height="400" hidden></canvas>
+        <div class="fps-float" id="e3-fps" hidden title="FPS de la vista 3D (mientras interactúas)">— fps</div>
+        <div class="vox-float" id="e3-vox" hidden title="Voxels dibujados en el último frame (dentro del visor)">— vox</div>
+        <div class="tool-float" id="tool-float" hidden>
+          <button class="tool" data-tool="hand" title="Mover vista (H)">✋<span>Mano</span></button>
+          <button class="tool" data-tool="orbit" title="Girar la vista (arrastra)">🔄<span>Giro</span></button>
+          <button class="tool" data-tool="select" title="Seleccionar (S)">🔲<span>Selección</span></button>
+          <button class="tool" data-tool="extrude" title="Extruir la selección hacia frente/fondo (arrastra o ↑↓) (X)">⤢<span>Extruir</span></button>
+          <button class="tool" data-tool="pick"  title="Color (I)">💧<span>Color</span></button>
+          <button class="tool" data-tool="paint" title="Pincel (B)"><i class="tool-swatch"></i>✏️<span>Pincel</span></button>
+          <button class="tool" data-tool="build" title="Construir: pon un voxel sobre la cara que clicas (C)"><i class="tool-swatch"></i>🧱<span>Construir</span></button>
+          <button class="tool" data-tool="erase" title="Borrar (E)">🩹<span>Borrar</span></button>
+          <button class="tool" data-tool="fill"  title="Relleno (G)">🪣<span>Relleno</span></button>
+        </div>
+        <div class="rot-float" id="rot-float" hidden>
+          <button class="btn sm" id="e3-rot-left" title="Rotar">⟲</button>
+          <button class="btn sm" id="e3-rot-right" title="Rotar">⟳</button>
+          <button class="btn sm" id="e3-cam" title="Proyección ortogonal frontal (vista de frente)">Frontal</button>
+          <button class="btn sm" id="e3-persp" title="Perspectiva cónica (3D lineal): fuga por profundidad">◭ Cónica</button>
+        </div>
+        <div class="layer-float" id="layer-float">
+          <button class="btn sm" id="lf-up" title="Subir capa (])">▲</button>
+          <span id="lf-label">1/16</span>
+          <button class="btn sm" id="lf-down" title="Bajar capa ([)">▼</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- Panel derecho: preview 3D + biblioteca ---------- -->
+    <aside class="panel right">
+      <section class="card">
+        <h2><span>Vista 3D <span class="muted" id="voxel-count">0 vox</span></span>
+          <button class="preview-toggle" id="toggle-preview" title="Ocultar el preview 3D" aria-label="Ocultar el preview 3D">👁</button>
+        </h2>
+        <div id="iso-body">
+          <div class="iso-wrap">
+            <canvas id="iso" width="420" height="420"></canvas>
+            <button class="expand" id="iso-only" style="right:82px" title="Aislar: mostrar solo la capa actual (resto fantasma)">▬</button>
+            <button class="expand" id="iso-isolate" style="right:46px" title="Aislar: mostrar hasta la capa actual (resto fantasma)">▤</button>
+            <button class="expand" id="iso-expand" title="Ver en grande (F)">⛶</button>
+          </div>
+          <div class="iso-ctrl">
+            <button class="btn sm" id="rot-left" title="Rotar (R)">⟲</button>
+            <button class="btn sm" id="rot-right">⟳</button>
+            <button class="btn sm" id="iso-expand2" title="Ver en grande (F)">⛶ Ampliar</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Assets del servidor</h2>
+        <ul class="roster" id="roster-assets"><li class="muted">Cargando…</li></ul>
+      </section>
+
+      <section class="card">
+        <h2>Plantillas</h2>
+        <div class="templates">
+          <button class="chip" data-preset="barril">🛢️ Barril</button>
+          <button class="chip" data-preset="slime">🟢 Slime</button>
+          <button class="chip" data-preset="vacio">➕ Vacío</button>
+        </div>
+      </section>
+
+      <section class="card grow">
+        <h2>Habitantes <button class="btn sm" id="btn-habitantes" title="Ver galería">Galería ▤</button></h2>
+        <ul class="roster" id="roster-habitantes"><li class="muted">Cargando…</li></ul>
+        <p class="sub">Habitaciones <button class="btn sm" id="btn-habitaciones" title="Ver galería de habitaciones">Galería ▤</button></p>
+        <ul class="roster" id="roster-habitaciones"></ul>
+      </section>
+    </aside>
+  </main>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <!-- ===================== Galería de Habitantes ===================== -->
+  <div class="modal" id="hab-modal" hidden>
+    <div class="modal-head">
+      <div><strong id="hab-title">Habitantes</strong> <span class="muted">guardados en el servidor</span></div>
+      <div class="modal-actions">
+        <button class="btn sm" id="hab-refresh" title="Recargar">↻ Recargar</button>
+        <button class="btn sm" id="hab-close" title="Cerrar (Esc)">✕ Cerrar</button>
+      </div>
+    </div>
+    <div class="hab-stage"><div class="hab-grid" id="hab-grid"></div></div>
+  </div>
+
+  <!-- ===================== Modal vista 3D grande ===================== -->
+  <div class="modal" id="iso-modal" hidden>
+    <div class="modal-head">
+      <div>
+        <strong id="modal-name">Vista 3D</strong>
+        <span class="muted" id="modal-sub"></span>
+      </div>
+      <div class="modal-actions">
+        <button class="btn sm" id="modal-zoom-out" title="Alejar (−)">−</button>
+        <span id="modal-zoom" title="Zoom">100%</span>
+        <button class="btn sm" id="modal-zoom-in" title="Acercar (+)">+</button>
+        <button class="btn sm" id="modal-zoom-reset" title="Ajustar (0)">Ajustar</button>
+        <span class="modal-sep"></span>
+        <button class="btn sm" id="modal-rot-left" title="Rotar (R)">⟲</button>
+        <button class="btn sm" id="modal-rot-right" title="Rotar">⟳</button>
+        <button class="btn sm" id="modal-grid" title="Ocultar/mostrar la rejilla entre voxels">▦ Ocultar rejilla</button>
+        <button class="btn sm" id="modal-spin" title="Giro automático">▶ Girar</button>
+        <span class="modal-sep"></span>
+        <button class="btn sm" id="modal-sky" title="Cielo sobre el horizonte (plano tierra z=0)">☁️ Cielo</button>
+        <input type="color" id="modal-sky-color" title="Color del cielo" value="#77b6f0">
+        <button class="btn sm" id="modal-shadow" title="Sombra proyectada al suelo">🌑 Sombra</button>
+        <button class="btn sm" id="modal-close" title="Cerrar (Esc)">✕ Cerrar</button>
+      </div>
+    </div>
+    <div class="modal-stage">
+      <canvas id="iso-big"></canvas>
+    </div>
+  </div>
+
+  <!-- ===================== Mapa del mundo ===================== -->
+  <!-- ===================== Gestor de snippets de código (editor estilo Minecraft) ===================== -->
+  <div class="modal snip-modal" id="snip-modal" hidden>
+    <div class="modal-head">
+      <div><strong>🧩 Snippets de código</strong> <span class="muted" id="snip-sub">guarda, edita y ejecuta código contra el Mundo</span></div>
+      <div class="modal-actions">
+        <button class="btn sm" id="snip-refresh" title="Recargar lista">↻</button>
+        <button class="btn sm" id="snip-close" title="Cerrar (Esc)">✕ Cerrar</button>
+      </div>
+    </div>
+    <div class="snip-body">
+      <aside class="snip-list-pane">
+        <button class="btn sm snip-new-btn" id="snip-new">+ Nuevo snippet</button>
+        <div class="snip-list" id="snip-list"></div>
+      </aside>
+      <section class="snip-editor">
+        <div class="snip-editor-head">
+          <input type="text" id="snip-name" class="snip-name" placeholder="Nombre del snippet…" maxlength="80" />
+          <div class="snip-actions">
+            <button class="btn sm" id="snip-save" title="Guardar (Ctrl+S)">💾 Guardar</button>
+            <button class="btn sm snip-run-btn" id="snip-run" title="Ejecutar en el Mundo (Ctrl+Enter)">▶ Ejecutar</button>
+            <button class="btn sm snip-del-btn" id="snip-del" title="Borrar" hidden>🗑 Borrar</button>
+          </div>
+        </div>
+        <textarea id="snip-code" class="snip-code" spellcheck="false" placeholder="// setVoxel(x,y,z,material) — construye en el Mundo"></textarea>
+        <div class="snip-foot" id="snip-foot">setVoxel(x,y,z,material) · materiales: stone · smooth_stone · sandstone · stone_bricks · log · grass · dirt · sand · obsidian · o una clave/nombre de la paleta</div>
+      </section>
+    </div>
+  </div>
+
+  <div class="modal" id="mapa-modal" hidden>
+    <div class="modal-head">
+      <div><strong>Mapa</strong> <span class="muted" id="mapa-sub">coloca habitaciones en la rejilla</span></div>
+      <div class="modal-actions">
+        <button class="btn sm" id="mapa-refresh" title="Recargar">↻ Recargar</button>
+        <button class="btn sm" id="mapa-close" title="Cerrar (Esc)">✕ Cerrar</button>
+      </div>
+    </div>
+    <div class="mapa-help">
+      🗺️ Cada casilla es una <b>pantalla</b> del mundo (como en Zelda). Haz <b>clic en una casilla</b> para
+      colocar una habitación; vuelve a hacer clic para <b>cambiarla</b> o <b>quitarla</b>. Se guarda solo.
+    </div>
+    <div class="mapa-stage"><div class="mapa-grid" id="mapa-grid"></div></div>
+    <!-- selector de habitación para una celda -->
+    <div class="mapa-picker" id="mapa-picker" hidden>
+      <div class="mapa-picker-head">
+        <span id="mapa-picker-title">Elegir habitación</span>
+        <button class="btn sm" id="mapa-picker-close">✕</button>
+      </div>
+      <div class="mapa-picker-grid" id="mapa-picker-grid"></div>
+      <button class="btn sm danger" id="mapa-picker-remove" hidden>Quitar habitación de la celda</button>
+    </div>
+  </div>
+
+  <!-- ===================== Habitantes dentro de una habitación ===================== -->
+  <div class="modal" id="room-modal" hidden>
+    <div class="modal-head">
+      <div><strong id="room-title">Habitación</strong> <span class="muted">coloca habitantes dentro</span></div>
+      <div class="modal-actions">
+        <button class="btn sm" id="room-back" title="Volver al mapa">← Mapa</button>
+        <button class="btn sm" id="room-close" title="Cerrar (Esc)">✕ Cerrar</button>
+      </div>
+    </div>
+    <div class="room-body">
+      <div class="room-stage"><canvas id="room-canvas" width="520" height="520"></canvas></div>
+      <aside class="room-side">
+        <h3>Habitantes</h3>
+        <p class="room-hint">Clic en un habitante para <b>añadirlo</b>. En el plano: <b>arrástralo</b> para colocarlo,
+          clic para <b>seleccionarlo</b>, clic derecho o <b>Supr</b> para quitarlo.</p>
+        <ul class="room-hablist" id="room-hablist"></ul>
+        <button class="btn sm danger" id="room-del" hidden>Quitar seleccionado</button>
+        <button class="btn" id="room-play" title="Jugar en esta habitación">▶ Jugar aquí</button>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ===================== Jugar (F5) ===================== -->
+  <div class="modal" id="play-modal" hidden>
+    <div class="modal-head">
+      <div><strong id="play-title">Jugar</strong> <span class="muted" id="play-sub"></span>
+        <span class="play-hint-inline">· 🖱️ clic para caminar · cruza las <b>puertas</b> · Esc sale</span></div>
+      <div class="modal-actions">
+        <button class="btn sm" id="play-back" title="Volver a la habitación">← Habitación</button>
+        <button class="btn sm" id="play-close" title="Cerrar (Esc)">✕ Cerrar</button>
+      </div>
+    </div>
+    <div class="play-choose" id="play-choose">
+      <p>Elige el personaje que vas a controlar:</p>
+      <div class="mapa-picker-grid" id="play-choose-grid"></div>
+    </div>
+    <div class="play-stage" id="play-stage" hidden>
+      <canvas id="play-canvas" width="760" height="560"></canvas>
+      <div class="fps-float" id="play-fps" hidden title="FPS reales del modo Play">— fps</div>
+      <div class="vox-float" id="play-vox" hidden title="Voxels dibujados de la sala (dentro del visor)">— vox</div>
+    </div>
+  </div>
+
+  <!-- ===================== Mundo (REQ-MC · sandbox 3D WebGL) ===================== -->
+  <div class="modal mc-modal" id="mc-modal" hidden>
+    <canvas id="mc-canvas"></canvas>
+    <div class="mc-loading" id="mc-loading" hidden>
+      <div class="mc-spinner" aria-hidden="true"></div>
+      <div class="mc-loading-text" id="mc-loading-text">Cargando mundo…</div>
+    </div>
+    <div class="mc-crosshair" id="mc-crosshair" aria-hidden="true">+</div>
+    <div class="mc-hotbar" id="mc-hotbar"></div>
+    <div class="fps-float mc-float" id="mc-fps" hidden title="FPS reales del modo Mundo">— fps</div>
+    <div class="vox-float mc-float2" id="mc-vox" hidden title="Caras (quads) dibujadas por la GPU">— vox</div>
+    <button class="btn sm mc-close" id="mc-close" title="Cerrar (Esc)">✕ Cerrar</button>
+    <!-- Selector de galería para una ranura de la hotbar (calca #mapa-picker) -->
+    <div class="mapa-picker mc-picker" id="mc-picker" hidden>
+      <div class="mapa-picker-head"><span id="mc-picker-title">Bloque o textura</span>
+        <button class="btn sm ghost" id="mc-picker-close" title="Cerrar">✕</button></div>
+      <div class="mapa-picker-grid" id="mc-picker-grid"></div>
+      <button class="btn sm" id="mc-picker-remove" hidden>Vaciar ranura</button>
+    </div>
+    <!-- t1 · texto de la nota del bloque que se está mirando (visor, solo lectura) -->
+    <div class="mc-noteview" id="mc-noteview" aria-hidden="true" hidden></div>
+    <!-- rayos-X (tecla X): etiquetas de coordenadas sobre los bloques marcados en rojo -->
+    <div class="mc-xray-labels" id="mc-xray-labels" aria-hidden="true" hidden></div>
+    <!-- t1 · editor de nota post-it de un bloque (tecla N) -->
+    <div class="mc-note" id="mc-note" hidden>
+      <div class="mc-note-head">📝 Nota del bloque</div>
+      <textarea id="mc-note-text" rows="4" maxlength="280" placeholder="Escribe una nota… (Ctrl+Enter guarda)"></textarea>
+      <div class="mc-note-actions">
+        <button class="btn sm ghost" id="mc-note-del" hidden>Borrar</button>
+        <button class="btn sm ghost" id="mc-note-cancel">Cancelar</button>
+        <button class="btn sm" id="mc-note-save">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

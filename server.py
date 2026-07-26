@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""VoxelForge: sirve el sitio estático + API de habitantes (guardar/listar/renombrar/borrar).
+   Uso: python3 server.py [puerto]   (por defecto 8500)
+   Almacén: data/habitantes/<id>.json  (formato vox export)."""
+import http.server, socketserver, json, os, re, sys, datetime, shutil, time, urllib.parse
+
+BASE  = os.path.dirname(os.path.abspath(__file__))
+STORE = os.path.join(BASE, 'data', 'habitantes')
+TRASH = os.path.join(BASE, 'data', 'habitantes_trash')   # NADA se borra de verdad: va aquí
+MAPFILE = os.path.join(BASE, 'data', 'mapa.json')         # mapa del mundo (rejilla de habitaciones)
+WORLDFILE = os.path.join(BASE, 'data', 'mundo.json')       # mundo sandbox 3D (REQ-MC) — fichero único "sagrado" (mapa «default»)
+WORLDS = os.path.join(BASE, 'data', 'worlds')             # mundos con nombre: /map/<nombre> -> data/worlds/<slug>.json (persistentes)
+SNIPS = os.path.join(BASE, 'data', 'snippets')             # gestor de snippets de código (data/snippets/<id>.json)
+os.makedirs(STORE, exist_ok=True)
+os.makedirs(TRASH, exist_ok=True)
+os.makedirs(WORLDS, exist_ok=True)
+os.makedirs(SNIPS, exist_ok=True)
+
+DEFAULT_MAP = {'cols': 8, 'rows': 8, 'cells': {}}
+# Mundo vacío por defecto: sin voxels => el cliente genera terreno plano (mcGenFlat)
+DEFAULT_WORLD = {'format': 'voxelworld-1', 'dim': {'x': 96, 'y': 40, 'z': 96}, 'spawn': None, 'voxels': {}}
+PORT  = int(sys.argv[1]) if len(sys.argv) > 1 else 8500
+
+def slugify(s):
+    s = re.sub(r'[^a-z0-9]+', '-', (s or 'objeto').lower()).strip('-')
+    return s or 'objeto'
+
+# Nombre de mapa (de /map/<nombre> o ?map=) -> fichero de mundo persistente.
+# «default» (o vacío/ausente) = el mundo sagrado mundo.json; cualquier otro = data/worlds/<slug>.json.
+# El slug se acota a [a-z0-9-] (sin ../, sin barras) => imposible salir de data/worlds/.
+def world_file_for(name):
+    s = re.sub(r'[^a-z0-9]+', '-', (name or '').lower()).strip('-')
+    if not s or s == 'default':
+        return WORLDFILE
+    return os.path.join(WORLDS, s + '.json')
+
+def now_iso():
+    return datetime.datetime.now().isoformat(timespec='seconds')
+
+# Copia de seguridad de un fichero a la papelera (con marca de tiempo) — nunca se pierde
+def to_trash(fp, move=True):
+    if not os.path.exists(fp):
+        return
+    dst = os.path.join(TRASH, f'{int(time.time()*1000)}__{os.path.basename(fp)}')
+    (shutil.move if move else shutil.copy2)(fp, dst)
+
+# Escritura atómica: fichero temporal en el MISMO dir + os.replace (atómico en POSIX). El servidor es
+# multihilo (ThreadingMixIn) y el autoguardado del mundo dispara POST solapados de ~5MB; sin esto, dos
+# open('w') a la vez truncan/entrelazan el JSON y lo dejan corrupto. Con replace, el último write completo gana.
+def atomic_dump(d, path):
+    tmp = f'{path}.tmp.{os.getpid()}.{time.time_ns()}'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+            f.flush(); os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try: os.remove(tmp)
+            except OSError: pass
+
+# Elimina (a papelera) otros ficheros cuyo nombre coincide (mismo slug) => sin duplicados por nombre
+def dedup(idd):
+    for fn in os.listdir(STORE):
+        if not fn.endswith('.json') or fn[:-5] == idd:
+            continue
+        try:
+            m = json.load(open(os.path.join(STORE, fn), encoding='utf-8')).get('meta', {})
+        except Exception:
+            continue
+        if slugify(m.get('name')) == idd:
+            to_trash(os.path.join(STORE, fn))
+
+def list_snips():
+    out = []
+    for fn in os.listdir(SNIPS):
+        if not fn.endswith('.json'):
+            continue
+        try:
+            d = json.load(open(os.path.join(SNIPS, fn), encoding='utf-8'))
+        except Exception:
+            continue
+        out.append({'id': fn[:-5], 'name': d.get('name', '(sin nombre)'),
+                    'lines': (d.get('code', '') or '').count('\n') + 1,
+                    'savedAt': d.get('savedAt', '')})
+    out.sort(key=lambda s: s.get('savedAt', ''), reverse=True)   # más recientes primero
+    return out
+
+def list_all():
+    out = []
+    for fn in sorted(os.listdir(STORE)):
+        if not fn.endswith('.json'):
+            continue
+        try:
+            d = json.load(open(os.path.join(STORE, fn), encoding='utf-8'))
+        except Exception:
+            continue
+        meta = d.get('meta', {})
+        out.append({'id': fn[:-5], 'name': meta.get('name', '(sin nombre)'),
+                    'role': meta.get('role', ''), 'type': meta.get('type', 'objeto'),
+                    'size': d.get('size', 16), 'count': len(d.get('voxels', {})),
+                    'savedAt': d.get('savedAt', '')})
+    out.sort(key=lambda h: h.get('savedAt', ''), reverse=True)   # más recientes primero
+    return out
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *a, **k):
+        super().__init__(*a, directory=BASE, **k)
+    def log_message(self, *a):
+        pass
+    def end_headers(self):
+        # Sin esto el navegador cachea app.js/style.css (heurística de SimpleHTTP sin Cache-Control)
+        # y los cambios del editor no llegan al recargar. no-cache = revalidar siempre.
+        self.send_header('Cache-Control', 'no-cache')
+        super().end_headers()
+    def _send(self, code, obj):
+        body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers(); self.wfile.write(body)
+    def _read(self):
+        n = int(self.headers.get('Content-Length', 0) or 0)
+        return json.loads(self.rfile.read(n) or b'{}')
+    def _id(self):
+        m = re.match(r'^/api/habitantes/([A-Za-z0-9_-]+)$', self.path)
+        return m.group(1) if m else None
+    def _path(self, idd):
+        return os.path.join(STORE, idd + '.json')
+    def _snip_id(self):
+        m = re.match(r'^/api/snippets/([A-Za-z0-9_-]+)$', self.path)
+        return m.group(1) if m else None
+    def _snip_path(self, idd):
+        return os.path.join(SNIPS, idd + '.json')
+
+    def do_GET(self):
+        # SPA: /map/<nombre> (elige el mundo por URL) sirve el mismo index.html; el cliente lee el nombre
+        # de la ruta y carga /api/mundo?map=<nombre>. Los assets del index van con ruta absoluta (/app.js…).
+        path_only = urllib.parse.urlparse(self.path).path
+        if path_only == '/map' or path_only.startswith('/map/'):
+            self.path = '/index.html'
+            return super().do_GET()
+        if self.path == '/api/mapa':
+            if os.path.exists(MAPFILE):
+                try:
+                    return self._send(200, json.load(open(MAPFILE, encoding='utf-8')))
+                except Exception:
+                    pass
+            return self._send(200, DEFAULT_MAP)
+        if path_only == '/api/mundo':                             # mundo sandbox 3D (REQ-MC); ?map=<nombre> elige el mundo
+            wf = world_file_for(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('map', [''])[0])
+            if os.path.exists(wf):
+                try:
+                    return self._send(200, json.load(open(wf, encoding='utf-8')))
+                except Exception:
+                    pass
+            return self._send(200, {**DEFAULT_WORLD, 'fresh': True})   # sin fichero = mundo recién nacido → terreno plano (un vacío guardado NO lleva fresh)
+        if self.path == '/api/snippets':                         # gestor de snippets: lista
+            return self._send(200, list_snips())
+        sid = self._snip_id()
+        if sid:
+            fp = self._snip_path(sid)
+            if os.path.exists(fp):
+                return self._send(200, json.load(open(fp, encoding='utf-8')))
+            return self._send(404, {'error': 'no existe'})
+        if self.path == '/api/habitantes':
+            return self._send(200, list_all())
+        idd = self._id()
+        if idd:
+            fp = self._path(idd)
+            if os.path.exists(fp):
+                return self._send(200, json.load(open(fp, encoding='utf-8')))
+            return self._send(404, {'error': 'no existe'})
+        return super().do_GET()
+
+    def do_POST(self):
+        if self.path == '/api/mapa':
+            d = self._read()
+            if not isinstance(d, dict) or 'cells' not in d:      # validación mínima
+                return self._send(400, {'error': 'mapa inválido'})
+            d.setdefault('cols', 8); d.setdefault('rows', 8)
+            to_trash(MAPFILE, move=False)                         # respaldo del mapa anterior (sagrado)
+            atomic_dump(d, MAPFILE)
+            return self._send(200, {'ok': True})
+        if urllib.parse.urlparse(self.path).path == '/api/mundo':  # mundo sandbox 3D (REQ-MC); ?map=<nombre> elige el mundo
+            wf = world_file_for(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('map', [''])[0])
+            d = self._read()
+            if not isinstance(d, dict) or 'voxels' not in d or 'dim' not in d:   # validación mínima
+                return self._send(400, {'error': 'mundo inválido'})
+            to_trash(wf, move=False)                              # respaldo del mundo anterior (a la papelera, nunca se pierde)
+            atomic_dump(d, wf)
+            return self._send(200, {'ok': True})
+        if self.path == '/api/snippets':                         # gestor de snippets: crear/guardar
+            d = self._read()
+            if not isinstance(d, dict) or 'code' not in d:       # validación mínima
+                return self._send(400, {'error': 'snippet inválido'})
+            sid = d.get('id') or slugify(d.get('name'))          # id estable = del cliente o slug del nombre
+            rec = {'id': sid, 'name': d.get('name', '(sin nombre)'), 'code': d.get('code', ''),
+                   'savedAt': now_iso()}
+            to_trash(self._snip_path(sid), move=False)           # respaldo de la versión anterior
+            atomic_dump(rec, self._snip_path(sid))
+            return self._send(200, {'id': sid, 'savedAt': rec['savedAt']})
+        if self.path == '/api/habitantes':
+            d = self._read()
+            d.pop('id', None)
+            idd = slugify(d.get('meta', {}).get('name'))     # id = nombre => sin duplicados
+            d['savedAt'] = now_iso()
+            to_trash(self._path(idd), move=False)             # respaldo antes de sobrescribir
+            atomic_dump(d, self._path(idd))
+            dedup(idd)                                        # consolida otros con el mismo nombre (a papelera)
+            return self._send(200, {'id': idd, 'savedAt': d['savedAt']})
+        return self._send(404, {'error': 'ruta'})
+
+    def do_PATCH(self):
+        idd = self._id()
+        if idd and os.path.exists(self._path(idd)):
+            d = json.load(open(self._path(idd), encoding='utf-8'))
+            body = self._read()
+            if body.get('name'):
+                d.setdefault('meta', {})['name'] = body['name']
+                new_id = slugify(body['name'])
+                if new_id != idd:                            # renombrar => mover el fichero al nuevo id
+                    to_trash(self._path(new_id), move=False)
+                    atomic_dump(d, self._path(new_id))
+                    to_trash(self._path(idd)); idd = new_id   # el viejo va a papelera
+                    dedup(idd)
+                else:
+                    atomic_dump(d, self._path(idd))
+            return self._send(200, {'ok': True, 'id': idd})
+        return self._send(404, {'error': 'no existe'})
+
+    def do_DELETE(self):
+        sid = self._snip_id()
+        if sid:
+            if os.path.exists(self._snip_path(sid)):
+                to_trash(self._snip_path(sid)); return self._send(200, {'ok': True})   # a papelera, no borrado real
+            return self._send(404, {'error': 'no existe'})
+        idd = self._id()
+        if idd and os.path.exists(self._path(idd)):
+            to_trash(self._path(idd)); return self._send(200, {'ok': True})   # a papelera, no borrado real
+        return self._send(404, {'error': 'no existe'})
+
+class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+if __name__ == '__main__':
+    print(f'VoxelForge server en http://0.0.0.0:{PORT}  ·  habitantes -> {STORE}')
+    Server(('0.0.0.0', PORT), Handler).serve_forever()

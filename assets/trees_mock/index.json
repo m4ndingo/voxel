@@ -1,0 +1,29 @@
+[
+  {
+    "id": "roble",
+    "name": "Roble",
+    "role": "Árbol · roble frondoso",
+    "icon": "🌳",
+    "type": "objeto",
+    "size": 32,
+    "file": "assets/trees_mock/roble.vox.json"
+  },
+  {
+    "id": "pino",
+    "name": "Pino",
+    "role": "Árbol · pino conífera",
+    "icon": "🌲",
+    "type": "objeto",
+    "size": 32,
+    "file": "assets/trees_mock/pino.vox.json"
+  },
+  {
+    "id": "cerezo",
+    "name": "Cerezo",
+    "role": "Árbol · cerezo en flor",
+    "icon": "🌸",
+    "type": "objeto",
+    "size": 32,
+    "file": "assets/trees_mock/cerezo.vox.json"
+  }
+]

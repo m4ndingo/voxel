@@ -1,0 +1,63 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MOCK · Bloques de construcción</title>
+<style>
+  :root{ color-scheme:dark; }
+  body{ margin:0; font:14px/1.4 system-ui,sans-serif; background:#0f1420; color:#e7ecf3; padding:20px; }
+  h1{ font-size:18px; margin:0 0 4px; }
+  p.sub{ margin:0 0 18px; color:#8b97a8; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
+  .card{ background:#161d2b; border:1px solid #26314a; border-radius:12px; padding:12px 10px 10px; text-align:center; }
+  canvas{ width:128px; height:128px; image-rendering:pixelated; }
+  .name{ font-weight:600; margin-top:6px; }
+  .role{ font-size:11px; color:#8b97a8; margin-top:2px; min-height:26px; }
+  .id{ font-size:10px; color:#5c6a80; margin-top:4px; font-family:ui-monospace,monospace; }
+  @media(max-width:680px){ .grid{ grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); } canvas{ width:104px; height:104px; } }
+</style></head>
+<body>
+<h1>🧱 Bloques de construcción tipo Minecraft <span style="color:#f0a54a">· MOCK</span></h1>
+<p class="sub">Catálogo de prueba (<code>assets/blocks_mock/</code>). Aún no son assets: revisa y decide cuáles promover.</p>
+<div class="grid" id="grid"></div>
+<script>
+const N=16, TOP=N-1, S=3.6, h=1.8, V=3.6;                 // proyección iso por celda
+function shade(hex,f){ const n=parseInt(hex.slice(1),16);
+  const c=v=>Math.max(0,Math.min(255,Math.round(v*f)));
+  return 'rgb('+c(n>>16&255)+','+c(n>>8&255)+','+c(n&255)+')'; }
+// proyección de un vértice de voxel (vx,vy,vz) -> pantalla
+const proj=(vx,vy,vz)=>[ (vx-vy)*S, (vx+vy)*h - vz*V ];
+// dibuja una cara: rejilla NxN de celdas, esquina en voxel (bx,by,bz),
+// du/dv = paso en voxels por celda; color(i,j); factor de sombra
+function drawFace(ctx,bx,by,bz,dux,duy,duz,dvx,dvy,dvz,color,f){
+  for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+    // esquinas del quad (i,j): base + i·du + j·dv
+    const q=(ii,jj)=>proj(bx+ii*dux+jj*dvx, by+ii*duy+jj*dvy, bz+ii*duz+jj*dvz);
+    const a=q(i,j),b=q(i+1,j),c=q(i+1,j+1),d=q(i,j+1);
+    ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.lineTo(c[0],c[1]); ctx.lineTo(d[0],d[1]); ctx.closePath();
+    ctx.fillStyle=shade(color(i,j),f); ctx.fill();
+  }
+}
+function render(cv, vox){
+  const ctx=cv.getContext('2d'); const dpr=2; cv.width=128*dpr; cv.height=128*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,128,128);
+  // centra: bbox de las 8 esquinas del cubo 0..N
+  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  for(const vx of [0,N])for(const vy of [0,N])for(const vz of [0,N]){ const p=proj(vx,vy,vz);
+    minx=Math.min(minx,p[0]);maxx=Math.max(maxx,p[0]);miny=Math.min(miny,p[1]);maxy=Math.max(maxy,p[1]); }
+  ctx.translate(64-(minx+maxx)/2, 64-(miny+maxy)/2);
+  const at=(x,y,z)=> vox[x+','+y+','+z] || '#000000';
+  // Caras visibles del octante (+X,+Y,+Z). +Z arriba (más claro), +Y izq, +X dcha.
+  drawFace(ctx, 0,0,N,  1,0,0, 0,1,0, (i,j)=>at(i,j,TOP),      1.10); // top +Z (x,y)
+  drawFace(ctx, 0,N,0,  1,0,0, 0,0,1, (i,k)=>at(i,TOP,k),      0.72); // +Y izq (x,z)
+  drawFace(ctx, N,0,0,  0,1,0, 0,0,1, (j,k)=>at(TOP,j,k),      0.55); // +X dcha (y,z)
+}
+fetch('index.json').then(r=>r.json()).then(list=>{
+  const g=document.getElementById('grid');
+  list.forEach(b=>{
+    const card=document.createElement('div'); card.className='card';
+    card.innerHTML='<canvas></canvas><div class="name">'+(b.icon||'')+' '+b.name+'</div>'+
+      '<div class="role">'+(b.role||'')+'</div><div class="id">'+b.id+'</div>';
+    g.appendChild(card);
+    fetch('/'+b.file).then(r=>r.json()).then(d=>render(card.querySelector('canvas'), d.voxels)).catch(()=>{});
+  });
+});
+</script></body></html>
