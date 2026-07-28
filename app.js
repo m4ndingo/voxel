@@ -6432,9 +6432,13 @@ function mcAgentMake(id, cfg){
     // Si el jugador está apoyado sobre un bloque sólido del mundo (suelo/arena/hormigón), NO está montado en el agente
     const px = Math.floor(p[0]), py = Math.floor(p[1]), pz = Math.floor(p[2]);
     if(typeof mcGetVoxel === 'function' && mcGetVoxel(px, py - 1, pz) > 0) return false;
+    // COTAS (no tocar sin releer esto): a.y/renderY = celda de SUELO SÓLIDA bajo el agente; el cuerpo se dibuja
+    // en ry+1 (mcAgentMesh: oy=ry+1) y mcCollides le da un AABB en [ry+1, ry+2). Por tanto, quien va de paseo
+    // encima tiene los PIES en ry+2, no en ry+1: la ventana antigua (ry+0.95..ry+1.25) caía DENTRO del propio
+    // cuerpo del agente, una cota inaccesible, así que isMounted() no devolvía true jamás y nunca te llevaba.
     return (p[0] >= rx + 0.1 && p[0] <= rx + 0.9 &&
             p[2] >= rz + 0.1 && p[2] <= rz + 0.9 &&
-            p[1] >= ry + 0.95 && p[1] <= ry + 1.25);
+            p[1] >= ry + 1.9 && p[1] <= ry + 2.5);
   };
   // OJO: a.blockId NO se resuelve aquí. onStart puede precargar la textura del cuerpo con game.addMaterial
   // (p.ej. obsidiana, que no está en la paleta por defecto); resolverlo antes poblaría la caché de
