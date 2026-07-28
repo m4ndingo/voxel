@@ -1,0 +1,6 @@
+{
+  "id": "reset-map",
+  "name": "Reset Map",
+  "code": "await game.killAll()\nawait game.wipeMap(null, true)\ngame.buildTerrain()",
+  "savedAt": "2026-07-27T11:41:49"
+}
