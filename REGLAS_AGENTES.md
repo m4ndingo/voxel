@@ -1,6 +1,33 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.30) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.32) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
+
+---
+
+## 0. Regla de Arquitectura (SACROSANTA) 🚧
+
+**NO SE MODIFICA `app.js` (EL FRAMEWORK) PARA HACER CAMBIOS EN LOS AGENTES**, salvo que sea imposible
+realizarlo de otra manera **y esté aprobado por el dueño del proyecto**.
+
+**`app.js` debe ser AGNÓSTICO a cómo son o cómo se comportan los agentes.** El framework aporta la
+mecánica (planificador, andar, pintar, notas, telemetría, dibujo del cuerpo); la identidad y la
+política de cada agente NO viven ahí.
+
+Orden de prioridad obligatorio ante cualquier cambio de agente:
+
+1. **Mejorar la librería de agentes** — `data/snippets/base-npc-skills.json` — si el cambio sirve a
+   más de un agente.
+2. **Añadir el código necesario al propio snippet del agente** si es muy particular de él.
+3. **Tocar `app.js`** — únicamente si 1 y 2 son imposibles, y **preguntando antes**.
+
+Nota técnica que hace innecesario el paso 3 casi siempre: los snippets se ejecutan en ámbito global
+con `AsyncFunction`, así que **alcanzan los internos de `app.js`** (`mc`, `mcAgentMesh`,
+`mcSurfaceY`…) sin modificarlo — `base-npc-skills.json` ya lo hace.
+
+**Precedente**: el cuerpo multi-celda de la serpiente (cola de 10 segmentos) se resolvió **sin tocar
+el framework**, creando cada segmento como **otro agente pausado** (`autostart:false` + `pause()`):
+`mcAgentsTick` salta lo que no está `'running'`, pero `mcAgentsSmoothUpdate` solo salta `'stopped'`
+(le interpola la posición y le re-malla el cubo) y el bucle de dibujo solo mira `vbo && count`.
 
 ---
 
@@ -91,3 +118,27 @@ Cuando `moved === false` o cuando se alcanza el umbral adaptativo de pasos sin p
 - **Precarga Asíncrona (`async onStart`)**: `game.defineStandardAgent` utiliza `async onStart(a)` devolviendo una Promesa al motor VoxelForge. El motor aguarda síncronamente la descarga y registro de `'obsidiana'`, `'obsidian'`, `'red_concrete'`, `'tronco'`, `'hierba'` y `'lava'` en el atlas antes de llamar a `listo()`. El Agente Obsidiana se renderiza con su verdadero cuerpo de Obsidiana negra y pinta correctamente en **rojo (`red_concrete`)** (v4.30).
 - **Seguimiento Planar 2D**: El contador `stepsWithoutNewCell` evalúa el descubrimiento de nuevas columnas $(X, Z)$.
 - **Bajada Forzada de Cima**: Tras 4 pasos girando en la copa de un pino ($Y > \text{sueloOriginal} + 2$), el agente fuerza un desvío hacia la cota de suelo natural inferior.
+
+---
+
+## 15. Modo Serpiente (`skills.modoSerpiente`) 🐍
+
+Habilidad **de la librería** (`base-npc-skills`), no del snippet: el agente arrastra un cuerpo de
+`largoSerpiente` celdas (por defecto 10) y **no puede morderse ni dar media vuelta**.
+
+- Se activa con `skills: { modoSerpiente: true }` y se dimensiona con `largoSerpiente: N`.
+- **Se implementa envolviendo `a.walk`**, no comprobando en `onTick`: el tick estándar llama a `a.walk`
+  desde ~6 sitios (BFS, escape de oscilación, escape por frecuencia, desatasco, desmontar del pino), así
+  que una comprobación en `onTick` solo cubriría uno de ellos.
+- Prohibiciones: **giro de 180°** (`dx,dz` opuestos a `a.vars.ultimoPaso`) y **pisar el propio cuerpo**.
+- **Válvula de escape (obligatoria)**: si **ninguna** otra dirección es a la vez no prohibida y
+  `a.canWalk`-able, el movimiento **se permite**, antes que congelar al agente emitiendo tickets de
+  estancamiento para siempre. Cada rechazo se cuenta en `a.stats.blockedBySelf`.
+- Estado que publica para el snippet: `a.vars.cuerpo` (celdas, la `0` pegada a la cabeza),
+  `a.vars.cuerpoSalientes` (celdas que acaban de salir por la punta — el snippet las **drena**) y
+  `a.vars.ultimoPaso`.
+- **Reparto**: la regla anti-mordisco es de la librería; **dibujar** el cuerpo y **qué material** deja el
+  rastro es del snippet (`agente-serpiente`), coherente con §0.
+- El hook `config.onTick` del snippet se invoca en un `try/finally` **siempre una vez por tick**, aunque el
+  tick estándar salga por cualquiera de sus salidas tempranas — de lo contrario el cuerpo se despegaría de
+  la cabeza.
