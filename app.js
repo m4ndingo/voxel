@@ -4699,11 +4699,49 @@ function mcForceUnstick(){
   if(mcUnstick()) return true;
   mc.pos[1]=mc.dim.y+MC_PH*mc.scale+1; mc.vel=[0,0,0]; return true;   // último recurso: sobre el mundo (cae limpio)
 }
+// Un agente que te EMBISTE te aparta de un empujón; no te sube a caballito. Sin esto, el solape lo resolvía
+// la auto-curación de mcUpdate, y mcUnstick solo sabe buscar salida HACIA ARRIBA: el primer hueco de aire
+// sobre el cuerpo del agente es justo la cota de montar (ry+2), así que la serpiente te ensartaba y aparecías
+// montado encima sin haber saltado. Aquí se resuelve el solape en horizontal, que es lo que hace un empujón.
+// Devuelve true si apartó al jugador; false si no había agente encima o estaba acorralado (→ mcUnstick).
+function mcAgentShove(){
+  if(!mc.agents || !mc.agents.size) return false;
+  const p=mc.pos, HW=MC_HW*mc.scale, PH=MC_PH*mc.scale;
+  const minX=p[0]-HW, maxX=p[0]+HW, minY=p[1], maxY=p[1]+PH-1e-4, minZ=p[2]-HW, maxZ=p[2]+HW;
+  for(const a of mc.agents.values()){
+    if(a.state==='stopped') continue;
+    const rx=a.renderX!==undefined?a.renderX:a.x;
+    const ry=a.renderY!==undefined?a.renderY:a.y;
+    const rz=a.renderZ!==undefined?a.renderZ:a.z;
+    // Mismo AABB del agente que usa mcCollides: [ry+1, ry+2). Quien va montado tiene los pies EN ry+2, así que
+    // no solapa y no le llega ningún empujón: montar sigue siendo cosa de saltar encima.
+    if(!(maxX>rx && minX<rx+1 && maxY>ry+1 && minY<ry+2 && maxZ>rz && minZ<rz+1)) continue;
+    const eps=1e-3;
+    // Dirección del empujón = hacia donde VA el agente (su celda destino menos la interpolada). Ordenar solo por
+    // «salida más corta» no vale: a mitad de embestida la salida corta es la de ATRÁS, y el agente te escupía
+    // hacia su cola y te atravesaba. Si ya llegó a destino (no se mueve), se empuja radialmente desde su centro.
+    let hx=a.x-rx, hz=a.z-rz;
+    if(Math.abs(hx)<1e-4 && Math.abs(hz)<1e-4){ hx=p[0]-(rx+0.5); hz=p[2]-(rz+0.5); }
+    // Las 4 salidas horizontales: primero las que van A FAVOR del empujón, y entre esas la más corta.
+    const salidas=[{dx:(rx-HW-eps)-p[0], dz:0}, {dx:(rx+1+HW+eps)-p[0], dz:0},
+                   {dx:0, dz:(rz-HW-eps)-p[2]}, {dx:0, dz:(rz+1+HW+eps)-p[2]}];
+    for(const s of salidas){ s.dist=Math.abs(s.dx)+Math.abs(s.dz); s.contra=(s.dx*hx+s.dz*hz)>0?0:1; }
+    salidas.sort((u,v)=>(u.contra-v.contra)||(u.dist-v.dist));
+    for(const s of salidas){
+      const nx=p[0]+s.dx, nz=p[2]+s.dz;
+      if(mcCollides(nx, p[1], nz)) continue;   // ese hueco lo ocupa terreno, una estructura u otro agente
+      p[0]=nx; p[2]=nz; return true;
+    }
+    return false;   // acorralado contra una pared → que mcUnstick haga lo de siempre y te suba
+  }
+  return false;
+}
 function mcUpdate(dt){
   if(dt<=0) return; dt=Math.min(dt,0.05);   // clamp para no atravesar bloques en un frame lento
   // Auto-curación: si acabamos INCRUSTADOS (sala mallada tras aparecer, estampada encima, resize…), el
   // siguiente frame nos saca solo. Evita quedar congelado sin poder andar/saltar sin depender de la tecla U.
-  if(mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])) mcUnstick();
+  // Un agente encima se resuelve APARTANDO en horizontal (empujón); solo si eso falla se sube al aire.
+  if(mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])){ if(!mcAgentShove()) mcUnstick(); }
   const k=mc.keys, sp=mc.speed*(k['shift']?0.5:1)*Math.sqrt(mc.scale);   // game.playerSpeed; Shift = mitad. Velocidad ∝ √scale (sublineal): un gigante avanza más en absoluto pero LENTO respecto a su cuerpo → sensación de mole/peso (antes ∝ scale = mismo ritmo relativo = ligero)
   const sinY=Math.sin(mc.yaw), cosY=Math.cos(mc.yaw);
   const fwd=[-sinY,0,-cosY], right=[cosY,0,-sinY];   // horizontal, relativo al yaw (no al pitch)
