@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.34) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.35) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -112,8 +112,11 @@ Cuando `moved === false` o cuando se alcanza el umbral adaptativo de pasos sin p
   separe "paso de largo" de "estoy dando vueltas aquí": recta → no dispara; ping-pong y zigzag → sí.
 - **Se mantiene la caja, no se cambia a "misma celda"**: contar solo repeticiones de la celda exacta se
   pierde los bucles de 2×2 y de 3-4 celdas, que son el atasco típico pegado al borde.
-- **Punto ciego conocido (pendiente)**: un agente **completamente parado** no dispara nunca, porque
-  `recentVisits` solo apila cuando la celda **cambia**.
+- **Agente parado** (`BORDER_QUIETO_MIN = 8`, v4.35): la caja por sí sola no ve al que está **congelado**,
+  porque `recentVisits` solo apila cuando la celda **cambia** y un agente inmóvil deposita **una sola
+  entrada** — justo el caso que más falta hace detectar. Se cuenta aparte, en `v.ticksQuieto`, **sin tocar
+  `recentVisits`**, del que dependen el mapa de calor (§9), el escape por frecuencia (§5) y el pintado de
+  lava (§13). El borde redirige si hay merodeo **o** 8 ticks seguidos sin moverse.
 - Efecto secundario: al dejar de dispararse en trayectos rectos, desaparecen las notas `escape de bucle`
   espurias que sembraba junto al borde (ver §17 sobre por qué la maniobra de borde acaba escribiendo esa
   nota).
@@ -194,5 +197,11 @@ Comportamiento **conocido y engañoso**, documentado aquí porque despista al le
 - Consecuencia práctica: una serpiente que camina **en línea perfectamente recta** puede sembrar una nota
   `escape de bucle` cinco ticks después de una redirección de borde, sin haber oscilado jamás. Caso real
   observado: `BORDER_ESCAPE` en el tick 47 → nota en el tick 52, en `[88,14,47]`.
-- **Pendiente**: etiquetar la nota con la maniobra que realmente puso `escapeSteps` en vez del texto fijo.
-  No cambia comportamiento, solo veracidad del registro.
+- **Resuelto en v4.35**: cada una de las 9 maniobras deja su motivo en `v.escapeMotivo`, y la nota lo
+  declara tal cual: `Causa: Fin de maniobra de escape (redireccion de borde de mapa).` La pila de llamadas
+  de la traza también lo lleva: `onTick() -> [<maniobra>] -> recordLoopEscapeVisit() -> a.note()`. Si no
+  hay motivo registrado lo dice, en vez de inventarse una causa.
+- La **primera línea** de la nota sigue siendo `escape de bucle`, intacta: es el formato oficial de §3 y de
+  ella depende la deduplicación por `findExistingNoteInRadius`. Solo cambia la línea `Causa:`.
+- **Sigue siendo cierto** que la nota no prueba que hubiera un bucle: prueba que terminó una maniobra de
+  escape. Ahora al menos dice cuál.
