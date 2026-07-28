@@ -288,5 +288,19 @@
     "group": "Bloques de construcción",
     "size": 16,
     "file": "assets/hormig-n-verde.vox.json"
+  },
+  {
+    "id": "cubo-trans",
+    "name": "Cubo Trans",
+    "role": "Bloque básico 16³",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/cubo-trans.vox.json"
   }
 ]
