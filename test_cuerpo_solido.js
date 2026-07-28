@@ -198,11 +198,12 @@ test('la caja sigue al cuerpo interpolado (renderX), no a la celda logica', () =
 });
 
 test('no queda rastro del cuerpo de bloques, del gemelo invisible ni de sombras inventadas', () => {
-  // El cuerpo del agente NO vive en mc.grid (saltaba de celda en celda) y no hay pasada de sombras
-  // propia. Lo que si vive en mc.grid es el OCLUSOR de la seccion SOMBRA, que es otra cosa: no se ve,
-  // no se choca, y solo esta para que la sombra la calcule mcComputeLight (ver test_sombra_real.js).
-  for (const resto of ['cuerpoBloques', 'ID_FANTASMA', 'dibujarSombras', 'calcomania', 'createFramebuffer'])
+  // El cuerpo del agente NO vive en mc.grid (saltaba de celda en celda). La seccion SOMBRA si tiene
+  // pasada de dibujo propia, pero lo que dibuja no se lo inventa: son los niveles que da
+  // mcComputeLight (ver test_sombra_real.js). Lo prohibido es la sombra a ojo o un shadow map aparte.
+  for (const resto of ['cuerpoBloques', 'ID_FANTASMA', 'calcomania', 'createFramebuffer', 'shadowMap'])
     assert(!lib.code.includes(resto), 'queda "' + resto + '" en la libreria');
+  assert(lib.code.includes('mcComputeLight()'), 'la sombra tiene que salir de mcComputeLight');
 });
 
 console.log('\n' + ok + ' ok, ' + fallos + ' fallos');
