@@ -37,12 +37,29 @@ def world_file_for(name):
 def now_iso():
     return datetime.datetime.now().isoformat(timespec='seconds')
 
-# Copia de seguridad de un fichero a la papelera (con marca de tiempo) — nunca se pierde
+MAX_TRASH_FILES = 30
+
+def clean_trash():
+    try:
+        files = [os.path.join(TRASH, f) for f in os.listdir(TRASH) if os.path.isfile(os.path.join(TRASH, f))]
+        if len(files) <= MAX_TRASH_FILES:
+            return
+        files.sort(key=lambda x: os.path.getmtime(x))
+        for f in files[:-MAX_TRASH_FILES]:
+            try: os.remove(f)
+            except OSError: pass
+    except Exception as e:
+        sys.stderr.write(f"[TRASH CLEAN] Error: {e}\n")
+
+# Copia de seguridad de un fichero a la papelera (con marca de tiempo) — acotada a MAX_TRASH_FILES
 def to_trash(fp, move=True):
     if not os.path.exists(fp):
         return
     dst = os.path.join(TRASH, f'{int(time.time()*1000)}__{os.path.basename(fp)}')
     (shutil.move if move else shutil.copy2)(fp, dst)
+    clean_trash()
+
+clean_trash()
 
 # Escritura atómica: fichero temporal en el MISMO dir + os.replace (atómico en POSIX). El servidor es
 # multihilo (ThreadingMixIn) y el autoguardado del mundo dispara POST solapados de ~5MB; sin esto, dos
@@ -137,6 +154,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # SPA: /map/<nombre> (elige el mundo por URL) sirve el mismo index.html; el cliente lee el nombre
         # de la ruta y carga /api/mundo?map=<nombre>. Los assets del index van con ruta absoluta (/app.js…).
         path_only = urllib.parse.urlparse(self.path).path
+        if path_only == '/assets/index.json':
+            idx_path = os.path.join(BASE, 'assets', 'index.json')
+            if os.path.exists(idx_path):
+                try:
+                    with open(idx_path, 'r', encoding='utf-8') as f:
+                        idx = json.load(f)
+                    valid_idx = []
+                    changed = False
+                    for item in idx:
+                        rel = item.get('file', '')
+                        if rel and os.path.exists(os.path.join(BASE, rel)):
+                            valid_idx.append(item)
+                        else:
+                            changed = True
+                    if changed:
+                        atomic_dump(valid_idx, idx_path)
+                    return self._send(200, valid_idx)
+                except Exception:
+                    pass
         if path_only == '/map' or path_only.startswith('/map/'):
             self.path = '/index.html'
             return super().do_GET()
@@ -200,6 +236,49 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             to_trash(self._snip_path(sid), move=False)           # respaldo de la versión anterior
             atomic_dump(rec, self._snip_path(sid))
             return self._send(200, {'id': sid, 'savedAt': rec['savedAt']})
+        if self.path == '/api/assets':
+            d = self._read()
+            if not isinstance(d, dict) or 'voxels' not in d:
+                return self._send(400, {'error': 'asset inválido'})
+            meta = d.get('meta', {})
+            name = meta.get('name') or d.get('name') or 'asset'
+            idd = slugify(name)
+            filename = f'{idd}.vox.json'
+            asset_path = os.path.join(BASE, 'assets', filename)
+            atomic_dump(d, asset_path)
+
+            idx_path = os.path.join(BASE, 'assets', 'index.json')
+            idx = []
+            if os.path.exists(idx_path):
+                try:
+                    with open(idx_path, 'r', encoding='utf-8') as f:
+                        idx = json.load(f)
+                except Exception:
+                    pass
+
+            rel_file = f'assets/{filename}'
+            found = False
+            for item in idx:
+                if item.get('id') == idd or item.get('file') == rel_file:
+                    item['name'] = meta.get('name', item.get('name', idd))
+                    item['file'] = rel_file
+                    found = True
+                    break
+
+            if not found:
+                idx.append({
+                    'id': idd,
+                    'name': meta.get('name', idd),
+                    'role': meta.get('role', f'Bloque · {idd}'),
+                    'icon': meta.get('icon', '🧱'),
+                    'type': meta.get('type', 'textura'),
+                    'group': meta.get('group', 'Bloques de construcción'),
+                    'size': d.get('size', 16),
+                    'file': rel_file
+                })
+
+            atomic_dump(idx, idx_path)
+            return self._send(200, {'ok': True, 'id': idd, 'file': rel_file})
         if self.path == '/api/habitantes':
             d = self._read()
             d.pop('id', None)

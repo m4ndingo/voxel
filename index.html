@@ -382,7 +382,10 @@
     <div class="mc-hotbar" id="mc-hotbar"></div>
     <div class="fps-float mc-float" id="mc-fps" hidden title="FPS reales del modo Mundo">— fps</div>
     <div class="vox-float mc-float2" id="mc-vox" hidden title="Caras (quads) dibujadas por la GPU">— vox</div>
-    <button class="btn sm mc-close" id="mc-close" title="Cerrar (Esc)">✕ Cerrar</button>
+    <div class="mc-actions">
+      <button class="btn sm mc-code-btn" id="mc-code-btn" title="Snippets de código (🧩)">🧩 Código</button>
+      <button class="btn sm mc-close" id="mc-close" title="Cerrar (Esc)">✕ Cerrar</button>
+    </div>
     <!-- Selector de galería para una ranura de la hotbar (calca #mapa-picker) -->
     <div class="mapa-picker mc-picker" id="mc-picker" hidden>
       <div class="mapa-picker-head"><span id="mc-picker-title">Bloque o textura</span>
@@ -400,10 +403,29 @@
       <textarea id="mc-note-text" rows="4" maxlength="280" placeholder="Escribe una nota… (Ctrl+Enter guarda)"></textarea>
       <div class="mc-note-actions">
         <button class="btn sm ghost" id="mc-note-del" hidden>Borrar</button>
+        <button class="btn sm ghost" id="mc-note-trace" hidden>🔍 Ver Traza</button>
         <button class="btn sm ghost" id="mc-note-cancel">Cancelar</button>
         <button class="btn sm" id="mc-note-save">Guardar</button>
       </div>
     </div>
+
+    <!-- Visor Modal de Traza Completa de Pila de Llamadas y Decisiones del Agente -->
+    <div class="modal trace-modal" id="trace-modal" hidden>
+      <div class="modal-head" style="flex-shrink:0;">
+        <div>
+          <strong id="trace-title">🔍 Traza de Pila de Llamadas de la Nota</strong>
+          <span class="muted" id="trace-sub" style="display:block; font-size:12px; opacity:0.8;">Historial cronológico de ejecuciones y decisiones del agente</span>
+        </div>
+        <div class="modal-actions">
+          <button class="btn sm" id="trace-copy" title="Copiar traza al portapapeles">📋 Copiar Traza</button>
+          <button class="btn sm" id="trace-close" title="Cerrar ventana (Esc)">✕ Cerrar</button>
+        </div>
+      </div>
+      <div style="flex:1; min-height:0; display:flex; flex-direction:column; padding:14px; box-sizing:border-box;">
+        <pre id="trace-content" style="flex:1; height:100%; margin:0; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; line-height:1.45; white-space:pre-wrap; background:rgba(0,0,0,0.6); color:#ffe08a; padding:14px; border-radius:8px; border:1px solid rgba(255,224,138,0.2); overflow-y:auto; box-sizing:border-box;"></pre>
+      </div>
+    </div>
+  </div>
   </div>
 
   <script src="/app.js"></script>

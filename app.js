@@ -1333,10 +1333,32 @@ function load(map,meta,size){
 }
 
 // ---- Assets servidos por HTTP (assets/index.json) ----
+let mcAssetsRegistry = {};
+function mcIndexAssets(idx){
+  if(!Array.isArray(idx)) return;
+  for(const a of idx){
+    if(!a || !a.file) continue;
+    const fileKey = 'asset:' + a.file;
+    if(a.id){
+      const k1 = String(a.id).trim().toLowerCase();
+      mcAssetsRegistry[k1] = a.file;
+      MC_MAT_ALIAS[k1] = fileKey;
+    }
+    if(a.name){
+      const k2 = String(a.name).trim().toLowerCase();
+      mcAssetsRegistry[k2] = a.file;
+      MC_MAT_ALIAS[k2] = fileKey;
+    }
+    const fileBase = a.file.split('/').pop().replace(/\.vox\.json$/, '').toLowerCase();
+    mcAssetsRegistry[fileBase] = a.file;
+    MC_MAT_ALIAS[fileBase] = fileKey;
+  }
+}
 async function loadServerAssets(){
   const ul=$('#roster-assets');
   try{
     const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
+    mcIndexAssets(idx);
     ul.innerHTML='';
     if(!idx.length){ ul.innerHTML='<li class="muted">(sin assets)</li>'; return; }
     const npcs=idx.filter(a=>a.type!=='bloque' && a.type!=='textura');   // bloque→Habitaciones, textura→tira propia
@@ -1504,24 +1526,38 @@ async function save(){
   if(state.voxels.size===0){ toast('Nada que guardar'); return; }
   const body=currentVox(); if(serverId) body.id=serverId;
   try{
-    const r=await fetch('/api/habitantes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const isTex = state.meta && state.meta.type === 'textura';
+    const endpoint = isTex ? '/api/assets' : '/api/habitantes';
+    const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const j=await r.json(); serverId=j.id;
-    if(state.meta.type==='textura') invalidateTex('hab:'+j.id);   // textura editada => refrescar def/caras/repr
+    if(isTex) {
+      invalidateTex('asset:assets/' + j.id + '.vox.json');
+      if(typeof refreshTexturas === 'function') refreshTexturas();
+      if(typeof mcBuildPalette === 'function') await mcBuildPalette();
+    }
     toast('Guardado en el servidor: «'+state.meta.name+'»');
     refreshRosters();
   }catch(e){ toast('Guardado local (servidor no disponible)'); }
 }
-// "Guardar como…": crea SIEMPRE un habitante nuevo (id nuevo) con el nombre indicado
+// "Guardar como…": crea SIEMPRE un habitante/asset nuevo (id nuevo) con el nombre indicado
 async function saveAs(){
   if(state.voxels.size===0){ toast('Nada que guardar'); return; }
-  const name=prompt('Guardar como (nombre del habitante):', state.meta.name||'Objeto');
+  const name=prompt('Guardar como (nombre del objeto):', state.meta.name||'Objeto');
   if(name==null || !name.trim()) return;
   state.meta.name=name.trim(); $('#meta-name').value=state.meta.name;
   const body=currentVox();                      // sin id => nuevo registro
   try{
-    const r=await fetch('/api/habitantes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    serverId=(await r.json()).id;
+    const isTex = state.meta && state.meta.type === 'textura';
+    const endpoint = isTex ? '/api/assets' : '/api/habitantes';
+    const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    serverId=j.id;
     localStorage.setItem(LS, localSnap());
+    if(isTex) {
+      invalidateTex('asset:assets/' + j.id + '.vox.json');
+      if(typeof refreshTexturas === 'function') refreshTexturas();
+      if(typeof mcBuildPalette === 'function') await mcBuildPalette();
+    }
     toast('Guardado como «'+state.meta.name+'»');
     refreshRosters();
   }catch(e){ toast('No se pudo guardar en el servidor'); }
@@ -1550,11 +1586,22 @@ function exportJSON(){
 }
 function importJSON(file){
   const rd=new FileReader();
-  rd.onload=()=>{
+  rd.onload=async ()=>{
     try{
       const d=JSON.parse(rd.result);
       const m=new Map(Object.entries(d.voxels||{}));
       load(m, d.meta||{name:file.name.replace(/\.vox\.json$/,''),type:'objeto'}, d.size);
+      try {
+        await fetch('/api/assets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(d)
+        });
+        if (typeof refreshTexturas === 'function') refreshTexturas();
+        if (typeof mcBuildPalette === 'function') await mcBuildPalette();
+      } catch(err) {
+        console.warn('No se pudo persistir asset en servidor:', err);
+      }
       toast('Importado '+file.name);
     }catch(e){ toast('Archivo no válido'); }
   };
@@ -1726,7 +1773,8 @@ window.addEventListener('keyup',e=>{
   if(e.key==='Control'||e.key==='Meta'){ ctrlHeld=false; refreshEditCursor(); update3dCursor(); refreshBigCursor(); }
   else if(e.key==='Alt'){ altHeld=false; refreshEditCursor(); update3dCursor(); }
 });
-window.addEventListener('blur',()=>{ ctrlHeld=false; altHeld=false; refreshEditCursor(); update3dCursor(); });
+window.addEventListener('blur',()=>{ ctrlHeld=false; altHeld=false; refreshEditCursor(); update3dCursor();
+  if(typeof mc!=='undefined'){ if(mc.keys){ for(const k in mc.keys) mc.keys[k]=false; } mc.vel=[0,0,0]; } });
 window.addEventListener('resize',()=>{ if(mode==='3d'){ resizeEdit3d(); drawEdit3d(); } else resizeEdit(); });
 
 // ---- Conmutar Capas / 3D ----
@@ -2401,6 +2449,7 @@ $('#hab-modal').addEventListener('click',e=>{ if(e.target.id==='hab-modal') clos
 // atajos
 window.addEventListener('keydown',e=>{
   if(e.key==='Escape' && !$('#mc-modal').hidden){                               // Mundo (REQ-MC): Esc de 2 pasos
+    if(!$('#snip-modal').hidden){ closeSnips(); return; }                         // 1º si el modal de código está abierto → cerrarlo
     if(!$('#mc-note').hidden){ mcCloseNote(); return; }                         // 1º si el editor de nota está abierto → cerrarlo
     if(!$('#mc-picker').hidden){ mcClosePicker(); return; }                     // 1º si el selector está abierto → cerrarlo
     if(mc.active && (document.pointerLockElement===mc.canvas || performance.now()-mc.unlockedAt<350)){ document.exitPointerLock(); return; } // 1º Esc: suelta el ratón, NO cierra
@@ -2778,10 +2827,11 @@ async function snipDelete(){
 }
 async function snipRun(){
   const code=$('#snip-code').value;
-  closeSnips();
-  if(!mc.active){ toast('Abriendo el Mundo…'); await openWorld(); }
-  try{ (new Function(code))(); }                    // el snippet corre en ámbito global: ve setVoxel/game
-  catch(err){ console.error('[snippet]',err); toast('Error en el snippet: '+err.message); }
+  try{
+    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+    await (new AsyncFunction(code))();
+    toast('▶ Snippet ejecutado');
+  }catch(err){ console.error('[snippet]',err); toast('Error en el snippet: '+err.message); }
 }
 $('#snip-close').onclick=closeSnips;
 $('#snip-refresh').onclick=snipReload;
@@ -4158,7 +4208,7 @@ async function mcBuildStructAtlas(){
   const AW=6*MC_TILE, AH=Math.max(1,list.length)*MC_TILE;
   const cv=document.createElement('canvas'); cv.width=AW; cv.height=AH;
   const ctx=cv.getContext('2d'); ctx.imageSmoothingEnabled=false;
-  const ins=0.5;                                                              // medio téxel de inset (NEAREST no sangra)
+  const ins=0;                                                                // alineación exacta 1-a-1 con el sub-voxel grid
   for(let ki=0; ki<list.length; ki++){
     const key=list[ki]; let faces=null;
     try{ faces=buildTexFaces(await getTexDef(key)).faces; }catch(e){}
@@ -4199,7 +4249,7 @@ async function mcBuildPalette(){
       const dx=fi*MC_TILE, dy=bi*MC_TILE;
       if(faces && faces[fi]) ctx.drawImage(faces[fi],0,0,faces[fi].width,faces[fi].height, dx,dy,MC_TILE,MC_TILE);
       else { ctx.fillStyle='#b0468c'; ctx.fillRect(dx,dy,MC_TILE,MC_TILE); }   // fucsia = textura ausente
-      const ins=0.5;                                                            // medio texel de inset (NEAREST no sangra)
+      const ins=0;                                                              // alineación exacta 1-a-1 con el sub-voxel grid
       rects.push({ u0:(dx+ins)/AW, v0:(dy+ins)/AH, u1:(dx+MC_TILE-ins)/AW, v1:(dy+MC_TILE-ins)/AH });
     }
     mc.palette[id]=rects;
@@ -4570,6 +4620,20 @@ function mcFineBoxHit(fx0,fy0,fz0,fx1,fy1,fz1){
   return false;
 }
 function mcFineSolidAt(fx,fy,fz){ return mcFineBoxHit(fx,fy,fz, fx,fy,fz); }
+function mcCollidesWorld(px,py,pz){   // ¿el AABB del jugador en (px,py,pz) solapa bloques del terreno o estructuras?
+  const HW=MC_HW*mc.scale, PH=MC_PH*mc.scale;
+  const x0=Math.floor(px-HW), x1=Math.floor(px+HW);
+  const y0=Math.floor(py),    y1=Math.floor(py+PH-1e-4);
+  const z0=Math.floor(pz-HW), z1=Math.floor(pz+HW);
+  for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++)
+    if(mcSolid(x,y,z)) return true;
+  if(mc.structures.length){
+    const T=MC_TILE;
+    if(mcFineBoxHit(Math.floor((px-HW)*T), Math.floor(py*T),           Math.floor((pz-HW)*T),
+                    Math.floor((px+HW)*T), Math.floor((py+PH-1e-4)*T), Math.floor((pz+HW)*T))) return true;
+  }
+  return false;
+}
 function mcCollides(px,py,pz){   // ¿el AABB del jugador en (px,py,pz) solapa algún voxel sólido?
   const HW=MC_HW*mc.scale, PH=MC_PH*mc.scale;
   // Terreno: resolución de bloque de mundo (16³).
@@ -4584,6 +4648,22 @@ function mcCollides(px,py,pz){   // ¿el AABB del jugador en (px,py,pz) solapa a
     const T=MC_TILE;
     if(mcFineBoxHit(Math.floor((px-HW)*T), Math.floor(py*T),           Math.floor((pz-HW)*T),
                     Math.floor((px+HW)*T), Math.floor((py+PH-1e-4)*T), Math.floor((pz+HW)*T))) return true;
+  }
+  // Agentes (NPCs): colisión física AABB 1×1×1 en su posición de renderizado (renderX, renderY+1, renderZ)
+  if(mc.agents && mc.agents.size){
+    const minX = px - HW, maxX = px + HW;
+    const minY = py,      maxY = py + PH - 1e-4;
+    const minZ = pz - HW, maxZ = pz + HW;
+    for(const a of mc.agents.values()){
+      if(a.state === 'stopped') continue;
+      const rx = a.renderX !== undefined ? a.renderX : a.x;
+      const ry = a.renderY !== undefined ? a.renderY : a.y;
+      const rz = a.renderZ !== undefined ? a.renderZ : a.z;
+      const ax0 = rx,     ax1 = rx + 1;
+      const ay0 = ry + 1, ay1 = ry + 2;
+      const az0 = rz,     az1 = rz + 1;
+      if(maxX > ax0 && minX < ax1 && maxY > ay0 && minY < ay1 && maxZ > az0 && minZ < az1) return true;
+    }
   }
   return false;
 }
@@ -5310,10 +5390,16 @@ const MC_NOTE_MAX=280;                                  // tope de una nota (pos
 function mcOpenNote(){
   const hit=mcRaycast(mcReach()); if(!hit){ toast('Apunta a un bloque para anotarlo'); return; }
   mc.noteCell=hit.cell.slice();
-  const cur=mc.notes[mcNoteKey(hit.cell)]||'';
+  const k=mcNoteKey(hit.cell);
+  const cur=mc.notes[k]||'';
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();   // suelta el ratón para poder escribir
   const ta=$('#mc-note-text'); ta.value=cur; ta.maxLength=MC_NOTE_MAX;
   $('#mc-note-del').hidden=!cur;                        // «Borrar» solo si ya había nota
+  
+  const hasTrace = (typeof game !== 'undefined' && game.noteTraces && (game.noteTraces[k] || game.noteTraces[hit.cell[0] + ',' + (hit.cell[1]-1) + ',' + hit.cell[2]] || game.noteTraces[hit.cell[0] + ',' + (hit.cell[1]+1) + ',' + hit.cell[2]]));
+  const traceBtn = $('#mc-note-trace');
+  if (traceBtn) traceBtn.hidden = !hasTrace;
+
   $('#mc-note').hidden=false; setTimeout(()=>{ ta.focus(); ta.select(); }, 0);
 }
 function mcCloseNote(){ $('#mc-note').hidden=true; mc.noteCell=null; }
@@ -5326,6 +5412,53 @@ function mcSaveNote(){
   mcCloseNote();
 }
 function mcDeleteNote(){ if(mc.noteCell){ delete mc.notes[mcNoteKey(mc.noteCell)]; mcScheduleSave(); toast('Nota borrada'); } mcCloseNote(); }
+
+function mcShowTraceModal(){
+  if(!mc.noteCell) return;
+  const c = mc.noteCell.slice();
+  mcCloseNote();
+  const k = mcNoteKey(c);
+  let trace = (typeof game !== 'undefined' && game.noteTraces) ? (game.noteTraces[k] || game.noteTraces[c[0] + ',' + (c[1]-1) + ',' + c[2]] || game.noteTraces[c[0] + ',' + (c[1]+1) + ',' + c[2]]) : null;
+  
+  if(!trace && typeof game !== 'undefined' && typeof game.traceNote === 'function'){
+    trace = game.traceNote(c[0], c[1], c[2]);
+  }
+
+  const modal = $('#trace-modal');
+  const content = $('#trace-content');
+  if(!modal || !content) return;
+
+  if(!trace){
+    content.textContent = '❌ No hay traza histórica registrada para este bloque [' + k + '].';
+  } else {
+    let out = '=== TRAZA COMPLETA DE EJECUCIÓN DE NOTA: "' + trace.noteType + '" en [' + trace.pos + '] ===\n';
+    out += 'Agente: ' + trace.agentName + ' (' + trace.agentId + ') | RunID: ' + trace.runId + ' | Emitida en Tick #' + trace.tick + '\n';
+    out += 'Pila de Llamadas: ' + trace.callStack + '\n';
+    out += 'Causa Declarada: ' + trace.cause + '\n';
+    out += (trace.grid3x3 || '') + '\n\n';
+    out += '--- HISTORIAL DE DECISIONES Y LLAMADAS DESDE EL INICIO (' + (trace.history ? trace.history.length : 0) + ' PASOS) ---\n';
+    if(trace.history && trace.history.length){
+      for(let i = 0; i < trace.history.length; i++){
+        const h = trace.history[i];
+        out += '[' + h.time + ' | Tick ' + String(h.tick).padStart(3, '0') + '] ' + String(h.action).padEnd(14) + ' Pos:[' + h.pos + '] Dir:[' + h.dir + '] ' + h.details + '\n';
+      }
+    }
+    content.textContent = out;
+  }
+  modal.hidden = false;
+}
+
+function mcCloseTraceModal(){
+  const modal = $('#trace-modal');
+  if(modal) modal.hidden = true;
+}
+
+function mcCopyTraceText(){
+  const content = $('#trace-content');
+  if(content && content.textContent){
+    navigator.clipboard.writeText(content.textContent).then(()=>{ toast('📋 Traza copiada al portapapeles'); }).catch(()=>{ toast('Traza lista en consola F12'); });
+  }
+}
 // Al mirar un bloque con nota (jugando), muestra su texto bajo la mira; si no, oculta el visor.
 function mcUpdateNoteView(){
   const el=$('#mc-noteview'); if(!el) return;
@@ -5554,6 +5687,19 @@ game.wipeMap=async function(name, force){
   if(mc.active && mc.grid && (mcMapName()||'default')===shown){ mcBake({dim: dim||mc.dim, voxels:{}, notes:{}}); }   // mcBake malla solo (mcMeshAll interno)
   return true;
 };
+// game.buildTerrain() · REGENERA el terreno plano por defecto (hierba Y=14, tierra Y=11..13, roca Y=0..10).
+game.buildTerrain=function(){
+  if(typeof mcGenFlat==='function' && typeof mcMeshAll==='function'){
+    mcGenFlat();
+    mcMeshAll();
+    if(typeof mcScheduleSave==='function') mcScheduleSave();
+    toast('🌱 Terreno por defecto regenerado');
+    console.log('[game.buildTerrain] Terreno plano por defecto regenerado con éxito.');
+    return true;
+  }
+  console.error('[game.buildTerrain] Motor 3D no listo.');
+  return false;
+};
 // game.tp(x,y,z) · salta a esas coordenadas de mundo (pies sobre el bloque; si el destino es sólido —p.ej. un
 // tronco— mcUnstick sube al primer hueco de aire). Conserva la mirada. game.notes()/game.gotoNote(i) para las notas.
 function mcTeleport(x,y,z){
@@ -5575,7 +5721,7 @@ game.aim=function(alcance){
   const d=+alcance>0?+alcance:64, h=mcRaycast(d);
   if(h) return h.cell.slice();                         // bloque sólido apuntado
   const cp=Math.cos(mc.pitch), dir=[-Math.sin(mc.yaw)*cp, Math.sin(mc.pitch), -Math.cos(mc.yaw)*cp];
-  const o=[mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]];   // sin sólido: proyecta la mira al aire
+  const o=[mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]];
   return [Math.floor(o[0]+dir[0]*d), Math.floor(o[1]+dir[1]*d), Math.floor(o[2]+dir[2]*d)];
 };
 // game.notes() · tabla de las notas post-it del mundo ("x,y,z" → texto) para copiar coords a game.tp / game.gotoNote.
@@ -5594,27 +5740,30 @@ game.gotoNote=function(i){
   return mcTeleport(x,y,z);
 };
 // ── setVoxel(x,y,z,material): puente para scripts de construcción por consola ──────────────────────────
-// Un script que llama setVoxel miles de veces (pirámides, etc.) NO debe remeshar por bloque: cada llamada solo
-// escribe en la rejilla densa; el re-mallado + autoguardado se disparan UNA vez al terminar la ráfaga (debounce).
-// `material` acepta: alias EN ('stone','smooth_stone'…), un nombre/clave de la paleta, o un id numérico.
 const MC_MAT_ALIAS={ stone:'asset:assets/roca.vox.json', smooth_stone:'asset:assets/adoquin.vox.json',
   cobblestone:'asset:assets/adoquin.vox.json', mossy_cobblestone:'asset:assets/musgo_adoquin.vox.json',
   stone_bricks:'asset:assets/ladrillo.vox.json', bricks:'asset:assets/ladrillo.vox.json',
   sandstone:'asset:assets/arenisca.vox.json', dirt:'asset:assets/tierra.vox.json',
   grass:'asset:assets/hierba.vox.json', wood:'asset:assets/tablones.vox.json',
   planks:'asset:assets/tablones.vox.json', sand:'asset:assets/arena.vox.json',
-  log:'asset:assets/tronco.vox.json', obsidian:'asset:assets/obsidiana.vox.json' };
+  log:'asset:assets/tronco.vox.json', obsidian:'asset:assets/obsidiana.vox.json',
+  red_concrete:'asset:assets/red_concrete.vox.json', red_concrete_block:'asset:assets/red_concrete.vox.json' };
 let mcMat2id={}, mcWarnedMat={};                    // caché material→id de la ráfaga + avisos ya dados
+
 function mcResolveMat(material){
   if(material===0||material==null||material===false) return 0;   // aire: setVoxel(x,y,z,0/null) ROMPE el bloque (explosiones)
   if(typeof material==='number') return (material>0 && material<mc.blockKey.length)?material:(mc.name2id['roca']||1);
   const m=String(material==null?'':material).trim();
   if(m==='' || m.toLowerCase()==='air' || m.toLowerCase()==='aire') return 0;   // alias de aire por nombre
   if(m in mcMat2id) return mcMat2id[m];
-  const key=MC_MAT_ALIAS[m.toLowerCase()] || (mc.name2id[m]?mc.blockKey[mc.name2id[m]]:null) || m;
-  let id=mc.blockKey.indexOf(key); if(id<1) id=mc.name2id[m]||-1;
+  const mLow = m.toLowerCase();
+  let key = MC_MAT_ALIAS[mLow] || (mc.name2id[m]?mc.blockKey[mc.name2id[m]]:null);
+  if(!key && mcAssetsRegistry[mLow]) key = 'asset:' + mcAssetsRegistry[mLow];
+  if(!key && mcAssetsRegistry[mLow.replace(/\s+/g, '_')]) key = 'asset:' + mcAssetsRegistry[mLow.replace(/\s+/g, '_')];
+  if(!key) key = m;
+  let id = mc.blockKey.indexOf(key); if(id<1) id = mc.name2id[m] || mc.name2id[mLow] || -1;
   if(id<1){                                          // desconocido (p.ej. '#hex' no aplica al terreno) → roca + aviso 1 vez
-    if(!mcWarnedMat[m]){ console.warn('setVoxel: material desconocido "'+m+'" → uso roca. Precarga texturas con game.addMaterial("asset:assets/…vox.json") o usa un nombre de la paleta.'); mcWarnedMat[m]=true; }
+    if(!mcWarnedMat[m]){ console.warn('setVoxel: material desconocido "'+m+'" → uso roca. Precarga texturas con game.addMaterial("'+m+'") o usa un nombre de la paleta.'); mcWarnedMat[m]=true; }
     id=mc.name2id['roca']||1;
   }
   mcMat2id[m]=id; return id;
@@ -5631,17 +5780,12 @@ function mcSetVoxel(x,y,z,material){
   if(!mc.batching){ clearTimeout(mcBuildT); mcBuildT=setTimeout(mcFlushBuild, 80); }   // re-malla+guarda una vez al acabar la ráfaga
   return true;
 }
-// ── getVoxel(x,y,z): inspector de la rejilla para scripts (una explosión decide si hay bloque antes de romperlo) ──
-// Devuelve el id de material del bloque (>0, reutilizable tal cual como material de setVoxel) o 0 si es aire / fuera del mundo.
 function mcGetVoxel(x,y,z){
   if(!mc.grid) return 0;
   x=Math.round(x); y=Math.round(y); z=Math.round(z);
   if(!mcInside(x,y,z)) return 0;                     // fuera de límites = aire para el script
   return mc.grid[mcIdx(x,y,z)] || 0;                 // 0 = aire
 }
-// ── beginBatch()/endBatch(): "modo silencioso" para bucles de miles de setVoxel (explosiones, estructuras) ──────
-// Entre begin y end solo se escribe la rejilla densa (NO se re-malla ni se guarda por bloque); endBatch re-malla
-// TODOS los chunks tocados de una sola vez y guarda. Anidable (contador): el re-mallado ocurre al cerrar el último.
 let mcBatchDepth=0;
 function mcBeginBatch(){ mcBatchDepth++; mc.batching=true; clearTimeout(mcBuildT); mcBuildT=0; }
 function mcEndBatch(){
@@ -5651,21 +5795,27 @@ function mcEndBatch(){
   clearTimeout(mcBuildT); mcBuildT=0;
   if(mcBuildN>0) mcFlushBuild();                      // un único re-mallado + guardado de toda la ráfaga
 }
-// setVoxel global: DISPATCHER (igual que getVoxel arriba). Con el Mundo abierto escribe en su rejilla densa
-// (mcSetVoxel, lo que usan los snippets); con el Mundo cerrado, la del EDITOR (state.voxels). `function setVoxel`
-// (editor) se declara arriba y por tanto vive en window; sin este despacho, asignar window.setVoxel=mcSetVoxel
-// la SOBRESCRIBÍA en global y applyTool/applyTool3d/floodFill dejaban de pintar (mcSetVoxel exige el Mundo abierto).
 const _editSetVoxel=setVoxel;
 window.setVoxel=(x,y,z,c)=> (mc && mc.active && mc.grid) ? mcSetVoxel(x,y,z,c) : _editSetVoxel(x,y,z,c);
 game.setVoxel=window.setVoxel;
-// OJO: NO exponemos window.getVoxel — el `const getVoxel` (arriba) lo sombrea en ámbito global y ya delega
-// al Mundo cuando está activo. game.getVoxel queda disponible para llamadas explícitas por consola.
 game.getVoxel=mcGetVoxel;
 window.beginBatch=mcBeginBatch; game.beginBatch=mcBeginBatch;
 window.endBatch=mcEndBatch; game.endBatch=mcEndBatch;
-// game.addMaterial("asset:assets/xxx.vox.json"[,"nombre"]) · precarga una textura en la paleta (async) para usarla
-// como material en setVoxel; devuelve su id. Útil antes de correr un script con texturas fuera de la paleta base.
-game.addMaterial=async function(key,name){ const id=await mcAddBlock(key,name); mcMat2id={}; return id; };
+game.addMaterial=async function(key,name){
+  let realKey = String(key||'').trim();
+  const kLow = realKey.toLowerCase();
+  if(mcAssetsRegistry[kLow]){
+    realKey = 'asset:' + mcAssetsRegistry[kLow];
+  } else if(mcAssetsRegistry[kLow.replace(/\s+/g, '_')]){
+    realKey = 'asset:' + mcAssetsRegistry[kLow.replace(/\s+/g, '_')];
+  } else if(!realKey.startsWith('asset:') && !realKey.endsWith('.json')){
+    const found = MC_MAT_ALIAS[kLow];
+    if(found) realKey = found;
+  }
+  const id=await mcAddBlock(realKey, name||key);
+  mcMat2id={};
+  return id;
+};
 let mcSaveT=0;
 function mcScheduleSave(){ clearTimeout(mcSaveT); mcSaveT=setTimeout(mcSaveWorld, 900); }   // debounce (serializa dentro)
 async function mcSaveWorld(){
@@ -5681,7 +5831,7 @@ function mcTick(now){
   if(!mc.fpsT) mc.fpsT=now;
   if(now-mc.fpsT>=500){ mc.fps=mc.fpsN*1000/(now-mc.fpsT); game.fps=mc.fps; mc.fpsN=0; mc.fpsT=now; }
   if(mc.grid) mcUpdate(dt);
-  if(mc.agents.size) mcAgentsTick(now);   // agentes/NPC: una decisión por agente cada tickMs (coste 0 si no hay ninguno)
+  if(mc.agents.size){ mcAgentsTick(now); mcAgentsSmoothUpdate(dt); }   // agentes/NPC: ticks lógicos + interpolación continua de renderizado
   // Construir/romper CONTINUO: mientras se mantiene el botón (y el puntero está bloqueado), repite la acción
   // a intervalos (no cada frame). El estampado de estructuras NO se repite (una pieza por pulsación).
   if(mc.heldBtn>=0 && document.pointerLockElement===mc.canvas && now-mc.actAt>=MC_ACT_MS){
@@ -5739,6 +5889,7 @@ async function openWorld(){
   mcResize();
   mc.hotbarShown=1; mcRevealHotbar();     // la hotbar arranca visible en su sitio
   mc.active=true; mc.fpsN=0; mc.fpsT=0; mc.last=performance.now();
+  mcResumeAgents();     // reanudar agentes pausados al volver del editor
   mc.raf=requestAnimationFrame(mcTick);
 }
 // Tunables de consola del Mundo (patrón game.nearClip): game.fov (grados) y game.renderDist (nº de chunks).
@@ -5904,7 +6055,7 @@ game.dumpVars=function(){
 };
 function closeWorld(){
   mc.active=false; mc.keys={}; mc.heldBtn=-1; mcClearPreview();
-  mcStopAgents('mundo cerrado');   // los agentes no sobreviven al cierre: vuelcan su malla y sus cambios antes de guardar
+  mcPauseAgents();   // los agentes se pausan al salir al editor: retienen memoria y coords hasta reabrir el Mundo
   mcCloseNote(); { const nv=$('#mc-noteview'); if(nv) nv.hidden=true; }   // t1 · cierra el editor/visor de notas al salir
   if(mc.grid){ clearTimeout(mcSaveT); mcSaveWorld(); }   // vuelca cualquier edición pendiente al salir
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
@@ -5912,10 +6063,14 @@ function closeWorld(){
   $('#mc-modal').hidden=true;
 }
 $('#mc-close').onclick=closeWorld;
+if($('#mc-code-btn')) $('#mc-code-btn').onclick=openSnips;
 $('#mc-picker-close').onclick=mcClosePicker;
 $('#mc-picker-remove').onclick=mcRemoveSlot;
 $('#mc-note-save').onclick=mcSaveNote;
 $('#mc-note-del').onclick=mcDeleteNote;
+if($('#mc-note-trace')) $('#mc-note-trace').onclick=mcShowTraceModal;
+if($('#trace-close')) $('#trace-close').onclick=mcCloseTraceModal;
+if($('#trace-copy')) $('#trace-copy').onclick=mcCopyTraceText;
 $('#mc-note-cancel').onclick=mcCloseNote;
 $('#mc-note-text').addEventListener('keydown',e=>{                    // Ctrl/⌘+Enter guarda (Esc lo cierra el handler del Mundo; los atajos del editor no aplican con el Mundo abierto)
   if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); mcSaveNote(); }
@@ -5939,7 +6094,7 @@ document.addEventListener('mousemove',e=>{
   // Reemerge la hotbar si el jugador está PARADO y mueve el ratón (gesto de «volver a mirar el inventario»).
   if(mc.hbTarget===0 && Math.hypot(mc.vel[0],mc.vel[2])<0.6 && (Math.abs(e.movementX)+Math.abs(e.movementY))>1) mcRevealHotbar();
 });
-window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || !$('#mc-note').hidden) return;   // selector/editor de nota abierto ⇒ no mover/seleccionar
+window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || !$('#mc-note').hidden || !$('#snip-modal').hidden || (e.target && e.target.matches && e.target.matches('input,select,textarea'))) return;   // selector/editor de nota/código abierto ⇒ no mover/seleccionar
   if(/^[1-9]$/.test(e.key)){ const i=+e.key-1;
     // Alt+número: abre el selector de esa ranura (sin Esc+clic derecho); si no, selecciona la ranura.
     if(i<mc.hotbar.length){ if(e.altKey) mcOpenPicker(i); else { mc.sel=i; mcSelectSlot(); } }
@@ -5969,7 +6124,7 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     if(document.pointerLockElement!==mc.canvas){ mcLockPointer(); }
   }
 });
-window.addEventListener('keyup',e=>{ if(!mc.active) return; mc.keys[e.key.toLowerCase()]=false; });
+window.addEventListener('keyup',e=>{ if(!mc.active || !$('#snip-modal').hidden) return; mc.keys[e.key.toLowerCase()]=false; });
 // game.onKey('t', fn) · liga una tecla a tu función mientras el Mundo (🌍) esté activo. Ejemplo:
 //   game.onKey('t', ()=> throwAndExplodeTNT(...game.aim(), {radius:8, fuseTimeMs:500, tntMat:'roca'}));
 // Re-registrar la misma tecla la REEMPLAZA (no acumula listeners); game.onKey('t', null) la quita.
@@ -6039,12 +6194,20 @@ function mcSurfaceY(x,z){
 }
 // Suelo PISABLE cerca de la altura actual: sólido con aire encima, a ±climb de y0. Evita escanear la columna
 // entera en cada paso (mcSurfaceY es O(alto) y se llamaría 4 veces por tick y agente).
-function mcSurfaceNear(x,z,y0,climb){
+function mcSurfaceNear(x,z,y0,climb,drop){
   if(!mc.grid || !mcInside(x,0,z)) return -1;
   const H=mc.dim.y;
-  for(let d=0;d<=climb;d++) for(const y of (d?[y0+d,y0-d]:[y0])){
-    if(y<0||y>=H) continue;
-    if(mc.grid[mcIdx(x,y,z)] && (y+1>=H || !mc.grid[mcIdx(x,y+1,z)])) return y;
+  const maxUp = climb !== undefined ? climb : 1;
+  const maxDown = drop !== undefined ? drop : 3;
+  const maxD = Math.max(maxUp, maxDown);
+  for(let d=0; d<=maxD; d++){
+    const candidates = [];
+    if(d <= maxUp) candidates.push(y0 + d);
+    if(d > 0 && d <= maxDown) candidates.push(y0 - d);
+    for(const y of candidates){
+      if(y<0||y>=H) continue;
+      if(mc.grid[mcIdx(x,y,z)] && (y+1>=H || !mc.grid[mcIdx(x,y+1,z)])) return y;
+    }
   }
   return -1;
 }
@@ -6052,17 +6215,26 @@ function mcSurfaceNear(x,z,y0,climb){
 // Cuerpo del agente: cubo suelto de 36 vértices con el formato del terreno (x,y,z,u,v,shade) y su atlas.
 // Va en un VBO propio y NO en mc.grid: en la rejilla el jugador colisionaría con los agentes, ensuciaría el
 // mundo guardado y obligaría a re-mallar dos chunks por paso. Siempre a pleno brillo (se ve en salas oscuras).
-const MC_AGENT_INSET=0.06;       // encoge el cubo para que no haga z-fighting con el bloque de debajo
+const MC_AGENT_INSET_XZ=0.02;     // ligero inset en X y Z para no hacer z-fighting con paredes adyacentes
+const MC_AGENT_INSET_Y=0.001;     // asentamiento de la cara inferior totalmente pegado a la cota del suelo
 function mcAgentMesh(a){
   const gl=mc.gl; if(!gl) return;
-  const rects=mc.palette[a.blockId];
+  let rects=mc.palette[a.blockId];
+  if(!rects && mc.palette.length > 1){ a.blockId = 1; rects = mc.palette[1]; }
   if(!rects){ a.count=0; return; }
-  const S=1-2*MC_AGENT_INSET, ox=a.x+MC_AGENT_INSET, oy=a.y+1+MC_AGENT_INSET, oz=a.z+MC_AGENT_INSET;
+  const rx = a.renderX !== undefined ? a.renderX : a.x;
+  const ry = a.renderY !== undefined ? a.renderY : a.y;
+  const rz = a.renderZ !== undefined ? a.renderZ : a.z;
+  const Sx=1-2*MC_AGENT_INSET_XZ, Sy=1-2*MC_AGENT_INSET_Y, Sz=1-2*MC_AGENT_INSET_XZ;
+  const ox=rx+MC_AGENT_INSET_XZ, oy=ry+1+MC_AGENT_INSET_Y, oz=rz+MC_AGENT_INSET_XZ;
   const verts=[];
   for(let f=0;f<6;f++){
     const F=MC_FACES[f], r=rects[F.tex], C=F.corners;
     const uv=[[r.u0,r.v0],[r.u1,r.v0],[r.u1,r.v1],[r.u0,r.v1]];
-    for(const k of [0,1,2,0,2,3]){ const c=C[k]; verts.push(ox+c[0]*S, oy+c[1]*S, oz+c[2]*S, uv[k][0], uv[k][1], F.s); }
+    for(const k of [0,1,2,0,2,3]){
+      const c=C[k];
+      verts.push(ox+c[0]*Sx, oy+c[1]*Sy, oz+c[2]*Sz, uv[k][0], uv[k][1], F.s);
+    }
   }
   if(!a.vbo) a.vbo=gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, a.vbo);
@@ -6104,10 +6276,11 @@ function mcAgentNote(a, texto, celda){              // con cuota antiinundación
 // Una heurística rota NUNCA puede matar el bucle del Mundo: se aísla el agente, se deja rastro y se sigue.
 function mcAgentFail(a, err, donde){
   a.state='error';
-  console.error('[agente '+a.id+'] '+(donde||'onTick')+':', err);
-  mcAgentNoteForce(a, 'ERROR '+((err&&err.message)||err));   // la nota de error se salta la cuota
+  const msg = (err && err.message) ? err.message : String(err);
+  console.error('[agente '+a.id+'] '+(donde||'onTick')+': '+msg);
+  mcAgentNoteForce(a, 'ERROR '+msg);   // la nota de error se salta la cuota
   toast('Agente '+a.id+': error (ver consola F12)');
-  try{ if(a.cfg.onError) a.cfg.onError(a, err); }catch(e2){ console.error('[agente '+a.id+'] onError:', e2); }
+  try{ if(a.cfg.onError) a.cfg.onError(a, err); }catch(e2){ console.error('[agente '+a.id+'] onError: '+(e2&&e2.message?e2.message:e2)); }
   mcAgentFlushDirty(); mcAgentFlushSave();
 }
 
@@ -6116,7 +6289,7 @@ function mcAgentTarget(a, dx, dz){
   dx=dx|0; dz=dz|0;
   const nx=a.x+dx, nz=a.z+dz, m=a.margin;
   if(nx<m || nz<m || nx>=mc.dim.x-m || nz>=mc.dim.z-m) return -1;
-  return mcSurfaceNear(nx, nz, a.y, a.climb);
+  return mcSurfaceNear(nx, nz, a.y, a.climb, a.drop);
 }
 
 function mcAgentMake(id, cfg){
@@ -6138,6 +6311,7 @@ function mcAgentMake(id, cfg){
     state:'idle',
     tickMs: Math.max(16, num(cfg.tickMs,120)),
     climb: Math.max(0, num(cfg.climb,1)|0),
+    drop: Math.max(0, num(cfg.drop,3)|0),
     margin: Math.max(0, num(cfg.margin,1)|0),
     maxTicks: Math.max(0, num(cfg.maxTicks,0)|0),
     noteMax: Math.max(0, num(cfg.noteMax,20)|0),
@@ -6146,6 +6320,20 @@ function mcAgentMake(id, cfg){
     stats:{ ticks:0, steps:0, painted:0, repainted:0, blocked:0, idleTicks:0, distance:0,
             notes:0, notesDropped:0, startedAt:0, lastMoveAt:0, elapsedMs:0 },
     vbo:null, count:0, _nextAt:0, _noteAt:0, _moved:false, _mat:{},
+  };
+  a.passengers = cfg.passengers !== false && cfg.rideable !== false;
+  a.isMounted = function(){
+    if(a._dismountedAt && (performance.now() - a._dismountedAt < 2500)) return false;
+    const p = mc.pos;
+    const rx = a.renderX !== undefined ? a.renderX : a.x;
+    const ry = a.renderY !== undefined ? a.renderY : a.y;
+    const rz = a.renderZ !== undefined ? a.renderZ : a.z;
+    // Si el jugador está apoyado sobre un bloque sólido del mundo (suelo/arena/hormigón), NO está montado en el agente
+    const px = Math.floor(p[0]), py = Math.floor(p[1]), pz = Math.floor(p[2]);
+    if(typeof mcGetVoxel === 'function' && mcGetVoxel(px, py - 1, pz) > 0) return false;
+    return (p[0] >= rx + 0.1 && p[0] <= rx + 0.9 &&
+            p[2] >= rz + 0.1 && p[2] <= rz + 0.9 &&
+            p[1] >= ry + 0.95 && p[1] <= ry + 1.25);
   };
   // OJO: a.blockId NO se resuelve aquí. onStart puede precargar la textura del cuerpo con game.addMaterial
   // (p.ej. obsidiana, que no está en la paleta por defecto); resolverlo antes poblaría la caché de
@@ -6156,6 +6344,7 @@ function mcAgentMake(id, cfg){
   a.walk=function(dx,dz){
     const ny=mcAgentTarget(a,dx,dz);
     if(ny<0){ a.stats.blocked++; return false; }
+    if(a.renderX === undefined){ a.renderX = a.x; a.renderY = a.y; a.renderZ = a.z; }
     a.x+=dx|0; a.z+=dz|0; a.y=ny;
     if(dx||dz) a.dir=[Math.sign(dx|0), Math.sign(dz|0)];
     a.stats.steps++; a.stats.distance+=Math.abs(dx|0)+Math.abs(dz|0); a.stats.lastMoveAt=performance.now();
@@ -6163,20 +6352,25 @@ function mcAgentMake(id, cfg){
     return true;
   };
   a.surfaceY=function(x,z){ return mcSurfaceY(Math.round(x), Math.round(z)); };
+  a.getBlock=function(x,y,z){ const px=(x===undefined?a.x:Math.round(x)), py=(y===undefined?a.y:Math.round(y)), pz=(z===undefined?a.z:Math.round(z)); return mcGetVoxel(px,py,pz); };
   a.floor=function(x,z){                        // id del bloque de suelo (0 = aire/nada) en (x,z) o bajo el agente
     const px=(x===undefined?a.x:Math.round(x)), pz=(z===undefined?a.z:Math.round(z));
     const py=(px===a.x&&pz===a.z)?a.y:mcSurfaceY(px,pz);
     return py<0 ? 0 : mc.grid[mcIdx(px,py,pz)];
   };
   a.paint=function(mat, x, z){                  // devuelve true SOLO si cambió algo (repintar cuenta aparte)
-    const px=(x===undefined?a.x:Math.round(x)), pz=(z===undefined?a.z:Math.round(z));
-    const py=(px===a.x&&pz===a.z)?a.y:mcSurfaceY(px,pz);
-    if(py<0) return false;
+    if(x!==undefined || z!==undefined){
+      const px=Math.round(x), pz=Math.round(z), py=mcSurfaceY(px,pz);
+      if(py<0) return false;
+      const id=a.matId(mat); if(!id) return false;
+      const prev=mc.grid[mcIdx(px,py,pz)];
+      if(!prev) return false;
+      if(prev===id){ a.stats.repainted++; return false; }
+      mcAgentSetBlock(px,py,pz,id); a.stats.painted++; return true;
+    }
     const id=a.matId(mat); if(!id) return false;
-    const prev=mc.grid[mcIdx(px,py,pz)];
-    if(!prev) return false;                      // no se pinta el aire
-    if(prev===id){ a.stats.repainted++; return false; }
-    mcAgentSetBlock(px,py,pz,id); a.stats.painted++; return true;
+    a._pendingPaint = { matId: id, targetX: a.x, targetY: a.y, targetZ: a.z };
+    return true;
   };
   a.setBlock=function(x,y,z,mat){ return mcAgentSetBlock(Math.round(x),Math.round(y),Math.round(z), a.matId(mat)); };
   a.agentsAt=function(x,z){                     // otros agentes en esa celda (evitarse entre ellos es política tuya)
@@ -6185,6 +6379,10 @@ function mcAgentMake(id, cfg){
     return out;
   };
   a.note=function(texto, celda){ return mcAgentNote(a, texto, celda); };
+  a.getNote=function(x,y,z){
+    const px=(x===undefined?a.x:Math.round(x)), py=(y===undefined?a.y:Math.round(y)), pz=(z===undefined?a.z:Math.round(z));
+    return (mc.notes && mc.notes[px+','+py+','+pz]) || '';
+  };
   a.rnd=function(n){ return n==null ? Math.random() : Math.floor(Math.random()*n); };
   a.log=function(){ console.log('[agente '+a.id+']', a.state, 'pos', a.x+','+a.y+','+a.z, a.stats, a.vars); return a; };
   // ── Ciclo de vida ──
@@ -6230,7 +6428,8 @@ function mcAgentsTick(now){
   for(const a of mc.agents.values()){
     if(a.state!=='running') continue;
     vivos++;
-    const paso=Math.max(16, a.tickMs*(mcAgentSpeed>0?mcAgentSpeed:1));
+    const speedMult = mcAgentSpeed > 0 ? mcAgentSpeed : 1;
+    const paso = Math.max(16, a.tickMs / speedMult);
     if(!a._nextAt) a._nextAt=now;
     let n=0;
     while(a.state==='running' && now>=a._nextAt && n<MC_AGENT_MAX_STEPS){ n++; a._nextAt+=paso; mcAgentStep(a); }
@@ -6240,9 +6439,107 @@ function mcAgentsTick(now){
   if(vivos) mcAgentMaybeSave(now);
 }
 
+function mcAgentsSmoothUpdate(dt){
+  if(dt <= 0 || !mc.agents || !mc.agents.size) return;
+  for(const a of mc.agents.values()){
+    if(a.state === 'stopped') continue;
+    if(a.renderX === undefined){ a.renderX = a.x; a.renderY = a.y; a.renderZ = a.z; continue; }
+    const dx = a.x - a.renderX, dz = a.z - a.renderZ;
+    const distHoriz = Math.hypot(dx, dz);
+    const oldRx = a.renderX, oldRy = a.renderY, oldRz = a.renderZ;
+    const mounted = a.passengers && a.isMounted();
+    if(distHoriz > 1e-4){
+      const speedMult = mcAgentSpeed > 0 ? mcAgentSpeed : 1;
+      const effectiveTickMs = Math.max(16, a.tickMs / speedMult);
+      const speed = 1000 / effectiveTickMs;
+      const maxMove = Math.min(distHoriz, dt * speed);
+      a.renderX += (dx / distHoriz) * maxMove;
+      a.renderZ += (dz / distHoriz) * maxMove;
+    } else {
+      a.renderX = a.x;
+      a.renderZ = a.z;
+    }
+    const xMin = Math.floor(a.renderX + 0.05), xMax = Math.floor(a.renderX + 0.95);
+    const zMin = Math.floor(a.renderZ + 0.05), zMax = Math.floor(a.renderZ + 0.95);
+    const baseTargetY = Math.round(a.y);
+    let maxY = Math.min(a.y, mcSurfaceNear(Math.round(a.renderX), Math.round(a.renderZ), baseTargetY, 1));
+    if(maxY < 0) maxY = a.y;
+    for(let ix = xMin; ix <= xMax; ix++){
+      for(let iz = zMin; iz <= zMax; iz++){
+        const sy = mcSurfaceNear(ix, iz, baseTargetY, 1);
+        if(sy > maxY) maxY = sy;
+      }
+    }
+    a.renderY = maxY;
+    if(a._pendingPaint){
+      const p = a._pendingPaint;
+      const distToTarget = Math.hypot(a.renderX - p.targetX, a.renderZ - p.targetZ);
+      if(distToTarget < 0.25){
+        const prev = mc.grid[mcIdx(p.targetX, p.targetY, p.targetZ)];
+        if(prev && prev !== p.matId){
+          mcAgentSetBlock(p.targetX, p.targetY, p.targetZ, p.matId);
+          a.stats.painted++;
+        } else if(prev === p.matId){
+          a.stats.repainted++;
+        }
+        a._pendingPaint = null;
+      }
+    }
+    mcAgentMesh(a);
+    if(mounted){
+      const dxP = a.renderX - oldRx;
+      const dyP = a.renderY - oldRy;
+      const dzP = a.renderZ - oldRz;
+      const targetPx = mc.pos[0] + dxP;
+      const targetPy = mc.pos[1] + dyP;
+      const targetPz = mc.pos[2] + dzP;
+
+      if(mcCollidesWorld(targetPx, targetPy, targetPz)){
+        a._dismountedAt = performance.now();
+        const pushDx = oldRx - a.renderX;
+        const pushDz = oldRz - a.renderZ;
+        const pushLen = Math.hypot(pushDx, pushDz) || 1;
+        const dirX = pushDx / pushLen;
+        const dirZ = pushDz / pushLen;
+
+        // Posicionar al jugador fuera del perímetro del túnel (atrás, sobre suelo libre) sin saltos bruscos en Y
+        mc.pos[0] = oldRx + 0.5 + dirX * 0.6;
+        mc.pos[2] = oldRz + 0.5 + dirZ * 0.6;
+
+        // Inercia de caída parabólica suave a 60 FPS impulsada por la gravedad del juego
+        mc.vel[0] = dirX * 2.5;
+        mc.vel[2] = dirZ * 2.5;
+        mc.vel[1] = -1.8;
+
+        if(!a._warnedKnockoff){
+          toast('💥 ¡Te has chocado con un bloque y has caído al suelo!');
+          a._warnedKnockoff = true;
+          setTimeout(() => { a._warnedKnockoff = false; }, 2500);
+        }
+      } else {
+        mc.pos[0] = targetPx;
+        mc.pos[1] = targetPy;
+        mc.pos[2] = targetPz;
+      }
+    }
+  }
+}
+
 function mcStopAgents(motivo){
   for(const a of mc.agents.values()) a.stop(motivo||'stop');
   return mc.agents.size;
+}
+
+function mcPauseAgents(){
+  let n=0;
+  for(const a of mc.agents.values()) if(a.state==='running'){ a.pause(); n++; }
+  return n;
+}
+
+function mcResumeAgents(){
+  let n=0;
+  for(const a of mc.agents.values()) if(a.state==='paused'){ a.resume(); n++; }
+  return n;
 }
 
 // game.defineAgent(cfg) · registra (o REEMPLAZA) un agente. Mismo contrato que game.onKey: valida, avisa por
@@ -6260,19 +6557,53 @@ game.defineAgent=function(cfg){
   if(cfg.autostart!==false) a.start();
   return a;
 };
-// game.agents() · tabla de agentes vivos · game.agent(id) · handle para inspeccionar .vars / .stats en F12
-game.agents=function(){
+
+// game.agents() · tabla de agentes vivos · game.agents.killAll() · game.agents.kill(id) · game.agents.stopAll()
+function getAgentsTable(){
   const filas=[...mc.agents.values()].map(a=>({ id:a.id, estado:a.state, pos:a.x+','+a.y+','+a.z,
     ticks:a.stats.ticks, pasos:a.stats.steps, pintados:a.stats.painted, notas:a.stats.notes, meta:a.goal }));
   if(!filas.length) console.log('sin agentes (game.defineAgent)'); else console.table(filas);
   return filas;
+}
+game.agents=getAgentsTable;
+game.agents.killAll=function(){
+  const count=mc.agents.size;
+  if(!count){ console.log('Sin agentes activos para eliminar.'); return 0; }
+  for(const a of [...mc.agents.values()]){ a.stop('killAll'); mcAgentFreeMesh(a); mc.agents.delete(a.id); }
+  toast('💀 '+count+' agente(s) eliminado(s)');
+  console.log('💀 '+count+' agente(s) eliminado(s) desde game.agents.killAll()');
+  return count;
 };
+game.agents.kill=function(id){
+  if(id===undefined || id===null || id==='all' || id==='*') return game.agents.killAll();
+  const a=mc.agents.get(String(id));
+  if(!a){ console.warn('game.agents.kill: no existe el agente "'+id+'"'); return false; }
+  a.stop('killed_from_console'); mcAgentFreeMesh(a); mc.agents.delete(a.id);
+  toast('💀 Agente "'+a.name+'" eliminado');
+  console.log('💀 Agente "'+a.id+'" ('+a.name+') eliminado desde game.agents.kill("'+id+'")');
+  return true;
+};
+game.agents.stopAll=function(){ const n=mcStopAgents('game.agents.stopAll'); toast(n+' agente(s) detenido(s)'); return n; };
+game.agents.get=function(id){ return mc.agents.get(String(id)) || null; };
+
+game.showToastsEnabled = false;
+game.agents.showToasts = function(enable){
+  if(enable === undefined) return game.showToastsEnabled;
+  game.showToastsEnabled = Boolean(enable);
+  const status = game.showToastsEnabled ? 'ACTIVADAS' : 'DESACTIVADAS (silenciosas por defecto)';
+  console.log('🔔 Notificaciones toast de agentes: ' + status);
+  return game.showToastsEnabled;
+};
+game.showToasts = game.agents.showToasts;
+
 game.agent=function(id){ return mc.agents.get(String(id)) || null; };
-game.stopAgents=function(){ const n=mcStopAgents('game.stopAgents'); toast(n+' agente(s) detenido(s)'); return n; };
-game.removeAgent=function(id){
-  const a=mc.agents.get(String(id)); if(!a){ console.warn('game.removeAgent: no hay agente "'+id+'"'); return false; }
-  a.stop('removeAgent'); mcAgentFreeMesh(a); mc.agents.delete(a.id); return true;
-};
+game.stopAgents=game.agents.stopAll;
+game.removeAgent=game.agents.kill;
+game.kill=game.agents.kill;
+game.killAll=game.agents.killAll;
+window.kill=game.agents.kill;
+window.killAll=game.agents.killAll;
+window.stopAgents=game.agents.stopAll;
 // game.pruneAgentNotes(id) · borra SOLO las notas escritas por ese agente (prefijo «[id] »). Nunca toca las
 // notas del usuario ni las de otros agentes.
 game.pruneAgentNotes=function(id){

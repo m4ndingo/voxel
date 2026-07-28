@@ -250,5 +250,33 @@
     "group": "Bloques de construcción",
     "size": 16,
     "file": "assets/yellow_concrete.vox.json"
+  },
+  {
+    "id": "lava",
+    "name": "lava",
+    "role": "Bloque · lava",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/lava.vox.json"
+  },
+  {
+    "id": "tejado",
+    "name": "tejado",
+    "role": "Bloque · tejado",
+    "icon": "🏠",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/tejado.vox.json"
   }
 ]
