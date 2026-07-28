@@ -69,8 +69,13 @@ el framework**, creando cada segmento como **otro agente pausado** (`autostart:f
 ## 6. Jerarquía Estricta de Desatasco Físico (Sacrosanta)
 Cuando `moved === false` o cuando se alcanza el umbral adaptativo de pasos sin progreso:
 1. **Prioridad 1 (Desvío Físico Ortogonal)**: Intentar caminata a celdas libres adyacentes no transitadas.
-2. **Prioridad 2 (Minado de Emergencia Físico 3D)**: Destruir bloques de muro entorpecedores en las 4 direcciones adyacentes para abrir 2 túneles de salida física en el mundo 3D. Antes de picar, el agente planta un **Pino Piramidal 3D** con una nota justificativa.
+2. **Prioridad 2 (Minado de Emergencia Físico 3D)**: Destruir bloques de muro entorpecedores en las 4 direcciones adyacentes para abrir salida física. Si tras picar sigue sin haber salida, se deja un **Pino Piramidal 3D** como hito, con nota justificativa y uno solo por sitio.
 3. **Prioridad 3 (Salto Táctico)**: Teletransporte como **ÚLTIMO RECURSO ABSOLUTO** únicamente si los intentos de desvío y minado físico no abrieron salida.
+
+**El escalón solo se considera cumplido si el mundo CAMBIÓ a mejor, no si el agente hizo algo** (v4.36, ver
+§21). Cada peldaño devuelve `true` únicamente cuando *después* de actuar existe un vecino pisable; si no, el
+control tiene que caer al siguiente. Un peldaño que devuelve `true` por haber *intentado* algo convierte la
+jerarquía en un bucle de un solo escalón y los tres de abajo dejan de existir.
 
 ---
 
@@ -110,6 +115,11 @@ Cuando `moved === false` o cuando se alcanza el umbral adaptativo de pasos sin p
   bloque real, con umbral 3 la línea recta, el ping-pong y el zigzag 2×2 disparaban **los tres en el mismo
   tick** — no discriminaba nada. Cruzar la caja en línea recta deposita como mucho 5 visitas, de ahí que 8
   separe "paso de largo" de "estoy dando vueltas aquí": recta → no dispara; ping-pong y zigzag → sí.
+- **Se prueban TODAS las direcciones que no acercan más al borde, no solo la normal** (v4.36). Antes se
+  calculaba una única `interiorDir` (la perpendicular al borde más cercano) y, si esa celda no era salida
+  válida, **no pasaba absolutamente nada**: dos agentes atascados en `x=94` con `W=96` entraban aquí en cada
+  tick y no se redirigían jamás. Ahora se prueba primero la normal y, si está tapiada, las **paralelas al
+  borde** en los dos sentidos (que tampoco acercan a él).
 - **Se mantiene la caja, no se cambia a "misma celda"**: contar solo repeticiones de la celda exacta se
   pierde los bucles de 2×2 y de 3-4 celdas, que son el atasco típico pegado al borde.
 - **Agente parado** (`BORDER_QUIETO_MIN = 8`, v4.35): la caja por sí sola no ve al que está **congelado**,
@@ -528,3 +538,65 @@ Los escenarios son los fallos reales de las capturas — cubo bajo la nube oscur
 entera con un único valor (nada de esquinas), anillo de suelo alrededor del bloque barrido medio téxel a
 medio téxel sin un solo punto claro, un bloque apoyado que no se sombrea a sí mismo, y el borde de la sombra
 siguiendo al oclusor cuando se mueve **0.37 de bloque**.
+
+---
+
+## 21. Por qué la cadena de rescate no rescataba (v4.36) 🪤
+
+Tres fallos independientes que se tapaban entre sí. Síntoma que los destapó: `[MINADO EMERGENCIA] … en torno
+a 78,17,46` **1178 veces seguidas con las mismas coordenadas**, y `game.stuck()` con tres agentes a 25 pasadas
+por la misma celda dando vueltas al perímetro de un rectángulo hueco que ellos mismos habían levantado.
+
+**1. `minadoEmergencia` declaraba éxito por haber picado, no por haber abierto.** Devolvía `true` en cuanto
+quitaba un bloque, y el llamador hace `if (mined) return;`. Con un constructor vecino reponiendo el mismo
+bloque, «queda algo que picar» es cierto **para siempre**: el agente se quedaba en el peldaño 2 de §6 y
+`rebobinadoHistorico` y `saltoTactico` **no se alcanzaban nunca**. Ahora el éxito se **mide** (`a.canWalk`
+en las 4 direcciones *después* de picar) y hay **presupuesto por celda** (`MINADO_MAX_POR_CELDA = 8`): tras 8
+intentos infructuosos desde la misma celda deja de picar y cede el turno. Se reinicia al moverse.
+
+**2. `minadoEmergencia` picaba a la altura equivocada.** Usaba `cy = a.surfaceY(a.x, a.z)`, que es el bloque
+sólido **más alto de la columna** — bajo un techo, o dentro de lo que el propio agente acababa de construir,
+eso está metros por encima de su cabeza y se picaba aire. El suelo del agente es **`a.y - 1`** (`a.y` es la
+celda de sus pies; la librería reescribe `a.y = surfaceY + 1` al final de cada tick). Y se pica **solo pies y
+cabeza** (`cy+1`, `cy+2`): un paso necesita dos celdas de aire, no derribar la columna vecina entera de un
+tick, que es lo que hacía `Math.max(my, cy + 2)`.
+
+**3. `saltoTactico` no podía encontrar destino JAMÁS para un agente atrapado** — el peor de los tres.
+El barrido de 96×96 evaluaba cada celda candidata con
+`for (k…) if (a.canWalk(dirs[k][0], dirs[k][1])) openCount++`. **`a.canWalk(dx, dz)` mide siempre desde la
+posición del AGENTE**, no desde `(x, z)`: `openCount` valía lo mismo para las ~9.000 candidatas, y ese valor
+era el de la celda donde el agente está encerrado, que por definición tiene **0 vecinos abiertos** (por eso
+pide rescate). Como el filtro es `openCount >= 2`, **ninguna celda calificaba nunca** y el último recurso
+absoluto devolvía `false` justo cuando hacía falta. La celda candidata se mide ahora con
+`game.skills.vecinosPisablesEn(a, x, y, z)`, que replica el criterio de `mcSurfaceNear` (subir ≤ `climb`,
+bajar ≤ `drop`, aire sobre el suelo) sobre la celda **que se le pasa**. Se evalúa **después** del filtro de
+distancia, porque cuesta 4 barridos de columna y aquí se recorre el mapa entero.
+
+⚠️ **Regla general:** una habilidad que consulta el entorno recibe `(a, x, y, z)` o no se puede usar en un
+barrido. Los métodos del handle (`a.canWalk`, `a.paint`, `a.walk`) son **relativos al agente** por contrato;
+usarlos para preguntar por *otra* celda compila, no falla y devuelve un resultado plausible — el peor tipo
+de fallo.
+
+**Verificado**: `node test_rescate.js` (8 tests) carga la librería real con stubs mínimos de `mc`/`game` y un
+mundo de juguete. Comprueba que un muro de una hilada se pica y **abre** (`true`), que un voladizo sin suelo
+debajo se pica y **no abre** (`false` siempre, y para a los 8 intentos), y que 30 minados consecutivos dejan
+**una sola línea** de consola. Contra el `base-npc-skills.json` anterior **falla 5 de 8**.
+
+---
+
+## 22. El log de consola es un recurso acotado 📉
+
+Un agente atascado repite la misma decisión **~10 veces por segundo** (`tickMs` 90-200). Una sola sesión dejó
+**1178 líneas idénticas** de `[MINADO EMERGENCIA]`; el `[TICKET]`, que arrastra el diagrama 3×3 entero,
+salía cada 1500 ms por motivo = 40 por minuto. Eso no se puede leer y además retiene las cadenas en memoria.
+
+- **Nada de `console.log` directo en el camino del tick.** Se usa **`logAgente(clave, msg[, msMin])`**:
+  imprime la primera aparición de esa clave y luego, como mucho, **una línea cada `LOG_REPEAT_MS` (10 s)**
+  con cuántas repeticiones se omitieron. La clave es **del emisor** (`'minado:' + a.id`), **no del texto**:
+  así también se acota un mensaje que lleva contadores dentro y por tanto nunca se repite literal.
+- `[TICKET]` va con `msMin = 15000`. La lista completa sigue en `a.vars.showTickets()`.
+- **Los historiales son anillos, no listas**: `MAX_HISTORIAL = 200` por agente (`toastHistory`, `ticketLog`)
+  y `MAX_HISTORIAL_GLOBAL = 500` para `game.toastHistory`. Antes crecían sin tope mientras el mundo
+  estuviera abierto.
+- Los `console.log` de **diagnóstico bajo demanda** (`game.stuck()`, `game.heatmap()`, `game.perf()`,
+  `a.vars.asciiMap()`…) **no** se tocan: los dispara el dueño, no el bucle.
