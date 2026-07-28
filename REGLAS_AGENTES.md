@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.32) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.33) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -121,7 +121,28 @@ Cuando `moved === false` o cuando se alcanza el umbral adaptativo de pasos sin p
 
 ---
 
-## 15. Modo Serpiente (`skills.modoSerpiente`) 🐍
+## 15. Límite de Desnivel por Paso (`climb` / `drop`) ⛰️
+
+Perilla **genérica de todo agente**, configurable desde su snippet: cuántos bloques puede salvar **de una
+vez**. Subir 1+1+1 por una escalera es legítimo; lo que se limita es el salto de 2 o 3 de golpe.
+
+- `climb` (por defecto 1) = desnivel máximo que **sube** por paso; `drop` (por defecto 3) = el que **baja**.
+- **`defineStandardAgent` no los reenviaba a `defineAgent`**: se descartaban en silencio. Ya se propagan.
+- **El desnivel se mide suelo-contra-suelo en la librería**, no se delega en `app.js`: `mcAgentTarget`
+  (`app.js:6292`) mide el paso contra `a.y`, y la librería reescribe `a.y = surfaceY + 1` tras cada tick
+  (`base-npc-skills` :1062 y :1616) — un bloque **por encima** de la cota que usa `app.js` (`mcAgentMake`
+  pone `a.y = mcSurfaceY`, y `mcSurfaceNear` devuelve también la Y del bloque sólido). Esa unidad de más
+  corre la ventana entera: **con `climb:1` el agente subía de hecho 2 bloques de golpe**, y bajaba uno
+  menos de lo declarado.
+- **No se corrige `a.y`**: la cota inflada está metida en las claves de cobertura 3D (`a.vars.visited` y el
+  `bodyY = cy + 1` de la BFS); cambiarla invalidaría la cobertura de todos los agentes. Se aplica en la
+  puerta de paso, envolviendo `a.canWalk` y `a.walk` (helper `game.skills.desnivelProhibido`).
+- Los rechazos se cuentan en `a.stats.blockedBySlope`.
+- **No cubre** el teletransporte (`saltoTactico`) ni el pino de emergencia: esos no pasan por `walk`.
+
+---
+
+## 16. Modo Serpiente (`skills.modoSerpiente`) 🐍
 
 Habilidad **de la librería** (`base-npc-skills`), no del snippet: el agente arrastra un cuerpo de
 `largoSerpiente` celdas (por defecto 10) y **no puede morderse ni dar media vuelta**.
