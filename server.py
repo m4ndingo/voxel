@@ -149,6 +149,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return m.group(1) if m else None
     def _snip_path(self, idd):
         return os.path.join(SNIPS, idd + '.json')
+    def _asset_id(self):
+        m = re.match(r'^/api/assets/([A-Za-z0-9_.-]+)$', self.path)
+        if not m:
+            return None
+        aid = m.group(1)
+        if aid.endswith('.vox.json'):
+            aid = aid[:-9]
+        return aid
+    def _asset_path(self, idd):
+        return os.path.join(BASE, 'assets', f'{idd}.vox.json')
 
     def do_GET(self):
         # SPA: /map/<nombre> (elige el mundo por URL) sirve el mismo index.html; el cliente lee el nombre
@@ -199,6 +209,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if os.path.exists(fp):
                 return self._send(200, json.load(open(fp, encoding='utf-8')))
             return self._send(404, {'error': 'no existe'})
+        if path_only == '/api/assets':
+            idx_path = os.path.join(BASE, 'assets', 'index.json')
+            if os.path.exists(idx_path):
+                try:
+                    with open(idx_path, 'r', encoding='utf-8') as f:
+                        idx = json.load(f)
+                    return self._send(200, idx)
+                except Exception:
+                    pass
+            return self._send(200, [])
+        aid = self._asset_id()
+        if aid:
+            fp = self._asset_path(aid)
+            if os.path.exists(fp):
+                try:
+                    return self._send(200, json.load(open(fp, encoding='utf-8')))
+                except Exception:
+                    pass
+            return self._send(404, {'error': 'no existe asset'})
         if self.path == '/api/habitantes':
             return self._send(200, list_all())
         idd = self._id()
@@ -314,6 +343,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if os.path.exists(self._snip_path(sid)):
                 to_trash(self._snip_path(sid)); return self._send(200, {'ok': True})   # a papelera, no borrado real
             return self._send(404, {'error': 'no existe'})
+        aid = self._asset_id()
+        if aid and os.path.exists(self._asset_path(aid)):
+            to_trash(self._asset_path(aid))
+            idx_path = os.path.join(BASE, 'assets', 'index.json')
+            if os.path.exists(idx_path):
+                try:
+                    with open(idx_path, 'r', encoding='utf-8') as f:
+                        idx = json.load(f)
+                    idx = [item for item in idx if item.get('id') != aid and item.get('file') != f'assets/{aid}.vox.json']
+                    atomic_dump(idx, idx_path)
+                except Exception:
+                    pass
+            return self._send(200, {'ok': True})
         idd = self._id()
         if idd and os.path.exists(self._path(idd)):
             to_trash(self._path(idd)); return self._send(200, {'ok': True})   # a papelera, no borrado real

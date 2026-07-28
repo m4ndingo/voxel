@@ -1529,7 +1529,10 @@ async function save(){
     const isTex = state.meta && state.meta.type === 'textura';
     const endpoint = isTex ? '/api/assets' : '/api/habitantes';
     const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const j=await r.json(); serverId=j.id;
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' - El servidor API no soporta ' + endpoint);
+    const j=await r.json();
+    if (!j || !j.id) throw new Error('Respuesta inválida del servidor');
+    serverId=j.id;
     if(isTex) {
       invalidateTex('asset:assets/' + j.id + '.vox.json');
       if(typeof refreshTexturas === 'function') refreshTexturas();
@@ -1537,7 +1540,7 @@ async function save(){
     }
     toast('Guardado en el servidor: «'+state.meta.name+'»');
     refreshRosters();
-  }catch(e){ toast('Guardado local (servidor no disponible)'); }
+  }catch(e){ toast('Guardado local (servidor API no disponible en esta versión git/estática)'); }
 }
 // "Guardar como…": crea SIEMPRE un habitante/asset nuevo (id nuevo) con el nombre indicado
 async function saveAs(){
@@ -1550,7 +1553,9 @@ async function saveAs(){
     const isTex = state.meta && state.meta.type === 'textura';
     const endpoint = isTex ? '/api/assets' : '/api/habitantes';
     const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' - El servidor API no soporta ' + endpoint);
     const j=await r.json();
+    if (!j || !j.id) throw new Error('Respuesta inválida del servidor');
     serverId=j.id;
     localStorage.setItem(LS, localSnap());
     if(isTex) {
@@ -1560,7 +1565,7 @@ async function saveAs(){
     }
     toast('Guardado como «'+state.meta.name+'»');
     refreshRosters();
-  }catch(e){ toast('No se pudo guardar en el servidor'); }
+  }catch(e){ toast('No se pudo guardar en servidor (versión estática/git)'); }
 }
 function restore(){
   try{
@@ -1592,15 +1597,19 @@ function importJSON(file){
       const m=new Map(Object.entries(d.voxels||{}));
       load(m, d.meta||{name:file.name.replace(/\.vox\.json$/,''),type:'objeto'}, d.size);
       try {
-        await fetch('/api/assets', {
+        const isTex = (d.meta && d.meta.type === 'textura');
+        const endpoint = isTex ? '/api/assets' : '/api/habitantes';
+        const r = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(d)
         });
-        if (typeof refreshTexturas === 'function') refreshTexturas();
-        if (typeof mcBuildPalette === 'function') await mcBuildPalette();
+        if (r.ok) {
+          if (typeof refreshTexturas === 'function') refreshTexturas();
+          if (typeof mcBuildPalette === 'function') await mcBuildPalette();
+        }
       } catch(err) {
-        console.warn('No se pudo persistir asset en servidor:', err);
+        console.warn('No se pudo persistir en servidor (versión estática/git):', err);
       }
       toast('Importado '+file.name);
     }catch(e){ toast('Archivo no válido'); }
