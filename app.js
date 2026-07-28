@@ -4244,14 +4244,16 @@ function mcUploadStructAtlas(){
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   mc.structAtlasTex=tex;
 }
-async function mcBuildPalette(){
+async function mcBuildPalette(onProgress){
   mc.palette=[null]; mc.blockKey=[null]; mc.name2id={};
   const AW=6*MC_TILE, AH=Math.max(1,mc.blocks.length)*MC_TILE;
   const cv=document.createElement('canvas'); cv.width=AW; cv.height=AH;
   const ctx=cv.getContext('2d'); ctx.imageSmoothingEnabled=false;
   for(let bi=0; bi<mc.blocks.length; bi++){
     const b=mc.blocks[bi], id=bi+1; let faces=null;
+    const _tB=performance.now(), _cached=texDefs.has(b.key);   // ¿ya estaba en caché o toca descargarla?
     try{ faces=buildTexFaces(await getTexDef(b.key)).faces; }catch(e){}
+    if(onProgress) onProgress(bi+1, mc.blocks.length, b.name, b.key, performance.now()-_tB, _cached);
     mc.name2id[b.name]=id; mc.blockKey[id]=b.key;
     const rects=[];
     for(let fi=0; fi<6; fi++){
@@ -4267,9 +4269,12 @@ async function mcBuildPalette(){
   // ¿algún texel translúcido (alpha<0.5)? Si NO, el terreno usa el shader sin `discard` (early-z activo → menos
   // overdraw). Si SÍ (o el canvas está contaminado y no se puede leer), alpha-test para no rellenar los huecos.
   mc.atlasHasAlpha=false;
+  const _tA=performance.now();
   try{ const d=ctx.getImageData(0,0,AW,AH).data;
        for(let i=3;i<d.length;i+=4){ if(d[i]<128){ mc.atlasHasAlpha=true; break; } } }
   catch(e){ mc.atlasHasAlpha=true; }
+  mcLoadNote('Escaneo de alpha del atlas ('+AW+'x'+AH+'): '+(performance.now()-_tA).toFixed(1)
+    +' ms → atlasHasAlpha='+mc.atlasHasAlpha+(mc.atlasHasAlpha?' (shader con discard)':' (shader opaco, early-z)'));
 }
 function mcUploadAtlas(){
   const gl=mc.gl;
@@ -5690,6 +5695,8 @@ async function mcReloadWorld(){
   toast('Mundo recargado (sin mover)');
 }
 game.reloadWorld=mcReloadWorld;
+// Desglose de la última carga del Mundo: en qué se fue el tiempo bajo «Preparando bloques…» y compañía.
+game.loadReport=mcLoadReport;
 // game.mapName = nombre del mapa actual (de la URL /map/<nombre>; 'default' = mundo sagrado).
 Object.defineProperty(game,'mapName',{ enumerable:true, get:()=>mcMapName() });
 // game.map('loquesea') navega a otro mundo persistente (recarga en /map/loquesea; sin arg = nombre actual).
@@ -5880,42 +5887,105 @@ function mcTick(now){
 }
 // Overlay de carga del Mundo (t12): evita ver «solo cielo» mientras se hornea el mundo/atlas/meshes.
 function mcYield(){ return new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))); }   // cede 2 frames para que el navegador pinte
+// ── CRONÓMETRO DE CARGA DEL MUNDO ────────────────────────────────────────────────────────────────
+// Por qué existe: el overlay solo mostraba 3 mensajes ('Cargando mundo…', 'Preparando bloques…',
+// 'Construyendo el mundo…') para un proceso con 8 etapas bien distintas. «Preparando bloques…» en
+// particular esconde N descargas de assets EN SERIE (una por bloque de la paleta), la rasterización de
+// 6 caras por bloque, un escaneo de alpha sobre el atlas entero, la subida del atlas a la GPU y hasta 9
+// resoluciones de estructura de la hotbar. Sin desglose, una carga lenta es indistinguible de un cuelgue.
+// Consola: game.loadReport() repite el informe de la última carga.
+let mcLoad=null;
+function mcLoadStart(){ mcLoad={ t0:performance.now(), fases:[], abierta:null, bloques:[], notas:[] }; }
+function mcLoadPhase(nombre){ mcLoadStop(); if(mcLoad) mcLoad.abierta={ nombre, t:performance.now() }; }
+function mcLoadStop(){
+  if(!mcLoad || !mcLoad.abierta) return;
+  const f=mcLoad.abierta;
+  mcLoad.fases.push({ fase:f.nombre, ms:+(performance.now()-f.t).toFixed(1) });
+  mcLoad.abierta=null;
+}
+function mcLoadNote(txt){ if(mcLoad) mcLoad.notas.push(txt); }
+function mcLoadReport(){
+  if(!mcLoad){ console.log('Aún no se ha cargado ningún mundo en esta sesión.'); return null; }
+  const total=+(performance.now()-mcLoad.t0).toFixed(1);
+  const filas=mcLoad.fases.map(f=>({ fase:f.fase, ms:f.ms, '%':+(f.ms*100/Math.max(total,0.01)).toFixed(1) }));
+  console.log('=== CARGA DEL MUNDO · '+total+' ms en total ===');
+  console.table(filas);
+  if(mcLoad.notas.length) console.log('  '+mcLoad.notas.join('\n  '));
+  if(mcLoad.bloques.length){
+    const orden=mcLoad.bloques.slice().sort((a,b)=>b.ms-a.ms);
+    console.log('--- BLOQUES DE LA PALETA (cada uno = 1 asset + 6 caras rasterizadas) ---');
+    console.table(orden.map(b=>({ bloque:b.name, ms:+b.ms.toFixed(1), origen:b.cached?'caché':'descarga', clave:b.key })));
+    const desc=mcLoad.bloques.filter(b=>!b.cached);
+    console.log('  '+desc.length+' de '+mcLoad.bloques.length+' bloques hubo que descargarlos ('
+      +desc.reduce((s,b)=>s+b.ms,0).toFixed(0)+' ms). Las descargas son EN SERIE: es el tramo que más'
+      +' se nota en «Preparando bloques…».');
+  }
+  return { total, fases:mcLoad.fases, bloques:mcLoad.bloques };
+}
 function mcShowLoading(txt){ const el=$('#mc-loading'); if(!el) return; const t=$('#mc-loading-text'); if(t) t.textContent=txt||'Cargando…'; el.hidden=false; }
 function mcHideLoading(){ const el=$('#mc-loading'); if(el) el.hidden=true; }
 async function openWorld(){
   $('#mc-modal').hidden=false;
-  if(!mc.gl && !mcInitGL()){ $('#mc-modal').hidden=true; return; }
+  mcLoadStart();
+  mcLoadPhase('WebGL: crear contexto');
+  if(!mc.gl && !mcInitGL()){ $('#mc-modal').hidden=true; mcLoadStop(); return; }
+  mcLoadPhase('WebGL: compilar shaders');
   if(!mc.prog) mcBuildProgram();
   if(!mc.structProg) mcBuildStructProgram();
   if(!mc.stexProg) mcBuildStructTexProgram();
+  mcLoadStop();
   if(!mc.grid){                       // primera entrada: paleta+atlas, hotbar y mundo (guardado o terreno plano)
-    mcShowLoading('Cargando mundo…'); await mcYield();   // pinta el overlay antes del trabajo pesado (evita el «solo cielo»)
+    mcShowLoading('Descargando el mundo…'); await mcYield();   // pinta el overlay antes del trabajo pesado (evita el «solo cielo»)
+    mcLoadPhase('Red: descargar mundo.json');
     let doc=null;
     try{ doc=await fetch(mcWorldUrl(),{cache:'no-store'}).then(r=>r.json()); }catch(e){}
+    mcLoadStop();
+    mcLoadNote('Mundo: '+(doc&&doc.voxels?Object.keys(doc.voxels).length:0)+' voxels guardados, '
+      +(doc&&doc.structures?Object.keys(doc.structures).length:0)+' estructuras, '
+      +(doc&&doc.notes?Object.keys(doc.notes).length:0)+' notas.');
     // Lista de bloques = defaults ∪ keys del loadout ∪ keys presentes en el mundo guardado (así todo
     // lo colocado/guardado tiene su cara en el atlas y mcBake lo hornea).
+    mcLoadPhase('Componer lista de bloques');
     mc.blocks=MC_BLOCKS.map(b=>({name:b.name, key:b.key}));
     const addKey=(k,n)=>{ if(k && !mc.blocks.some(b=>b.key===k)) mc.blocks.push({name:n||k, key:k}); };
     const loadout=mcLoadoutKeys();
     if(loadout) loadout.forEach(k=>addKey(k));
     if(doc && doc.voxels) for(const v of Object.values(doc.voxels)) addKey(String(v).replace(/^tex:/,''));
-    mcShowLoading('Preparando bloques…'); await mcYield();
-    await mcBuildPalette(); mcUploadAtlas();
+    mcLoadStop();
+    mcLoadNote('Paleta: '+mc.blocks.length+' bloques ('+MC_BLOCKS.length+' por defecto + los de la hotbar'
+      +' + los presentes en el mundo guardado).');
+    mcShowLoading('Preparando bloques… (0/'+mc.blocks.length+')'); await mcYield();
+    mcLoadPhase('Paleta: assets + rasterizar caras');
+    await mcBuildPalette((n,total,name,key,ms,cached)=>{
+      // El overlay deja de mentir: dice QUÉ bloque va y cuántos quedan, en vez de un mensaje fijo.
+      mcShowLoading('Preparando bloques… ('+n+'/'+total+') '+name+(cached?'':' ⬇'));
+      if(mcLoad) mcLoad.bloques.push({ name, key, ms, cached });
+    });
+    mcLoadPhase('Atlas → GPU');
+    mcUploadAtlas();
+    mcLoadStop();
     // Hotbar: restaura el loadout (key→id) o el default [hierba..arena, 3 vacías].
     if(loadout) mc.hotbar=Array.from({length:MC_SLOTS},(_,i)=>{ const k=loadout[i]; const id=k?mc.blockKey.indexOf(k):-1; return id>0?id:0; });
     else mc.hotbar=[1,2,3,4,5,6,0,0,0];
     // Recalcula qué ranura es estructura DESDE su clave (no confíes en el slotStruct guardado: puede ser viejo,
     // cuando un objeto <16 vox se guardaba como bloque suelto). blockLike ⇒ bloque de terreno; el resto ⇒ estructura.
+    mcLoadPhase('Hotbar: resolver estructuras');
     mc.slotStruct=[];
     if(loadout){ for(let i=0;i<MC_SLOTS;i++){ const k=loadout[i]; if(!k){ mc.slotStruct[i]=null; continue; }
       try{ const rec=await mcStructCells(k); mc.slotStruct[i]=rec.blockLike?null:k; }catch(e){ mc.slotStruct[i]=null; } } }
+    mcLoadStop();
+    mcLoadPhase('Hotbar: construir UI');
     mcBuildHotbar();
+    mcLoadStop();
     const hasVox = !!(doc && doc.voxels && Object.keys(doc.voxels).length);
     mcShowLoading(hasVox ? 'Construyendo el mundo…' : (doc && doc.fresh ? 'Generando terreno…' : 'Cargando mundo vacío…')); await mcYield();
+    mcLoadPhase(hasVox ? 'Bake del mundo guardado + mallado' : (doc && doc.fresh ? 'Generar terreno + mallado' : 'Bake de mundo vacío'));
     if(hasVox) mcBake(doc);              // conserva lo construido
     else if(doc && doc.fresh) { mcGenFlat(); mcMeshAll(); }   // mundo recién nacido (sin fichero) → terreno plano
-    else mcBake(doc || {voxels:{}});     // vacío GUARDADO (p.ej. wipeMap) → vacío total, sin suelo
+    else mcBake(doc || {voxels:{}});     // vacío GUARDADO (p.ej. wipeMap) → vacío total, sin voxels
+    mcLoadStop();
     mcHideLoading();
+    mcLoadReport();
   }
   mcResize();
   mc.hotbarShown=1; mcRevealHotbar();     // la hotbar arranca visible en su sitio
