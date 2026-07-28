@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.33) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.34) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -100,7 +100,23 @@ Cuando `moved === false` o cuando se alcanza el umbral adaptativo de pasos sin p
 ---
 
 ## 11. Redirección Automática de Borde de Mapa (`isBorderZone`)
-- Cuando un agente se encuentra a menos de 2 bloques del perímetro del mapa y registra 3+ pasadas recientes, se le impone una **redirección automática hacia el interior del terreno** (hacia el centro libre).
+- Cuando un agente se encuentra a menos de 2 bloques del perímetro del mapa y **merodea** por esa zona, se
+  le impone una **redirección automática hacia el interior del terreno** (hacia el centro libre).
+- El merodeo se mide contando las pisadas de los últimos 50 ticks dentro de una **caja de 5×5** centrada en
+  el agente, y exige **`BORDER_LOITER_MIN = 8`** (v4.34; antes eran 3).
+- **Por qué 8 y no 3 — no bajarlo.** La caja de 5×5 contiene **siempre** la celda actual más las 2 que se
+  acaban de dejar atrás, así que cualquier umbral ≤3 es **verdadero por construcción** desde el tercer
+  paso: el contador dejaba de medir estancamiento y era un simple "estoy cerca del borde". Medido sobre el
+  bloque real, con umbral 3 la línea recta, el ping-pong y el zigzag 2×2 disparaban **los tres en el mismo
+  tick** — no discriminaba nada. Cruzar la caja en línea recta deposita como mucho 5 visitas, de ahí que 8
+  separe "paso de largo" de "estoy dando vueltas aquí": recta → no dispara; ping-pong y zigzag → sí.
+- **Se mantiene la caja, no se cambia a "misma celda"**: contar solo repeticiones de la celda exacta se
+  pierde los bucles de 2×2 y de 3-4 celdas, que son el atasco típico pegado al borde.
+- **Punto ciego conocido (pendiente)**: un agente **completamente parado** no dispara nunca, porque
+  `recentVisits` solo apila cuando la celda **cambia**.
+- Efecto secundario: al dejar de dispararse en trayectos rectos, desaparecen las notas `escape de bucle`
+  espurias que sembraba junto al borde (ver §17 sobre por qué la maniobra de borde acaba escribiendo esa
+  nota).
 
 ---
 
@@ -163,3 +179,20 @@ Habilidad **de la librería** (`base-npc-skills`), no del snippet: el agente arr
 - El hook `config.onTick` del snippet se invoca en un `try/finally` **siempre una vez por tick**, aunque el
   tick estándar salga por cualquiera de sus salidas tempranas — de lo contrario el cuerpo se despegaría de
   la cabeza.
+
+---
+
+## 17. La nota `escape de bucle` NO la dispara detectar un bucle ⚠️
+
+Comportamiento **conocido y engañoso**, documentado aquí porque despista al leer las trazas.
+
+- `recordLoopEscapeVisit` se invoca desde **un único sitio** del tick estándar: cuando la cuenta atrás
+  `v.escapeSteps` llega a 0. No hay ninguna comprobación de oscilación en ese momento.
+- Pero hay **9 sitios** que ponen `v.escapeSteps` (redirección de borde §11, escape por frecuencia §5,
+  salida de ciclo, desvíos de desatasco §6, desmonte de pino §14), y **todos** acaban escribiendo la misma
+  nota con el mismo texto fijo: `'Causa: Maniobra de ruptura de oscilación/bucle en micro-zona.'`
+- Consecuencia práctica: una serpiente que camina **en línea perfectamente recta** puede sembrar una nota
+  `escape de bucle` cinco ticks después de una redirección de borde, sin haber oscilado jamás. Caso real
+  observado: `BORDER_ESCAPE` en el tick 47 → nota en el tick 52, en `[88,14,47]`.
+- **Pendiente**: etiquetar la nota con la maniobra que realmente puso `escapeSteps` en vez del texto fijo.
+  No cambia comportamiento, solo veracidad del registro.
