@@ -3850,6 +3850,11 @@ const mc={
   histLock:false, histBusy:false, // histLock: no registrar mientras se aplica un undo/redo; histBusy: evita solapar dos a la vez
   interiorDark:0.08,              // factor de sombra en el fondo sin luz (interiores/pasillos, t7 skylight); 1 = desactivado (game.interiorDark)
   light:null,                     // Uint8Array 0..MC_MAXLIGHT por celda: luz del cielo difundida por el aire (mcComputeLight)
+  shadow:null,                    // MAPA DE SOMBRA del sol vertical: {size,fbo,tex,depth,dirty} — altura de la superficie más alta por téxel (mcRenderShadow)
+  sunExtra:null,                  // gancho: geometría que dibuja OTRO (snippets con pasada propia) y que también debe
+                                  // proyectar sombra. Se llama en la pasada del sol con dibuja(vbo,count,stride,model).
+  shadowSize:2048,                // lado del mapa de sombra en téxeles (game.shadowSize); 2048 sobre un mundo de 96 = 21 téxeles por bloque
+  sunShade:0.55,                  // cuánto apaga la SOMBRA PROYECTADA (game.sunShade); 1 = sin sombra de sol
   blockLight:null,                // Uint8Array 0..MC_MAXLIGHT por celda: luz de BLOQUE emisiva (*#hex) difundida por el aire (mcComputeBlockLight); escalar/neutra (no tiñe)
   glowLevel:15,                   // nivel de siembra de la luz emisiva (game.glowLevel; 0 = sin luz de bloque; 15 = MC_MAXLIGHT = alcance máximo)
  glowFocus:0.2,                  // foco del haz emisivo 0..1 (game.glowFocus): 0=omnidireccional (antorcha), 1=haz estrecho hacia la normal neta de las caras emisivas
@@ -3889,6 +3894,11 @@ function mcInitGL(){
   const gl=cv.getContext('webgl2')||cv.getContext('webgl');
   if(!gl){ toast('Tu navegador no soporta WebGL — el Mundo necesita GPU'); return null; }
   mc.gl=gl;
+  // El mapa de sombra necesita dFdx/dFdy para sacar la normal de la cara. En WebGL2 son núcleo incluso en shaders
+  // ESSL 1.00; en WebGL1 hay que pedir OES_standard_derivatives (universal, pero si faltara se apaga la sombra).
+  mc.gl2 = (typeof WebGL2RenderingContext!=='undefined') && (gl instanceof WebGL2RenderingContext);
+  mc.deriv = mc.gl2 || !!gl.getExtension('OES_standard_derivatives');
+  if(!mc.deriv) console.warn('[mundo] sin OES_standard_derivatives → sin sombra de sol');
   gl.clearColor(MC_SKY[0],MC_SKY[1],MC_SKY[2],1);
   gl.enable(gl.DEPTH_TEST);
   cv.addEventListener('webglcontextlost',e=>{ e.preventDefault(); }, false);   // MVP: mínimo (F3 re-mesha al volver)
@@ -4306,25 +4316,83 @@ async function mcAddBlock(key, name){
 }
 
 // --- F3 · meshing por chunks + shaders + cámara + frustum cull ---
+
+// SOMBRA PROYECTADA DEL SOL (vertical) — no confundir con el skylight de mcComputeLight, que es OCLUSIÓN AMBIENTAL:
+// aquel difunde la luz del cielo por el aire perdiendo 1 nivel por vecino, así que mide la distancia HORIZONTAL al
+// cielo abierto y por eso un pilar apoyado en el suelo no oscurece NADA a su alrededor y una losa flotante de 1×1
+// deja la celda de debajo a luz 14 de 15. Esto es lo otro: geometría.
+//
+// Y se hace como se hace en cualquier motor: un MAPA DE SOMBRA. Se renderiza el mundo DESDE EL SOL a una textura
+// (mcRenderShadow) y cada téxel guarda la altura de la superficie más alta de esa columna; al sombrear, cada
+// fragmento mira su téxel y pregunta si hay algo por encima. Al algoritmo no le consta que el mundo sean cubos: le
+// entra la MALLA ENTERA de una pasada, así que terreno, estructuras estampadas y agentes proyectan por igual, con
+// resolución de subcelda (2048 téxeles sobre 96 bloques = 21 por bloque) y sin nada por bloque que mantener.
+// Es la generalización de un heightmap por columna: lo mismo, pero calculado por la GPU y contando todo lo que se
+// dibuja, no solo mc.grid.
+//
+// La normal geométrica sale de las derivadas de la posición de mundo (las caras son planas ⇒ exacta) y se muestrea
+// MEDIA CELDA HACIA FUERA: el suelo pregunta por el aire de encima y una pared por el aire de su lado. Es la misma
+// regla que sigue mcMeshChunk al mirar la celda vecina de cada cara, y es lo que oscurece los LATERALES — un cubo
+// dentro de una sombra sale oscuro por los cinco lados que se ven, no solo por la tapa. De regalo, medio bloque de
+// separación deja el acné de sombra fuera de discusión: sin polygonOffset y sin bias afinado a mano.
+const MC_SUN_LIB=`
+uniform sampler2D uSunMap; uniform vec3 uSunOrg; uniform vec3 uSunDim; uniform float uSunShade; uniform vec3 uEye;
+float sunFactor(vec3 w){
+#ifndef SUN_DERIV
+  return 1.0;                                                // sin dFdx/dFdy no hay normal ⇒ sin sombra (el shader ni la compila)
+#else
+  if(uSunShade>=1.0) return 1.0;                             // sombra de sol apagada (game.sunShade=1)
+  vec3 n=normalize(cross(dFdx(w),dFdy(w)));
+  if(dot(n,uEye-w)<0.0) n=-n;                                // orientada al ojo: da igual el sentido de giro del quad
+  vec3 p=w+n*0.5;                                            // el aire al que da la cara
+  vec2 uv=(p.xz-uSunOrg.xz)/uSunDim.xz;
+  if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0) return 1.0;     // fuera del mapa = cielo abierto
+  vec2 e=texture2D(uSunMap,uv).rg;                           // altura en 16 bits empaquetados (por eso NEAREST: no se puede interpolar)
+  float top=(e.x+e.y/255.0)*uSunDim.y+uSunOrg.y;
+  return p.y < top-0.05 ? uSunShade : 1.0;
+#endif
+}`;
+// Los shaders se escriben UNA vez en ESSL 1.00 y se traducen aquí, porque dFdx/dFdy no están en los dos sitios:
+//   · WebGL1 → hay que pedir `OES_standard_derivatives` y la directiva debe ser la PRIMERA línea del fuente.
+//   · WebGL2 → la extensión NO existe para shaders ESSL 1.00 (ANGLE contesta literalmente "extension is not
+//     supported" y luego "'dFdx' : no matching overloaded function found"). Las derivadas son núcleo solo desde
+//     ESSL 3.00, así que en WebGL2 se sube el fuente a `#version 300 es` con estas cuatro sustituciones.
+// Si al final no hay derivadas (WebGL1 viejo sin la extensión), sin `SUN_DERIV` el `sunFactor` compila a `return 1.0`
+// y el Mundo se ve como siempre, sin sombra de sol, en vez de quedarse en negro por un shader que no compila.
+function mcGLSL(src, esVS){
+  if(!mc.gl2) return ((mc.deriv && !esVS) ? '#extension GL_OES_standard_derivatives : enable\n' : '')
+                   + (mc.deriv ? '#define SUN_DERIV 1\n' : '') + src;
+  return '#version 300 es\n#define SUN_DERIV 1\n'
+       + (esVS ? '' : 'precision mediump float;\nout highp vec4 fragColor;\n')   // highp: el mapa de sombra escribe 16 bits repartidos entre R y G
+       + src.replace(/\battribute\b/g,'in')
+            .replace(/\bvarying\b/g, esVS ? 'out' : 'in')
+            .replace(/\btexture2D\b/g,'texture')
+            .replace(/\bgl_FragColor\b/g,'fragColor');
+}
+function mcVS(cuerpo){ return mcGLSL(cuerpo,true); }
+function mcFS(cuerpo){ return mcGLSL(cuerpo,false); }
+
 const MC_VS=`
 attribute vec3 aPos; attribute vec2 aUV; attribute float aShade;
 uniform mat4 uProj; uniform mat4 uView;
-varying vec2 vUV; varying float vShade; varying float vDist;
-void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vUV=aUV; vShade=aShade; vDist=length(vp.xyz); }`;
+varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld;
+void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vUV=aUV; vShade=aShade; vDist=length(vp.xyz); vWorld=aPos; }`;
 const MC_FS=`
 precision mediump float;
-varying vec2 vUV; varying float vShade; varying float vDist;
+varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld;
 uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar;
+${MC_SUN_LIB}
 void main(){ vec4 t=texture2D(uTex,vUV); if(t.a<0.5) discard;
-  vec3 col=t.rgb*vShade; float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
+  vec3 col=t.rgb*vShade*sunFactor(vWorld); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
   gl_FragColor=vec4(mix(col,uSky,f),1.0); }`;
 // Gemelo SIN `discard`: cuando el atlas del terreno es 100% opaco (mc.atlasHasAlpha=false), este shader deja al
 // hardware rechazar por early-z los fragmentos ocultos antes de correr → menos overdraw (la otra mitad del fill-rate).
 const MC_FS_OPAQUE=`
 precision mediump float;
-varying vec2 vUV; varying float vShade; varying float vDist;
+varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld;
 uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar;
-void main(){ vec3 col=texture2D(uTex,vUV).rgb*vShade; float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
+${MC_SUN_LIB}
+void main(){ vec3 col=texture2D(uTex,vUV).rgb*vShade*sunFactor(vWorld); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
   gl_FragColor=vec4(mix(col,uSky,f),1.0); }`;
 // Fija EXACTAMENTE los arrays de atributos activos: deshabilita 0..N y habilita solo los de `list`. Necesario
 // porque en WebGL un atributo habilitado SIN buffer (p.ej. tras liberar su VBO al re-mallar, o un pase que
@@ -4343,31 +4411,38 @@ function mcLocOf(p){ const gl=mc.gl; return {
   aPos:gl.getAttribLocation(p,'aPos'), aUV:gl.getAttribLocation(p,'aUV'), aShade:gl.getAttribLocation(p,'aShade'),
   uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'),
   uTex:gl.getUniformLocation(p,'uTex'), uSky:gl.getUniformLocation(p,'uSky'),
-  uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar') }; }
+  uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
+  uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
+    uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
+  uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye') }; }
 function mcBuildProgram(){
   const gl=mc.gl;
-  mc.prog=glProgram(gl,MC_VS,MC_FS); mc.loc=mcLocOf(mc.prog);                   // alpha-test (con discard)
-  mc.progOpaque=glProgram(gl,MC_VS,MC_FS_OPAQUE); mc.locOpaque=mcLocOf(mc.progOpaque); // opaco (early-z)
+  mc.prog=glProgram(gl,mcVS(MC_VS),mcFS(MC_FS)); mc.loc=mcLocOf(mc.prog);                   // alpha-test (con discard)
+  mc.progOpaque=glProgram(gl,mcVS(MC_VS),mcFS(MC_FS_OPAQUE)); mc.locOpaque=mcLocOf(mc.progOpaque); // opaco (early-z)
 }
 // Programa de estructuras: gemelo del terreno pero con COLOR POR VÉRTICE (no atlas) → cada voxel fino su color.
 const MC_STRUCT_VS=`
 attribute vec3 aPos; attribute vec3 aColor; attribute float aShade; attribute float aEmit; attribute float aAlpha;
 uniform mat4 uProj; uniform mat4 uView;
-varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha;
-void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vColor=aColor; vShade=aShade; vDist=length(vp.xyz); vEmit=aEmit; vAlpha=aAlpha; }`;
+varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld;
+void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vColor=aColor; vShade=aShade; vDist=length(vp.xyz); vEmit=aEmit; vAlpha=aAlpha; vWorld=aPos; }`;
 const MC_STRUCT_FS=`
 precision mediump float;
-varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha;
+varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld;
 uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar;
-void main(){ vec3 lit=mix(vColor*vShade, vColor, vEmit);                         // emisivo (vEmit=1) = a pleno brillo, sin sombra
+${MC_SUN_LIB}
+void main(){ vec3 lit=mix(vColor*vShade*sunFactor(vWorld), vColor, vEmit);       // emisivo (vEmit=1) = a pleno brillo, sin sombra
   float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0)*(1.0-vEmit);        // ni niebla: el emisivo brilla a través
   gl_FragColor=vec4(mix(lit,uSky,f), vAlpha); }`;
 function mcBuildStructProgram(){
-  const gl=mc.gl, p=glProgram(gl,MC_STRUCT_VS,MC_STRUCT_FS); mc.structProg=p;
+  const gl=mc.gl, p=glProgram(gl,mcVS(MC_STRUCT_VS),mcFS(MC_STRUCT_FS)); mc.structProg=p;
   mc.structLoc={ aPos:gl.getAttribLocation(p,'aPos'), aColor:gl.getAttribLocation(p,'aColor'), aShade:gl.getAttribLocation(p,'aShade'),
     aEmit:gl.getAttribLocation(p,'aEmit'), aAlpha:gl.getAttribLocation(p,'aAlpha'),
     uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'),
-    uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar') };
+    uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
+    uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
+    uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
+    uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye') };
 }
 // Programa de estructuras TEXTURADAS con repetición por voxel: aTile = coord de tile (0..W / 0..H sobre la cara
 // fusionada), aRect = rect UV del tile en el atlas (u0,v0,u1,v1). El FS repite el tile con fract(aTile) → una cara
@@ -4376,21 +4451,148 @@ function mcBuildStructProgram(){
 const MC_STEX_VS=`
 attribute vec3 aPos; attribute vec2 aTile; attribute vec4 aRect; attribute float aShade;
 uniform mat4 uProj; uniform mat4 uView;
-varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist;
-void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vTile=aTile; vRect=aRect; vShade=aShade; vDist=length(vp.xyz); }`;
+varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld;
+void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vTile=aTile; vRect=aRect; vShade=aShade; vDist=length(vp.xyz); vWorld=aPos; }`;
 const MC_STEX_FS=`
 precision highp float;
-varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist;
+varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld;
 uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar;
+${MC_SUN_LIB}
 void main(){ vec2 uv=vRect.xy+(vRect.zw-vRect.xy)*fract(vTile); vec4 t=texture2D(uTex,uv); if(t.a<0.5) discard;
-  vec3 col=t.rgb*vShade; float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
+  vec3 col=t.rgb*vShade*sunFactor(vWorld); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
   gl_FragColor=vec4(mix(col,uSky,f),1.0); }`;
 function mcBuildStructTexProgram(){
-  const gl=mc.gl, p=glProgram(gl,MC_STEX_VS,MC_STEX_FS); mc.stexProg=p;
+  const gl=mc.gl, p=glProgram(gl,mcVS(MC_STEX_VS),mcFS(MC_STEX_FS)); mc.stexProg=p;
   mc.stexLoc={ aPos:gl.getAttribLocation(p,'aPos'), aTile:gl.getAttribLocation(p,'aTile'), aRect:gl.getAttribLocation(p,'aRect'), aShade:gl.getAttribLocation(p,'aShade'),
     uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'), uTex:gl.getUniformLocation(p,'uTex'),
-    uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar') };
+    uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
+    uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
+    uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
+    uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye') };
 }
+// Programa del SOL: escribe la ALTURA de cada fragmento, visto desde arriba con proyección ortográfica. Solo usa
+// aPos, así que sirve tal cual para los tres formatos de vértice (terreno 6·4, estructuras 9·4, texturadas 10·4):
+// basta con cambiar el stride. NDC: x,z → la caja del mundo; z de clip = 1-2h, o sea que lo MÁS ALTO queda lo más
+// cerca del sol y gana el test de profundidad. Con eso, el color del téxel = altura de la superficie más alta.
+const MC_SUN_VS=`
+attribute vec3 aPos; uniform vec3 uSunOrg; uniform vec3 uSunDim; uniform mat4 uModel; varying float vH;
+void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz;
+  vH=(w.y-uSunOrg.y)/uSunDim.y;
+  gl_Position=vec4((w.x-uSunOrg.x)/uSunDim.x*2.0-1.0, (w.z-uSunOrg.z)/uSunDim.z*2.0-1.0, 1.0-2.0*vH, 1.0); }`;
+// 8 bits de altura serían 0.16 bloques de resolución (bandas visibles en el borde de la sombra), así que va
+// empaquetada en 16 sobre R y G con el truco de siempre: G lleva el resto y R se corrige para que sume exacto.
+const MC_SUN_FS=`
+precision highp float; varying float vH;
+void main(){ vec2 e=fract(vec2(vH, vH*255.0)); e.x-=e.y/255.0; gl_FragColor=vec4(e,0.0,1.0); }`;
+function mcBuildSunProgram(){
+  const gl=mc.gl, p=glProgram(gl,mcVS(MC_SUN_VS),mcFS(MC_SUN_FS)); mc.sunProg=p;
+  mc.sunLoc={ aPos:gl.getAttribLocation(p,'aPos'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
+    uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
+    uModel:gl.getUniformLocation(p,'uModel') };
+}
+// Reserva (o reusa) el mapa de sombra: textura RGBA8 + renderbuffer de profundidad. Nada de extensiones — el
+// canal de profundidad solo se usa para quedarse con el fragmento más alto, la altura viaja por el color.
+function mcInitShadow(){
+  const gl=mc.gl; if(!gl || !mc.deriv) return null;
+  const size=Math.max(256, Math.min(4096, mc.shadowSize|0));
+  if(mc.shadow && mc.shadow.size===size) return mc.shadow;
+  mcFreeShadow();
+  const S={ size, fbo:gl.createFramebuffer(), tex:gl.createTexture(), depth:gl.createRenderbuffer(), dirty:true };
+  gl.bindTexture(gl.TEXTURE_2D, S.tex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,size,size,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);   // OBLIGATORIO: la altura va empaquetada, interpolarla da alturas inventadas
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindRenderbuffer(gl.RENDERBUFFER, S.depth);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, size, size);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, S.fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, S.tex, 0);
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, S.depth);
+  const ok=gl.checkFramebufferStatus(gl.FRAMEBUFFER)===gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null); gl.bindTexture(gl.TEXTURE_2D,null); gl.bindRenderbuffer(gl.RENDERBUFFER,null);
+  if(!ok){ console.warn('[mundo] framebuffer de sombra incompleto → sin sombra de sol'); return null; }
+  return (mc.shadow=S);
+}
+function mcFreeShadow(){
+  const gl=mc.gl, S=mc.shadow; if(!gl || !S) return;
+  if(S.fbo) gl.deleteFramebuffer(S.fbo); if(S.tex) gl.deleteTexture(S.tex); if(S.depth) gl.deleteRenderbuffer(S.depth);
+  mc.shadow=null;
+}
+// Marca el mapa para rehacer. Lo llama todo lo que cambia la GEOMETRÍA (mallar un chunk, mover un agente, estampar
+// o liberar una estructura). Mientras nada se mueva el mapa se reutiliza tal cual y la sombra sale gratis: el coste
+// solo aparece en los frames en los que de verdad ha cambiado algo.
+function mcShadowDirty(){ if(mc.shadow) mc.shadow.dirty=true; }
+// El mapa NO encuadra justo el mundo, sino el mundo con un MARGEN: los cuerpos que vuelan (una nube ancha)
+// asoman por el borde y por encima del techo, y lo que se sale del volumen lo recorta la GPU. Sin margen, el
+// trozo de nube que sobresalía del mundo no proyectaba nada y su panza se veía A PLENA LUZ. El margen se paga
+// en resolución: con 2048 y un mundo de 96 se pasa de 21 téxeles por bloque a 16, y la altura de 16 bits sigue
+// dando 0.001 bloques de error. Sale de aquí para el vertex shader del sol Y para sunFactor: si los dos no
+// usan EXACTAMENTE el mismo encuadre, la sombra sale desplazada.
+const MC_SUN_MARGIN=16;
+function mcSunFrustum(L){
+  const gl=mc.gl, M=MC_SUN_MARGIN;
+  gl.uniform3f(L.uSunOrg, -M, -1, -M);                                 // esquina baja del volumen
+  gl.uniform3f(L.uSunDim, mc.dim.x+2*M, mc.dim.y+2+M, mc.dim.z+2*M);   // y su tamaño: origen + esto = la otra esquina
+}
+// Pasada 1 · el mundo visto desde el sol. Le entran las MISMAS VBO que se dibujan en pantalla, así que terreno,
+// estructuras y agentes proyectan sombra sin que ninguno tenga código propio. Se queda fuera el pase translúcido
+// (un cristal no proyecta un agujero negro) y el fantasma de colocación.
+function mcRenderShadow(){
+  const gl=mc.gl;
+  if(!mc.deriv || mc.sunShade>=1) return null;                      // sombra apagada: ni se reserva el mapa
+  const S=mcInitShadow(); if(!S) return null;
+  if(!mc.sunProg) mcBuildSunProgram();
+  // Las estructuras se estampan/liberan por muchos sitios (mcRestampAll, vista-previa, deshacer): en vez de sembrar
+  // avisos por todos ellos, una firma barata sobre la lista. Terreno y agentes sí avisan a mano (mcShadowDirty).
+  let sig=mc.structures.length; for(const st of mc.structures) sig+=st.colCount+st.texCount;
+  // Los agentes van en la firma por lo mismo: un cuerpo lo puede construir alguien de fuera (skills.cuerpo se
+  // hace su propia malla a escala sin pasar por mcAgentMesh) y entonces nadie avisa. Sin esto, una nube que
+  // NO se mueve no llegaba nunca al mapa: se veía la panza al sol y sin sombra debajo.
+  for(const a of mc.agents.values()) sig+=a.count + (a.renderX||0)*7 + (a.renderY||0)*13 + (a.renderZ||0)*17;
+  if(sig!==S.sig){ S.sig=sig; S.dirty=true; }
+  if(!S.dirty) return S;                                            // nada se ha movido desde el último frame
+  const SL=mc.sunLoc;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, S.fbo);
+  gl.viewport(0,0,S.size,S.size);
+  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);   // altura 0 = -1 en mundo: por debajo de todo ⇒ al sol
+  // Esta pasada va la PRIMERA del frame, así que hereda el estado con el que acabó el frame anterior (el pase
+  // translúcido deja BLEND puesto y la máscara de profundidad quitada). Sin esto la altura se mezclaría en vez
+  // de escribirse y el z-test no se quedaría con el fragmento más alto.
+  gl.disable(gl.BLEND); gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.depthFunc(gl.LESS);
+  gl.useProgram(mc.sunProg);
+  mcAttribs([SL.aPos]);
+  mcSunFrustum(SL);
+  const IDENT=mat4.ident();
+  const draw=(vbo,count,stride,model)=>{ if(!vbo || !count) return;
+    gl.uniformMatrix4fv(SL.uModel,false,model||IDENT);
+    gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
+    gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,stride,0); gl.drawArrays(gl.TRIANGLES,0,count); };
+  for(const ch of mc.chunks.values()) if(ch.count && ch.vbo) draw(ch.vbo, ch.count, 6*4);
+  for(const a of mc.agents.values()) if(a.count && a.vbo) draw(a.vbo, a.count, 6*4);
+  for(const st of mc.structures){
+    if(st.colCount && st.colVbo) draw(st.colVbo, st.colCount, 9*4);
+    if(st.texCount && st.texVbo) draw(st.texVbo, st.texCount, 10*4);
+  }
+  // Lo que dibuja otro (p.ej. los cuerpos de ESTRUCTURA de los agentes, que van con matriz de modelo propia y no
+  // están en ninguna de las listas de arriba). app.js no sabe qué es: solo le presta el dibujante de la pasada.
+  if(mc.sunExtra) try{ mc.sunExtra(draw); }catch(e){ console.error('[mundo] sunExtra:', e); }
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.clearColor(MC_SKY[0],MC_SKY[1],MC_SKY[2],1);
+  S.dirty=false;
+  return S;
+}
+// Deja listos los uniformes de sombra del programa que esté activo. Sin mapa (o con game.sunShade=1) manda
+// uSunShade=1 y el shader se sale por la primera línea de sunFactor: coste cero.
+function mcSunUniforms(L, S){
+  const gl=mc.gl; if(L.uSunShade===undefined || L.uSunShade===null) return;
+  if(!S){ gl.uniform1f(L.uSunShade, 1); return; }
+  gl.uniform1f(L.uSunShade, mc.sunShade);
+  mcSunFrustum(L);
+  gl.uniform3f(L.uEye, mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]);
+  gl.uniform1i(L.uSunMap, 1);                                       // unidad 1 (la 0 es el atlas)
+}
+
 // Mesha un chunk: por cada cara con vecino aire emite un quad (culling de caras internas) → VBO. O(chunk).
 function mcMeshChunk(cx,cz){
   const gl=mc.gl, dim=mc.dim;
@@ -4428,6 +4630,7 @@ function mcMeshChunk(cx,cz){
   gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
   ch.count=verts.length/6; ch.aabb=[x0,0,z0, x1,dim.y,z1];
+  mcShadowDirty();   // el terreno cambió de forma → el mapa del sol ya no vale
 }
 // t7 · SKYLIGHT: propaga la luz del cielo por el aire → mc.light[idx] en 0..MC_MAXLIGHT. Reciben luz plena (cielo)
 // el aire abierto por ARRIBA (cada columna, de arriba abajo hasta topar con sólido) y el de las 4 CARAS LATERALES
@@ -4539,7 +4742,7 @@ function mcMeshAll(){
   const ncx=Math.ceil(mc.dim.x/MC_CHUNK), ncz=Math.ceil(mc.dim.z/MC_CHUNK);
   for(let cz=0;cz<ncz;cz++) for(let cx=0;cx<ncx;cx++) mcMeshChunk(cx,cz);
   // Los cuerpos de los agentes usan el mismo atlas: si creció (game.addMaterial) sus UV quedarían obsoletas.
-  for(const a of mc.agents.values()) if(a.vbo){ a.blockId=mcResolveMat(a.block); mcAgentMesh(a); }
+  for(const a of mc.agents.values()) if(a.vbo){ a.blockId=mcResolveMat(a.block); a._meshSig=null; mcAgentMesh(a); }
 }
 // t8 · redimensiona el mundo EN VIVO (game.resizeWorld). Reasigna la rejilla densa conservando los bloques
 // anclados en el origen (0,0,0), libera las VBO de todos los chunks, recoloca spawn/jugador dentro de los nuevos
@@ -4819,6 +5022,11 @@ function mcRender(){
   mcResize();
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   if(!mc.prog || !mc.atlasTex) return;
+  // Pasada 1 · el mundo visto desde el sol (solo si la geometría cambió). Deja el mapa en la unidad 1 para que lo
+  // consulten los cuatro programas; la 0 se queda para el atlas, como siempre.
+  const SM=mcRenderShadow();
+  gl.viewport(0,0,mc.canvas.width,mc.canvas.height);
+  if(SM){ gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, SM.tex); gl.activeTexture(gl.TEXTURE0); }
   const view=mcViewMatrix(), pj=mcProjMatrix(), pv=mat4.mul(pj.m,view);
   // Terreno: atlas opaco → shader sin discard (early-z); con huecos → alpha-test. Las estructuras texturadas
   // (2º pase) siempre usan mc.prog (su atlas suele tener huecos), así que ese programa se prepara aparte allí.
@@ -4831,6 +5039,7 @@ function mcRender(){
   gl.uniform3f(L.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
   gl.uniform1f(L.uFogNear, pj.far*0.55); gl.uniform1f(L.uFogFar, pj.far*0.98);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.atlasTex); gl.uniform1i(L.uTex,0);
+  mcSunUniforms(L, SM);
   const stride=6*4, cxp=Math.floor(mc.pos[0]/MC_CHUNK), czp=Math.floor(mc.pos[2]/MC_CHUNK);
   const fx=mc.pos[0]/MC_CHUNK, fz=mc.pos[2]/MC_CHUNK;                                // chunk (fraccional) del jugador
   const vis=mc._visChunks||(mc._visChunks=[]); vis.length=0;                         // scratch reutilizado (sin GC por frame)
@@ -4872,6 +5081,7 @@ function mcRender(){
       gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
       gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
       gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
+      mcSunUniforms(SL, SM);
       mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);
       for(const s of mc.structures){
         if(!s.colCount || !mcChunkVisible(s,pv)) continue;
@@ -4890,6 +5100,7 @@ function mcRender(){
       gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
       gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.structAtlasTex); gl.uniform1i(SL.uTex,0);
+      mcSunUniforms(SL, SM);
       mcAttribs([SL.aPos,SL.aTile,SL.aRect,SL.aShade]);
       for(const s of mc.structures){
         if(!s.texCount || !mcChunkVisible(s,pv)) continue;
@@ -4912,6 +5123,7 @@ function mcRender(){
         gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
         gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
         gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
+        mcSunUniforms(SL, SM);
         mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);
         gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
         for(const s of mc.structures){
@@ -4942,6 +5154,7 @@ function mcDrawPreview(pj, view){
     gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
     gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
     gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
+    mcSunUniforms(SL, null);                                                    // el fantasma es una ayuda, no proyecta ni recibe sombra
     mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);                // el blend del fantasma usa CONSTANT_ALPHA → ignora vAlpha (el vidrio se ve al alpha del fantasma)
     if(s.colCount){ gl.bindBuffer(gl.ARRAY_BUFFER, s.colVbo); mcStructAttrib(SL, sstr); gl.drawArrays(gl.TRIANGLES,0,s.colCount); }
     if(s.alphaCount){ gl.bindBuffer(gl.ARRAY_BUFFER, s.alphaVbo); mcStructAttrib(SL, sstr); gl.drawArrays(gl.TRIANGLES,0,s.alphaCount); }
@@ -4953,6 +5166,7 @@ function mcDrawPreview(pj, view){
     gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
     gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.structAtlasTex); gl.uniform1i(SL.uTex,0);
+    mcSunUniforms(SL, null);
     mcAttribs([SL.aPos,SL.aTile,SL.aRect,SL.aShade]);
     gl.bindBuffer(gl.ARRAY_BUFFER, s.texVbo);
     gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,stride2,0);
@@ -6191,6 +6405,22 @@ Object.defineProperty(game,'interiorDark',{ enumerable:true, get:()=>mc.interior
   set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.08)); mc.interiorDark=v; try{localStorage.setItem('vf_mcInteriorDark',v);}catch(e){}
     if(mc.grid){ mcMeshAll(); if(mc.structures.length) mcRestampAll(); }   // re-oscurece terreno Y estructuras en vivo
     return v; } });
+// game.sunShade = SOMBRA PROYECTADA del sol vertical, que es COSA APARTE de game.interiorDark. interiorDark es
+// oclusión ambiental (cuánto cielo abierto tienes a mano, medido en horizontal); esto es geometría: si hay algo por
+// encima, estás en sombra, y se aplica a las 6 caras porque cada una pregunta por el aire al que da. 1 = desactivada
+// (y entonces ni se renderiza el mapa: coste cero); 0.55 por defecto; 0 = sombra a negro. NO re-malla nada — es un
+// uniforme, así que cambia en el frame siguiente. Persiste en vf_mcSunShade.
+try{ const d=parseFloat(localStorage.getItem('vf_mcSunShade')); if(isFinite(d)) mc.sunShade=Math.max(0,Math.min(1,d)); }catch(e){}
+Object.defineProperty(game,'sunShade',{ enumerable:true, get:()=>mc.sunShade,
+  set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.55)); mc.sunShade=v; try{localStorage.setItem('vf_mcSunShade',v);}catch(e){}
+    mcShadowDirty(); return v; } });
+// game.shadowSize = lado del mapa de sombra en téxeles (256..4096, potencia de 2 recomendada). Cubre el mundo entero,
+// así que la resolución REAL es shadowSize/dim: 2048 sobre 96 bloques = 21 téxeles por bloque (borde de sombra a
+// 1/21 de bloque). Subirlo afina el borde y cuesta memoria (2048² RGBA = 16 MB); bajarlo lo hace dentado.
+try{ const n=parseInt(localStorage.getItem('vf_mcShadowSize'),10); if(isFinite(n)) mc.shadowSize=Math.max(256,Math.min(4096,n)); }catch(e){}
+Object.defineProperty(game,'shadowSize',{ enumerable:true, get:()=>mc.shadowSize,
+  set:v=>{ v=Math.max(256,Math.min(4096, parseInt(v,10)||2048)); mc.shadowSize=v; try{localStorage.setItem('vf_mcShadowSize',v);}catch(e){}
+    mcFreeShadow(); return v; } });   // mcInitShadow lo reserva de nuevo al siguiente frame
 // game.glowLevel = alcance de la LUZ DE BLOQUE emisiva (voxeles *#hex): nivel de siembra 0..MC_MAXLIGHT (−1/paso por el
 // aire). 0 = sin luz de bloque; 15 (=MC_MAXLIGHT, alcance máx) por defecto. La luz es escalar/neutra (no tiñe) en v1. Persiste en vf_mcGlow; al
 // cambiarlo recalcula la luz de bloque, re-malla el terreno y re-hornea las estructuras (paredes cercanas encendidas).
@@ -6237,7 +6467,7 @@ game.dumpVars=function(){
     'fov','renderDist','renderScale','mouseSpeed','yaw','pitch','hotbarHide','reach',   // Mundo (WebGL)
     'ghostAlpha','structGhostAlpha','noteAlpha','playerSpeed','playerScale','playerTool',
     'airControl','airAccel','airCap',
-    'structTextures','structGreedy','interiorDark','glowLevel','glowFocus','worldSize',
+    'structTextures','structGreedy','interiorDark','sunShade','shadowSize','glowLevel','glowFocus','worldSize',
     'agentSpeed','agentSaveMs'];
   const V={ showFPS:_showFPS, showVoxels:_showVox };                          // callables → su booleano subyacente
   for(const k of keys) V[k]=game[k];
@@ -6421,6 +6651,12 @@ function mcAgentMesh(a){
   const rx = a.renderX !== undefined ? a.renderX : a.x;
   const ry = a.renderY !== undefined ? a.renderY : a.y;
   const rz = a.renderZ !== undefined ? a.renderZ : a.z;
+  // mcAgentsSmoothUpdate llama aquí en CADA frame de CADA agente, se haya movido o no. Si los vértices van a
+  // salir idénticos no hay nada que subir a la GPU... ni sombra que rehacer: sin esta guarda, un solo agente
+  // quieto obligaba a redibujar el mapa de sombra entero 60 veces por segundo.
+  const sig = rx+'|'+ry+'|'+rz+'|'+a.blockId;
+  if(a._meshSig===sig && a.count) return;
+  a._meshSig=sig;
   const Sx=1-2*MC_AGENT_INSET_XZ, Sy=1-2*MC_AGENT_INSET_Y, Sz=1-2*MC_AGENT_INSET_XZ;
   const ox=rx+MC_AGENT_INSET_XZ, oy=ry+1+MC_AGENT_INSET_Y, oz=rz+MC_AGENT_INSET_XZ;
   const verts=[];
@@ -6436,8 +6672,9 @@ function mcAgentMesh(a){
   gl.bindBuffer(gl.ARRAY_BUFFER, a.vbo);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
   a.count=36;
+  mcShadowDirty();   // el agente se movió → su sombra también (esta es TODA la integración que necesita)
 }
-function mcAgentFreeMesh(a){ if(a.vbo && mc.gl) mc.gl.deleteBuffer(a.vbo); a.vbo=null; a.count=0; }
+function mcAgentFreeMesh(a){ if(a.vbo && mc.gl) mc.gl.deleteBuffer(a.vbo); a.vbo=null; a.count=0; mcShadowDirty(); }
 
 // Notas: REUTILIZAN los post-it del Mundo (mc.notes), así que se serializan en el JSON del mundo y se pueden
 // leer/procesar desde FUERA del juego para mejorar las heurísticas. Formato compacto «[id] texto».
@@ -6699,6 +6936,12 @@ function mcAgentsSmoothUpdate(dt){
       }
     }
     mcAgentMesh(a);
+    // Si el cuerpo se ha movido, su sombra tiene que rehacerse. Va aquí y no en mcAgentMesh porque esa función
+    // se puede envolver desde fuera (los cuerpos a escala de la librería de agentes construyen su propia malla y
+    // nunca llegaban al mcShadowDirty de app.js): la nube se deslizaba con la sombra clavada donde estuvo, y solo
+    // saltaba al colocar un bloque, que es lo que sí marcaba el mapa. La regla es del motor, no de los agentes:
+    // si la geometría se mueve entre frames, el mapa de sombra caduca.
+    if(a.renderX!==oldRx || a.renderY!==oldRy || a.renderZ!==oldRz) mcShadowDirty();
     if(mounted){
       const dxP = a.renderX - oldRx;
       const dyP = a.renderY - oldRy;
