@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.44) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.45) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -397,58 +397,70 @@ la malla — una estructura con huecos se choca como si fuera maciza. Afinarlo p
 
 **En el Mundo hay una sola verdad para las sombras: el skylight de `mcComputeLight` (`app.js:4437`)** — y
 esa verdad **solo mira `mc.grid`**, que es de **enteros**. Una sombra que *viva* en la rejilla va por fuerza
-a trompicones, celda a celda. Pero el **cuerpo** del agente también está hecho de bloques y se mueve suave,
-**porque no está en la rejilla: es geometría dibujada en una posición con decimales**. La sombra hace
-exactamente lo mismo, en dos tiempos:
+a trompicones, celda a celda.
 
-1. **Cuánto oscurece** — lo dice `mcComputeLight` y nadie más. Se mete la **losa inferior** del cuerpo en
-   `mc.grid` como **oclusor** (`ID_SOMBRA = 65535`, sin entrada en `mc.palette`), se recalcula la luz, se
-   restan los niveles contra los de antes y **se deshace todo dentro de la misma llamada**: al salir,
-   `mc.grid` y `mc.light` están **bit a bit** como estaban. De ahí sale una **estampa**: un quad negro por
-   cada cara superior de terreno que ha perdido luz, con `alpha = 1 − interiorDark^(Δlv/MAX)`, en
-   coordenadas **locales** al ancla de la huella.
-2. **Dónde cae** — cada frame, en una pasada de dibujo propia encadenada a `mcRender`, con
-   `uView = vista · translate(rx + 0.5 − ancho/2, 0, rz + 0.5 − fondo/2)`: el ancla de la estampa se pone en
-   el **borde real del cuerpo, con decimales**. La sombra se desliza igual que el cuerpo.
+La salida **no** es deslizar la sombra por decimales. Eso se probó y sobre **relieve** es peor: el quad
+conserva la altura de la columna con la que se midió y, al correrse, acaba **flotando sobre un agujero** o
+**hundido dentro del bloque de al lado**, donde el z-buffer se lo va comiendo (*"los bloques se sombrean de
+golpe y la sombra desaparece poco a poco para luego volver a sombrearse el bloque de golpe"*). La salida es
+separar **dónde cae** de **cuánto oscurece**:
 
-**Nadie de fuera llega a ver el oclusor** (no se cede el frame), así que **no hay que envolver** `mcSolid`,
-`mcGetVoxel`, `mcSerialize`, `mcSurfaceY` ni `mcSurfaceNear`, y **no se re-malla ni un chunk**.
+1. **La geometría NO se mueve.** Un quad por **columna** de terreno, clavado en la cara superior **real** de
+   esa columna (`mcSurfaceY`): **trepa** al bloque alto y **baja** al fondo del agujero, igual que el shade
+   horneado. Nunca flota ni se hunde, así que basta con levantarlo `SOMBRA_EPS = 0.02` para el z-fighting.
+2. **Lo que se mueve es el ALPHA.** El campo de oscurecimiento se mide **una vez** con el cuerpo anclado a
+   celda entera y, al dibujar, se **muestrea bilinealmente** en el desplazamiento subcelda del cuerpo: medio
+   paso de la nube = medio alpha en la columna que entra y medio en la que sale. **Eso** es lo suave — y es
+   continuo también con cuerpos de lado **par**, que caen a medio camino entre dos columnas.
 
-**Por qué es la misma sombra y no una pintada a ojo** — el terreno ya está en pantalla con
-`dst = lit0·(1−f) + sky·f`. El quad va por `mc.structProg` con `aColor=(0,0,0)` y `aEmit=0`, o sea su
-fragmento es `mix(0,sky,f) = sky·f` con alpha `a`, y se mezcla con `SRC_ALPHA`/`ONE_MINUS_SRC_ALPHA`:
+**Cuánto oscurece** lo dice `mcComputeLight` y nadie más: se mete la **losa inferior** del cuerpo en
+`mc.grid` como **oclusor** (`ID_SOMBRA = 65535`, sin entrada en `mc.palette`), se recalcula la luz, se restan
+los niveles contra los de antes y **se deshace todo dentro de la misma llamada**: al salir, `mc.grid` y
+`mc.light` están **bit a bit** como estaban. Nadie tiene que envolver `mcSolid`/`mcSurfaceY`/`mcSerialize` y
+**no se re-malla ni un chunk**. Por columna se guarda su **transmitancia** `interiorDark^(Δlv/MAX)` (1 =
+intacta), en la huella **más `SOMBRA_MARGEN = 2` celdas** de holgura.
+
+**Por qué es la misma sombra y no una pintada a ojo** (el álgebra, para no tener que fiarse): el terreno ya
+está en pantalla con su color `lit0 = base·F.s·lut(lv0)` y su niebla, o sea `dst = lit0·(1−f) + sky·f`. El
+quad va por `mc.structProg` con `aColor=(0,0,0)` y `aEmit=0`, luego su fragmento es `mix(0,sky,f) = sky·f`
+con alpha `a`, y se mezcla con `SRC_ALPHA`/`ONE_MINUS_SRC_ALPHA`:
 
 ```
-dst·(1−a) + sky·f·a  =  lit0·(1−a)·(1−f) + sky·f
+dst·(1−a) + sky·f·a = [lit0·(1−f) + sky·f]·(1−a) + sky·f·a = lit0·(1−a)·(1−f) + sky·f
 ```
 
 que es **exactamente** lo que habría pintado `mcMeshChunk` con el oclusor puesto, porque
-`lut(lv1)/lut(lv0) = interiorDark^((lv0−lv1)/MAX) = 1−a`. **Mismo color y misma niebla, hasta el último
-bit.** Lo único que cambia es que se puede poner en `x=10.37` en vez de en `x=10`.
+`lut(lv1)/lut(lv0) = interiorDark^((lv0−lv1)/MAX) = 1−a`. **Mismo color y misma niebla, hasta el último bit.**
 
-**Por qué no salta al rehacerse**: la estampa se calcula con la huella **entera** y se guarda **relativa a su
-ancla**; dibujarla es poner ese ancla en `rx + 0.5 − ancho/2`. Al rehacerla, el ancla y las coordenadas
-locales saltan **el mismo entero en sentidos contrarios** ⇒ la posición en el mundo solo depende de `rx`,
-que es continuo. Verificado en `test_sombra_real.js` cruzando `renderX` de 10.0 a 11.0.
+⚠️ **OJO CON EL CANAL ALPHA — por aquí salió gris.** El lienzo GL se crea con los atributos por defecto
+(`alpha:true`, premultiplicado) y se compone sobre el fondo del modal, que es **cielo azul**
+(`.mc-modal{background:#8cc6ff}`, `style.css:445`). Con `blendFunc` normal la mezcla se aplica **también al
+alpha del framebuffer**: donde cae la sombra baja de 1 a `1−a+a²` y el navegador deja pasar ese azul por
+debajo. La sombra se veía como una **calcomanía gris azulada plana**, igual de gris sobre hierba, tierra o
+roca (*"la sombra de la nube sale gris, cuando ninguna otra sombra es gris"*). Por eso se dibuja con
+**`blendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ZERO, ONE)`**: se mezcla el color y **no se toca** el
+alpha del lienzo. Cualquier pasada nueva que mezcle sobre el terreno tiene el mismo problema.
 
 **Solo se mide la LOSA INFERIOR del cuerpo**, una capa de celdas, no el volumen. Medido con un puerto
 literal de `mcComputeLight`: la sombra en el suelo sale **idéntica** (0 celdas de luz distintas, probado con
 lados 1, 3, 9 y 30), porque la luz que llega debajo entra *de lado* y el techo la tapa igual sea de una capa
 o de treinta. Cuesta `escala` veces menos.
 
-**Qué cuesta** (medido, mundo 96×40×96): rehacer una estampa = **1 `mcComputeLight` (7.6 ms)** + un barrido
-de la rejilla. **Cero remallado** (`mc.light` se restaura tal cual). Solo se rehace **cuando el cuerpo cambia
-de celda** y como mucho cada `game.sombraMs` (500 ms por defecto). Un agente parado cuesta **un draw call**.
-⚠️ Subir `sombraMs` **ya no retrasa la sombra** —la posición es exacta en todos los frames—, solo la
-**forma**, que apenas cambia mientras el suelo de debajo sea parecido.
+**Qué cuesta** (medido, mundo 96×40×96): remedir el campo = **1 `mcComputeLight` (7.6 ms)** + un barrido de
+las columnas de la huella. **Cero remallado.** Solo se remide **al cambiar de celda** y con el freno de
+`game.sombraMs` (500 ms por defecto). Cada frame solo se **resuben los alphas** (1 float por vértice) y solo
+si el cuerpo se ha movido: un agente parado no cuesta ni eso. Si el agente se aleja **más de
+`SOMBRA_MARGEN`** celdas del campo medido, el freno **se salta** — si no, la sombra se quedaría sin columnas
+donde caer.
 
-**Qué se ve** (`interiorDark=0.55`, oscurecimiento en el centro de la sombra):
+**Lo que se ve** (`interiorDark=0.55`, que es lo que corre el dueño; con el 0.08 por defecto es mucho más
+negro):
 
-| lado | 1 | 3 | 9 | 30 |
-| --- | --- | --- | --- | --- |
-| oscurece | 3.9 % | 7.7 % | 18.1 % | 45 % (negro del todo) |
+| lado del cuerpo | 1 | 3 | 9 | 30 |
+|---|---|---|---|---|
+| oscurecimiento | 3.9 % | 7.7 % | 18.1 % | 45 % |
 
-y **no depende de la altura**: el skylight es *oclusión ambiental* — decide la distancia **horizontal** al
+**No depende de la altura**: el skylight es *oclusión ambiental* — decide la distancia **horizontal** al
 aire con cielo abierto. `app.js:4404` ya lo avisa: *"una figura flotante apenas ensombrece el suelo"*.
 
 ⚠️ **Un agente que anda por el suelo no enseña sombra.** Solo oscurece la celda que su propio cuerpo ocupa
@@ -457,9 +469,9 @@ la luz les entra directa del cielo. **No es un fallo de la implementación: es l
 sombras del Mundo.** La sombra se ve cuando el agente **vuela** y es **ancho**.
 
 ```js
-game.sombras = false;            // apaga la sombra de agente en todo el mundo
-game.sombraMs = 1000;            // cada cuánto se puede REHACER la forma (no la posición)
-game.skills.sombra(a, false);    // este agente concreto no proyecta sombra
+game.sombras = false;          // apaga la sombra de agente en todo el mundo
+game.sombraMs = 1000;          // cada cuánto se puede REMEDIR el campo (no la posición)
+game.skills.sombra(a, false);  // este agente concreto no proyecta sombra
 game.defineAgent({ ..., sombra:false })
 ```
 
@@ -468,12 +480,13 @@ sin pedir nada en su snippet.
 
 ⚠️ **Limitaciones conocidas**:
 
-- La estampa solo lleva **caras superiores de terreno**: una pared no se oscurece por el lado.
+- La estampa solo lleva **caras superiores de terreno**: la pared de un agujero no se oscurece por el lado.
 - **Las estructuras estampadas no reciben sombra**: no están en `mc.grid` y hornean su shade al construir la
   instancia (`mcBuildStructMesh`). La sombra de un agente cae sobre el **terreno**, no sobre una sala.
 - El oclusor **solo ocupa aire**: nunca pisa ni borra un bloque del usuario. Un cuerpo metido en el terreno
   no añade sombra (el terreno ya tapaba el cielo por su cuenta).
-- Mientras no se rehaga, la **forma** es la del suelo de hace un momento (la **posición** siempre es exacta).
+- Una columna del campo guarda **una sola** cara, la de la superficie (`mcSurfaceY`): bajo un voladizo, la
+  sombra cae sobre el voladizo, no sobre las dos.
 - Si el usuario **edita bloques** bajo un agente parado, su sombra se queda vieja hasta que el agente se mueva.
 - Si se **edita** esta sección de la librería hay que **recargar la página (F5)**: los ganchos se instalan
   una sola vez y el estado se comparte en `game.__sombra` para no dejar VBOs huérfanas.
@@ -485,8 +498,10 @@ números salen de `mcComputeLight`; lo único propio es *dónde* se dibujan. Y e
 **tampoco** vive en `mc.grid`: `mc.grid` es de enteros y el cuerpo saltaría de celda en celda (*"se espera
 que el movimiento sea suave, no a trompicones"* / *"si un agente se puede mover suave la sombra también"*).
 
-**Verificado headless**: `test_sombra_real.js` (26 tests) monta un puerto literal de `mcComputeLight`, del
-muestreo por cara de `mcMeshChunk` y un stub de WebGL que captura las VBOs y las `uView` reales. Comprueba,
-entre otras cosas, que la sombra es **celda a celda idéntica** a poner bloques de verdad en su sitio, que
-`mc.grid` y `mc.light` quedan **bit a bit** como estaban, que no se re-malla ni un chunk, y que al cruzar de
-celda **no hay tirón**.
+**Verificado headless**: `test_sombra_real.js` (30 tests) monta un puerto literal de `mcComputeLight`, del
+muestreo por cara de `mcMeshChunk` y un stub de WebGL que captura las VBOs, los atributos y el estado de
+mezcla reales. Comprueba, entre otras cosas, que la sombra es **celda a celda idéntica** a poner bloques de
+verdad en su sitio, que `mc.grid` y `mc.light` quedan **bit a bit** como estaban, que no se re-malla ni un
+chunk, que el quad **trepa al pilar y baja al agujero** y **no se despega** al deslizarse por encima, que el
+alpha de una columna **no da tirones** al cruzarla el cuerpo, y que la pasada **no toca el canal alpha** del
+lienzo.
