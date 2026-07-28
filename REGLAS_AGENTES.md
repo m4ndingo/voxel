@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.39) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.40) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -347,4 +347,44 @@ Tres reglas: **cargar** la dependencia si falta; **abortar** (no crear el agente
 en vez de dejar un cubo 1×1×1 pegado al suelo; y **tolerar su ausencia en `onStop`**
 (`if (game.skills && game.skills.liberarCuerpo) …`), porque se puede recargar la librería a media
 ejecución.
+
+### 20.2 Sombra proyectada sobre el terreno (`skills.sombra`) 🌑
+
+El Mundo no tiene sol direccional: la luz del terreno es **skylight** horneada por bloque
+(`mcComputeLight`), así que nada proyecta sombra sobre nada y un agente que vuela se ve **flotando sin
+peso**, sin nada que lo ancle al suelo.
+
+`game.skills.sombra(a, opciones)` **no es un shadow map** (haría falta un segundo pase y un FBO, y eso
+sí obligaría a tocar `app.js`): es una **calcomanía** de quads negros translúcidos pegados a la
+superficie, dibujados con `mc.structProg` —que ya lleva alpha por vértice— en una pasada encadenada a
+`mcRender`. Negro con `SRC_ALPHA` **es** multiplicar el destino por `(1-alpha)`, así que oscurece sin
+tapar: la textura del suelo se sigue viendo.
+
+```js
+game.skills.sombra(a);                                 // hereda la escala de skills.cuerpo
+game.skills.sombra(a, { escala:6, opacidad:0.5, desvanece:40, crece:0.03, desvio:[0,0] });
+game.skills.quitarSombra(a);                           // liberarCuerpo() ya la llama
+```
+
+Decisiones que no son obvias:
+
+- **Una columna = una altura.** La mancha se apoya en la superficie de **cada** columna que pisa, no en
+  un plano: así **trepa** a lo que sea más alto que el suelo — la lección de **BUG-SH1** en el Play 2D —
+  en vez de hundirse en una colina o flotar sobre un valle.
+- **Sol en el cenit** (cae recta bajo el agente), que es lo coherente con una luz de cielo sin
+  dirección. `desvio:[dx,dz]` la desplaza si se quiere fingir un sol bajo.
+- **Se dibuja ANTES que los cuerpos**: un cuerpo translúcido usa `depthMask(false)` y no deja
+  profundidad, así que una sombra posterior se pintaría **encima** de la nube.
+- **Cuanto más alto, más ancha y más floja** (`crece` / `desvanece`); por encima de `desvanece` bloques
+  de caída no se dibuja nada.
+- **El tope de tamaño se aplica al RADIO, no al nº de celdas**: recortar por celdas dejaba la mancha de
+  una nube gigante pegada a su esquina mínima en vez de centrada bajo ella.
+- **Coste**: se reconstruye solo cuando el agente **se mueve** (parado = 0), y el campo de alturas
+  (`mcSurfaceY` es O(alto) por columna) se re-escanea solo al cambiar de celda entera. Una nube de
+  escala 3 son 52 quads / 11 KB por reconstrucción.
+
+**LIMITACIÓN**: el campo de alturas sale de `mc.grid`, y las **estructuras estampadas no viven en
+`mc.grid`**. Una nube sobre una sala proyecta en el **suelo**, no en su tejado — el mismo agujero que la
+colisión de los agentes. Si el terreno cambia bajo una sombra parada, la caché de alturas queda vieja
+hasta que el agente se mueva.
 
