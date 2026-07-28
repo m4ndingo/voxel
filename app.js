@@ -5453,11 +5453,33 @@ function mcCloseTraceModal(){
   if(modal) modal.hidden = true;
 }
 
+// OJO: navigator.clipboard SOLO existe en contexto seguro (HTTPS o localhost). El Mundo se sirve por HTTP
+// plano en :8500, así que abriéndolo por IP desde otra máquina `navigator.clipboard` es undefined y leer
+// .writeText lanzaba TypeError — el .catch() no lo cubría, porque el fallo es síncrono. Se cae a
+// execCommand('copy'), que sí funciona sin contexto seguro, y en último término a la consola.
 function mcCopyTraceText(){
   const content = $('#trace-content');
-  if(content && content.textContent){
-    navigator.clipboard.writeText(content.textContent).then(()=>{ toast('📋 Traza copiada al portapapeles'); }).catch(()=>{ toast('Traza lista en consola F12'); });
+  const txt = content && content.textContent;
+  if(!txt) return;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt)
+      .then(()=>{ toast('📋 Traza copiada al portapapeles'); })
+      .catch(()=>{ mcCopyFallback(txt); });
+    return;
   }
+  mcCopyFallback(txt);
+}
+function mcCopyFallback(txt){
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=txt; ta.style.position='fixed'; ta.style.top='-1000px'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+    if(ok){ toast('📋 Traza copiada al portapapeles'); return; }
+  }catch(e){}
+  console.log(txt);
+  toast('Traza volcada a la consola F12');
 }
 // Al mirar un bloque con nota (jugando), muestra su texto bajo la mira; si no, oculta el visor.
 function mcUpdateNoteView(){
