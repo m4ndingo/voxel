@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.38) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.39) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -323,4 +323,28 @@ exigiría `app.js` ⇒ hay que pedirlo (§0, paso 3). Por eso el agente `nube` v
 
 **Precedente aplicado**: el mismo patrón que la cola de la serpiente — ampliar el cuerpo desde fuera del
 framework, sin que `app.js` se entere de qué es una nube.
+
+### 20.1 Un snippet que depende de la librería SE LA CARGA SOLO
+
+Los snippets son de **un solo disparo** y no comparten sesión: ejecutar `agente-nube` en una pestaña
+recién abierta no ejecuta `base-npc-skills`. Avisar por consola y seguir adelante **no vale** — el agente
+se crea igual y revienta en `onStart` con `Cannot read properties of undefined (reading 'cuerpo')`.
+
+Patrón obligatorio para cualquier snippet que use `game.skills.*`:
+
+```js
+async function ejecutarSnippet(id) {                      // igual que el editor de scripts
+  var r = await fetch('/api/snippets/' + id, { cache:'no-store' });   // ruta ABSOLUTA: la SPA vive en /map/<nombre>
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  var d = await r.json();
+  var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+  await (new AsyncFunction(d.code))();
+}
+if (!(await asegurarLibreria())) return;                  // si no aparece, NO crear el agente
+```
+
+Tres reglas: **cargar** la dependencia si falta; **abortar** (no crear el agente) si aun así no aparece,
+en vez de dejar un cubo 1×1×1 pegado al suelo; y **tolerar su ausencia en `onStop`**
+(`if (game.skills && game.skills.liberarCuerpo) …`), porque se puede recargar la librería a media
+ejecución.
 
