@@ -360,6 +360,28 @@ superficie, dibujados con `mc.structProg` —que ya lleva alpha por vértice— 
 `mcRender`. Negro con `SRC_ALPHA` **es** multiplicar el destino por `(1-alpha)`, así que oscurece sin
 tapar: la textura del suelo se sigue viendo.
 
+**Por qué no basta la sombra que YA hacen los bloques** (pregunta obligada: el skylight de
+`mcComputeLight` sí oscurece lo que queda tapado). Medido portando `mcComputeLight` literal a un mundo
+96×40×96 con suelo en y=14 e `interiorDark=0.55`:
+
+| nube (lado) | altura | luz del suelo | oscurecimiento |
+|---|---|---|---|
+| 3 | 26 | 13/15 | **7.7 %** |
+| 3 | 18 | 13/15 | **7.7 %** |
+| 6 | 26 | 12/15 | 11.3 % |
+| 12 | 26 | 9/15 | 21.3 % |
+
+Tres razones, ninguna estética:
+
+1. **Es invisible**: 7.7 % para una nube de 3 bloques. `app.js:4404` ya lo dice — *"una figura flotante
+   apenas ensombrece el suelo (la luz entra de lado)"*.
+2. **No depende de la altura** (filas 1 y 2: idénticas). Lo que decide es la distancia *horizontal* al
+   aire con cielo abierto, no el hueco vertical. Es oclusión ambiental, no una sombra.
+3. **Solo la hacen los bloques de `mc.grid`**, y meter ahí la nube cuesta un `mcComputeLight` del mundo
+   **entero** por paso (**7.6 ms medidos**, + `mcComputeBlockLight` + 9 `mcMeshChunk` +
+   `mcRebakeStructsNear`, con 16.7 ms de presupuesto a 60 fps), la estampa en `mundo.json` para siempre
+   y hace que el jugador choque con ella.
+
 ```js
 game.skills.sombra(a);                                 // hereda la escala de skills.cuerpo
 game.skills.sombra(a, { escala:6, opacidad:0.5, desvanece:40, crece:0.03, desvio:[0,0] });
