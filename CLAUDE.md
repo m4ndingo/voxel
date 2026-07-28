@@ -219,6 +219,23 @@ lienzo; `occupied` se deja completo), por eso `game.voxels` baja al acercar el z
 Verificación visual sin navegador: `node render_rooms.js <asset.vox.json> <out.png>` (rasteriza un iso
 propio a PNG). Ya NO hay mock de Habitaciones.
 
+## Agentes / NPC — regla de arquitectura (LEER ANTES DE TOCAR NADA)
+
+**NO SE MODIFICA `app.js` (EL FRAMEWORK) PARA HACER CAMBIOS EN LOS AGENTES**, salvo que sea
+imposible de otra manera **y esté aprobado por el dueño del proyecto. `app.js` debe ser AGNÓSTICO a
+cómo son o cómo se comportan los agentes.** Orden de prioridad para cualquier cambio de agente:
+
+1. **Mejorar la librería de agentes** (`data/snippets/base-npc-skills.json`) si sirve a más de un agente.
+2. **Añadir el código al propio snippet del agente** si es muy particular de él.
+3. Tocar `app.js` — solo si 1 y 2 son imposibles, y **preguntando antes**.
+
+Los snippets se ejecutan en ámbito global con `AsyncFunction`, así que **alcanzan los internos de
+`app.js`** (`mc`, `mcAgentMesh`, `mcSurfaceY`…) sin necesidad de modificarlo — `base-npc-skills.json`
+ya lo hace. Ejemplo de lo que se resuelve así: el cuerpo multi-celda de la serpiente son **agentes
+extra pausados** (`autostart:false` + `pause()`), porque `mcAgentsTick` salta lo que no está
+`'running'` pero `mcAgentsSmoothUpdate` solo salta `'stopped'` y el bucle de dibujo solo mira
+`vbo && count`. Especificación de comportamiento: **`REGLAS_AGENTES.md`**.
+
 ## Convenciones
 
 - Cualquier cambio de `state` termina llamando a `render()` (= `drawEdit` + `drawIso` +
