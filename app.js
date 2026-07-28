@@ -6288,9 +6288,13 @@ game.keys=function(){ const ks=Object.keys(mcUserKeys); console.log(ks.length?('
 //   game.defineAgent({ id:'pintor', block:'sand', tickMs:120, onTick(a){ a.walk(1,0); a.paint('grass'); } })
 // Redefinir un id existente DETIENE el viejo y lo reemplaza (iterar la heurística sin recargar la página).
 // Inspección en F12: game.agents() · game.agent('pintor').vars / .stats · game.stopAgents().
-const MC_AGENT_MAX_STEPS=4;      // pasos máximos por agente y frame (para tickMs < duración de frame)
+const MC_AGENT_MAX_STEPS=4;      // pasos por agente y frame a velocidad normal (para tickMs < duración de frame)
+const MC_AGENT_FRAME_MS=8;       // presupuesto de CPU por frame para TODOS los agentes (medio frame a 60 fps).
+                                 // game.agentSpeed no tiene tope, así que el freno real no puede ser un número
+                                 // de pasos sino TIEMPO: sin esto, agentSpeed=1000 congela la pestaña en vez de
+                                 // ir más rápido. Con esto los agentes corren lo que quepa y el Mundo sigue vivo.
 const MC_AGENT_SAVE_MS=30000;    // cada cuánto se vuelca el mundo mientras hay agentes escribiendo
-let mcAgentSpeed=1;              // game.agentSpeed: multiplicador global de tickMs (2 = la mitad de rápido)
+let mcAgentSpeed=1;              // game.agentSpeed: multiplicador de VELOCIDAD (2 = el doble de rápido); divide tickMs
 let mcAgentSaveMs=MC_AGENT_SAVE_MS;
 const mcAgentDirty=new Set();    // chunks "cx,cz" pendientes de re-mallar por escrituras de agentes
 let mcAgentSaveDirty=false, mcAgentSaveAt=0;
@@ -6568,14 +6572,25 @@ function mcAgentStep(a){
 
 function mcAgentsTick(now){
   let vivos=0;
+  const speedMult = mcAgentSpeed > 0 ? mcAgentSpeed : 1;
+  // Tope de pasos por frame ∝ velocidad (a x1 son los 4 de siempre), pero quien manda de verdad es el
+  // presupuesto de tiempo de abajo: es lo que permite que game.agentSpeed no tenga techo sin colgar el navegador.
+  const tope = Math.max(MC_AGENT_MAX_STEPS, Math.ceil(MC_AGENT_MAX_STEPS*speedMult));
+  const t0 = performance.now();
+  let agotado = false;
   for(const a of mc.agents.values()){
     if(a.state!=='running') continue;
     vivos++;
-    const speedMult = mcAgentSpeed > 0 ? mcAgentSpeed : 1;
-    const paso = Math.max(16, a.tickMs / speedMult);
+    if(agotado) continue;
+    // Sin suelo de 16 ms: antes el paso no podía bajar de un frame, así que a partir de agentSpeed≈7 (tickMs 110)
+    // subirlo más no aceleraba NADA. Ahora el paso puede ser submilisegundo y se dan varios por frame.
+    const paso = Math.max(0.05, a.tickMs / speedMult);
     if(!a._nextAt) a._nextAt=now;
     let n=0;
-    while(a.state==='running' && now>=a._nextAt && n<MC_AGENT_MAX_STEPS){ n++; a._nextAt+=paso; mcAgentStep(a); }
+    while(a.state==='running' && now>=a._nextAt && n<tope){
+      n++; a._nextAt+=paso; mcAgentStep(a);
+      if(performance.now()-t0 > MC_AGENT_FRAME_MS){ agotado=true; break; }   // se acabó el frame: seguimos en el siguiente
+    }
     if(a._nextAt<now) a._nextAt=now;   // sin catch-up: tras un parón del navegador no se acumulan pasos atrasados
   }
   mcAgentFlushDirty();
@@ -6593,7 +6608,9 @@ function mcAgentsSmoothUpdate(dt){
     const mounted = a.passengers && a.isMounted();
     if(distHoriz > 1e-4){
       const speedMult = mcAgentSpeed > 0 ? mcAgentSpeed : 1;
-      const effectiveTickMs = Math.max(16, a.tickMs / speedMult);
+      // Mismo suelo que el planificador (0.05 ms, no 16): si aquí se quedaba en 16 ms, a velocidad alta el
+      // cuerpo interpolado no alcanzaba nunca a la posición lógica y el agente se veía «arrastrándose» detrás.
+      const effectiveTickMs = Math.max(0.05, a.tickMs / speedMult);
       const speed = 1000 / effectiveTickMs;
       const maxMove = Math.min(distHoriz, dt * speed);
       a.renderX += (dx / distHoriz) * maxMove;
@@ -6755,10 +6772,13 @@ game.pruneAgentNotes=function(id){
   if(n){ mcScheduleSave(); mcUpdateNoteView(); }
   console.log(n+' nota(s) de "'+id+'" borradas'); return n;
 };
-// game.agentSpeed = multiplicador global de tickMs (0.5 = el doble de rápido; 2 = la mitad). Persiste.
-try{ const s=parseFloat(localStorage.getItem('vf_agentSpeed')); if(isFinite(s)) mcAgentSpeed=Math.max(0.1,Math.min(20,s)); }catch(e){}
+// game.agentSpeed = multiplicador global de VELOCIDAD: divide el tickMs de cada agente, así que 2 = el doble de
+// rápido y 0.5 = la mitad (el comentario de antes decía justo lo contrario y era falso). Persiste.
+// SIN TOPE por arriba: el freno no es un número, es MC_AGENT_FRAME_MS (el tiempo de CPU que los agentes pueden
+// gastar por frame). Pedir más velocidad de la que cabe no acelera más, pero tampoco cuelga el Mundo.
+try{ const s=parseFloat(localStorage.getItem('vf_agentSpeed')); if(isFinite(s)) mcAgentSpeed=Math.max(0.1,s); }catch(e){}
 Object.defineProperty(game,'agentSpeed',{ enumerable:true, get:()=>mcAgentSpeed,
-  set:v=>{ v=Math.max(0.1, Math.min(20, isFinite(+v)?+v:1)); mcAgentSpeed=v; try{localStorage.setItem('vf_agentSpeed',v);}catch(e){}
+  set:v=>{ v=Math.max(0.1, isFinite(+v)?+v:1); mcAgentSpeed=v; try{localStorage.setItem('vf_agentSpeed',v);}catch(e){}
     for(const a of mc.agents.values()) a._nextAt=0; } });
 // game.agentSaveMs = cada cuánto (ms) se vuelca el mundo mientras los agentes escriben (mcSaveWorld POSTea el
 // mundo ENTERO, así que bajarlo mucho satura la red). Persiste.
