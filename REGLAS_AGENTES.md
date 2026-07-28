@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.37) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.38) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -287,3 +287,40 @@ Para añadir una fase nueva desde un snippet: `game.skills_medir('mi_fase', func
 
 ⚠️ El perfilador mide con `performance.now()` en el hilo principal: **medir con DevTools cerrado**, igual
 que los fps (con DevTools abierto el coste se infla).
+
+---
+
+## 20. Cuerpo del agente: escala, vuelo y cuerpo de estructura (`skills.cuerpo`) ☁️
+
+El framework dibuja **siempre el mismo cuerpo**: un cubo 1×1×1 del atlas del terreno, apoyado en
+`renderY+1` (`mcAgentMesh`, app.js). Ni escala, ni altura libre, ni voxeles finos.
+
+Se amplía **sin tocar `app.js`** (§0), envolviendo dos funciones globales desde la librería:
+
+| Función envuelta | Por qué ahí |
+|---|---|
+| `mcAgentMesh(a)` | La llama `mcAgentsSmoothUpdate` **cada frame**, justo después de pegar `a.renderY` al suelo: es el único punto donde se puede devolver la altura de vuelo y construir un cubo a escala. |
+| `mcRender()` | Se le encadena una pasada al final, con el depth buffer del frame ya puesto, para los cuerpos de **estructura** (usan `mc.structProg`/`mc.stexProg`, que el bucle de agentes no toca). |
+
+```js
+game.skills.cuerpo(a, { bloque:'snow', escala:3, altura:26 });          // cubo del atlas a escala
+await game.skills.cuerpo(a, { estructura:'hab:nube', escala:2, altura:26 });  // voxeles finos
+game.skills.liberarCuerpo(a);                                           // en onStop
+```
+
+- `escala` — lado del cuerpo en bloques (admite decimales). Centrado en la celda, base en `renderY+1`.
+- `altura` — Y de la **base** del cuerpo. Con `altura`, el agente **vuela**: deja de pegarse al suelo.
+  Vuela de verdad solo si además mueves `a.x`/`a.z` a mano; `a.walk()` exige suelo pisable.
+- La malla de estructura se sube **una sola vez en coordenadas locales** y se coloca cada frame con
+  `uView = vista × traslación` ⇒ moverse no re-sube nada.
+
+⚠️ **Por qué NO se meten en `mc.structures`**, que ya se dibujan solas: **`mcSerialize()` las guarda en
+el JSON del mundo**. La nube quedaría **estampada para siempre** donde la pillara el autoguardado.
+
+⚠️ **Limitación**: la **colisión** sigue siendo el cubo 1×1×1 de `app.js` (`mcCollides` da un AABB fijo
+en `[renderY+1, renderY+2)`). Un cuerpo a escala 3 se ve grande y se choca pequeño. Arreglarlo **sí**
+exigiría `app.js` ⇒ hay que pedirlo (§0, paso 3). Por eso el agente `nube` va con `passengers:false`.
+
+**Precedente aplicado**: el mismo patrón que la cola de la serpiente — ampliar el cuerpo desde fuera del
+framework, sin que `app.js` se entere de qué es una nube.
+
