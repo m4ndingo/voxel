@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.36) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.37) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -205,6 +205,20 @@ Comportamiento **conocido y engañoso**, documentado aquí porque despista al le
   ella depende la deduplicación por `findExistingNoteInRadius`. Solo cambia la línea `Causa:`.
 - **Sigue siendo cierto** que la nota no prueba que hubiera un bucle: prueba que terminó una maniobra de
   escape. Ahora al menos dice cuál.
+- **v4.35 estaba a medias — corregido en v4.37**: las dos asignaciones de `escapeMotivo` del desvío
+  ortogonal estaban escritas **después del `return`**, o sea que no se ejecutaban nunca. 2 de los 9 motivos
+  eran inalcanzables y todo desvío ortogonal acababa etiquetado con el motivo genérico del padre
+  (`pasos sin descubrir celda nueva`). Síntoma en una auditoría real: 8 de 9 notas de un mapa con la misma
+  causa palabra por palabra, todas en llano perfecto (3x3 todo a 14).
+- **La nota ahora exige que la maniobra haya FALLADO (v4.37)**. Antes se escribía nada más superar el
+  umbral, aunque un simple giro resolviera la situación. Dos compuertas:
+  1. al superar el umbral solo se anota si **ningún desvío ortogonal está libre** (encajonado de verdad);
+  2. al agotarse `v.escapeSteps` solo se anota si `v.stepsWithoutNewCell > 0`, es decir si durante el
+     escape **no se descubrió ninguna celda nueva**.
+  Distingue lo único que importa: «ya he recorrido casi todo el mapa» (normal, no es noticia) de «no salgo
+  de aquí» (lo que merece un post-it). El umbral es `calculateDynamicStuckThreshold` =
+  `min(30, round(caminables_5x5 × 1.2))` = **30 pasos** en llano abierto, y ahí se llega por pura
+  saturación cuando el mapa ya está recorrido.
 
 ## 18. Coste del tick: por qué el Mundo perdía frames con el mapa cubierto 🔥
 
