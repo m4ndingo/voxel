@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.41) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.42) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -352,75 +352,66 @@ en vez de dejar un cubo 1×1×1 pegado al suelo; y **tolerar su ausencia en `onS
 (`if (game.skills && game.skills.liberarCuerpo) …`), porque se puede recargar la librería a media
 ejecución.
 
-### 20.2 Sombra proyectada: **una sola verdad, la de los bloques** (`skills.cuerpoBloques`) 🌑
+### 20.2 Física del agente a su tamaño real (`skills.solido`) 🧊
 
-**DECISIÓN DEL DUEÑO DEL PROYECTO.** No hay —ni se vuelve a escribir— un sistema de sombras propio de
-agentes. La única verdad para proyectar sombra es la que **ya tienen los bloques del juego**: el skylight
-de `mcComputeLight` difundido por el aire, horneado en el `shade` de cada cara por `mcMeshChunk`. Un
-agente que quiera dar sombra «igual que un bloque» tiene que **SER bloques**.
+`app.js` le da a **todo** agente la misma caja de física: **1×1×1** en `[rx,rx+1] × [ry+1,ry+2) × [rz,rz+1]`.
+Por eso un cuerpo a escala 9 **se ve enorme y se choca diminuto**, y subirse encima de una nube es buscar
+un píxel invisible. La caja está cableada en tres sitios:
+
+| Dónde | Qué decide |
+|---|---|
+| `mcCollides` (app.js) | con qué choca el jugador |
+| `mcAgentShove` (app.js) | el empujón cuando un agente te embiste |
+| `a.isMounted` (app.js) | ir montado encima; su ventana es `[ry+1.9, ry+2.5]`, la tapa de un cubo de 1 |
+
+Los tres se corrigen **desde la librería, sin tocar `app.js`** (§0): los dos primeros son funciones globales
+y se envuelven igual que `mcAgentMesh` o `mcSerialize`; el tercero es un método del handle y se reemplaza.
 
 ```js
-game.skills.cuerpoBloques(a, { bloque:'nube-snow', escala:31, altura:26 });  // cubo de lado impar
-game.skills.cuerpoBloques(a, { escala:9, forma:'esfera' });
-game.skills.liberarCuerpoBloques(a);                    // liberarCuerpo() ya la llama
+game.skills.cuerpo(a, { bloque:'nube-snow', escala:9, altura:26 });
+game.skills.solido(a);          // ahora choca, empuja y te lleva a escala 9
+game.skills.solido(a, false);   // vuelve al 1×1×1 del framework
 ```
 
-Las celdas del agente se escriben en `mc.grid`. A partir de ahí **no hay nada especial que mantener**: lo
-dibuja el mallado del terreno, lo sombrea el skylight, lo colisiona `mcCollides` y lo oscurece
-`game.interiorDark`, como a cualquier otro bloque. Cero shaders, cero VBO, cero pasada de render extra.
+El agente **sigue siendo un agente normal** con toda su mecánica: el framework interpola su posición entre
+celdas (se mueve **suave**, no a trompicones), te empuja si te embiste y te lleva encima. Lo único que
+cambia es que la medida que usa la física es la de verdad. La caja sale del cuerpo que ya declaraste con
+`skills.cuerpo` (`escala`/`altura`): **lo que se ve y lo que se choca son la misma medida**, no dos
+verdades que mantener a la vez.
 
-**Lo que sí hay que resolver, y por qué** (está todo en la sección «CUERPO DE BLOQUES» de la librería):
+Detalles que no son obvios:
 
-1. **No estropear el mundo guardado.** `mcSerialize()` vuelca `mc.grid` entera a `mundo.json` y hay
-   autoguardado cada 30 s (`mcAgentMaybeSave`): un agente de bloques quedaría **estampado** donde le
-   pillara el guardado. Se envuelve `mcSerialize` para borrar las celdas de los agentes antes de
-   serializar y devolverlas en un `finally`. La rejilla es la verdad para **dibujar**; lo que se **guarda**
-   es el mundo sin agentes.
-2. **No pisar terreno del usuario.** Solo se ocupan celdas que en ese momento son **aire**, y al moverse
-   solo se borran **las que escribimos nosotros** (`c.celdas`, índices planos). Un agente no puede borrar
-   un bloque tuyo ni dejar estela.
-3. **No relucir 54 veces por paso.** `mcAgentSetBlock` llama a `mcRemeshAround` —y por tanto a un
-   `mcComputeLight` del mundo entero— en cada celda que pasa de aire a sólido: un cubo 3×3×3 son 27
-   puestas + 27 quitadas = **54 reluces**. Aquí se escribe crudo en `mc.grid` y se hace **UN** relucido +
-   los `mcMeshChunk` del vecindario, al final del paso.
-4. **Parado = coste CERO.** `mcAgentsSmoothUpdate` llama a `mcAgentMesh` **cada frame**, así que el corte
-   de «no he cambiado de celda» es lo único que separa 0 relucidos de 60/s. Ese corte va **solo por
-   posición** (`px/py/pz`), nunca por «tengo celdas»: un agente parado cuyo cuerpo **no cabe** (volumen
-   lleno de terreno del usuario) tiene 0 celdas y relucía el mundo entero 60 veces por segundo.
+- **Al original se le esconden los agentes** (`mc.agents` vacío durante la llamada) para quedarse solo con
+  terreno + estructuras. Sin eso la caja 1×1×1 seguiría ahí, y en un agente que **vuela** es un obstáculo
+  invisible **a ras de suelo**, justo debajo de la nube.
+- **Al agente que no pide `solido` no se le cambia nada**: conserva su 1×1×1 exacto.
+- **La caja sigue a `renderX/Y/Z`** (posición interpolada), no a la celda lógica.
+- El empujón usa **la misma política que `app.js`**: salida horizontal más corta *a favor* de la marcha del
+  agente; si está parado, radial desde su centro.
 
-**Coste real, para tenerlo delante**: un paso = 1 `mcComputeLight` (**7.6 ms medidos** en 96×40×96) +
-`mcComputeBlockLight` + los chunks tocados. Con `tickMs` de 1 s es un tirón de ~10 ms una vez por segundo,
-no una caída sostenida de fps. **Subir la velocidad del agente lo multiplica.**
+**LIMITACIÓN**: para un cuerpo de **estructura** la caja es el cubo de lado `escala`, no la silueta fina de
+la malla — una estructura con huecos se choca como si fuera maciza. Afinarlo pediría muestrear
+`mcStructGeom` por celda (lo que hace `mcFineBoxHit` con las salas), y **eso sí tocaría `app.js`**.
 
-**Y el tamaño de la sombra es el que da el motor, no uno inventado.** Medido portando `mcComputeLight`
-literal a node (mundo 96×40×96, suelo en y=14, `interiorDark=0.55`):
+### 20.3 Los agentes NO proyectan sombra 🌑
 
-| nube (lado) | altura | luz del suelo | oscurecimiento |
-|---|---|---|---|
-| 3 | 26 | 13/15 | **7.7 %** |
-| 3 | 18 | 13/15 | **7.7 %** |
-| 6 | 26 | 12/15 | 11.3 % |
-| 12 | 26 | 9/15 | 21.3 % |
-| 24 | 26 | 3/15 | **38.0 %** |
+En el Mundo la **única** sombra es el skylight de `mcComputeLight`, y solo mira los bloques de `mc.grid`:
+una malla de agente no tapa el cielo, así que **no sombrea**. Esto se ha intentado dos veces y las dos se
+han descartado por decisión del dueño del proyecto:
 
-Dos lecturas obligadas de esa tabla: **una figura pequeña casi no oscurece** (7.7 % con lado 3 —
-`app.js:4404` ya lo dice: *"una figura flotante apenas ensombrece el suelo (la luz entra de lado)"*), y el
-resultado **no depende de la altura** (filas 1 y 2 idénticas): decide la distancia *horizontal* al aire
-con cielo abierto. Es oclusión ambiental. Si se quiere sombra que se vea, la palanca es **el tamaño del
-agente** o **`game.interiorDark`** —que afecta a todo por igual, que es justo lo que se pedía—, no un
-sistema paralelo.
+1. **Calcomanía** (quads negros con `SRC_ALPHA` y su propia pasada de render) — rechazada: *"no es nada
+   óptimo ni portable ni sostenible"*, *"una única verdad para proyectar sombras, y es la que tienen
+   actualmente los bloques del juego"*.
+2. **Cuerpo residente en `mc.grid`** (el agente *siendo* terreno, con o sin gemelo invisible) — rechazada:
+   `mc.grid` es de enteros, así que el cuerpo **salta de celda en celda** en vez de moverse suave, y
+   esconder el salto en un gemelo invisible es un **truco**. Lo que se quiere es *"que se comporte como los
+   agentes, sin trucos"*.
 
-**CONSECUENCIAS ACEPTADAS** (son el precio de la única verdad, no defectos a parchear):
+Además el skylight **decepciona como sombra** aunque se consiga: medido portando `mcComputeLight` literal a
+node (mundo 96×40×96, suelo en y=14, `interiorDark=0.55`), una figura de lado 3 oscurece el suelo un
+**7.7 %**, de lado 24 un **38 %**, y **no depende de la altura** — decide la distancia *horizontal* al aire
+con cielo abierto. Es oclusión ambiental, no sombra. `app.js:4404` ya lo dice.
 
-- **El jugador choca con el agente y se le puede subir encima**: es terreno. El sistema de pasajeros
-  (`passengers`) sobra para estos agentes.
-- **El cuerpo no se interpola entre celdas**: salta de celda en celda, porque `mc.grid` es discreta. El
-  VBO propio (`skills.cuerpo`) sí se interpolaba; ese es el intercambio.
-- **Dos agentes de bloques no se interpenetran**: cada uno ve las celdas del otro como no-aire y le cede
-  el solape. Al liberarse, ninguno deja celdas huérfanas (verificado).
-- **`skills.cuerpo` (VBO de estructura o cubo escalado) sigue existiendo y NO da sombra**: es una malla
-  propia, no terreno, así que no tapa el cielo. Quien quiera sombra usa `cuerpoBloques`.
-
-**Prohibido**: reintroducir calcomanías, quads negros, shadow maps, FBOs o cualquier pasada de render
-dedicada a sombras de agente. Si la sombra del motor no gusta, se cambia **el motor para todos**
-(`game.interiorDark`), no se añade un segundo sistema.
+**Prohibido**: calcomanías, quads negros, shadow maps, FBOs, cuerpos en `mc.grid` o cualquier pasada de
+render dedicada a sombras de agente. Si hace falta sombra de verdad, es un cambio **del motor para todos**
+y hay que pedirlo (§0, paso 3).
