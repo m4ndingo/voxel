@@ -337,6 +337,29 @@ contra el fundido.
 - Cruzar repetidamente entre salas (incl. Herrería, que carga lenta) nunca deja pantalla negra: el
   entorno nuevo aparece sin necesidad de clic. Reproducir forzando una carga lenta.
 
+### ✅ BUG-MCB1 · `game.buildTerrain()` prometía construir el terreno y en realidad estrenaba mundo — ✅ done (2026-07-28)
+**Resuelto**: por defecto ahora **solo rellena el AIRE** hasta Y=14 (roca 0..10 / tierra 11..13 / hierba 14). No
+pisa ni un bloque existente, no toca estructuras, notas, spawn ni el historial de deshacer. El comportamiento
+destructivo de siempre sigue estando, pero hay que pedirlo: `game.buildTerrain({reset:true})`.
+Reportado 2026-07-28: «parece que va a construir el terreno sobre lo que hay y en realidad lo borra todo».
+
+**Causa raíz**
+`game.buildTerrain` llamaba a `mcGenFlat()` a secas, que **no rellena: estrena mundo** —
+`mcClearStructures()`, `mc.notes={}`, `mc.grid=new Uint16Array(...)` con dim fija 96×40×96, spawn/pos
+reubicados e historial vaciado. El nombre no daba ninguna pista de eso.
+
+**Arreglo**
+Barrido de `y=0..min(14, dim.y-1)` saltando toda celda con bloque (`if(mc.grid[i]) continue`). Respeta la `dim`
+actual (no la fuerza a 96³). Como las estructuras finas **no viven en `mc.grid`**, se salta también el AABB de
+las que bajan de Y=14, para no emparedar una metida en un sótano. Al terminar, `mcMeshAll()` (recalcula luz) y
+`mcScheduleSave()`; el log dice cuántas celdas rellenó y cuántas respetó, y recuerda la forma `{reset:true}`.
+
+**Verificación** (arnés sobre rejilla sintética con torre, adoquín de superficie, bloque enterrado, hoyo cavado
+y estructura en sótano): 0 bloques existentes pisados; el hoyo queda tapado y con césped arriba; torre, adoquín,
+bloque enterrado y hueco de la estructura, intactos.
+
+---
+
 ### ✅ BUG-MCA1 · Un bloque translúcido se ve MACIZO en el Mundo y no sale su fantasma de estructura — ✅ done (2026-07-28)
 **Resuelto**: `mcStructCells` ya no clasifica como `blockLike` un 16³ macizo **con alpha**: se estampa como
 **estructura fina**, que sí mezcla de verdad (`aAlpha`/`vAlpha` + pasada con `BLEND`). Además rayos-X gana una

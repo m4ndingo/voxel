@@ -5789,18 +5789,45 @@ game.wipeMap=async function(name, force){
   if(mc.active && mc.grid && (mcMapName()||'default')===shown){ mcBake({dim: dim||mc.dim, voxels:{}, notes:{}}); }   // mcBake malla solo (mcMeshAll interno)
   return true;
 };
-// game.buildTerrain() · REGENERA el terreno plano por defecto (hierba Y=14, tierra Y=11..13, roca Y=0..10).
-game.buildTerrain=function(){
-  if(typeof mcGenFlat==='function' && typeof mcMeshAll==='function'){
+// game.buildTerrain() · RELLENA el terreno plano por defecto (roca Y=0..10, tierra Y=11..13, hierba Y=14) SOLO
+// DONDE HAY AIRE: recupera el césped y tapa los agujeros sin tocar NADA de lo que hayas construido. No borra
+// estructuras, ni notas, ni bloques (tampoco los enterrados), ni mueve el spawn, ni reinicia deshacer/rehacer.
+// Antes llamaba a mcGenFlat() a secas, que reasigna la rejilla entera: el nombre prometía «construir el terreno»
+// y en realidad estrenaba mundo. Esa versión destructiva sigue disponible, pero hay que PEDIRLA:
+// game.buildTerrain({reset:true}).
+game.buildTerrain=function(opts){
+  if(typeof mcGenFlat!=='function' || typeof mcMeshAll!=='function' || !mc.grid){
+    console.error('[game.buildTerrain] Motor 3D no listo.'); return false;
+  }
+  if(opts===true || (opts && opts.reset===true)){
     mcGenFlat();
     mcMeshAll();
     if(typeof mcScheduleSave==='function') mcScheduleSave();
-    toast('🌱 Terreno por defecto regenerado');
-    console.log('[game.buildTerrain] Terreno plano por defecto regenerado con éxito.');
+    toast('🌱 Mundo regenerado desde cero');
+    console.warn('[game.buildTerrain] reset: mundo NUEVO de 96×40×96 — estructuras, notas y todo lo construido, BORRADOS.');
     return true;
   }
-  console.error('[game.buildTerrain] Motor 3D no listo.');
-  return false;
+  const idH=mc.name2id['hierba'], idT=mc.name2id['tierra'], idR=mc.name2id['roca'];
+  if(!idH || !idT || !idR){ console.error('[game.buildTerrain] este mundo no tiene hierba/tierra/roca en la paleta.'); return false; }
+  const dim=mc.dim, GH=14, yTop=Math.min(GH, dim.y-1);
+  // Las estructuras finas NO viven en mc.grid: si una está metida en un hoyo por debajo de la superficie,
+  // rellenar su hueco la emparedaría. Solo estorban las que bajan de GH; el resto ni se mira.
+  const cajas=mc.structures.filter(s=>s.aabb && s.aabb[1]<=GH).map(s=>s.aabb);
+  const enEstructura=(x,y,z)=>{ for(const a of cajas) if(x>=a[0]&&x<=a[3]&&y>=a[1]&&y<=a[4]&&z>=a[2]&&z<=a[5]) return true; return false; };
+  let puestos=0, respetados=0, saltados=0;
+  for(let z=0;z<dim.z;z++) for(let x=0;x<dim.x;x++) for(let y=0;y<=yTop;y++){
+    const i=mcIdx(x,y,z);
+    if(mc.grid[i]){ respetados++; continue; }                       // ya hay bloque: NO se pisa (ni para «recuperar» hierba)
+    if(cajas.length && enEstructura(x,y,z)){ saltados++; continue; }
+    mc.grid[i] = (y===GH) ? idH : (y>=GH-3 ? idT : idR); puestos++;
+  }
+  mcMeshAll();                                                       // recalcula luz + malla todos los chunks
+  if(typeof mcScheduleSave==='function') mcScheduleSave();
+  toast('🌱 Terreno rellenado: '+puestos+' bloques');
+  console.log('[game.buildTerrain] '+puestos+' celdas de aire rellenadas hasta Y='+GH+'. Intactas: '+respetados
+    +' ya ocupadas'+(saltados?', '+saltados+' dentro de una estructura':'')+', '+mc.structures.length+' estructuras, '
+    +Object.keys(mc.notes||{}).length+' notas y el spawn. ¿Querías el mundo NUEVO? → game.buildTerrain({reset:true})');
+  return true;
 };
 // game.tp(x,y,z) · salta a esas coordenadas de mundo (pies sobre el bloque; si el destino es sólido —p.ej. un
 // tronco— mcUnstick sube al primer hueco de aire). Conserva la mirada. game.notes()/game.gotoNote(i) para las notas.
