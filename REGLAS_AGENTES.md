@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.43) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.44) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -396,36 +396,51 @@ la malla — una estructura con huecos se choca como si fuera maciza. Afinarlo p
 ### 20.3 La sombra del agente es la del Mundo (`skills.sombra`) 🌑
 
 **En el Mundo hay una sola verdad para las sombras: el skylight de `mcComputeLight` (`app.js:4437`)** — y
-esa verdad **solo mira `mc.grid`**. Así que para que un agente proyecte *esa* sombra (y no una inventada) hay
-que darle **un bloque en `mc.grid` que tape el cielo**. Eso es lo que hace `skills.sombra`, desde
-`base-npc-skills.json`, sin tocar `app.js`: le pone al agente un **oclusor** con un id
-(`ID_SOMBRA = 65535`) que **no tiene entrada en `mc.palette`**.
+esa verdad **solo mira `mc.grid`**, que es de **enteros**. Una sombra que *viva* en la rejilla va por fuerza
+a trompicones, celda a celda. Pero el **cuerpo** del agente también está hecho de bloques y se mueve suave,
+**porque no está en la rejilla: es geometría dibujada en una posición con decimales**. La sombra hace
+exactamente lo mismo, en dos tiempos:
 
-| Propiedad | Cómo | Por qué |
-| --- | --- | --- |
-| **Invisible** | `mcMeshChunk` hace `var rects=mc.palette[id]; if(!rects) continue;` (`app.js:4414`) | sin rects no genera ni una cara; lo que se ve sigue siendo la malla suave del cuerpo |
-| **Intangible** | se envuelve `mcSolid` para que `ID_SOMBRA` no cuente como sólido | la colisión ya la lleva `skills.solido`; y sobre todo `mcMeshChunk` **pela la cara del vecino sólido** (4418) ⇒ sin esto salía un **agujero en el suelo** bajo cada agente |
-| **Opaco a la luz** | `mcComputeLight` **no usa `mcSolid`**: mira `g[i]===0` en crudo | cualquier id ≠ 0 tapa el cielo. Es lo único que se busca |
-| **No se guarda** | se envuelve `mcSerialize` para retirarlos mientras serializa | si no, el mundo guardaría `tex:undefined` por cada oclusor |
-| **No engaña a los scripts** | se envuelve `mcGetVoxel` para devolver `0` en un oclusor | `a.isMounted` lo tomaría por suelo del mundo y creería que no vas montado |
-| **No es suelo** | `mcSurfaceY` y `mcSurfaceNear` se ejecutan con los oclusores **retirados** de la rejilla | leen `mc.grid` en crudo: `mcSurfaceY` diría que el suelo está a 26 bajo una nube, y el oclusor de un agente dejaría la celda de al lado sin ser pisable para otro |
+1. **Cuánto oscurece** — lo dice `mcComputeLight` y nadie más. Se mete la **losa inferior** del cuerpo en
+   `mc.grid` como **oclusor** (`ID_SOMBRA = 65535`, sin entrada en `mc.palette`), se recalcula la luz, se
+   restan los niveles contra los de antes y **se deshace todo dentro de la misma llamada**: al salir,
+   `mc.grid` y `mc.light` están **bit a bit** como estaban. De ahí sale una **estampa**: un quad negro por
+   cada cara superior de terreno que ha perdido luz, con `alpha = 1 − interiorDark^(Δlv/MAX)`, en
+   coordenadas **locales** al ancla de la huella.
+2. **Dónde cae** — cada frame, en una pasada de dibujo propia encadenada a `mcRender`, con
+   `uView = vista · translate(rx + 0.5 − ancho/2, 0, rz + 0.5 − fondo/2)`: el ancla de la estampa se pone en
+   el **borde real del cuerpo, con decimales**. La sombra se desliza igual que el cuerpo.
 
-Retirar los oclusores para llamar al original (en vez de reescribir su lógica, que sería una segunda verdad
-que se queda vieja) es **el mismo recurso** que usa `skills.solido` al esconderle `mc.agents` al `mcCollides`
-original (§20.2).
+**Nadie de fuera llega a ver el oclusor** (no se cede el frame), así que **no hay que envolver** `mcSolid`,
+`mcGetVoxel`, `mcSerialize`, `mcSurfaceY` ni `mcSurfaceNear`, y **no se re-malla ni un chunk**.
 
-**Solo se escribe la LOSA INFERIOR del cuerpo**, una capa de celdas, no el volumen. Medido con un puerto
+**Por qué es la misma sombra y no una pintada a ojo** — el terreno ya está en pantalla con
+`dst = lit0·(1−f) + sky·f`. El quad va por `mc.structProg` con `aColor=(0,0,0)` y `aEmit=0`, o sea su
+fragmento es `mix(0,sky,f) = sky·f` con alpha `a`, y se mezcla con `SRC_ALPHA`/`ONE_MINUS_SRC_ALPHA`:
+
+```
+dst·(1−a) + sky·f·a  =  lit0·(1−a)·(1−f) + sky·f
+```
+
+que es **exactamente** lo que habría pintado `mcMeshChunk` con el oclusor puesto, porque
+`lut(lv1)/lut(lv0) = interiorDark^((lv0−lv1)/MAX) = 1−a`. **Mismo color y misma niebla, hasta el último
+bit.** Lo único que cambia es que se puede poner en `x=10.37` en vez de en `x=10`.
+
+**Por qué no salta al rehacerse**: la estampa se calcula con la huella **entera** y se guarda **relativa a su
+ancla**; dibujarla es poner ese ancla en `rx + 0.5 − ancho/2`. Al rehacerla, el ancla y las coordenadas
+locales saltan **el mismo entero en sentidos contrarios** ⇒ la posición en el mundo solo depende de `rx`,
+que es continuo. Verificado en `test_sombra_real.js` cruzando `renderX` de 10.0 a 11.0.
+
+**Solo se mide la LOSA INFERIOR del cuerpo**, una capa de celdas, no el volumen. Medido con un puerto
 literal de `mcComputeLight`: la sombra en el suelo sale **idéntica** (0 celdas de luz distintas, probado con
 lados 1, 3, 9 y 30), porque la luz que llega debajo entra *de lado* y el techo la tapa igual sea de una capa
 o de treinta. Cuesta `escala` veces menos.
 
-**Qué cuesta** (medido, mundo 96×40×96): mover el oclusor una celda obliga a **recalcular la luz de todo el
-mundo** — 7.6 ms de `mcComputeLight` + 1.2 ms de diff + re-mallar los chunks cuya luz cambió (4 de 36 con
-una nube de lado 9). En `app.js` no hay recálculo parcial y **no se va a escribir uno: sería una segunda
-verdad**. Por eso solo se recalcula **cuando el oclusor cambia de celda** y como mucho cada `game.sombraMs`
-(250 ms por defecto). Un agente parado cuesta **0**. En vez del 3×3 a ojo de `mcRemeshAround` se **compara
-`mc.light` antes y después** y se re-mallan solo los chunks que cambiaron: la sombra de una nube alta cae
-*lejos* de la nube y un 3×3 no la cogería.
+**Qué cuesta** (medido, mundo 96×40×96): rehacer una estampa = **1 `mcComputeLight` (7.6 ms)** + un barrido
+de la rejilla. **Cero remallado** (`mc.light` se restaura tal cual). Solo se rehace **cuando el cuerpo cambia
+de celda** y como mucho cada `game.sombraMs` (500 ms por defecto). Un agente parado cuesta **un draw call**.
+⚠️ Subir `sombraMs` **ya no retrasa la sombra** —la posición es exacta en todos los frames—, solo la
+**forma**, que apenas cambia mientras el suelo de debajo sea parecido.
 
 **Qué se ve** (`interiorDark=0.55`, oscurecimiento en el centro de la sombra):
 
@@ -443,7 +458,7 @@ sombras del Mundo.** La sombra se ve cuando el agente **vuela** y es **ancho**.
 
 ```js
 game.sombras = false;            // apaga la sombra de agente en todo el mundo
-game.sombraMs = 500;             // recálculo más espaciado: menos tirón, sombra más a saltos
+game.sombraMs = 1000;            // cada cuánto se puede REHACER la forma (no la posición)
 game.skills.sombra(a, false);    // este agente concreto no proyecta sombra
 game.defineAgent({ ..., sombra:false })
 ```
@@ -453,22 +468,25 @@ sin pedir nada en su snippet.
 
 ⚠️ **Limitaciones conocidas**:
 
-- **Las estructuras estampadas no se re-oscurecen**: hornean su shade al construir la instancia
-  (`mcBuildStructMesh`), y aquí **no** se llama a `mcRebakeStructsNear` porque reconstruye mallas enteras y
-  es inasumible varias veces por segundo. La sombra de un agente cae sobre el **terreno**, no sobre una sala.
+- La estampa solo lleva **caras superiores de terreno**: una pared no se oscurece por el lado.
+- **Las estructuras estampadas no reciben sombra**: no están en `mc.grid` y hornean su shade al construir la
+  instancia (`mcBuildStructMesh`). La sombra de un agente cae sobre el **terreno**, no sobre una sala.
 - El oclusor **solo ocupa aire**: nunca pisa ni borra un bloque del usuario. Un cuerpo metido en el terreno
   no añade sombra (el terreno ya tapaba el cielo por su cuenta).
-- Las vistas de depuración que leen `mc.grid` en crudo (rayos-X, contadores de voxels) **sí ven** el oclusor.
+- Mientras no se rehaga, la **forma** es la del suelo de hace un momento (la **posición** siempre es exacta).
+- Si el usuario **edita bloques** bajo un agente parado, su sombra se queda vieja hasta que el agente se mueva.
 - Si se **edita** esta sección de la librería hay que **recargar la página (F5)**: los ganchos se instalan
-  una sola vez y el estado se comparte en `game.__sombra` para no dejar oclusores huérfanos en la rejilla.
+  una sola vez y el estado se comparte en `game.__sombra` para no dejar VBOs huérfanas.
 
-**Sigue prohibido**: calcomanías, quads negros, shadow maps, FBOs o cualquier pasada de render dedicada a
-sombras de agente. Rechazado en su día por el dueño (*"no es nada óptimo ni portable ni sostenible"*, *"una
-única verdad para proyectar sombras, y es la que tienen actualmente los bloques del juego"*). Y el **cuerpo**
-del agente **tampoco** vive en `mc.grid`: `mc.grid` es de enteros y el cuerpo saltaría de celda en celda
-(*"se espera que el movimiento sea suave, no a trompicones"*). El que vive en la rejilla es **solo el
-oclusor**, que no se ve ni se choca — el cuerpo sigue siendo la malla interpolada del framework.
+**Sigue prohibido**: sombras **inventadas** — calcomanías pintadas a ojo, shadow maps, FBOs. Rechazado en su
+día por el dueño (*"no es nada óptimo ni portable ni sostenible"*, *"una única verdad para proyectar sombras,
+y es la que tienen actualmente los bloques del juego"*). Lo que hay aquí **no es una segunda verdad**: los
+números salen de `mcComputeLight`; lo único propio es *dónde* se dibujan. Y el **cuerpo** del agente
+**tampoco** vive en `mc.grid`: `mc.grid` es de enteros y el cuerpo saltaría de celda en celda (*"se espera
+que el movimiento sea suave, no a trompicones"* / *"si un agente se puede mover suave la sombra también"*).
 
-**Verificado headless**: `test_sombra_real.js` (23 tests) monta un puerto literal de `mcComputeLight` y del
-muestreo por cara de `mcMeshChunk` y comprueba, entre otras cosas, que la luz que produce un agente es
-**bit-idéntica** a la de poner bloques de verdad en su sitio.
+**Verificado headless**: `test_sombra_real.js` (26 tests) monta un puerto literal de `mcComputeLight`, del
+muestreo por cara de `mcMeshChunk` y un stub de WebGL que captura las VBOs y las `uView` reales. Comprueba,
+entre otras cosas, que la sombra es **celda a celda idéntica** a poner bloques de verdad en su sitio, que
+`mc.grid` y `mc.light` quedan **bit a bit** como estaban, que no se re-malla ni un chunk, y que al cruzar de
+celda **no hay tirón**.
