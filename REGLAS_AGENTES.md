@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.35) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.36) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -205,3 +205,71 @@ Comportamiento **conocido y engañoso**, documentado aquí porque despista al le
   ella depende la deduplicación por `findExistingNoteInRadius`. Solo cambia la línea `Causa:`.
 - **Sigue siendo cierto** que la nota no prueba que hubiera un bucle: prueba que terminó una maniobra de
   escape. Ahora al menos dice cuál.
+
+## 18. Coste del tick: por qué el Mundo perdía frames con el mapa cubierto 🔥
+
+**Síntoma** (v4.36): tras cubrir la serpiente todo el mapa de rastro, el Mundo 3D caía a pocos fps y
+llegaba a congelarse ~27 s de golpe. Ni `game.notes()`, ni `game.stuck()`, ni `game.heatmap()` lo
+explicaban: **describen lo que el agente DECIDE, no lo que CUESTA**. La pista estaba en las marcas de
+tiempo de la traza (`game.traceNote`): el intervalo entre ticks se degradaba 14 ms → 100 ms → 682 ms →
+**26 881 ms**, o sea que el hilo principal estaba saturado de JS, no de render.
+
+Dos rutas se disparaban precisamente **cuando ya no queda nada por visitar**, que es el estado en el que
+la intuición dice «el agente no sabe qué hacer»:
+
+1. **`findNextStepToNearestUnvisited` sin objetivo.** La BFS recorría el mapa entero (~8 800 nodos) y
+   devolvía `null`; se llamaba 1-2 veces por tick, para siempre. Dentro del bucle, por **cada vecino de
+   cada nodo**, invocaba `findExistingNoteInRadius(a, '', 1)`:
+   - `headerKey = ''` ⇒ `indexOf('') >= 0` es **siempre cierto**, así que devolvía la primera nota que
+     hubiera;
+   - escaneaba 3×3×3 = **27 `getNote`** (cada uno construyendo una clave `"x,y,z"`);
+   - y lo hacía alrededor de **`a.x/a.y/a.z` (el AGENTE), no de la celda candidata** ⇒ era invariante del
+     bucle y **ni siquiera vetaba lo que pretendía vetar**.
+
+   Medido: **944 136 llamadas a `getNote` y 116 ms de reloj por BFS**.
+
+2. **`saltoTactico` sin destino.** Hace un barrido doble de 96×96. El cooldown de 3 s (`lastJumpAt`) solo
+   se armaba **en el camino de éxito**, así que con el mapa cubierto (`bestCell === null`) no se armaba
+   nunca y el barrido infructuoso se repetía en cada llamada.
+
+**Arreglo (todo en la librería, `app.js` intacto — §0):**
+- El veto por nota se resuelve con un índice de columnas construido **una vez por BFS** desde `mc.notes`
+  (son unas pocas entradas) y se consulta **sobre la celda candidata**, que es lo que se pretendía.
+- Cola BFS con puntero (`qi`) en vez de `shift()`, que es O(n).
+- **Memo `v.bfsSinFrontera`**: si una BFS completa **sin exclusiones** no encuentra frontera, el resultado
+  no puede cambiar solo (`visited` únicamente crece). Se invalida por tamaño de `visited`, por
+  `v.bfsEpoca` (que incrementa `saltoTactico` al teletransportar, porque el salto **sí** puede llevar a
+  otra región conectada) y por rearme cada 600 ticks como red de seguridad.
+- `saltoTactico` arma `lastJumpFailAt` también al fallar.
+
+Medido en el escenario del usuario (mapa cubierto, 2 BFS + 1 salto por tick): **24,5 ms/tick → 0,2
+ms/tick**. El presupuesto de un frame a 60 fps es 16,7 ms.
+
+⚠️ **Cambio de comportamiento consciente**: el veto por nota (`callejon sin salida`, `foso trampa`,
+`visitas a la cima`) **antes no funcionaba** — miraba la celda equivocada. Ahora sí veta. Un agente puede
+por tanto descartar destinos que antes perseguía.
+
+## 19. Perfilador por fases (`game.perf()`) ⏱️
+
+Existe porque el caso de §18 no era diagnosticable con las herramientas de comportamiento. Mide **reloj
+real por fase del tick**:
+
+```js
+game.perf()        // tabla por fase + los peores ticks, ordenados
+game.perf(20)      // idem, con los 20 peores
+game.perf.reset()  // reinicia el muestreo
+```
+
+- **`ms/s`** = milisegundos de CPU por segundo de reloj. **1000 ms/s = un núcleo saturado**; es la
+  columna que delata una caída de frames.
+- **`% CPU`** por encima de ~30 en una fase ⇒ esa fase se está comiendo los frames.
+- **Peores ticks**: solo se guardan los que superan **30 ms** (los que se notan como tirón), con hora,
+  tick, agente y desglose por fase.
+- Si el coste de `tick` supera con mucho la suma de las fases medidas, el desglose lo dice
+  explícitamente (`sin instrumentar (N ms fuera de fases)`) — **la ausencia de dato también es dato**.
+
+Fases instrumentadas: `tick` (envuelve el tick entero), `bfs`, `saltoTactico`, `onTick` (el del snippet).
+Para añadir una fase nueva desde un snippet: `game.skills_medir('mi_fase', function(){ ... })`.
+
+⚠️ El perfilador mide con `performance.now()` en el hilo principal: **medir con DevTools cerrado**, igual
+que los fps (con DevTools abierto el coste se infla).
