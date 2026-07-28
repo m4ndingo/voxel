@@ -197,8 +197,11 @@ test('la caja sigue al cuerpo interpolado (renderX), no a la celda logica', () =
   assert(!mundo.mcCollides(20.0, 30, 20.5), 'la caja se ha quedado en la celda vieja');
 });
 
-test('no queda rastro del cuerpo de bloques ni del gemelo invisible', () => {
-  for (const resto of ['cuerpoBloques', 'ID_FANTASMA', 'mcComputeLight', 'dibujarSombras', 'game.skills.sombra'])
+test('no queda rastro del cuerpo de bloques, del gemelo invisible ni de sombras inventadas', () => {
+  // El cuerpo del agente NO vive en mc.grid (saltaba de celda en celda) y no hay pasada de sombras
+  // propia. Lo que si vive en mc.grid es el OCLUSOR de la seccion SOMBRA, que es otra cosa: no se ve,
+  // no se choca, y solo esta para que la sombra la calcule mcComputeLight (ver test_sombra_real.js).
+  for (const resto of ['cuerpoBloques', 'ID_FANTASMA', 'dibujarSombras', 'calcomania', 'createFramebuffer'])
     assert(!lib.code.includes(resto), 'queda "' + resto + '" en la libreria');
 });
 

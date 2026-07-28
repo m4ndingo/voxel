@@ -1,4 +1,4 @@
-# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.42) 📜🤖
+# Especificación Oficial de Reglas de Comportamiento de Agentes (v4.43) 📜🤖
 
 Este documento establece las especificaciones técnicas obligatorias y sacrosantas para todos los agentes del motor VoxelForge.
 
@@ -317,13 +317,13 @@ game.skills.liberarCuerpo(a);                                           // en on
 ⚠️ **Por qué NO se meten en `mc.structures`**, que ya se dibujan solas: **`mcSerialize()` las guarda en
 el JSON del mundo**. La nube quedaría **estampada para siempre** donde la pillara el autoguardado.
 
-⚠️ **Limitaciones de este cuerpo** (las dos se resuelven usando `skills.cuerpoBloques`, §20.2):
+⚠️ **Lo que este cuerpo NO trae por sí solo** (cada una tiene su sección):
 
-- La **colisión** sigue siendo el cubo 1×1×1 de `app.js` (`mcCollides` da un AABB fijo en
-  `[renderY+1, renderY+2)`): un cuerpo a escala 3 se ve grande y se choca pequeño. Arreglarlo aquí
-  exigiría `app.js` ⇒ habría que pedirlo (§0, paso 3).
-- **No proyecta sombra**: es una malla propia, no terreno, así que no tapa el cielo y `mcComputeLight`
-  ni se entera.
+- La **colisión** de serie sigue siendo el cubo 1×1×1 de `app.js` (`mcCollides` da un AABB fijo en
+  `[renderY+1, renderY+2)`): un cuerpo a escala 3 se ve grande y se choca pequeño. Se corrige con
+  **`skills.solido`** (§20.2).
+- La **sombra**: una malla propia no es terreno, así que no tapa el cielo y `mcComputeLight` ni se entera.
+  Se corrige con **`skills.sombra`** (§20.3), que va puesta sola en todos los agentes.
 
 **Precedente aplicado**: el mismo patrón que la cola de la serpiente — ampliar el cuerpo desde fuera del
 framework, sin que `app.js` se entere de qué es una nube.
@@ -393,25 +393,82 @@ Detalles que no son obvios:
 la malla — una estructura con huecos se choca como si fuera maciza. Afinarlo pediría muestrear
 `mcStructGeom` por celda (lo que hace `mcFineBoxHit` con las salas), y **eso sí tocaría `app.js`**.
 
-### 20.3 Los agentes NO proyectan sombra 🌑
+### 20.3 La sombra del agente es la del Mundo (`skills.sombra`) 🌑
 
-En el Mundo la **única** sombra es el skylight de `mcComputeLight`, y solo mira los bloques de `mc.grid`:
-una malla de agente no tapa el cielo, así que **no sombrea**. Esto se ha intentado dos veces y las dos se
-han descartado por decisión del dueño del proyecto:
+**En el Mundo hay una sola verdad para las sombras: el skylight de `mcComputeLight` (`app.js:4437`)** — y
+esa verdad **solo mira `mc.grid`**. Así que para que un agente proyecte *esa* sombra (y no una inventada) hay
+que darle **un bloque en `mc.grid` que tape el cielo**. Eso es lo que hace `skills.sombra`, desde
+`base-npc-skills.json`, sin tocar `app.js`: le pone al agente un **oclusor** con un id
+(`ID_SOMBRA = 65535`) que **no tiene entrada en `mc.palette`**.
 
-1. **Calcomanía** (quads negros con `SRC_ALPHA` y su propia pasada de render) — rechazada: *"no es nada
-   óptimo ni portable ni sostenible"*, *"una única verdad para proyectar sombras, y es la que tienen
-   actualmente los bloques del juego"*.
-2. **Cuerpo residente en `mc.grid`** (el agente *siendo* terreno, con o sin gemelo invisible) — rechazada:
-   `mc.grid` es de enteros, así que el cuerpo **salta de celda en celda** en vez de moverse suave, y
-   esconder el salto en un gemelo invisible es un **truco**. Lo que se quiere es *"que se comporte como los
-   agentes, sin trucos"*.
+| Propiedad | Cómo | Por qué |
+| --- | --- | --- |
+| **Invisible** | `mcMeshChunk` hace `var rects=mc.palette[id]; if(!rects) continue;` (`app.js:4414`) | sin rects no genera ni una cara; lo que se ve sigue siendo la malla suave del cuerpo |
+| **Intangible** | se envuelve `mcSolid` para que `ID_SOMBRA` no cuente como sólido | la colisión ya la lleva `skills.solido`; y sobre todo `mcMeshChunk` **pela la cara del vecino sólido** (4418) ⇒ sin esto salía un **agujero en el suelo** bajo cada agente |
+| **Opaco a la luz** | `mcComputeLight` **no usa `mcSolid`**: mira `g[i]===0` en crudo | cualquier id ≠ 0 tapa el cielo. Es lo único que se busca |
+| **No se guarda** | se envuelve `mcSerialize` para retirarlos mientras serializa | si no, el mundo guardaría `tex:undefined` por cada oclusor |
+| **No engaña a los scripts** | se envuelve `mcGetVoxel` para devolver `0` en un oclusor | `a.isMounted` lo tomaría por suelo del mundo y creería que no vas montado |
+| **No es suelo** | `mcSurfaceY` y `mcSurfaceNear` se ejecutan con los oclusores **retirados** de la rejilla | leen `mc.grid` en crudo: `mcSurfaceY` diría que el suelo está a 26 bajo una nube, y el oclusor de un agente dejaría la celda de al lado sin ser pisable para otro |
 
-Además el skylight **decepciona como sombra** aunque se consiga: medido portando `mcComputeLight` literal a
-node (mundo 96×40×96, suelo en y=14, `interiorDark=0.55`), una figura de lado 3 oscurece el suelo un
-**7.7 %**, de lado 24 un **38 %**, y **no depende de la altura** — decide la distancia *horizontal* al aire
-con cielo abierto. Es oclusión ambiental, no sombra. `app.js:4404` ya lo dice.
+Retirar los oclusores para llamar al original (en vez de reescribir su lógica, que sería una segunda verdad
+que se queda vieja) es **el mismo recurso** que usa `skills.solido` al esconderle `mc.agents` al `mcCollides`
+original (§20.2).
 
-**Prohibido**: calcomanías, quads negros, shadow maps, FBOs, cuerpos en `mc.grid` o cualquier pasada de
-render dedicada a sombras de agente. Si hace falta sombra de verdad, es un cambio **del motor para todos**
-y hay que pedirlo (§0, paso 3).
+**Solo se escribe la LOSA INFERIOR del cuerpo**, una capa de celdas, no el volumen. Medido con un puerto
+literal de `mcComputeLight`: la sombra en el suelo sale **idéntica** (0 celdas de luz distintas, probado con
+lados 1, 3, 9 y 30), porque la luz que llega debajo entra *de lado* y el techo la tapa igual sea de una capa
+o de treinta. Cuesta `escala` veces menos.
+
+**Qué cuesta** (medido, mundo 96×40×96): mover el oclusor una celda obliga a **recalcular la luz de todo el
+mundo** — 7.6 ms de `mcComputeLight` + 1.2 ms de diff + re-mallar los chunks cuya luz cambió (4 de 36 con
+una nube de lado 9). En `app.js` no hay recálculo parcial y **no se va a escribir uno: sería una segunda
+verdad**. Por eso solo se recalcula **cuando el oclusor cambia de celda** y como mucho cada `game.sombraMs`
+(250 ms por defecto). Un agente parado cuesta **0**. En vez del 3×3 a ojo de `mcRemeshAround` se **compara
+`mc.light` antes y después** y se re-mallan solo los chunks que cambiaron: la sombra de una nube alta cae
+*lejos* de la nube y un 3×3 no la cogería.
+
+**Qué se ve** (`interiorDark=0.55`, oscurecimiento en el centro de la sombra):
+
+| lado | 1 | 3 | 9 | 30 |
+| --- | --- | --- | --- | --- |
+| oscurece | 3.9 % | 7.7 % | 18.1 % | 45 % (negro del todo) |
+
+y **no depende de la altura**: el skylight es *oclusión ambiental* — decide la distancia **horizontal** al
+aire con cielo abierto. `app.js:4404` ya lo avisa: *"una figura flotante apenas ensombrece el suelo"*.
+
+⚠️ **Un agente que anda por el suelo no enseña sombra.** Solo oscurece la celda que su propio cuerpo ocupa
+(la de debajo, que su cubo tapa entera, al 45 %) y a los vecinos no les quita **nada**, porque a ras de suelo
+la luz les entra directa del cielo. **No es un fallo de la implementación: es lo que da la única verdad de
+sombras del Mundo.** La sombra se ve cuando el agente **vuela** y es **ancho**.
+
+```js
+game.sombras = false;            // apaga la sombra de agente en todo el mundo
+game.sombraMs = 500;             // recálculo más espaciado: menos tirón, sombra más a saltos
+game.skills.sombra(a, false);    // este agente concreto no proyecta sombra
+game.defineAgent({ ..., sombra:false })
+```
+
+**Va puesta sola**: la librería engancha `game.defineAgent`, así que **todos los agentes** proyectan sombra
+sin pedir nada en su snippet.
+
+⚠️ **Limitaciones conocidas**:
+
+- **Las estructuras estampadas no se re-oscurecen**: hornean su shade al construir la instancia
+  (`mcBuildStructMesh`), y aquí **no** se llama a `mcRebakeStructsNear` porque reconstruye mallas enteras y
+  es inasumible varias veces por segundo. La sombra de un agente cae sobre el **terreno**, no sobre una sala.
+- El oclusor **solo ocupa aire**: nunca pisa ni borra un bloque del usuario. Un cuerpo metido en el terreno
+  no añade sombra (el terreno ya tapaba el cielo por su cuenta).
+- Las vistas de depuración que leen `mc.grid` en crudo (rayos-X, contadores de voxels) **sí ven** el oclusor.
+- Si se **edita** esta sección de la librería hay que **recargar la página (F5)**: los ganchos se instalan
+  una sola vez y el estado se comparte en `game.__sombra` para no dejar oclusores huérfanos en la rejilla.
+
+**Sigue prohibido**: calcomanías, quads negros, shadow maps, FBOs o cualquier pasada de render dedicada a
+sombras de agente. Rechazado en su día por el dueño (*"no es nada óptimo ni portable ni sostenible"*, *"una
+única verdad para proyectar sombras, y es la que tienen actualmente los bloques del juego"*). Y el **cuerpo**
+del agente **tampoco** vive en `mc.grid`: `mc.grid` es de enteros y el cuerpo saltaría de celda en celda
+(*"se espera que el movimiento sea suave, no a trompicones"*). El que vive en la rejilla es **solo el
+oclusor**, que no se ve ni se choca — el cuerpo sigue siendo la malla interpolada del framework.
+
+**Verificado headless**: `test_sombra_real.js` (23 tests) monta un puerto literal de `mcComputeLight` y del
+muestreo por cara de `mcMeshChunk` y comprueba, entre otras cosas, que la luz que produce un agente es
+**bit-idéntica** a la de poner bloques de verdad en su sitio.
