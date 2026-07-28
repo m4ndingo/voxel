@@ -337,6 +337,51 @@ contra el fundido.
 - Cruzar repetidamente entre salas (incl. Herrería, que carga lenta) nunca deja pantalla negra: el
   entorno nuevo aparece sin necesidad de clic. Reproducir forzando una carga lenta.
 
+### ✅ BUG-MCA1 · Un bloque translúcido se ve MACIZO en el Mundo y no sale su fantasma de estructura — ✅ done (2026-07-28)
+**Resuelto**: `mcStructCells` ya no clasifica como `blockLike` un 16³ macizo **con alpha**: se estampa como
+**estructura fina**, que sí mezcla de verdad (`aAlpha`/`vAlpha` + pasada con `BLEND`). Además rayos-X gana una
+**línea de TIPO** (`bloque · textura` / `estructura · guardada`) entre las coordenadas y el material, porque a
+simple vista un 16³ macizo se ve idéntico colocado de las dos formas.
+Reportado 2026-07-28 con `assets/cubo-trans.vox.json` y `hab:cubo-trans` (4096 voxels, todos `#4ab8d924`, alpha 0x24 ≈ 14 %).
+
+**Síntoma**
+Un asset guardado **con alpha** se ve sólido al colocarlo en el mapa. Guardado además **como estructura**, al
+seleccionarlo del selector y mantener el clic derecho **no aparece el fantasma**: se comporta como si se hubiera
+elegido la textura. Rayos-X muestra la clave del material pero **no dice si esa celda es bloque o estructura**.
+
+**Causa raíz** (dos, encadenadas)
+1. `mcStructCells` decidía `blockLike` solo por geometría: `w,h,d ≤ 1 && nvox ≥ 16³`. Un cubo macizo de 16³ es
+   `blockLike` **lleve alpha o no**, así que `mcAssignSlot` ponía `mc.slotStruct[slot]=null` ⇒ ruta de terreno,
+   sin `mc.preview` (el fantasma solo existe con ranura de estructura) — de ahí «como si eligiera la textura».
+   Las dos entradas de la galería (`type:'textura'` y `type:'bloque'`) son geométricamente idénticas: la regla
+   no podía distinguirlas.
+2. La ruta de terreno **no puede** representar alpha: `buildTexFaces` hornea el atlas con `d[o+3]=255`
+   (y `parseInt(hex.slice(1,7),16)`, solo `#rrggbb`) ⇒ `mc.atlasHasAlpha=false` ⇒ `mcRender` elige `MC_FS_OPAQUE`.
+   Aunque se conservara el alpha, el shader del terreno solo hace **recorte binario** (`if(t.a<0.5) discard`) y
+   nunca mezcla: con alpha 0.14 el bloque **desaparecería**, no se volvería translúcido.
+
+**Arreglo**
+- `mcStructCells`: detecta `translucido` en el barrido de voxeles (filtro por longitud ≥ 9 antes de llamar a
+  `colorAlpha`, para no pagarlo 2,5 M de veces en la taberna) y `blockLike = … && !translucido`. Se expone en
+  el `rec` por si hace falta más adelante.
+- `mcUpdateXrayLabels`: etiqueta de **tres** líneas; nueva `mcMatKind(key,isStruct)` memoizada (invalidada al
+  recargar el catálogo) → `bloque|estructura · badge de la galería`.
+
+**Verificación**
+- Los 6 bloques básicos (hierba, tierra, roca, arena…) y `agua` (4096 vox opacos) **siguen** siendo bloque de
+  terreno; solo cambian de lado `assets/cubo-trans.vox.json` y `hab:cubo-trans`. Comprobado con arnés sobre los
+  ficheros reales.
+- En el Mundo: elegir el cubo translúcido ⇒ mantener clic derecho **muestra el fantasma**; al soltar se estampa
+  y **se ve a través**. Rayos-X (X) distingue `bloque · …` de `estructura · …`.
+
+**Limitación conocida (no arreglada)**
+El **terreno** sigue sin translucidez real: atlas sin alpha + shader de recorte binario. Darle vidrio de verdad
+al terreno exige conservar el alpha en `buildTexFaces`, marcar bloques translúcidos en la paleta, partir el VBO
+de cada chunk en opaco+alpha (y dejar de pelar caras contra vecinos translúcidos) y una segunda pasada ordenada
+de atrás hacia delante. Toca el camino caliente del render ⇒ pendiente de decisión.
+
+---
+
 ---
 
 ## Backlog Mundo (REQ-MC) · Olas B y C — pendiente

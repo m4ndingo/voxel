@@ -509,6 +509,8 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
   background:rgba(150,10,10,.72); text-shadow:0 1px 1px rgba(0,0,0,.8)}
 .mc-xlbl-struct{background:rgba(190,90,10,.74)}   /* estructura fina: mismo naranja que su caja de rayos-X */
 .mc-xlbl-mat{font-weight:400; font-size:9px; opacity:.9; color:#ffe08a}   /* nombre de material, usable tal cual en tntMat/setVoxel */
+.mc-xlbl-tipo{font-weight:400; font-size:9px; opacity:.8; color:#cfe9ff}   /* bloque de terreno vs estructura fina + origen en la galería */
+.mc-xlbl-tipo:empty{display:none}
 .mc-xlbl-mat:empty{display:none}
 .mc-xlbl[hidden]{display:none}
 /* ===== Gestor de snippets · editor estilo Minecraft (panel de piedra, bordes biselados, código monoespaciado) ===== */

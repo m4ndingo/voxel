@@ -3949,12 +3949,16 @@ async function mcStructCells(srcKey){
   if(mc.structs[srcKey] && mc.structs[srcKey].cells) return mc.structs[srcKey];
   const doc=await getRoomData(srcKey);
   const src=doc.voxels||{};
-  const seen=new Set(); const cells=[]; let w=0,h=0,d=0, nvox=0;
+  const seen=new Set(); const cells=[]; let w=0,h=0,d=0, nvox=0, translucido=false;
   for(const k in src){
     const p=k.split(','), ax=+p[0], ay=+p[1], az=+p[2];
     if(!Number.isFinite(ax)||!Number.isFinite(ay)||!Number.isFinite(az)) continue;
-    if(src[k]==null) continue;
+    const v=src[k];
+    if(v==null) continue;
     nvox++;
+    // Solo '#rrggbbaa' (9 chars) o '*#rrggbbaa' (10) pueden llevar alpha; el filtro por longitud evita llamar a
+    // colorAlpha 2,5 M de veces en una sala grande (taberna) para nada.
+    if(!translucido && typeof v==='string' && v.length>=9 && colorAlpha(v)<1) translucido=true;
     const cx=Math.floor(ax/MC_TILE), cy=Math.floor(az/MC_TILE), cz=Math.floor(ay/MC_TILE);
     const ck=cx+','+cy+','+cz;
     if(!seen.has(ck)){ seen.add(ck); cells.push({cx,cy,cz}); }
@@ -3963,8 +3967,11 @@ async function mcStructCells(srcKey){
   // blockLike = bloque de terreno macizo (un 16³ COMPLETO, p.ej. hierba/roca = 4096 voxels). Un objeto/prop con
   // forma o huecos que cabe en <1 bloque (llama = 191 vox) NO es blockLike → se estampa como ESTRUCTURA FINA
   // (voxels reales, como el editor 3D) en vez de proyectarse en las 6 caras de un cubo (silueta con huecos → cielo).
-  const blockLike = (w<=1 && h<=1 && d<=1 && nvox >= MC_TILE*MC_TILE*MC_TILE);
-  const rec=Object.assign(mc.structs[srcKey]||{}, {cells, w,h,d, count:cells.length, nvox, blockLike});
+  // …y OPACO: el atlas del terreno se hornea a RGB sin alpha (buildTexFaces fija d[o+3]=255) y el shader del
+  // terreno solo hace recorte binario, así que un cubo translúcido colocado como bloque saldría MACIZO. Con alpha
+  // se estampa como ESTRUCTURA FINA, que sí lo mezcla de verdad (aAlpha/vAlpha + pasada con BLEND).
+  const blockLike = (w<=1 && h<=1 && d<=1 && nvox >= MC_TILE*MC_TILE*MC_TILE && !translucido);
+  const rec=Object.assign(mc.structs[srcKey]||{}, {cells, w,h,d, count:cells.length, nvox, translucido, blockLike});
   mc.structs[srcKey]=rec; return rec;
 }
 // Ancla la estructura por el CENTRO de su base (no por la esquina): convierte la celda apuntada por la mira
@@ -5099,6 +5106,19 @@ function mcMatName(id){
   }
   return mcXnameCache.map[id] || String(mc.blockKey[id]||'').replace(/^asset:assets\//,'').replace(/^hab:/,'').replace(/\.vox\.json$/,'') || ('#'+id);
 }
+// Tipo de material para la etiqueta de rayos-X: CÓMO se coloca (bloque de terreno vs estructura fina) y de DÓNDE
+// sale (badge de la galería: bloque / textura / guardada). Memoizado porque las etiquetas se rehacen cada frame;
+// sin catálogo cargado (aún no se abrió el selector) se deduce del prefijo de la clave.
+const mcKindCache=new Map();
+function mcMatKind(key, isStruct){
+  const ck=(isStruct?'s|':'b|')+key; let t=mcKindCache.get(ck);
+  if(t===undefined){
+    const c=mc.catalog && mc.catalog.find(o=>o.key===key);
+    t=(isStruct?'estructura':'bloque')+' · '+(c ? c.badge : (String(key).slice(0,4)==='hab:' ? 'guardada' : 'asset'));
+    mcKindCache.set(ck,t);
+  }
+  return t;
+}
 function mcUpdateXrayLabels(){
   const box=$('#mc-xray-labels'); if(!box) return;
   if(!mc.active || !mc.xray || !mc.grid){ if(!box.hidden) box.hidden=true; return; }
@@ -5107,9 +5127,11 @@ function mcUpdateXrayLabels(){
   const pv=mat4.mul(mcProjMatrix().m, mcViewMatrix());
   const p=mc.pos, R=3, cx=Math.floor(p[0]), cy=Math.floor(p[1]), cz=Math.floor(p[2]);
   let n=0;
-  // Coloca (o reutiliza del pool) una etiqueta de dos líneas (coords / material) en el punto de mundo (wx,wy,wz).
+  // Coloca (o reutiliza del pool) una etiqueta de tres líneas (coords / tipo / material) en el punto de mundo
+  // (wx,wy,wz). La línea de TIPO dice si esa celda es un bloque de terreno o una estructura fina: a simple vista
+  // un 16³ macizo se ve igual de las dos formas, y solo la estructura conserva el alpha.
   // isStruct la tiñe como estructura (naranja, igual que su caja de rayos-X). Devuelve true si quedó en pantalla.
-  function emit(wx,wy,wz, coText, matText, isStruct){
+  function emit(wx,wy,wz, coText, tipoText, matText, isStruct){
     const cw=pv[3]*wx+pv[7]*wy+pv[11]*wz+pv[15];
     if(cw<=0.01) return false;                                               // detrás de la cámara
     const ndx=(pv[0]*wx+pv[4]*wy+pv[8]*wz+pv[12])/cw, ndy=(pv[1]*wx+pv[5]*wy+pv[9]*wz+pv[13])/cw;
@@ -5118,10 +5140,12 @@ function mcUpdateXrayLabels(){
     let el=mcXlbls[n];
     if(!el){ el=document.createElement('div'); el.className='mc-xlbl';
       el._c=document.createElement('span'); el._c.className='mc-xlbl-xyz';   // línea 1: coordenadas
-      el._m=document.createElement('span'); el._m.className='mc-xlbl-mat';   // línea 2: nombre de material
-      el.appendChild(el._c); el.appendChild(el._m); box.appendChild(el); mcXlbls[n]=el; }
+      el._t=document.createElement('span'); el._t.className='mc-xlbl-tipo';  // línea 2: tipo (bloque/estructura · origen)
+      el._m=document.createElement('span'); el._m.className='mc-xlbl-mat';   // línea 3: nombre de material
+      el.appendChild(el._c); el.appendChild(el._t); el.appendChild(el._m); box.appendChild(el); mcXlbls[n]=el; }
     el.style.transform='translate('+sx.toFixed(1)+'px,'+sy.toFixed(1)+'px) translate(-50%,-50%)';
     if(el._c.textContent!==coText) el._c.textContent=coText;
+    if(el._t.textContent!==tipoText) el._t.textContent=tipoText;
     if(el._m.textContent!==matText) el._m.textContent=matText;
     el.classList.toggle('mc-xlbl-struct', !!isStruct);                       // el pool se comparte → refresca el marcador cada vez
     if(el.hidden) el.hidden=false; n++;
@@ -5129,7 +5153,8 @@ function mcUpdateXrayLabels(){
   }
   // Bloques de rejilla del entorno.
   for(let x=cx-R;x<=cx+R;x++) for(let y=cy-1;y<=cy+3;y++) for(let z=cz-R;z<=cz+R;z++){
-    if(mcInside(x,y,z) && mc.grid[mcIdx(x,y,z)]) emit(x+0.5,y+0.5,z+0.5, x+','+y+','+z, mcMatName(mc.grid[mcIdx(x,y,z)]), false);
+    if(mcInside(x,y,z) && mc.grid[mcIdx(x,y,z)]){ const id=mc.grid[mcIdx(x,y,z)];
+      emit(x+0.5,y+0.5,z+0.5, x+','+y+','+z, mcMatKind(mc.blockKey[id], false), mcMatName(id), false); }
   }
   // Estructuras finas cercanas: una etiqueta por instancia en el centro de su AABB (rayos-X ya dibuja su caja naranja).
   // La coord es su celda de origen y el «material» su clave cruda (hab:cristal / asset:…) — igual que la muestran los bloques.
@@ -5137,7 +5162,7 @@ function mcUpdateXrayLabels(){
     const a=s.aabb; if(!a) continue;
     const mxc=(a[0]+a[3])/2, myc=(a[1]+a[4])/2, mzc=(a[2]+a[5])/2;
     if(Math.abs(mxc-p[0])>R+8 || Math.abs(mzc-p[2])>R+8) continue;           // solo el entorno (como los bloques)
-    emit(mxc, myc, mzc, s.ox+','+s.oy+','+s.oz, String(s.key), true);
+    emit(mxc, myc, mzc, s.ox+','+s.oy+','+s.oz, mcMatKind(s.key, true), String(s.key), true);
   }
   for(let i=n;i<mcXlbls.length;i++) if(!mcXlbls[i].hidden) mcXlbls[i].hidden=true;   // sobrantes ocultos
 }
@@ -5625,7 +5650,8 @@ async function mcBuildCatalog(){
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
     idx.filter(a=>a.type==='bloque'||a.type==='textura').forEach(a=>cat.push({key:'asset:'+a.file, name:a.name, icon:a.icon||(a.type==='textura'?'🎨':'🏠'), badge:a.type})); }catch(e){}
   try{ (await apiHabitantes()).filter(h=>h.type==='bloque'||h.type==='textura').forEach(h=>cat.push({key:'hab:'+h.id, name:h.name, icon:h.icon||(h.type==='textura'?'🎨':'🏠'), badge:'guardada'})); }catch(e){}
-  mc.catalog=cat; return cat;
+  mc.catalog=cat; mcKindCache.clear();   // el badge de cada clave alimenta la etiqueta de rayos-X (mcMatKind)
+  return cat;
 }
 async function mcOpenPicker(slot){
   mc.pickSlot=slot;
