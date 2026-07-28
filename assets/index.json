@@ -278,5 +278,15 @@
       "z": 16
     },
     "file": "assets/tejado.vox.json"
+  },
+  {
+    "id": "hormig-n-verde",
+    "name": "Hormigón Verde",
+    "role": "Bloque · hormigón verde (green concrete)",
+    "icon": "🟢",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/hormig-n-verde.vox.json"
   }
 ]
