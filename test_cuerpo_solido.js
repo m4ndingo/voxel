@@ -197,13 +197,18 @@ test('la caja sigue al cuerpo interpolado (renderX), no a la celda logica', () =
   assert(!mundo.mcCollides(20.0, 30, 20.5), 'la caja se ha quedado en la celda vieja');
 });
 
-test('no queda rastro del cuerpo de bloques, del gemelo invisible ni de sombras inventadas', () => {
-  // El cuerpo del agente NO vive en mc.grid (saltaba de celda en celda). La seccion SOMBRA si tiene
-  // pasada de dibujo propia, pero lo que dibuja no se lo inventa: son los niveles que da
-  // mcComputeLight (ver test_sombra_real.js). Lo prohibido es la sombra a ojo o un shadow map aparte.
-  for (const resto of ['cuerpoBloques', 'ID_FANTASMA', 'calcomania', 'createFramebuffer', 'shadowMap'])
+test('no queda rastro del cuerpo de bloques, del gemelo invisible ni de la estampa de sombra', () => {
+  // El cuerpo del agente NO vive en mc.grid (saltaba de celda en celda). Y la sombra ya no se dibuja
+  // aqui: la hace el motor con un mapa de sombra (app.js, mcRenderShadow, ver test_shadow_map.js), asi
+  // que el cuerpo proyecta por el mero hecho de dibujarse. La libreria no debe volver a fabricar una.
+  for (const resto of ['cuerpoBloques', 'ID_FANTASMA', 'calcomania', 'ID_SOMBRA', 'medirCampo',
+                       'rehacerEstampa', 'dibujarSombras', 'createFramebuffer', 'shadowMap'])
     assert(!lib.code.includes(resto), 'queda "' + resto + '" en la libreria');
-  assert(lib.code.includes('mcComputeLight()'), 'la sombra tiene que salir de mcComputeLight');
+  // El pase propio de los cuerpos de ESTRUCTURA si es legitimo (dibuja la malla del agente). Lo que no
+  // puede volver es una pasada que MEZCLE sombra a mano: ese blendFuncSeparate era de la estampa.
+  assert(!/gl\.blendFuncSeparate/.test(lib.code), 'la libreria ha vuelto a mezclar sombra por su cuenta');
+  assert(lib.code.includes('mc.sunExtra'),
+         'los cuerpos de estructura tienen que engancharse al mapa de sombra o no proyectan');
 });
 
 console.log('\n' + ok + ' ok, ' + fallos + ' fallos');

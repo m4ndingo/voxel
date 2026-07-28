@@ -5,3 +5,9 @@ data/habitantes/
 data/habitantes_trash/
 data/worlds/
 *.log
+
+# Playwright: solo lo usa test_navegador.js (abre el Mundo en un Chromium de verdad para compilar el GLSL).
+# Se instala a mano: npm i -D playwright@1.47.2 && npx playwright install chromium   (la 1.48+ pide Node 20).
+node_modules/
+package.json
+package-lock.json

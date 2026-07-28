@@ -322,8 +322,9 @@ el JSON del mundo**. La nube quedaría **estampada para siempre** donde la pilla
 - La **colisión** de serie sigue siendo el cubo 1×1×1 de `app.js` (`mcCollides` da un AABB fijo en
   `[renderY+1, renderY+2)`): un cuerpo a escala 3 se ve grande y se choca pequeño. Se corrige con
   **`skills.solido`** (§20.2).
-- La **sombra**: una malla propia no es terreno, así que no tapa el cielo y `mcComputeLight` ni se entera.
-  Se corrige con **`skills.sombra`** (§20.3), que va puesta sola en todos los agentes.
+- La **sombra** la hace el motor y va sola (§20.3): la pasada del sol dibuja las mismas VBO que se ven, así
+  que el cuerpo proyecta por el mero hecho de dibujarse. Un cuerpo de **estructura** es la excepción —lo
+  dibuja esta librería con matriz propia—, y por eso se registra en `mc.sunExtra`.
 
 **Precedente aplicado**: el mismo patrón que la cola de la serpiente — ampliar el cuerpo desde fuera del
 framework, sin que `app.js` se entere de qué es una nube.
@@ -393,115 +394,137 @@ Detalles que no son obvios:
 la malla — una estructura con huecos se choca como si fuera maciza. Afinarlo pediría muestrear
 `mcStructGeom` por celda (lo que hace `mcFineBoxHit` con las salas), y **eso sí tocaría `app.js`**.
 
-### 20.3 La sombra del agente es la del Mundo (`skills.sombra`) 🌑
+### 20.3 La sombra del agente la hace el motor (mapa de sombra) 🌑
 
-**En el Mundo hay una sola verdad para las sombras: el skylight de `mcComputeLight` (`app.js:4437`)** — y
-esa verdad **solo mira `mc.grid`**, que es de **enteros**. Una sombra que *viva* en la rejilla va por fuerza
-a trompicones, celda a celda.
+**El agente no tiene sombra propia. Se dibuja, y por eso proyecta.** Esta sección ya no describe código de la
+librería: describe una capacidad de `app.js` y **la única línea** que hace falta aquí para engancharse.
 
-La salida **no** es deslizar la sombra por decimales. Eso se probó y sobre **relieve** es peor: el quad
-conserva la altura de la columna con la que se midió y, al correrse, acaba **flotando sobre un agujero** o
-**hundido dentro del bloque de al lado**, donde el z-buffer se lo va comiendo (*"los bloques se sombrean de
-golpe y la sombra desaparece poco a poco para luego volver a sombrearse el bloque de golpe"*). La salida es
-separar **dónde cae** de **cuánto oscurece**:
+**Cómo funciona** (`mcRenderShadow` en `app.js`): antes de pintar el frame, se renderiza el mundo **desde el
+sol** —proyección ortográfica vertical— a una textura, y cada téxel guarda **la altura de la superficie más
+alta** de esa columna. Al sombrear, cada fragmento mira su téxel y pregunta si hay algo por encima. Es el
+algoritmo estándar (*shadow map*), el mismo que te da `three.js` con `light.castShadow = true`, escrito a
+mano en ~150 líneas de WebGL porque el Mundo tiene su propio mallado por chunks y portarlo a una librería
+sería reescribir el render entero.
 
-1. **La geometría NO se mueve.** Un quad por **columna** de terreno, clavado en la cara superior **real** de
-   esa columna (`mcSurfaceY`): **trepa** al bloque alto y **baja** al fondo del agujero, igual que el shade
-   horneado. Nunca flota ni se hunde, así que basta con levantarlo `SOMBRA_EPS = 0.02` para el z-fighting.
-2. **Lo que se mueve es el ALPHA.** El campo de oscurecimiento se mide **una vez** con el cuerpo anclado a
-   celda entera y, al dibujar, se **muestrea bilinealmente** en el desplazamiento subcelda del cuerpo: medio
-   paso de la nube = medio alpha en la columna que entra y medio en la que sale. **Eso** es lo suave — y es
-   continuo también con cuerpos de lado **par**, que caen a medio camino entre dos columnas.
+Lo que importa para los agentes: **le entra la malla, no la rejilla**. La pasada del sol dibuja las **mismas
+VBO** que se dibujan en pantalla, así que terreno, estructuras estampadas y **cuerpos de agente** proyectan
+por igual, sin que ninguno tenga una línea de código de sombra. Y como es geometría real y no `mc.grid`, la
+sombra tiene **resolución de subcelda**: se desliza con el agente en vez de saltar de celda en celda.
 
-**Cuánto oscurece** lo dice `mcComputeLight` y nadie más: se mete la **losa inferior** del cuerpo en
-`mc.grid` como **oclusor** (`ID_SOMBRA = 65535`, sin entrada en `mc.palette`), se recalcula la luz, se restan
-los niveles contra los de antes y **se deshace todo dentro de la misma llamada**: al salir, `mc.grid` y
-`mc.light` están **bit a bit** como estaban. Nadie tiene que envolver `mcSolid`/`mcSurfaceY`/`mcSerialize` y
-**no se re-malla ni un chunk**. Por columna se guarda su **transmitancia** `interiorDark^(Δlv/MAX)` (1 =
-intacta), en la huella **más `SOMBRA_MARGEN = 2` celdas** de holgura.
+**Las seis caras salen solas.** La normal geométrica se saca de las derivadas de la posición de mundo
+(`dFdx`/`dFdy`; las caras son planas ⇒ exacta) y el mapa se muestrea **media celda hacia fuera**: el suelo
+pregunta por el aire de encima y una pared por el aire de su lado. Es la misma regla que sigue `mcMeshChunk`
+al mirar la celda vecina de cada cara. Por eso un cubo dentro de una sombra sale oscuro **por los cinco
+lados que se ven**, no solo por la tapa. De regalo, medio bloque de separación deja el **acné de sombra**
+fuera de discusión: sin `polygonOffset` y sin *bias* afinado a mano.
 
-**Por qué es la misma sombra y no una pintada a ojo** (el álgebra, para no tener que fiarse): el terreno ya
-está en pantalla con su color `lit0 = base·F.s·lut(lv0)` y su niebla, o sea `dst = lit0·(1−f) + sky·f`. El
-quad va por `mc.structProg` con `aColor=(0,0,0)` y `aEmit=0`, luego su fragmento es `mix(0,sky,f) = sky·f`
-con alpha `a`, y se mezcla con `SRC_ALPHA`/`ONE_MINUS_SRC_ALPHA`:
-
-```
-dst·(1−a) + sky·f·a = [lit0·(1−f) + sky·f]·(1−a) + sky·f·a = lit0·(1−a)·(1−f) + sky·f
-```
-
-que es **exactamente** lo que habría pintado `mcMeshChunk` con el oclusor puesto, porque
-`lut(lv1)/lut(lv0) = interiorDark^((lv0−lv1)/MAX) = 1−a`. **Mismo color y misma niebla, hasta el último bit.**
-
-⚠️ **OJO CON EL CANAL ALPHA — por aquí salió gris.** El lienzo GL se crea con los atributos por defecto
-(`alpha:true`, premultiplicado) y se compone sobre el fondo del modal, que es **cielo azul**
-(`.mc-modal{background:#8cc6ff}`, `style.css:445`). Con `blendFunc` normal la mezcla se aplica **también al
-alpha del framebuffer**: donde cae la sombra baja de 1 a `1−a+a²` y el navegador deja pasar ese azul por
-debajo. La sombra se veía como una **calcomanía gris azulada plana**, igual de gris sobre hierba, tierra o
-roca (*"la sombra de la nube sale gris, cuando ninguna otra sombra es gris"*). Por eso se dibuja con
-**`blendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ZERO, ONE)`**: se mezcla el color y **no se toca** el
-alpha del lienzo. Cualquier pasada nueva que mezcle sobre el terreno tiene el mismo problema.
-
-**Solo se mide la LOSA INFERIOR del cuerpo**, una capa de celdas, no el volumen. Medido con un puerto
-literal de `mcComputeLight`: la sombra en el suelo sale **idéntica** (0 celdas de luz distintas, probado con
-lados 1, 3, 9 y 30), porque la luz que llega debajo entra *de lado* y el techo la tapa igual sea de una capa
-o de treinta. Cuesta `escala` veces menos.
-
-**Qué cuesta** (medido, mundo 96×40×96): remedir el campo = **1 `mcComputeLight` (7.6 ms)** + un barrido de
-las columnas de la huella. **Cero remallado.** Solo se remide **al cambiar de celda** y con el freno de
-`game.sombraMs` (500 ms por defecto). Cada frame solo se **resuben los alphas** (1 float por vértice) y solo
-si el cuerpo se ha movido: un agente parado no cuesta ni eso. Si el agente se aleja **más de
-`SOMBRA_MARGEN`** celdas del campo medido, el freno **se salta** — si no, la sombra se quedaría sin columnas
-donde caer.
-
-**Lo que se ve** (`interiorDark=0.55`, que es lo que corre el dueño; con el 0.08 por defecto es mucho más
-negro):
-
-| lado del cuerpo | 1 | 3 | 9 | 30 |
-|---|---|---|---|---|
-| oscurecimiento | 3.9 % | 7.7 % | 18.1 % | 45 % |
-
-**No depende de la altura**: el skylight es *oclusión ambiental* — decide la distancia **horizontal** al
-aire con cielo abierto. `app.js:4404` ya lo avisa: *"una figura flotante apenas ensombrece el suelo"*.
-
-⚠️ **Un agente que anda por el suelo no enseña sombra.** Solo oscurece la celda que su propio cuerpo ocupa
-(la de debajo, que su cubo tapa entera, al 45 %) y a los vecinos no les quita **nada**, porque a ras de suelo
-la luz les entra directa del cielo. **No es un fallo de la implementación: es lo que da la única verdad de
-sombras del Mundo.** La sombra se ve cuando el agente **vuela** y es **ancho**.
+**Lo único que hay que hacer desde un snippet** es registrar la geometría que dibuje **él**, porque app.js no
+la conoce. Para eso está el gancho genérico `mc.sunExtra`, al que se le presta el dibujante ya configurado:
 
 ```js
-game.sombras = false;          // apaga la sombra de agente en todo el mundo
-game.sombraMs = 1000;          // cada cuánto se puede REMEDIR el campo (no la posición)
-game.skills.sombra(a, false);  // este agente concreto no proyecta sombra
-game.defineAgent({ ..., sombra:false })
+mc.sunExtra = function (dibuja) {          // dibuja(vbo, count, stride, matrizModelo)
+  dibuja(malla.colVbo, malla.colCount,  9*4, modelo);
+  dibuja(malla.texVbo, malla.texCount, 10*4, modelo);
+};
 ```
 
-**Va puesta sola**: la librería engancha `game.defineAgent`, así que **todos los agentes** proyectan sombra
-sin pedir nada en su snippet.
+La librería ya lo usa para los **cuerpos de estructura** (§20), que van con matriz de modelo propia y no
+están en ninguna lista de `app.js`. Los cuerpos de **bloque** no necesitan nada: viven en `a.vbo`, que la
+pasada del sol ya barre. Y todo lo que mueva geometría debe llamar a **`mcShadowDirty()`** — el mapa solo se
+rehace cuando algo cambió, así que un mundo quieto no cuesta nada.
+
+**Mandos** (consola F12, persistidos, sin re-mallar nada — son uniformes):
+
+```js
+game.sunShade  = 0.55;   // 1 = sin sombra de sol (y entonces ni se renderiza el mapa: coste cero); 0 = a negro
+game.shadowSize = 2048;  // lado del mapa en téxeles; cubre mundo+margen ⇒ 2048/(96+32) = 16 téxeles por bloque
+game.skills.sombra(a, false);   // ya no hace nada: si se dibuja, proyecta. Se conserva por compatibilidad
+```
 
 ⚠️ **Limitaciones conocidas**:
 
-- La estampa solo lleva **caras superiores de terreno**: la pared de un agujero no se oscurece por el lado.
-- **Las estructuras estampadas no reciben sombra**: no están en `mc.grid` y hornean su shade al construir la
-  instancia (`mcBuildStructMesh`). La sombra de un agente cae sobre el **terreno**, no sobre una sala.
-- El oclusor **solo ocupa aire**: nunca pisa ni borra un bloque del usuario. Un cuerpo metido en el terreno
-  no añade sombra (el terreno ya tapaba el cielo por su cuenta).
-- Una columna del campo guarda **una sola** cara, la de la superficie (`mcSurfaceY`): bajo un voladizo, la
-  sombra cae sobre el voladizo, no sobre las dos.
-- Si el usuario **edita bloques** bajo un agente parado, su sombra se queda vieja hasta que el agente se mueva.
-- Si se **edita** esta sección de la librería hay que **recargar la página (F5)**: los ganchos se instalan
-  una sola vez y el estado se comparte en `game.__sombra` para no dejar VBOs huérfanas.
+- **Sol vertical.** Un pilar apoyado en el suelo proyecta justo debajo de sí mismo, o sea que **no se le ve
+  sombra**. Se ve bajo voladizos, salas y cosas que vuelan. Un sol inclinado es cambiar la matriz de la
+  pasada y la consulta; el resto del diseño no se entera.
+- **Sombra dura, sin penumbra.** Un téxel está en sombra o no lo está. A 16 téxeles por bloque el borde es
+  limpio; para suavizarlo haría falta PCF (varias muestras) en `sunFactor`.
+- **El pase translúcido no proyecta**: un cristal no hace un agujero negro. Tampoco el fantasma de
+  colocación. El terreno con alpha-test (hojas) **sí** proyecta macizo.
+- El mapa **cubre el mundo entero más un margen** de `MC_SUN_MARGIN` bloques (16) por lado, así que la
+  resolución real baja si se agranda mucho el mundo (`game.shadowSize` lo compensa a costa de memoria:
+  2048² RGBA = 16 MB). El margen **no es cosmético**: un cuerpo que asoma por el borde del terreno cae
+  **fuera del volumen de la pasada del sol**, se recorta, y su parte de fuera sale **sin sombra debajo** —
+  justo lo que cantó el dueño. Por eso el mapa se indexa con **origen + tamaño** (`uSunOrg`/`uSunDim`, los
+  manda `mcSunFrustum` a los cuatro programas) y **no** con `mc.dim`: quien porte esa aritmética a otro sitio
+  (o a un test) tiene que portar **las dos**.
+- Sin `OES_standard_derivatives` (WebGL1 muy viejo) la sombra **se apaga sola**: `mc.deriv=false` ⇒ no se
+  define `SUN_DERIV` ⇒ `sunFactor` compila a `return 1.0`. El Mundo se ve como siempre, sin sombra de sol.
 
-**Sigue prohibido**: sombras **inventadas** — calcomanías pintadas a ojo, shadow maps, FBOs. Rechazado en su
-día por el dueño (*"no es nada óptimo ni portable ni sostenible"*, *"una única verdad para proyectar sombras,
-y es la que tienen actualmente los bloques del juego"*). Lo que hay aquí **no es una segunda verdad**: los
-números salen de `mcComputeLight`; lo único propio es *dónde* se dibujan. Y el **cuerpo** del agente
-**tampoco** vive en `mc.grid`: `mc.grid` es de enteros y el cuerpo saltaría de celda en celda (*"se espera
-que el movimiento sea suave, no a trompicones"* / *"si un agente se puede mover suave la sombra también"*).
+⚠️ **Si el cuerpo se mueve, hay que caducar el mapa.** `mcAgentsSmoothUpdate` marca `mcShadowDirty()` cuando
+la posición de render de un agente cambia, y `mcAgentMesh` se salta el trabajo si los vértices van a salir
+idénticos (un agente quieto ya no rehace la sombra 60 veces por segundo). La regla es del motor: **da igual
+quién construya la malla**. La nube no pasa por `mcAgentMesh` —`skills.cuerpo` le hace una malla a escala
+propia—, y por eso se deslizaba con **la sombra clavada** donde estuvo, saltando solo al colocar un bloque
+(que sí marcaba el mapa). Si algún día se dibuja geometría movida por otro sitio, mismo deber: avisar.
 
-**Verificado headless**: `test_sombra_real.js` (30 tests) monta un puerto literal de `mcComputeLight`, del
-muestreo por cara de `mcMeshChunk` y un stub de WebGL que captura las VBOs, los atributos y el estado de
-mezcla reales. Comprueba, entre otras cosas, que la sombra es **celda a celda idéntica** a poner bloques de
-verdad en su sitio, que `mc.grid` y `mc.light` quedan **bit a bit** como estaban, que no se re-malla ni un
-chunk, que el quad **trepa al pilar y baja al agujero** y **no se despega** al deslizarse por encima, que el
-alpha de una columna **no da tirones** al cruzarla el cuerpo, y que la pasada **no toca el canal alpha** del
-lienzo.
+Y el reverso del mismo error: un cuerpo que **nace y se queda quieto** tampoco entraba en el mapa (nadie lo
+marcaba nunca) ⇒ **no proyectaba nada**. Por eso la firma barata de `mcRenderShadow` cubre `mc.structures`
+**y `mc.agents`** (cuenta de vértices + posición de render): aparecer también es un cambio.
+
+ℹ️ Con el sol **vertical**, la **cara de abajo** de un cuerpo flotante sale **oscura entera**. No es un fallo:
+esa cara no recibe sol. Lo que sí era un fallo era verla con un **cuadrado oscuro más pequeño** dentro —eso
+era el mapa caducado, la huella de la nube donde ya no estaba.
+
+⚠️ **`dFdx`/`dFdy` no están donde uno cree** (esto costó una pantalla en negro):
+
+| contexto | qué hace falta |
+|---|---|
+| WebGL1 | `#extension GL_OES_standard_derivatives : enable`, **primera línea** del fuente |
+| WebGL2 + shader ESSL 1.00 | **no hay manera**: la extensión no existe para ESSL1 (`extension is not supported`) y las derivadas no son núcleo hasta ESSL 3.00 |
+| WebGL2 + shader ESSL 3.00 | núcleo, nada que pedir |
+
+Como el contexto se pide `webgl2` con caída a `webgl`, los shaders se escriben **una sola vez en ESSL 1.00** y
+`mcGLSL(src, esVS)` los **sube a `#version 300 es`** cuando toca (`attribute`→`in`, `varying`→`in`/`out`,
+`texture2D`→`texture`, `gl_FragColor`→ un `out` declarado). **Todo** programa nuevo tiene que pasar por
+`mcVS()`/`mcFS()`: mezclar un vertex ESSL1 con un fragment ESSL3 no linka.
+
+**Esto sustituye a la estampa anterior**, y con ella se fueron sus dos fallos: las **esquinas sin sombrear**
+(era el alpha desvaneciéndose en el borde del quad, más el `SOMBRA_EPS` desplazándolo en pantalla) y las
+**zonas más claras del suelo junto a un bloque** (era el muestreo bilineal promediando celdas **sólidas**,
+que no tenían dato). Los dos eran artefactos de la maquinaria, no de la sombra: existían solo porque el
+agente no está en `mc.grid` y había que fabricarle una sombra aparte. Se borraron `medirCampo`,
+`muestrearCampo`, `rehacerEstampa`, `actualizarAlfas` y `dibujarSombras` (~420 líneas), el oclusor efímero
+`ID_SOMBRA` y su `mcComputeLight` relanzado, y el `mcSunTop`/`mcSunLit` por columna del terreno: **un solo
+sistema**.
+
+⚠️ **Lo que sí sigue prohibido en la librería**: fabricarse una segunda sombra. `test_cuerpo_solido.js`
+rechaza `medirCampo`/`rehacerEstampa`/`dibujarSombras`/`ID_SOMBRA`/`calcomania`/`gl.blendFuncSeparate` y
+exige que los cuerpos de estructura se enganchen por `mc.sunExtra`.
+
+**No confundir con `mcComputeLight`**, que sigue existiendo y es **otra cosa**: oclusión ambiental. Difunde
+la luz del cielo por el aire perdiendo un nivel por vecino, así que mide la **distancia horizontal** al cielo
+abierto — por eso un pilar apoyado en el suelo no oscurece **nada** a su alrededor y una losa flotante de
+1×1 deja la celda de debajo a luz 14 de 15 (*"si la luz viene de arriba y hay un objeto en medio, cómo puede
+estar iluminado lo de abajo"* — tenía razón: eso no era una sombra). Los dos efectos **se multiplican**.
+
+**Verificado headless**, en dos niveles:
+
+**`test_navegador.js` (12 tests) — el único que compila GLSL de verdad.** Abre el Mundo en un Chromium con
+Playwright (WebGL sobre SwiftShader): comprueba que **no hay ni un error de shader en consola**, que el mapa
+de sombra **contiene la geometría** (pone una losa flotante y lee el téxel de su columna en el FBO: la altura
+guardada es la cara de arriba de la losa con < 0.05 de error), y que **en pantalla** el suelo bajo un techo
+sale **×0.55** — exactamente `sunShade`. Repite la carga **forzando WebGL1** (tapando `getContext('webgl2')`)
+para compilar también el camino ESSL 1.00. Escribe con `mcSetBlock`+`mcMeshChunk` a pelo y lo deshace, así
+que **no toca el mundo del disco**. Requiere `npm i -D playwright@1.47.2 && npx playwright install chromium`
+(la 1.48+ pide Node 20; aquí hay 18); los fps de SwiftShader **no valen para nada**.
+
+**`test_shadow_map.js` (20 tests)** no compila GLSL, así que
+comprueba las dos cosas que sí se pueden sin GPU: **(a) coherencia de los shaders** —que cada *varying* que usa un
+fragment shader lo escriba y asigne su vertex shader, que `vWorld` sea `aPos` y no la posición de vista, y
+que cada uniforme que se busca con `getUniformLocation` exista en el fuente— y **(b) el algoritmo**, con un
+puerto del mapa de altura y de `sunFactor` cuyas constantes (el desplazamiento de media celda, el margen
+contra el acné) se **leen del GLSL de `app.js`**, no se copian: cambiar el shader sin tocar el test se nota.
+Los escenarios son los fallos reales de las capturas — cubo bajo la nube oscuro en las cinco caras, cara
+entera con un único valor (nada de esquinas), anillo de suelo alrededor del bloque barrido medio téxel a
+medio téxel sin un solo punto claro, un bloque apoyado que no se sombrea a sí mismo, y el borde de la sombra
+siguiendo al oclusor cuando se mueve **0.37 de bloque**.
