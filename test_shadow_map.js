@@ -61,13 +61,17 @@ test('vWorld es la posicion de MUNDO, no la de vista', () => {
 });
 
 test('los uniformes que se buscan existen en el fuente', () => {
-  const enLib = ['uSunMap', 'uSunOrg', 'uSunDim', 'uSunShade', 'uEye'];
+  const enLib = ['uSunMap', 'uSunOrg', 'uSunDim', 'uSunShade', 'uEye', 'uSunProbe'];
   for (const u of enLib) assert(new RegExp('uniform[^;]*\\b' + u + '\\b').test(LIB), 'MC_SUN_LIB no declara ' + u);
   // ...y que mcLocOf / los dos mcBuild*Program los piden todos (si no, la localizacion sale null y no se manda nada)
   for (const fn of ['mcLocOf', 'mcBuildStructProgram', 'mcBuildStructTexProgram']) {
     const cuerpo = SRC.slice(SRC.indexOf('function ' + fn), SRC.indexOf('function ' + fn) + 1200);
     for (const u of enLib) assert(cuerpo.includes("'" + u + "'"), fn + ' no busca ' + u);
   }
+  // La distancia de la sonda es regulable en vivo: el shader la toma del uniform, no de un literal.
+  assert(/vec3 p=w\+n\*uSunProbe;/.test(LIB), 'MC_SUN_LIB no muestrea en w+n*uSunProbe');
+  // y que alguien lo suba de verdad en cada frame
+  assert(/gl\.uniform1f\(L\.uSunProbe,\s*mc\.sunProbe\)/.test(SRC), 'mcSunUniforms no sube mc.sunProbe');
 });
 
 test('el programa del sol solo usa aPos (sirve para los tres formatos de vertice)', () => {
@@ -95,7 +99,11 @@ test('el pase translucido NO proyecta sombra (un cristal no hace un agujero negr
 
 // ------------------------------------------------------------------ 2 · el algoritmo, con las constantes de app.js
 // Se leen del GLSL para que cambiar el shader sin tocar el test se note.
-const OFF  = parseFloat(LIB.match(/vec3 p=w\+n\*([\d.]+);/)[1]);          // cuanto se sale la muestra de la cara
+// La distancia de la sonda ya no es un literal del shader: es el uniform uSunProbe (game.sunProbe), asi que su
+// valor se lee del default de mc y el test de arriba comprueba que el shader lo reciba.
+const mOFF = SRC.match(/\n\s*sunProbe:\s*([\d.]+)\s*,/);
+if (!mOFF) throw new Error('no se encuentra el default mc.sunProbe en app.js');
+const OFF  = parseFloat(mOFF[1]);                                        // cuanto se sale la muestra de la cara
 const BIAS = parseFloat(LIB.match(/p\.y\s*<\s*top-([\d.]+)/)[1]);         // margen contra el acne
 const DIM  = { x: 96, y: 40, z: 96 };
 // El volumen del sol NO es el mundo: mcSunFrustum le añade MC_SUN_MARGIN a los lados (y hueco arriba) para que
@@ -256,7 +264,11 @@ test('el mapa solo se rehace cuando algo se mueve', () => {
   const pasada = SRC.slice(SRC.indexOf('function mcRenderShadow'), SRC.indexOf('function mcSunUniforms'));
   assert(/if\(!S\.dirty\) return S;/.test(pasada), 'la pasada del sol no mira el flag de suciedad');
   assert(/mcShadowDirty\(\);\s*\/\/ el terreno/.test(SRC), 'mcMeshChunk no marca el mapa como sucio');
-  assert(/mcShadowDirty\(\);\s*\/\/ el agente/.test(SRC), 'mcAgentMesh no marca el mapa como sucio');
+  // Un agente que anda va por la via LENTA (mcShadowMoved): rehacer el mapa entero a 144 Hz porque alguien da un
+  // paso costaba ~20 ms por frame. Sigue rehaciendose, pero al ritmo de mc.shadowMoveMs. Ver test_sombra_movil.js.
+  assert(/mcShadowMoved\(\);\s*\/\/ el agente/.test(SRC), 'mcAgentMesh no marca el mapa como movido');
+  assert(/if\(!S\.dirty && S\.moved && ahora-\(S\.lastBake\|\|0\)>=mc\.shadowMoveMs\) S\.dirty=true;/.test(pasada),
+    'la pasada del sol no promociona el movimiento a horneado');
 });
 
 test('el volumen del sol lleva margen, y app.js lo monta como este test lo porta', () => {
@@ -282,8 +294,23 @@ test('un cuerpo que sobresale del mundo TAMBIEN tiene sombra debajo', () => {
 });
 
 test('no queda nada de la estampa vieja en app.js', () => {
-  for (const resto of ['mcComputeSun', 'mcSunLit', 'sunTop', 'SOMBRA_EPS', 'gl.polygonOffset'])
+  for (const resto of ['mcComputeSun', 'mcSunLit', 'sunTop', 'SOMBRA_EPS'])
     assert(!SRC.includes(resto), 'queda "' + resto + '" en app.js');
+  // El sesgo de profundidad ha vuelto, pero para las pasadas de ESTRUCTURAS (mcStructGL, contra el z-fighting
+  // de una cara estampada pegada a un bloque del terreno). Lo que no puede volver es a la pasada del sol, que es
+  // donde lo usaba la estampa vieja: alli desplaza el mapa de altura y descuadra la sombra.
+  const desde = SRC.indexOf('function mcStructGL');
+  assert(desde > 0, 'no encuentro mcStructGL en app.js');
+  const cuerpo = SRC.slice(desde, SRC.indexOf('\n}', desde) + 2);
+  const cuenta = (s, re) => (s.match(re) || []).length;
+  assert(cuenta(cuerpo, /gl\.polygonOffset/g) > 0 && cuenta(SRC, /gl\.polygonOffset/g) === cuenta(cuerpo, /gl\.polygonOffset/g),
+    'hay gl.polygonOffset fuera de mcStructGL: la estampa vieja lo usaba en la pasada del sol');
+  // Lo mismo para el culling: la pasada del sol dibuja el mapa de altura y necesita ver TODAS las caras. Si el
+  // CULL_FACE se filtra fuera de mcStructGL, los cuerpos pierden la cara de abajo y dejan de proyectar sombra.
+  assert(cuenta(cuerpo, /gl\.(enable|disable)\(gl\.CULL_FACE\)/g) === cuenta(SRC, /gl\.(enable|disable)\(gl\.CULL_FACE\)/g),
+    'hay gl.CULL_FACE fuera de mcStructGL: se filtraria a la pasada del sol y del terreno');
+  // Y se apaga siempre al salir, en la misma llamada que apaga el sesgo (mismo par on/off).
+  assert(/else\s*\{[^}]*gl\.disable\(gl\.CULL_FACE\)/.test(cuerpo), 'mcStructGL(false) no apaga el culling');
 });
 
 console.log('\n' + ok + ' ok, ' + fallos + ' fallos');

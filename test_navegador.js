@@ -163,19 +163,28 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     const a = game.defineAgent({ id: '__test_sombra', name: 'test', block: 'stone', autostart: false, onTick() {} });
     if (!a) return { error: 'game.defineAgent devolvio null' };
     for (let i = 0; i < 4; i++) mcAgentsSmoothUpdate(0.016);   // el cuerpo se asienta (el material se resuelve tarde)
-    mc.shadow.dirty = false;
+    mc.shadow.dirty = false; mc.shadow.moved = false;
     mcAgentsSmoothUpdate(0.016);                 // quieto ⇒ el mapa se reutiliza
-    const quieto = mc.shadow.dirty;
+    const quieto = mc.shadow.dirty || mc.shadow.moved;
     a.x += 4;                                    // ahora hay destino: el cuerpo se desliza hacia el
     mcAgentsSmoothUpdate(0.016);
-    const moviendo = mc.shadow.dirty;
+    const moviendo = mc.shadow.moved;
+    // Y no basta con que se marque: tiene que acabar rehorneandose de verdad. Con el freno a 0 eso es inmediato.
+    const freno = mc.shadowMoveMs; mc.shadowMoveMs = 0;
+    mc.shadow.lastBake = 0;
+    mcRenderShadow();
+    const horneado = mc.shadow.lastBake > 0;
+    mc.shadowMoveMs = freno;
     game.removeAgent('__test_sombra');
-    return { quieto, moviendo };
+    return { quieto, moviendo, horneado };
   });
 
   test('un cuerpo que se desliza entre celdas caduca el mapa de sombra', () => {
     assert(!mueve.error, mueve.error);
+    // Andar marca `moved` (via lenta, estrangulada a mc.shadowMoveMs) en vez de `dirty`: rehacer el mapa entero en
+    // cada frame porque alguien da un paso costaba ~20 ms/frame. Ver test_sombra_movil.js.
     assert(mueve.moviendo === true, 'el agente se movio y el mapa no se marco: la sombra se queda clavada');
+    assert(mueve.horneado === true, 'se marco el movimiento pero el mapa no llego a rehornearse nunca');
   });
   test('...y si no se mueve nadie, el mapa se reutiliza (la sombra sigue siendo gratis en escena quieta)', () => {
     assert(mueve.quieto === false, 'el mapa se rehace cada frame sin que se mueva nada');

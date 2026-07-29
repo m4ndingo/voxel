@@ -1,0 +1,158 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Mundos · VoxelForge</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.ico">
+<!-- Listado de mundos servido en /map/ (server.py). Los datos y las miniaturas vienen de /api/mundos,
+     que lee data/mundo.json + data/worlds/*.json con cache por mtime en data/_thumbs/. -->
+<style>
+:root{ --bg:#0e1016; --panel:#161a24; --panel-2:#1d2230; --line:#2a3040; --ink:#e7ecf4;
+       --muted:#8a93a6; --accent:#e2a44a; --accent-2:#6bd3a0; --danger:#e2685a; --radius:10px; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+     font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:26px 24px 10px;max-width:1180px;margin:0 auto}
+h1{margin:0 0 4px;font-size:22px;letter-spacing:.2px}
+h1 span{color:var(--muted);font-weight:400}
+.sub{color:var(--muted);font-size:13px}
+.barra{max-width:1180px;margin:14px auto 0;padding:0 24px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.barra input{background:var(--panel);border:1px solid var(--line);color:var(--ink);
+             padding:7px 11px;border-radius:8px;font:inherit;min-width:190px}
+.barra input:focus{outline:none;border-color:var(--accent)}
+.orden{display:flex;gap:4px;margin-left:auto}
+.orden button{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+              padding:6px 11px;border-radius:8px;font:inherit;cursor:pointer}
+.orden button.on{border-color:var(--accent);color:var(--accent)}
+.grid{max-width:1180px;margin:16px auto 40px;padding:0 24px;
+      display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+      overflow:hidden;display:flex;flex-direction:column;transition:border-color .15s,transform .15s}
+.card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.thumb{position:relative;aspect-ratio:1;background:#0b0d12 center/cover;image-rendering:pixelated}
+.thumb img{width:100%;height:100%;display:block;image-rendering:pixelated}
+.badge{position:absolute;top:8px;left:8px;background:#0b0d12cc;border:1px solid var(--line);
+       color:var(--accent);font-size:11px;padding:2px 7px;border-radius:99px;backdrop-filter:blur(3px)}
+.badge.def{color:var(--accent-2);border-color:#2f4a3c}
+.cuerpo{padding:12px 13px 13px;display:flex;flex-direction:column;gap:9px;flex:1}
+.nombre{font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px}
+.ruta{color:var(--muted);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;font-size:12px}
+.stats div{display:flex;justify-content:space-between;gap:6px;
+           border-bottom:1px dotted #232838;padding-bottom:2px}
+.stats b{font-weight:600;font-variant-numeric:tabular-nums}
+.k{color:var(--muted)}
+.mats{display:flex;flex-wrap:wrap;gap:4px}
+.mat{font-size:10.5px;color:var(--muted);background:var(--panel-2);
+     border:1px solid var(--line);border-radius:99px;padding:1px 7px}
+.relleno{height:3px;background:var(--panel-2);border-radius:99px;overflow:hidden}
+.relleno i{display:block;height:100%;background:var(--accent)}
+.pie{display:flex;justify-content:space-between;align-items:center;
+     margin-top:auto;padding-top:9px;border-top:1px solid var(--line)}
+.fecha{color:var(--muted);font-size:11px}
+.abrir{background:var(--accent);color:#1a1206;border:0;border-radius:7px;
+       padding:5px 13px;font:inherit;font-weight:600;font-size:12.5px;cursor:pointer;text-decoration:none}
+.nota{max-width:1180px;margin:0 auto 40px;padding:14px 18px;background:var(--panel);
+      border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;
+      color:var(--muted);font-size:12.5px}
+.nota b{color:var(--ink)}
+.nota code{color:var(--accent);font-family:ui-monospace,Menlo,monospace}
+.nota a{color:var(--accent)}
+.aviso{border-left-color:var(--danger)}
+@media(max-width:680px){ .grid{grid-template-columns:1fr;padding:0 14px} header{padding:18px 14px 6px}
+  .barra{padding:0 14px} .orden{margin-left:0;width:100%} }
+</style>
+<header>
+  <h1>Mundos <span>· VoxelForge</span></h1>
+  <div class="sub" id="resumen">Leyendo los mundos…</div>
+</header>
+<div class="barra">
+  <input id="q" placeholder="Filtrar por nombre o material...">
+  <div class="orden" id="orden">
+    <button data-k="mtime" class="on">Recientes</button>
+    <button data-k="voxels">Voxels</button>
+    <button data-k="estructuras">Estructuras</button>
+    <button data-k="nombre">Nombre</button>
+  </div>
+</div>
+<div class="grid" id="grid"></div>
+<div class="nota">
+  <b>La miniatura es una vista cenital del propio mundo</b>, sin render 3D: cada columna lleva el color real de
+  su material (la media de su textura) y el relieve se marca con luz rasante del noroeste.
+  Para crear un mundo nuevo basta con visitar <code>/map/&lt;nombre&gt;</code>: nace como terreno plano y se
+  guarda solo al primer cambio. El <code>editor de objetos</code> está en <a href="/">la raíz</a>.
+</div>
+<script>
+const fmt = n => n.toLocaleString('es-ES');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' })[c]);
+const cuando = iso => {
+  const d = new Date(iso), h = (Date.now() - d) / 36e5;
+  if (h < 1) return 'hace ' + Math.max(1, Math.round(h * 60)) + ' min';
+  if (h < 24) return 'hace ' + Math.round(h) + ' h';
+  if (h < 24 * 7) return 'hace ' + Math.round(h / 24) + ' d';
+  return d.toLocaleDateString('es-ES', { day:'numeric', month:'short', year:'numeric' });
+};
+// El mundo por defecto vive en /map/default (el sagrado data/mundo.json). OJO: NO enlazarlo a /map/,
+// que es esta misma pagina.
+const rutaDe = m => '/map/' + encodeURIComponent(m.nombre);
+
+let DATOS = [], orden = 'mtime', filtro = '';
+function pinta() {
+  const lista = DATOS
+    .filter(m => !filtro || m.nombre.includes(filtro) || m.top.join(' ').includes(filtro))
+    .sort((a, b) => orden === 'nombre' ? a.nombre.localeCompare(b.nombre)
+                  : orden === 'mtime'  ? b.mtime.localeCompare(a.mtime)
+                  : b[orden] - a[orden]);
+  document.getElementById('resumen').textContent =
+    lista.length + ' mundo' + (lista.length === 1 ? '' : 's') + ' · ' +
+    fmt(lista.reduce((s, m) => s + m.voxels, 0)) + ' voxels · ' +
+    lista.reduce((s, m) => s + m.estructuras, 0) + ' estructuras · ' +
+    lista.reduce((s, m) => s + m.mb, 0).toFixed(1) + ' MB en disco';
+  document.getElementById('grid').innerHTML = lista.map(m => `
+    <article class="card">
+      <div class="thumb">
+        <img src="${m.thumb}" alt="vista cenital de ${esc(m.nombre)}" loading="lazy">
+        <span class="badge ${m.nombre === 'default' ? 'def' : ''}">${m.nombre === 'default' ? 'por defecto' : esc(m.dim)}</span>
+      </div>
+      <div class="cuerpo">
+        <div>
+          <div class="nombre">${esc(m.nombre)}</div>
+          <div class="ruta">${esc(rutaDe(m))}</div>
+        </div>
+        <div class="stats">
+          <div><span class="k">voxels</span><b>${fmt(m.voxels)}</b></div>
+          <div><span class="k">estructuras</span><b>${m.estructuras}</b></div>
+          <div><span class="k">tipos</span><b>${m.tiposEstructura}</b></div>
+          <div><span class="k">notas</span><b>${m.notas}</b></div>
+          <div><span class="k">altura max</span><b>${m.ymax}</b></div>
+          <div><span class="k">tamaño</span><b>${m.mb} MB</b></div>
+        </div>
+        <div>
+          <div class="k" style="margin-bottom:3px">terreno cubierto ${m.relleno}%</div>
+          <div class="relleno"><i style="width:${m.relleno}%"></i></div>
+        </div>
+        <div class="mats">${m.top.map(t => `<span class="mat">${esc(t)}</span>`).join('')}</div>
+        <div class="pie">
+          <span class="fecha">${cuando(m.mtime)}</span>
+          <a class="abrir" href="${esc(rutaDe(m))}">Abrir</a>
+        </div>
+      </div>
+    </article>`).join('');
+}
+
+document.getElementById('q').addEventListener('input', e => { filtro = e.target.value.toLowerCase().trim(); pinta(); });
+document.getElementById('orden').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  orden = b.dataset.k;
+  [...e.currentTarget.children].forEach(x => x.classList.toggle('on', x === b));
+  pinta();
+});
+
+fetch('/api/mundos', { cache: 'no-store' })
+  .then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j.error || r.status)))
+  .then(d => { DATOS = d; pinta(); })
+  .catch(e => {
+    document.getElementById('resumen').textContent = 'No se pudo leer el listado.';
+    document.getElementById('grid').innerHTML =
+      '<div class="nota aviso">No se pudo leer <code>/api/mundos</code>: ' + esc(e) + '</div>';
+  });
+</script>

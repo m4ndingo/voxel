@@ -3,6 +3,7 @@
    Uso: python3 server.py [puerto]   (por defecto 8500)
    Almacén: data/habitantes/<id>.json  (formato vox export)."""
 import http.server, socketserver, json, os, re, sys, datetime, shutil, time, urllib.parse
+import mundos                                              # listado de /map/: estadísticas + miniatura cenital
 
 BASE  = os.path.dirname(os.path.abspath(__file__))
 STORE = os.path.join(BASE, 'data', 'habitantes')
@@ -183,9 +184,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self._send(200, valid_idx)
                 except Exception:
                     pass
-        if path_only == '/map' or path_only.startswith('/map/'):
+        # /map y /map/ (sin nombre) = listado de mundos; /map/<nombre> = la SPA con ese mundo.
+        if path_only in ('/map', '/map/'):
+            self.path = '/mapas.html'
+            return super().do_GET()
+        if path_only.startswith('/map/'):
             self.path = '/index.html'
             return super().do_GET()
+        if path_only == '/api/mundos':                            # listado de /map/ (cache por mtime en data/_thumbs/)
+            try:
+                return self._send(200, mundos.listar())
+            except Exception as e:
+                return self._send(500, {'error': f'no se pudo listar los mundos: {e}'})
         if self.path == '/api/mapa':
             if os.path.exists(MAPFILE):
                 try:
