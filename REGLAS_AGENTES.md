@@ -145,7 +145,7 @@ jerarquía en un bucle de un solo escalón y los tres de abajo dejan de existir.
 
 ## 14. Bajada Automática de Pinos y Precarga Asíncrona de Materiales
 - **Precarga Asíncrona (`async onStart`)**: `game.defineStandardAgent` utiliza `async onStart(a)` devolviendo una Promesa al motor VoxelForge. El motor aguarda síncronamente la descarga y registro de `'obsidiana'`, `'obsidian'`, `'red_concrete'`, `'tronco'`, `'hierba'` y `'lava'` en el atlas antes de llamar a `listo()`. El Agente Obsidiana se renderiza con su verdadero cuerpo de Obsidiana negra y pinta correctamente en **rojo (`red_concrete`)** (v4.30).
-- **Seguimiento Planar 2D**: El contador `stepsWithoutNewCell` evalúa el descubrimiento de nuevas columnas $(X, Z)$.
+- **Seguimiento Planar 2D**: El contador `stepsWithoutNewCell` evalúa el descubrimiento de nuevas columnas $(X, Z)$. Lo lleva `anotarPaso(a)` y **solo vuelve a cero al pisar columna nueva** (ver §21.b: cuando se reiniciaba al *intentar* un rescate, no podía pasar del umbral).
 - **Bajada Forzada de Cima**: Tras 4 pasos girando en la copa de un pino ($Y > \text{sueloOriginal} + 2$), el agente fuerza un desvío hacia la cota de suelo natural inferior.
 
 ---
@@ -581,6 +581,50 @@ de fallo.
 mundo de juguete. Comprueba que un muro de una hilada se pica y **abre** (`true`), que un voladizo sin suelo
 debajo se pica y **no abre** (`false` siempre, y para a los 8 intentos), y que 30 minados consecutivos dejan
 **una sola línea** de consola. Contra el `base-npc-skills.json` anterior **falla 5 de 8**.
+
+---
+
+## 21.b «Pasos sin celda nueva» no contaba pasos (v4.38) 🔢
+
+Lo destapó el primer informe de §23: `Constructor Héroe (Tejado)`, encajonado en un pasillo de 1 de ancho,
+llevaba **975 pasos con 0 celdas ganadas** y el campo `pasosSinProgreso` de su ficha decía **18**. El contador
+`stepsWithoutNewCell` es la entrada de **todo** lo que decide un rescate (el umbral de §17, `game.stuck()`, el
+veredicto del informe), así que mientras miente no hay diagnóstico posible. Mentía por dos motivos a la vez:
+
+**1. Se ponía a cero al LANZAR la maniobra, no al conseguir algo.** Ocho asignaciones `= 0` repartidas por la
+escalera de rescate, casi todas en el camino de *intento*: desvío ortogonal, desmonte, `minadoEmergencia`
+devolviendo `true`, `saltoTactico` (¡incluso si devolvía `false`!) y el fondo de la escalera. Con la puesta a
+cero, el contador mide «pasos desde el último intento» y **por construcción no puede pasar del umbral**.
+Ahora el único reinicio es el legítimo —**se ha pisado una columna nueva**— más las reubicaciones de verdad
+(salto táctico consumado, teletransporte al suelo, reaparición de la serpiente), donde el agente *está* en
+otro sitio. Lo que se apunta al lanzar un rescate es `v.rescateEnPaso`, y la **cadencia de la escalera se
+mide con la resta** `stepsWithoutNewCell - rescateEnPaso`, que vale exactamente lo que valía antes el
+contador: la escalera se dispara igual de a menudo, solo deja de mentir el contador. Los dos umbrales de
+comportamiento que leían el contador en crudo (marcado de lava de §13, `EDGE_DROP` de torre) usan también la
+resta, para no cambiar de conducta de rebote.
+
+**2. Dos ramas de escape caminaban sin anotar el paso.** `LOOP_ESCAPE_2CELL` y `FREQ_BREAK` hacen
+`a.walk(...)` y `return` **antes** de la contabilidad del final del tick, que era código suelto ahí abajo. O
+sea: el agente que más escapaba era el que menos se anotaba, y no solo el contador —`visited`,
+`visitedPlanar`, `historial` y `pathHistory` se quedaban sin las columnas realmente pisadas, con lo que la
+frontera BFS trabajaba sobre un mapa falso. Medido en el pasillo de juguete: **150 pasos dados, `FREQ_BREAK`
+en 120 ticks seguidos, contador congelado en 9**. La contabilidad es ahora la función **`anotarPaso(a)`** y
+la llaman los tres caminos.
+
+⚠️ **Regla general:** si una rama del tick hace `a.walk()` y `return`, tiene que llamar a `anotarPaso(a)`.
+Un paso que no se anota es peor que un paso que no se da: el agente se mueve y el diagnóstico no se enfrenta.
+
+**Verificado**: `node test_contador_celda_nueva.js` (14 tests) es **diferencial** — monta el pasillo de 1 de
+ancho del caso real con la librería de `HEAD` y con la actual y compara. Lo que cambia: el contador pasa de
+congelarse en **9** a llegar a **138** con 150 pasos, y la ficha de `game.stuck()` pasa de `9/18` a `138/18`.
+Lo que **no** cambia: mismos pasos, misma celda final, mismas columnas descubiertas y la escalera disparándose
+en **los mismos ticks**.
+
+**Lo que este arreglo NO arregla** (siguiente defecto, medido en la misma prueba): con el contador honesto la
+escalera de rescate **sigue sin alcanzarse** para ese agente, porque `FREQ_BREAK` se dispara cada tick, rearma
+`v.escapeSteps = 3` y hace `return` antes de llegar a ella. El agente vive permanentemente «escapando»: ni
+escala a minado/salto ni agota la cuenta atrás, así que tampoco se emite la nota de §17. El informe lo enseña
+ahora en la tabla 3.3 (`FREQ_BREAK` con miles de ejecuciones y ~0 celdas ganadas).
 
 ---
 
