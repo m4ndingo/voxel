@@ -229,6 +229,13 @@ cómo son o cómo se comportan los agentes.** Orden de prioridad para cualquier 
 2. **Añadir el código al propio snippet del agente** si es muy particular de él.
 3. Tocar `app.js` — solo si 1 y 2 son imposibles, y **preguntando antes**.
 
+**Planificador de agentes (`mcAgentsTick`, `app.js`)**: el presupuesto de CPU por frame
+(`MC_AGENT_FRAME_MS`, 8 ms) se reparte **por turnos rotatorios** — el frame siguiente empieza por el agente
+que se quedó sin turno, y ninguno puede pasarse de su rodaja (`presupuesto / nº de agentes vivos`). Antes se
+recorría el `Map` en orden fijo y el primero se comía el presupuesto entero: con `game.agentSpeed=10` se
+quedaban **a cero 4 de 6 agentes**, y a 100, 5 de 6 (medido). `game.agentSpeed` no tiene tope: el freno es el
+tiempo, no el número de pasos.
+
 Los snippets se ejecutan en ámbito global con `AsyncFunction`, así que **alcanzan los internos de
 `app.js`** (`mc`, `mcAgentMesh`, `mcSurfaceY`…) sin necesidad de modificarlo — `base-npc-skills.json`
 ya lo hace. Ejemplo de lo que se resuelve así: el cuerpo multi-celda de la serpiente son **agentes

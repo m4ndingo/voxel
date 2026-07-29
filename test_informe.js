@@ -156,5 +156,35 @@ const notasAntes = Object.keys(mc.notes).length;
 game.informe({ guardar: false });
 t('caso 6: no crea notas (isTrapPit de solo lectura)', Object.keys(mc.notes).length === notasAntes);
 
+// Caso 7: ping-pong entre dos celdas. El agente se mueve SIEMPRE y no gana una sola celda: el
+// veredicto no puede decir "ok" solo porque cambio de casilla (es el fallo de §21 dentro del informe).
+mundo = {};
+mundo['20,14,20'] = 1; mundo['20,14,21'] = 1;
+const a3 = nuevoAgente('serp', 'Pingpong', 20, 20);
+a3.vars.acciones = { UTURN_DEADEND: { n: 4000, conEfecto: 3990, sinEfecto: 0, celdasGanadas: 0,
+                                      mismaPos: 2, celdaIman: '20,15,20' } };
+a3.vars.recentVisits = [];
+for (let i = 0; i < 30; i++) a3.vars.recentVisits.push({ x: 20, z: 20 + (i % 2), tick: i });
+a3.stats.ticks = 4000;
+const inf7 = game.informe({ guardar: false, todos: true });
+t('caso 7: el veredicto es SIN AVANCE, no ok', /UTURN_DEADEND \|[^|]*\|[^|]*\|[^|]*\| 0 \|[^|]*\| \*\*SIN AVANCE\*\*/.test(inf7));
+t('caso 7: R1 explica que moverse no es avanzar', inf7.indexOf('gano 0 celdas nuevas') >= 0 && inf7.indexOf('§21.1') >= 0);
+
+// Caso 8: vecino con suelo pisable pero con voladizo encima. canWalk lo rechaza (desnivelProhibido
+// mide cima contra cima), asi que el informe NO puede etiquetarlo LIBRE.
+mundo = {};
+mundo['30,14,30'] = 1;                       // donde esta el agente
+mundo['30,14,29'] = 1; mundo['30,18,29'] = 1; // vecino NORTE: suelo pisable en 14 y voladizo en 18
+const a4 = nuevoAgente('volad', 'Voladizo', 30, 30);
+const inf8 = game.informe({ guardar: false, todos: true, agentes: ['volad'] });
+t('caso 8: el vecino con voladizo sale como AZOTEA', /NORTE[^\n]*AZOTEA \+4/.test(inf8));
+t('caso 8: y no como LIBRE', !/NORTE[^\n]*LIBRE/.test(inf8));
+
+// Caso 9: la ventana en segundos hace caso a game.agentSpeed (con 100 no son 80 s, son 0,8).
+game.agentSpeed = 100;
+const inf9 = game.informe({ guardar: false });
+t('caso 9: los segundos cuentan la velocidad', /400 ticks \(~0\.[0-9] s con tickMs 120 y agentSpeed 100\)/.test(inf9));
+game.agentSpeed = 1;
+
 console.log('\n' + ok + ' ok, ' + fail + ' fallos');
 process.exit(fail ? 1 : 0);

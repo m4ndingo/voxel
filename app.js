@@ -6860,31 +6860,51 @@ function mcAgentStep(a){
   if(a.maxTicks>0 && a.stats.ticks>=a.maxTicks && a.state==='running') a.stop('maxTicks');
 }
 
+// Reparto justo del presupuesto de frame. El primero del Map se comía los 8 ms enteros y `agotado`
+// saltaba a TODOS los demás — y como el orden del Map es fijo, los mismos agentes se quedaban sin CPU
+// para siempre: medido, a game.agentSpeed=10 se quedaban a cero 4 de 6, y a 100, 5 de 6. Dos frenos:
+// se empieza la vuelta por quien se quedó sin turno, y ningún agente puede pasarse de su rodaja.
+let mcAgentRR = 0;
+const mcTickOrder = [];   // buffer reutilizado: nada de reservar un array por frame
+
 function mcAgentsTick(now){
-  let vivos=0;
   const speedMult = mcAgentSpeed > 0 ? mcAgentSpeed : 1;
   // Tope de pasos por frame ∝ velocidad (a x1 son los 4 de siempre), pero quien manda de verdad es el
   // presupuesto de tiempo de abajo: es lo que permite que game.agentSpeed no tenga techo sin colgar el navegador.
   const tope = Math.max(MC_AGENT_MAX_STEPS, Math.ceil(MC_AGENT_MAX_STEPS*speedMult));
   const t0 = performance.now();
+
+  mcTickOrder.length=0;
+  for(const a of mc.agents.values()) if(a.state==='running') mcTickOrder.push(a);
+  const vivos = mcTickOrder.length;
+  if(!vivos){ mcAgentFlushDirty(); return; }
+  if(mcAgentRR >= vivos) mcAgentRR = 0;
+  const rodaja = MC_AGENT_FRAME_MS / vivos;   // lo que como mucho puede consumir uno sin dejar secos a los otros
+
   let agotado = false;
-  for(const a of mc.agents.values()){
-    if(a.state!=='running') continue;
-    vivos++;
-    if(agotado) continue;
-    // Sin suelo de 16 ms: antes el paso no podía bajar de un frame, así que a partir de agentSpeed≈7 (tickMs 110)
-    // subirlo más no aceleraba NADA. Ahora el paso puede ser submilisegundo y se dan varios por frame.
-    const paso = Math.max(0.05, a.tickMs / speedMult);
+  for(let k=0; k<vivos; k++){
+    const a = mcTickOrder[(mcAgentRR + k) % vivos];
     if(!a._nextAt) a._nextAt=now;
-    let n=0;
-    while(a.state==='running' && now>=a._nextAt && n<tope){
-      n++; a._nextAt+=paso; mcAgentStep(a);
-      if(performance.now()-t0 > MC_AGENT_FRAME_MS){ agotado=true; break; }   // se acabó el frame: seguimos en el siguiente
+    if(!agotado){
+      // Sin suelo de 16 ms: antes el paso no podía bajar de un frame, así que a partir de agentSpeed≈7 (tickMs 110)
+      // subirlo más no aceleraba NADA. Ahora el paso puede ser submilisegundo y se dan varios por frame.
+      const paso = Math.max(0.05, a.tickMs / speedMult);
+      const finRodaja = performance.now() + rodaja;
+      let n=0;
+      while(a.state==='running' && now>=a._nextAt && n<tope){
+        n++; a._nextAt+=paso; mcAgentStep(a);
+        const ahora = performance.now();
+        if(ahora-t0 > MC_AGENT_FRAME_MS){ agotado=true; mcAgentRR=(mcAgentRR+k+1)%vivos; break; }  // el siguiente frame empieza por el de después
+        if(ahora > finRodaja) break;                                                                // su rodaja, no la de todos
+      }
     }
-    if(a._nextAt<now) a._nextAt=now;   // sin catch-up: tras un parón del navegador no se acumulan pasos atrasados
+    // Sin catch-up ni para los que no llegaron a tocar CPU: si no, acumulan deuda y en cuanto les toca
+    // turno se gastan el frame entero poniéndose al día, que es como empezó todo esto.
+    if(a._nextAt<now) a._nextAt=now;
   }
+  if(!agotado) mcAgentRR = 0;   // cupo entero: la próxima vuelta puede empezar por el principio
   mcAgentFlushDirty();
-  if(vivos) mcAgentMaybeSave(now);
+  mcAgentMaybeSave(now);
 }
 
 function mcAgentsSmoothUpdate(dt){
