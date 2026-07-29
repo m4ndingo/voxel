@@ -600,3 +600,99 @@ salía cada 1500 ms por motivo = 40 por minuto. Eso no se puede leer y además r
   estuviera abierto.
 - Los `console.log` de **diagnóstico bajo demanda** (`game.stuck()`, `game.heatmap()`, `game.perf()`,
   `a.vars.asciiMap()`…) **no** se tocan: los dispara el dueño, no el bucle.
+
+---
+
+## 23. El informe de atascos (`game.informe()`) 🔎
+
+Los tres fallos de §21 se cazaron **leyendo código**, no leyendo diagnósticos. Eso es la prueba de que el
+instrumental estaba incompleto: `game.stuck()`, `game.heatmap()`, `showTickets()` y `traceNote()` dicen
+**dónde** está el agente, nunca **por qué su rescate no funciona**. `game.informe()` es la pieza que faltaba:
+un texto autosuficiente que se genera desde F12 y se pasa tal cual a quien depura.
+
+```js
+game.informe()                     // todos; guarda en el servidor y devuelve el string
+game.informe({ guardar:false })    // solo devuelve  →  copy(game.informe({guardar:false}))
+game.informe({ agentes:['constructor'], ticks:400, max:30000, todos:true })
+game.informe.ultimo                // el último generado, por si se perdió el scroll
+```
+
+**Entrega doble.** Va por `POST /api/snippets` a `data/snippets/informe-atascos.json` (el respaldo del
+anterior lo hace `to_trash`, no se pierde ninguno) **y** se devuelve como string. Dentro del snippet el
+Markdown viaja **crudo, en un comentario de bloque** —no como string escapado— para poder leerlo sin `\n`
+por medio; el `code` es JS válido y ejecutarlo no rompe nada. Si el `fetch` falla, el string sigue estando.
+
+### El listón: el informe solo tenía que haber bastado para cazar §21
+
+| Fallo de §21 | Qué lo delata |
+|---|---|
+| `minadoEmergencia` decía éxito sin abrir paso | **3.3**: peldaño con N intentos y **0 con efecto** |
+| Picaba siempre desde la misma celda | **3.3**: columna «misma celda» + **R2** |
+| `saltoTactico` nunca encontraba destino | **3.3**: intentos > 0, ejecuciones con efecto = 0 |
+| Otro agente reponía el bloque picado | **4**: escrituras del mundo con **autor por celda** (**R3**) |
+
+### Lo que hace posible la tabla 3.3
+
+**Un peldaño se anota al INTENTARLO y se juzga por su EFECTO.** `minadoEmergencia` solo llamaba a
+`logExecutionStep` en su **camino de éxito**: las 1178 pasadas sin abrir salida no dejaban ni una línea de
+telemetría, justo las que había que contar. Ahora los peldaños llaman a `anotarAccion(a, tipo)` **al entrar**
+(deduplicado por `(tick, tipo)`, así el log de éxito no cuenta dos veces) y la acción queda **pendiente**;
+5 ticks después se resuelve: **hubo efecto si `visited` creció o el agente cambió de celda**. Nada de esto
+imprime: §22 sigue en pie, el resultado solo sale por el informe.
+
+Tres anillos O(1) alimentan el informe, todos fuera de bucles calientes:
+
+| Anillo | Dónde se llena | Tamaño | Para qué |
+|---|---|---|---|
+| `a.vars.acciones` | `anotarAccion` / `logExecutionStep` | por tipo | tabla 3.3 y R1/R2 |
+| `game.worldWrites` | envoltorios de `a.setBlock`/`a.paint` | 600 | sección 4 y R3/R4 |
+| `a.vars.progreso` | `ejecutarTickEstandar`, cada 25 ticks | 40 | curva de cobertura |
+
+`game.worldWrites` es el **único** sitio por el que pasan todas las escrituras de agente (incluida la cola
+asíncrona de construcción), y solo anota si el bloque **cambió de verdad**.
+
+### Normas del informe
+
+- **Toda hipótesis cita el § que la respalda o no se imprime.** Un informe que opina sin respaldo es ruido,
+  y el ruido ya costó 1178 líneas. Reglas: R1 peldaño ineficaz (§21.1), R2 celda imán (§6), R3 guerra de
+  bloques (§21.2), R4 autojaula (§11), R5 es `climb`/`drop` y no la heurística (§15), R6 escalera sin último
+  recurso (§6), R7 puede ser CPU (§18, §19), R8 cubre poco de su caja de merodeo (§11).
+- **No modifica lo que diagnostica.** `game.skills.isTrapPit()` **escribe una nota** cuando acierta
+  (`recordTrapPitVisit`), así que el informe usa una copia de solo lectura. Misma razón para no llamar a
+  nada que pueda plantar un pino.
+- **Mide con la vara del framework.** El vecindario 5×5 pregunta por `mcSurfaceNear(x, z, a.y, climb, drop)`,
+  no por `a.surfaceY` (que es el sólido más alto de la columna) ni por `a.canWalk` (que es **relativo al
+  agente**, §21.3). De ahí que distinga `TAPIADO` —sólido a cota alcanzable, se pica— de `DESNIVEL` —no se
+  arregla picando—.
+- **El informe también está sujeto a §22.** Presupuesto duro (`max`, 30 000 por defecto). Orden de
+  sacrificio: traza → heatmap → tickets → notas → agentes sanos. Cada recorte **se declara en la sección 6**;
+  el corte duro se hace **sobre el cuerpo**, nunca sobre la sección 6, que es la que avisa de que se cortó.
+  El heatmap va **recortado a la caja de merodeo** (~0,3 KB) en vez de 96×96 (~9 KB por agente). Cuidado
+  con las dos cajas: la **caja de merodeo** es el bbox real de lo pisado (es la que se compara con las celdas
+  distintas y la que juzga R8); la **ventana dibujada** es como mucho de 24 de lado alrededor del agente, y
+  cuando recorta dice cuántas de las celdas se ven — el porcentaje NUNCA se calcula contra la ventana.
+
+- **Las columnas de la escalera cuadran a la vista.** `veces` son **intentos**; `con efecto` + `sin efecto`
+  solo cuenta las ya juzgadas, y la diferencia (las que aún no cumplieron los 5 ticks de espera) se declara
+  bajo la tabla. Si no, parece que se pierden acciones.
+- **No se vuelca a la consola.** 30 000 caracteres son ~600 líneas. `game.informe()` imprime dos líneas de
+  resumen; el texto está en el fichero, en el valor devuelto y en `game.informe.ultimo`.
+
+### Límites conocidos
+
+1. **Es un retrato del instante.** Cubre hacia atrás lo que quepa en los anillos (~500 entradas de traza,
+   600 escrituras, 40 muestras de cobertura). Si el atasco lleva media hora, la sección 4 solo ve el final;
+   la curva de cobertura lo hace explícito en vez de fingir que lo vio todo.
+2. **No lleva losa del mundo**, así que el caso no se reproduce: se reconstruye mentalmente desde 3.4 y 3.5.
+3. `game.worldWrites` **solo ve escrituras de agente** (las que pasan por el handle). Lo que ponga el
+   jugador a mano o `game.setVoxel` no aparece.
+4. La vía fichero necesita el servidor; la vía string funciona siempre.
+5. No lleva captura ni datos de render: si la sospecha es visual, la captura la manda el dueño.
+
+**Verificado**: `node test_informe.js` (23 tests) — un agente de juguete que pica 14 veces sin abrir paso
+produce un informe con **R1, R2 y `INEFICAZ`**; dos agentes turnándose una celda producen **R3** con los dos
+autores; `max: 2000` respeta el presupuesto **y** declara los recortes; `guardar:false` no toca `fetch`; el
+`code` enviado al servidor es JS válido y contiene el Markdown íntegro; generar el informe **no crea notas**.
+En el navegador (Playwright + SwiftShader, 3 agentes reales corriendo): `game.informe({todos:true})` genera
+las secciones 3.1-3.8 contra el mundo real sin un solo error de consola, y `game.informe()` deja
+`data/snippets/informe-atascos.json` en el servidor.
