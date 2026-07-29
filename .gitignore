@@ -11,3 +11,6 @@ data/worlds/
 node_modules/
 package.json
 package-lock.json
+
+# Bytecode de mundos.py (lo genera server.py al importarlo)
+__pycache__/

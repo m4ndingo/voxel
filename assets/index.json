@@ -302,5 +302,19 @@
       "z": 16
     },
     "file": "assets/cubo-trans.vox.json"
+  },
+  {
+    "id": "cubo-liso",
+    "name": "Cubo Liso",
+    "role": "Bloque básico 16³",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/cubo-liso.vox.json"
   }
 ]

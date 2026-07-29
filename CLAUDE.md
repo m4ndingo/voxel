@@ -32,6 +32,16 @@ celda abre selector (`openPicker`) con el catálogo de habitaciones (`buildRoomC
 + guardadas) y miniaturas `drawThumb`; colocar/cambiar/quitar autoguarda (`saveMapa`). El mapa **nunca**
 escribe en `data/habitantes/`. Roadmap completo y estados en **`PLAN.md`**.
 
+**Listado de mundos** (`mapas.html` + `mundos.py`): `GET /map/` (y `/map`) sirve `mapas.html`, un listado de
+todos los mundos con miniatura y estadísticas; **`/map/<nombre>` sigue sirviendo la SPA** (el mundo por
+defecto es `/map/default`, **no** `/map/`). Los datos vienen de `GET /api/mundos` → `mundos.listar()`, que lee
+`data/mundo.json` + `data/worlds/*.json`. La **miniatura** es una vista cenital sin render 3D: por columna
+`(x,z)` se coge el voxel más alto y se pinta con el color **real** de su material —la media de la cara
+superior de su textura (`color_de_material`, resuelve `tex:asset:…` y `tex:hab:…`)—, con luz rasante del
+noroeste para el relieve. NO bajar el brillo con la altura: apaga todos los colores (las setas rojas de
+`lab` salían grises). En frío cuesta ~1 s (33 MB de JSON) ⇒ **cache en `data/_thumbs/<slug>.json`**
+invalidada por `mtime+tamaño` (en caliente, ~1 ms). Test: `node test_mapas.js`.
+
 No hay tests; verificar con un navegador (o Playwright headless: cargar `file://.../index.html`,
 comprobar `#voxel-count` y capturar `screenshot`). API verificable con `curl` (`/api/mapa`, `/api/habitantes`).
 
@@ -96,7 +106,7 @@ sigue directo por necesitar `g3d` fresco), y la **media resolución del arrastre
    pelar desde el principio; ramp de ancho `CLIP_SPAN`) se van pelando los voxels con menor
    profundidad (los más cerca de la cámara) — `project3d` filtra `list`/`occupied`, así que render, caras interiores
    (se destapan al faltar el vecino recortado) y picking ven el **interior** del objeto sin más
-   código. Zoom hasta 32 (3200%) en edición y modal; `game.nearClip` por defecto 32 (el pelado no empieza hasta 3200%). El encuadre (`S`) sigue usando el bbox completo. Las 6 caras del cubo unidad están en
+   código. Zoom hasta 32 (3200%) en edición y modal; `game.nearClip` por defecto 40 (el pelado no empieza hasta 4000%, o sea nunca con el zoom tope de 32). El encuadre (`S`) sigue usando el bbox completo. Las 6 caras del cubo unidad están en
    `CUBE_FACES` (normal, vecino, sombra, esquinas). **Controles 3D**: **botón derecho o central +
    arrastre** rota libre (con la herramienta Selección el derecho se cede a deseleccionar);
    **Ctrl+arrastre** = pan; **Alt+clic** = cuentagotas momentáneo (toma el color y MANTIENE la

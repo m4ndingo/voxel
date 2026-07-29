@@ -1533,11 +1533,9 @@ async function save(){
     const j=await r.json();
     if (!j || !j.id) throw new Error('Respuesta inválida del servidor');
     serverId=j.id;
-    if(isTex) {
-      invalidateTex('asset:assets/' + j.id + '.vox.json');
-      if(typeof refreshTexturas === 'function') refreshTexturas();
-      if(typeof mcBuildPalette === 'function') await mcBuildPalette();
-    }
+    if(isTex && typeof refreshTexturas === 'function') refreshTexturas();
+    // Refresca todo lo que ya esté usando este objeto en el Mundo: galería, ranura y lo estampado en el mapa.
+    await mcRefreshSavedKey(isTex ? 'asset:assets/' + j.id + '.vox.json' : 'hab:' + j.id);
     toast('Guardado en el servidor: «'+state.meta.name+'»');
     refreshRosters();
   }catch(e){ toast('Guardado local (servidor API no disponible en esta versión git/estática)'); }
@@ -1558,11 +1556,9 @@ async function saveAs(){
     if (!j || !j.id) throw new Error('Respuesta inválida del servidor');
     serverId=j.id;
     localStorage.setItem(LS, localSnap());
-    if(isTex) {
-      invalidateTex('asset:assets/' + j.id + '.vox.json');
-      if(typeof refreshTexturas === 'function') refreshTexturas();
-      if(typeof mcBuildPalette === 'function') await mcBuildPalette();
-    }
+    if(isTex && typeof refreshTexturas === 'function') refreshTexturas();
+    // Es un objeto NUEVO: nadie lo usa todavía, pero tiene que salir ya en la galería del Mundo.
+    await mcRefreshSavedKey(isTex ? 'asset:assets/' + j.id + '.vox.json' : 'hab:' + j.id);
     toast('Guardado como «'+state.meta.name+'»');
     refreshRosters();
   }catch(e){ toast('No se pudo guardar en servidor (versión estática/git)'); }
@@ -1606,7 +1602,10 @@ function importJSON(file){
         });
         if (r.ok) {
           if (typeof refreshTexturas === 'function') refreshTexturas();
-          if (typeof mcBuildPalette === 'function') await mcBuildPalette();
+          // Importar sobre un id que ya existía es una edición como cualquier otra: refresca lo que lo use.
+          const j = await r.json().catch(()=>null);
+          if (j && j.id) await mcRefreshSavedKey(isTex ? 'asset:assets/' + j.id + '.vox.json' : 'hab:' + j.id);
+          else if (typeof mcBuildPalette === 'function') await mcBuildPalette();
         }
       } catch(err) {
         console.warn('No se pudo persistir en servidor (versión estática/git):', err);
@@ -2464,6 +2463,16 @@ window.addEventListener('keydown',e=>{
     if(mc.active && (document.pointerLockElement===mc.canvas || performance.now()-mc.unlockedAt<350)){ document.exitPointerLock(); return; } // 1º Esc: suelta el ratón, NO cierra
     closeWorld(); return;                                                       // 2º Esc (ratón ya libre): cierra el Mundo
   }
+  // Alt+C = abre/cierra la vista de código, también desde el Mundo (el botón 🧩 obliga a soltar antes el ratón).
+  // Va ANTES del corte de Mundo y del de input/textarea a propósito: así cierra igual con el foco en el código.
+  // Se mira e.code (tecla FÍSICA) porque con Alt pulsado e.key llega compuesto en varios teclados, y se excluye
+  // Ctrl/⌘ para no pisar AltGr ni el Ctrl+C de copiar selección del Mundo.
+  if(e.code==='KeyC' && e.altKey && !e.ctrlKey && !e.metaKey){
+    e.preventDefault();
+    if(!$('#snip-modal').hidden){ closeSnips(); return; }
+    if(document.pointerLockElement===mc.canvas) document.exitPointerLock();      // en el Mundo el ratón está capturado
+    openSnips(); return;
+  }
   if(!$('#mc-modal').hidden) return;                                            // en Mundo, los atajos del editor no aplican
   if(e.key==='Escape' && !$('#play-modal').hidden){ closePlay(); return; }
   if(e.key==='Escape' && !$('#room-modal').hidden){ closeRoom(); return; }
@@ -2786,8 +2795,10 @@ build(50, 15, 50);
 `;
 async function openSnips(){
   $('#snip-modal').hidden=false;
+  const prev=snipCur;                                                            // al reabrir (Alt+C) vuelve al que estabas viendo, no al primero
   await snipReload();
-  if(snips.length) snipLoad(snips[0].id); else snipNew();
+  if(prev && snips.some(s=>s.id===prev)) snipLoad(prev);
+  else if(snips.length) snipLoad(snips[0].id); else snipNew();
 }
 function closeSnips(){ $('#snip-modal').hidden=true; }
 async function snipReload(){
@@ -3760,6 +3771,8 @@ const MC_SKY=[0.549,0.776,1.0];   // color cielo (calca .mc-modal en CSS)
 const MC_CHUNK=16;                // lado del chunk en x/z (la columna vertical y entera va en un chunk)
 const MC_MAXLIGHT=15;             // nivel máximo de luz del cielo (t7 skylight): se pierde 1 por bloque al difundirse por el aire
 const MC_TILE=16;                 // px por cara en el atlas (las texturas son 16³)
+const MC_ATLAS_STEP=16;           // el atlas de estructuras crece de 16 en 16 filas: si se ajustase al recuento, cada
+                                  // textura nueva cambiaría AH y con ella la v de TODAS las estructuras (re-mallar todas)
 // Bloques del terreno/hotbar. `top`/`side`/`bottom` fijan qué cara del asset (proyección de buildTexFaces,
 // orden CUBE_FACES) se usa como superior/lateral/inferior — para hierba: verde arriba, tierra a los lados.
 const MC_BLOCKS=[
@@ -3819,7 +3832,7 @@ const mc={
   renderScale:1,                  // escala de la resolución de render (game.renderScale; <1 = menos píxeles = más fps)
   sens:0.000625,                  // sensibilidad del ratón, rad/px (base 0.0025 × mouseSpeed 0.25 por defecto; game.mouseSpeed = múltiplo)
   reach:16,                       // alcance de romper/poner en bloques (game.reach)
-  speed:10,                       // velocidad de marcha en u/s (game.playerSpeed; Shift = mitad)
+  speed:5,                        // velocidad de marcha en u/s (game.playerSpeed; Shift = mitad)
   airControl:true,                // game.airControl: movimiento en el aire estilo Quake (air-strafe). true = girar el ratón NO redirige el salto y W/A/S/D solo nudgea; false = clásico (velocidad reescrita cada frame)
   airAccel:6,                     // game.airAccel: aceleración hacia wishdir en el aire (mayor = el nudge alcanza el tope más rápido)
   airCap:3,                       // game.airCap: tope (u/s, ∝√scale) de la componente de velocidad que se puede AÑADIR en el aire por dirección → cuánto se puede desviar/ganar. Mientras sea < velocidad de salto no hay acel. recta hacia delante (anti-truco)
@@ -3832,6 +3845,8 @@ const mc={
   ovbo:null,                      // VBO reutilizable para overlays (fantasma de colocación, marcador «demasiado lejos», rayos-X)
   ghostAlpha:0,                   // transparencia del fantasma de bloque suelto —verde (colocable) y ámbar («demasiado lejos»)— (game.ghostAlpha, 0..1; 0=invisible)
   structGhostAlpha:1,             // transparencia de la vista-previa de estructuras/habitaciones —caja de huella + malla renderizada— (game.structGhostAlpha, 0..1)
+  structBias:0,                   // sesgo de profundidad de las estructuras: negativo = un pelo hacia la cámara, así su cara GANA el empate contra el terreno pegado (game.structBias; 0 = sin sesgo, lo resuelve structCull)
+  structCull:true,                // culling de caras traseras en las estructuras: rompe el empate entre DOS bloques estampados vecinos, que el sesgo no puede romper (game.structCull)
   preview:null,                   // instancia-malla de la vista-previa mientras se mantiene el clic derecho (habitación renderizada siguiendo la mira)
   previewKey:null,                // memo "sk|ox|oy|oz|rot" de la vista-previa actual (para no re-mallar cada frame)
   previewStructKey:null,          // clave de sala cuyas texturas deben estar en el atlas para la vista-previa
@@ -3848,11 +3863,16 @@ const mc={
   hotbarHide:14,                  // distancia (bloques) de carrera continua tras la que se oculta la hotbar (game.hotbarHide; 0 = desactiva)
   hist:[], histRedo:[],           // historial de edición del Mundo (z=deshacer / Z=rehacer): pila y su inversa
   histLock:false, histBusy:false, // histLock: no registrar mientras se aplica un undo/redo; histBusy: evita solapar dos a la vez
-  interiorDark:0.08,              // factor de sombra en el fondo sin luz (interiores/pasillos, t7 skylight); 1 = desactivado (game.interiorDark)
+  interiorDark:0.1,               // factor de sombra en el fondo sin luz (interiores/pasillos, t7 skylight); 1 = desactivado (game.interiorDark)
   light:null,                     // Uint8Array 0..MC_MAXLIGHT por celda: luz del cielo difundida por el aire (mcComputeLight)
   shadow:null,                    // MAPA DE SOMBRA del sol vertical: {size,fbo,tex,depth,dirty} — altura de la superficie más alta por téxel (mcRenderShadow)
   sunExtra:null,                  // gancho: geometría que dibuja OTRO (snippets con pasada propia) y que también debe
                                   // proyectar sombra. Se llama en la pasada del sol con dibuja(vbo,count,stride,model).
+  shadowMoveMs:45,                // ms mínimos entre re-horneados del mapa de sombra cuando lo ÚNICO que cambió es
+                                  // la posición de los agentes (~22 Hz). 0 = como antes, uno por frame (game.shadowMoveMs)
+  sunProbe:0.51,                  // distancia a la que cada cara pregunta al mapa del sol, en bloques (game.sunProbe).
+                                  // 0.51 y no 0.5: valor ELEGIDO A OJO por el dueño, no derivado. Ver el comentario
+                                  // largo del accesor game.sunProbe para lo que se sabe y lo que no.
   shadowSize:2048,                // lado del mapa de sombra en téxeles (game.shadowSize); 2048 sobre un mundo de 96 = 21 téxeles por bloque
   sunShade:0.55,                  // cuánto apaga la SOMBRA PROYECTADA (game.sunShade); 1 = sin sombra de sol
   blockLight:null,                // Uint8Array 0..MC_MAXLIGHT por celda: luz de BLOQUE emisiva (*#hex) difundida por el aire (mcComputeBlockLight); escalar/neutra (no tiñe)
@@ -3934,6 +3954,9 @@ function mcClearStructures(){    // suelta las VBO de las estructuras estampadas
   mc.structures=[];
   if(mc.gl && mc.structAtlasTex){ mc.gl.deleteTexture(mc.structAtlasTex); mc.structAtlasTex=null; }
   mc.structAtlas=null; mc.structUV={};
+  // Y el reparto de filas: si no, el mundo nuevo hereda la marca de agua del viejo y arranca con un atlas enorme
+  // de filas que ya no usa nadie.
+  mc.structTexRow={}; mc.structAtlasRows=0;
   mc.hist.length=0; mc.histRedo.length=0;   // (re)generar el mundo reinicia el historial de deshacer/rehacer
 }
 function mcGenFlat(){
@@ -4017,6 +4040,9 @@ function mcHexRGB(h){
 //  · tex: voxeles `tex:` cuando game.structTextures=true — texturados de verdad vía atlas de estructuras (UV
 //    igual que el terreno) → detalle del editor a coste de nivel 1 (sin subdividir, sin tope).
 // Cacheada en mc.structs[srcKey].meshRot[rot] = {colLocal, colCount, texLocal, texCount, ext:{x,y,z}, bits, fdim}.
+// El bitset de COLISIÓN (bits/fdim) se copia además a mc.structs[srcKey].colRot[rot], que NO se invalida al
+// recomponer el atlas: la forma no depende de las UV ni del greedy, y si se va con la geometría el jugador se
+// queda un segundo sin suelo mientras se re-hornea (ver mcStructColl / mcRestampAll).
 // Rota (x,z) `rot` cuartos de vuelta (0..3) alrededor del eje vertical, dentro de una huella W×D (índices
 // 0..W-1 / 0..D-1). El resultado sigue en rango; rot impar intercambia las extensiones (W↔D).
 function mcRotXZ(x,z,rot,W,D){
@@ -4181,7 +4207,10 @@ async function mcStructGeom(srcKey, rot){
                emitCells:emitArr,                                              // celdas-de-bloque locales con ≥1 voxel emisivo (Parte B)
                emitDir:emitDirArr,                                             // dirección del haz por celda emisiva (normal neta de caras expuestas)
                ext:{x:mx*S, y:my*S, z:mz*S}, bits, fdim:[mx,my,mz] };
-  const rec=(mc.structs[srcKey]=mc.structs[srcKey]||{}); (rec.meshRot=rec.meshRot||{})[rot]=mesh; return mesh;
+  const rec=(mc.structs[srcKey]=mc.structs[srcKey]||{}); (rec.meshRot=rec.meshRot||{})[rot]=mesh;
+  // Copia de solo-colisión: {bits,fdim} y nada de vértices, para no retener los Float32Array de la malla vieja.
+  (rec.colRot=rec.colRot||{})[rot]={bits, fdim:mesh.fdim};
+  return mesh;
 }
 // Malla de una INSTANCIA estampada: traslada cada flujo fino a la celda de mundo (ox,oy,oz) y sube DOS VBO.
 async function mcBuildStructMesh(srcKey, ox,oy,oz, rot){
@@ -4230,8 +4259,28 @@ async function mcBuildStructAtlas(){
     const vox=doc.voxels||{};
     for(const k in vox){ const v=vox[k]; if(typeof v==='string' && v.slice(0,4)==='tex:') keys.add(v.slice(4)); }
   }
+  // FILAS FIJAS. La v de un téxel es fila/AH, así que si una clave cambia de fila —o si AH cambia— se invalidan
+  // las UV de TODAS las estructuras y hay que re-mallar las 48. Para evitarlo cada clave se queda en su fila
+  // mientras siga viva (mc.structTexRow) y la altura sube a saltos de MC_ATLAS_STEP en vez de ajustarse al
+  // recuento. Así estampar algo con textura nueva solo malla lo nuevo; el re-mallado total queda para cuando se
+  // cruza un escalón (16 → 32 → …), que pasa muy de vez en cuando. El precio es atlas de sobra, que no se dibuja.
+  const filas=mc.structTexRow||(mc.structTexRow={});
+  for(const k in filas) if(!keys.has(k)) delete filas[k];         // la clave ya no la usa nadie: su fila queda libre
+  const ocupadas=new Set(Object.keys(filas).map(k=>filas[k]));
+  for(const k of keys) if(filas[k]===undefined){                  // clave nueva → la fila libre más baja
+    let f=0; while(ocupadas.has(f)) f++;
+    filas[k]=f; ocupadas.add(f);
+  }
+  let maxFila=-1; for(const k in filas) if(filas[k]>maxFila) maxFila=filas[k];
   const list=[...keys]; const uvMap={};
-  const AW=6*MC_TILE, AH=Math.max(1,list.length)*MC_TILE;
+  // La altura solo SUBE, nunca baja: si al quitar estructuras se encogiera, las v de las que quedan cambiarían y
+  // habría que re-mallarlas todas — justo lo que se quiere evitar. Quedarse ancho no cuesta nada (son téxeles que
+  // no se dibujan) y hace que quitar cosas sea siempre gratis.
+  const previas=mc.structAtlasRows|0;
+  const nFilas=Math.max(MC_ATLAS_STEP, previas, Math.ceil((maxFila+1)/MC_ATLAS_STEP)*MC_ATLAS_STEP);
+  mc.structUVMoved = (previas>0 && nFilas!==previas);   // solo crecer de escalón invalida lo ya horneado
+  mc.structAtlasRows=nFilas;
+  const AW=6*MC_TILE, AH=nFilas*MC_TILE;
   const cv=document.createElement('canvas'); cv.width=AW; cv.height=AH;
   const ctx=cv.getContext('2d'); ctx.imageSmoothingEnabled=false;
   const ins=0;                                                                // alineación exacta 1-a-1 con el sub-voxel grid
@@ -4240,7 +4289,7 @@ async function mcBuildStructAtlas(){
     try{ faces=buildTexFaces(await getTexDef(key)).faces; }catch(e){}
     const rects=[];
     for(let fi=0; fi<6; fi++){
-      const dx=fi*MC_TILE, dy=ki*MC_TILE;
+      const dx=fi*MC_TILE, dy=filas[key]*MC_TILE;                               // fila FIJA de la clave, no el orden de la lista
       if(faces && faces[fi]) ctx.drawImage(faces[fi],0,0,faces[fi].width,faces[fi].height, dx,dy,MC_TILE,MC_TILE);
       else { ctx.fillStyle='#b0468c'; ctx.fillRect(dx,dy,MC_TILE,MC_TILE); }   // fucsia = textura ausente
       rects.push({ u0:(dx+ins)/AW, v0:(dy+ins)/AH, u1:(dx+MC_TILE-ins)/AW, v1:(dy+MC_TILE-ins)/AH });
@@ -4337,6 +4386,7 @@ async function mcAddBlock(key, name){
 // separación deja el acné de sombra fuera de discusión: sin polygonOffset y sin bias afinado a mano.
 const MC_SUN_LIB=`
 uniform sampler2D uSunMap; uniform vec3 uSunOrg; uniform vec3 uSunDim; uniform float uSunShade; uniform vec3 uEye;
+uniform float uSunProbe;   // cuánto se sale la sonda de la propia cara (game.sunProbe)
 float sunFactor(vec3 w){
 #ifndef SUN_DERIV
   return 1.0;                                                // sin dFdx/dFdy no hay normal ⇒ sin sombra (el shader ni la compila)
@@ -4344,7 +4394,7 @@ float sunFactor(vec3 w){
   if(uSunShade>=1.0) return 1.0;                             // sombra de sol apagada (game.sunShade=1)
   vec3 n=normalize(cross(dFdx(w),dFdy(w)));
   if(dot(n,uEye-w)<0.0) n=-n;                                // orientada al ojo: da igual el sentido de giro del quad
-  vec3 p=w+n*0.5;                                            // el aire al que da la cara
+  vec3 p=w+n*uSunProbe;                                      // el aire al que da la cara
   vec2 uv=(p.xz-uSunOrg.xz)/uSunDim.xz;
   if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0) return 1.0;     // fuera del mapa = cielo abierto
   vec2 e=texture2D(uSunMap,uv).rg;                           // altura en 16 bits empaquetados (por eso NEAREST: no se puede interpolar)
@@ -4407,6 +4457,26 @@ function mcStructAttrib(SL, stride){ const gl=mc.gl;
   gl.vertexAttribPointer(SL.aEmit,1,gl.FLOAT,false,stride,28);
   gl.vertexAttribPointer(SL.aAlpha,1,gl.FLOAT,false,stride,32);
 }
+// Sesgo de profundidad de TODAS las pasadas de estructuras (ver mcRender). Una estructura estampada se apoya en el
+// terreno, así que sus caras caen en el MISMO plano que las del bloque de debajo/al lado: la profundidad empata y,
+// píxel a píxel, gana una u otra según el ruido de interpolación (el dibujo del bloque de fondo asomando entre el
+// color liso de la cara, y bailando al mover la cámara). El sesgo acerca la estructura un pelo a la cámara, así que
+// GANA SIEMPRE: se ve la cara del objeto, que es lo que está delante. SIEMPRE hay que apagarlo al salir: la pasada
+// del sol es la primera del frame siguiente y hereda el estado; con el sesgo puesto el mapa de sombra se
+// desplazaría. mc.structBias=0 lo desactiva (escape si algún driver hiciera cosas raras).
+// El sesgo NO arregla estructura-contra-estructura: si las dos caras coplanares son de estructura, las dos llevan
+// el MISMO sesgo y el empate sigue siendo exacto ("un bloque que toca el suelo se ve bien, uno que toca otro bloque
+// no"). mcStructGeom sólo culla caras internas de UNA estructura (`solid` es de un doc), así que dos bloques
+// estampados vecinos emiten CADA UNO su cara en el plano que comparten, con normales opuestas. La que sobra es
+// siempre la que da la espalda a la cámara ⇒ culling de caras traseras: quita exactamente una de las dos, sin
+// empate que repartir. Las caras de MC_FACES están enrolladas en HORARIO vistas desde fuera (para las seis,
+// (q1-q0)×(q2-q0) apunta hacia dentro), de ahí frontFace(CW). game.structCull=false lo desactiva.
+function mcStructGL(on){ const gl=mc.gl;
+  if(on && mc.structBias){ gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(mc.structBias, mc.structBias); }
+  else { gl.polygonOffset(0,0); gl.disable(gl.POLYGON_OFFSET_FILL); }
+  if(on && mc.structCull){ gl.frontFace(gl.CW); gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); }
+  else { gl.disable(gl.CULL_FACE); gl.frontFace(gl.CCW); }
+}
 function mcLocOf(p){ const gl=mc.gl; return {
   aPos:gl.getAttribLocation(p,'aPos'), aUV:gl.getAttribLocation(p,'aUV'), aShade:gl.getAttribLocation(p,'aShade'),
   uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'),
@@ -4414,7 +4484,8 @@ function mcLocOf(p){ const gl=mc.gl; return {
   uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
   uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
-  uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye') }; }
+  uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
+  uSunProbe:gl.getUniformLocation(p,'uSunProbe') }; }
 function mcBuildProgram(){
   const gl=mc.gl;
   mc.prog=glProgram(gl,mcVS(MC_VS),mcFS(MC_FS)); mc.loc=mcLocOf(mc.prog);                   // alpha-test (con discard)
@@ -4442,7 +4513,8 @@ function mcBuildStructProgram(){
     uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
-    uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye') };
+    uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
+    uSunProbe:gl.getUniformLocation(p,'uSunProbe') };
 }
 // Programa de estructuras TEXTURADAS con repetición por voxel: aTile = coord de tile (0..W / 0..H sobre la cara
 // fusionada), aRect = rect UV del tile en el atlas (u0,v0,u1,v1). El FS repite el tile con fract(aTile) → una cara
@@ -4468,7 +4540,8 @@ function mcBuildStructTexProgram(){
     uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
-    uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye') };
+    uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
+    uSunProbe:gl.getUniformLocation(p,'uSunProbe') };
 }
 // Programa del SOL: escribe la ALTURA de cada fragmento, visto desde arriba con proyección ortográfica. Solo usa
 // aPos, así que sirve tal cual para los tres formatos de vértice (terreno 6·4, estructuras 9·4, texturadas 10·4):
@@ -4523,6 +4596,10 @@ function mcFreeShadow(){
 // o liberar una estructura). Mientras nada se mueva el mapa se reutiliza tal cual y la sombra sale gratis: el coste
 // solo aparece en los frames en los que de verdad ha cambiado algo.
 function mcShadowDirty(){ if(mc.shadow) mc.shadow.dirty=true; }
+// Variante «puede esperar»: algo se ha MOVIDO, pero rehacer el mapa entero cuesta ~20 ms (48 estructuras) y a 144 Hz
+// eso hunde los fps. Solo marca; mcRenderShadow decide cuándo, según mc.shadowMoveMs. Una edición del mundo NO va
+// por aquí: esa es mcShadowDirty y se rehornea en el acto.
+function mcShadowMoved(){ if(mc.shadow) mc.shadow.moved=true; }
 // El mapa NO encuadra justo el mundo, sino el mundo con un MARGEN: los cuerpos que vuelan (una nube ancha)
 // asoman por el borde y por encima del techo, y lo que se sale del volumen lo recorta la GPU. Sin margen, el
 // trozo de nube que sobresalía del mundo no proyectaba nada y su panza se veía A PLENA LUZ. El margen se paga
@@ -4545,13 +4622,26 @@ function mcRenderShadow(){
   if(!mc.sunProg) mcBuildSunProgram();
   // Las estructuras se estampan/liberan por muchos sitios (mcRestampAll, vista-previa, deshacer): en vez de sembrar
   // avisos por todos ellos, una firma barata sobre la lista. Terreno y agentes sí avisan a mano (mcShadowDirty).
-  let sig=mc.structures.length; for(const st of mc.structures) sig+=st.colCount+st.texCount;
-  // Los agentes van en la firma por lo mismo: un cuerpo lo puede construir alguien de fuera (skills.cuerpo se
-  // hace su propia malla a escala sin pasar por mcAgentMesh) y entonces nadie avisa. Sin esto, una nube que
-  // NO se mueve no llegaba nunca al mapa: se veía la panza al sol y sin sombra debajo.
-  for(const a of mc.agents.values()) sig+=a.count + (a.renderX||0)*7 + (a.renderY||0)*13 + (a.renderZ||0)*17;
-  if(sig!==S.sig){ S.sig=sig; S.dirty=true; }
-  if(!S.dirty) return S;                                            // nada se ha movido desde el último frame
+  // Dos firmas, porque las dos causas NO son igual de urgentes:
+  //  · GEOMETRÍA (estructuras, y el nº de vértices de cada cuerpo): si cambia hay que re-hornear en el acto, o se
+  //    ve una sombra de algo que ya no está.
+  //  · MOVIMIENTO (dónde está cada agente): puede esperar. Re-hornear el mapa entero (2048²) cuesta ~20 ms medidos
+  //    con 48 estructuras, y hacerlo a 144 Hz solo porque un agente da un paso es lo que hundía los fps a 60-80
+  //    durante los segundos en que los agentes se mueven tras colocar algo. La sombra de un cuerpo que anda
+  //    refrescada a ~22 Hz no se distingue, y el coste se divide por 6.
+  let sigGeo=mc.structures.length; for(const st of mc.structures) sigGeo+=st.colCount+st.texCount;
+  // El nº de vértices va en la firma de geometría porque un cuerpo lo puede construir alguien de fuera (skills.cuerpo
+  // se hace su propia malla a escala sin pasar por mcAgentMesh) y entonces nadie avisa. Sin esto, una nube que NO se
+  // mueve no llegaba nunca al mapa: se veía la panza al sol y sin sombra debajo.
+  let sigMov=0;
+  for(const a of mc.agents.values()){ sigGeo+=a.count;
+    sigMov+=(a.renderX||0)*7 + (a.renderY||0)*13 + (a.renderZ||0)*17; }
+  if(sigGeo!==S.sigGeo){ S.sigGeo=sigGeo; S.dirty=true; }
+  if(sigMov!==S.sigMov){ S.sigMov=sigMov; S.moved=true; }
+  const ahora=performance.now();
+  if(!S.dirty && S.moved && ahora-(S.lastBake||0)>=mc.shadowMoveMs) S.dirty=true;
+  if(!S.dirty) return S;                                            // nada que rehacer todavía
+  S.moved=false; S.lastBake=ahora;
   const SL=mc.sunLoc;
   gl.bindFramebuffer(gl.FRAMEBUFFER, S.fbo);
   gl.viewport(0,0,S.size,S.size);
@@ -4590,6 +4680,7 @@ function mcSunUniforms(L, S){
   gl.uniform1f(L.uSunShade, mc.sunShade);
   mcSunFrustum(L);
   gl.uniform3f(L.uEye, mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]);
+  gl.uniform1f(L.uSunProbe, mc.sunProbe);
   gl.uniform1i(L.uSunMap, 1);                                       // unidad 1 (la 0 es el atlas)
 }
 
@@ -4743,6 +4834,11 @@ function mcMeshAll(){
   for(let cz=0;cz<ncz;cz++) for(let cx=0;cx<ncx;cx++) mcMeshChunk(cx,cz);
   // Los cuerpos de los agentes usan el mismo atlas: si creció (game.addMaterial) sus UV quedarían obsoletas.
   for(const a of mc.agents.values()) if(a.vbo){ a.blockId=mcResolveMat(a.block); a._meshSig=null; mcAgentMesh(a); }
+  // Con qué luz de bloque quedaron horneados estos chunks. mcRestampAll lo usa para saltarse un mcMeshAll entero
+  // cuando la luz no ha cambiado. Tiene que ser ESTA foto y no una tomada al entrar en mcRestampAll: mcStampStruct
+  // ya llama a mcComputeBlockLight() antes, así que allí el "antes" vendría contaminado con la luz nueva y el
+  // terreno se quedaría a oscuras junto a una estructura recién encendida.
+  mc.blockLightMeshed = mc.blockLight ? mc.blockLight.slice() : null;
 }
 // t8 · redimensiona el mundo EN VIVO (game.resizeWorld). Reasigna la rejilla densa conservando los bloques
 // anclados en el origen (0,0,0), libera las VBO de todos los chunks, recoloca spawn/jugador dentro de los nuevos
@@ -4828,10 +4924,18 @@ function mcMoveAxis(ai, target){
 // Por estructura: recorte contra su AABB fino (si no solapa, coste cero) y sondeo del bitset denso de su
 // malla cacheada por acceso directo. Sustituye al Set global `structFine` cuyo coste crecía con el VOLUMEN
 // del AABB del jugador (∝ playerScale³: 1M consultas hash/frame a escala 5 → 31fps pegado a la Taberna).
+// Forma sólida de una instancia estampada, para COLISIÓN. Prefiere la malla viva y cae al bitset de solo-colisión
+// (colRot) cuando la geometría está invalidada: durante un mcRestampAll el atlas se recompone y meshRot se vacía,
+// y sin este respaldo el jugador se quedaba ~1 s sin suelo (caía y luego mcUnstick lo devolvía = «se agachaba»).
+function mcStructColl(s){
+  const rec=mc.structs[s.key]; if(!rec) return null;
+  const rot=s.rot|0, g=(rec.meshRot && rec.meshRot[rot]) || (rec.colRot && rec.colRot[rot]);
+  return (g && g.bits) ? g : null;
+}
 function mcFineBoxHit(fx0,fy0,fz0,fx1,fy1,fz1){
   const T=MC_TILE;
   for(const s of mc.structures){
-    const rr=mc.structs[s.key] && mc.structs[s.key].meshRot, g=rr && rr[s.rot|0]; if(!g||!g.bits) continue;
+    const g=mcStructColl(s); if(!g) continue;
     const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T;
     const x0=Math.max(fx0-bx,0), x1=Math.min(fx1-bx,d[0]-1); if(x0>x1) continue;
     const y0=Math.max(fy0-by,0), y1=Math.min(fy1-by,d[1]-1); if(y0>y1) continue;
@@ -5073,7 +5177,10 @@ function mcRender(){
     quads+=a.count/6;
   }
   // Estructuras estampadas (voxeles finos), frustum-culled por su aabb — DOS pasadas:
+  // Las TRES pasadas (estas dos y la translúcida) van con sesgo de profundidad: una estructura apoyada en el
+  // terreno comparte plano con el bloque de al lado y sin sesgo el empate lo reparte el ruido (ver mcStructGL).
   if(mc.structures.length){
+    mcStructGL(true);
     // 1) Color por vértice (voxeles #hex, y tex: cuando game.structTextures=false) — programa de estructuras.
     if(mc.structProg){
       const SL=mc.structLoc, sstr=9*4;
@@ -5125,6 +5232,8 @@ function mcRender(){
         gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
         mcSunUniforms(SL, SM);
         mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);
+        // El sesgo (puesto arriba, para las tres pasadas) también hace falta aquí: sin él la cara de cristal
+        // pegada a una opaca pierde el empate y se ve el fondo pelado en vez del cristal compuesto encima.
         gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
         for(const s of mc.structures){
           if(!s.alphaCount || !mcChunkVisible(s,pv)) continue;
@@ -5136,6 +5245,7 @@ function mcRender(){
         gl.depthMask(true); gl.disable(gl.BLEND);
       }
     }
+    mcStructGL(false);   // fuera antes de la pasada del sol del frame siguiente, que hereda el estado
   }
   mcDrawPreview(pj, view);        // vista-previa translúcida de la habitación mientras se mantiene el clic derecho
   mcDrawOverlays(pj, view);
@@ -5148,6 +5258,7 @@ function mcDrawPreview(pj, view){
   const gl=mc.gl, s=mc.preview; if(!s || mc.structGhostAlpha<=0) return;
   gl.enable(gl.BLEND); gl.blendColor(0,0,0,mc.structGhostAlpha); gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
   gl.depthMask(false);
+  mcStructGL(true);   // el fantasma se apoya en el suelo → su cara de abajo es coplanar con él (mismo empate que la pasada 3)
   if(mc.structProg && (s.colCount || s.alphaCount)){                          // pasada 1 · color por vértice (#hex opaco+translúcido y tex: en modo plano)
     const SL=mc.structLoc, sstr=9*4;
     gl.useProgram(mc.structProg);
@@ -5176,6 +5287,7 @@ function mcDrawPreview(pj, view){
     gl.drawArrays(gl.TRIANGLES,0,s.texCount);
     gl.bindTexture(gl.TEXTURE_2D, mc.atlasTex);                               // restaura el atlas del terreno
   }
+  mcStructGL(false);
   gl.disable(gl.BLEND); gl.depthMask(true);
 }
 // Libera la vista-previa de estructura (VBO) y olvida su memo. Se llama al soltar, al perder el foco o al cerrar.
@@ -5425,7 +5537,7 @@ function mcRaycast(maxd, hitStruct){   // desde el ojo, dirección de mirada; de
 function mcStructAt(px,py,pz){
   const T=MC_TILE, fx=Math.floor(px*T), fy=Math.floor(py*T), fz=Math.floor(pz*T);
   for(const s of mc.structures){
-    const rr=mc.structs[s.key] && mc.structs[s.key].meshRot, g=rr && rr[s.rot|0]; if(!g||!g.bits) continue;
+    const g=mcStructColl(s); if(!g) continue;
     const d=g.fdim, lx=fx-s.ox*T, ly=fy-s.oy*T, lz=fz-s.oz*T;
     if(lx<0||ly<0||lz<0||lx>=d[0]||ly>=d[1]||lz>=d[2]) continue;
     if(g.bits[(ly*d[2]+lz)*d[0]+lx]) return s;
@@ -5442,9 +5554,9 @@ function mcStructCellSolid(x,y,z){
 }
 // Re-malla TODAS las estructuras vivas (al cambiar game.structTextures): invalida la geometría fina cacheada
 // (el modo de textura cambió), recompone el atlas y reconstruye las VBO de cada instancia. La colisión fina
-// no necesita rehacerse: sondea el bitset de la malla cacheada de cada instancia viva.
+// se mantiene en pie durante el re-horneado: mcStructColl cae al bitset de colRot, que NO se invalida aquí.
 async function mcRestampAll(){
-  for(const k in mc.structs){ if(mc.structs[k]) mc.structs[k].meshRot={}; }
+  for(const k in mc.structs){ if(mc.structs[k]) mc.structs[k].meshRot={}; }   // solo la geometría; colRot (colisión) sigue viva
   const insts=mc.structures.slice();   // las instancias VIVAS siguen dibujándose mientras se re-hornean (no se liberan aún)
   await mcBuildStructAtlas();          // el atlas recolecta claves de las estructuras vivas (siguen en mc.structures)
   // emitCells de cada inst desde su geom CACHEADO (posición-independiente). Las instancias cargadas de disco son
@@ -5454,8 +5566,15 @@ async function mcRestampAll(){
   // mcBuildStructMesh de abajo reutiliza el greedy (sin doble coste).
   for(const s of insts){ const g=await mcStructGeom(s.key, (s.rot|0)&15); s.emitCells=g.emitCells; s.emitDir=g.emitDir; }
   // Luz de bloque FRESCA antes de reconstruir → mcBuildStructMesh hornea la luz correcta por cara (corrige luz
-  // estructura-sobre-estructura y post-edición). El terreno se re-malla al final por si el brillo cambió.
+  // estructura-sobre-estructura y post-edición). El terreno se re-malla al final SOLO si el brillo cambió respecto
+  // al que tienen HORNEADO los chunks (mc.blockLightMeshed, que pone mcMeshAll): las mallas del terreno dependen de
+  // la rejilla (que aquí no se toca), del atlas de terreno (que aquí tampoco, solo se recompone el de estructuras)
+  // y de esta luz. Como la mayoría de estructuras NO son emisivas, comparar 360 kB (décimas de ms) ahorra un
+  // mcMeshAll entero, que es la fase más cara del estampado.
   mcRecomputeHasGlow(); mcComputeBlockLight();
+  const BL=mc.blockLight, LM=mc.blockLightMeshed;
+  let luzCambio = !LM || !BL || BL.length!==LM.length;
+  if(!luzCambio) for(let i=0;i<BL.length;i++) if(BL[i]!==LM[i]){ luzCambio=true; break; }
   // Reconstruye cada instancia en un objeto NUEVO y solo entonces libera la vieja y la sustituye en su sitio: así
   // ninguna estructura desaparece del render mientras se re-hornea (evita el parpadeo de ~1s al colocar emisivos).
   for(const s of insts){
@@ -5463,7 +5582,33 @@ async function mcRestampAll(){
     const j=mc.structures.indexOf(s);
     if(j>=0){ mcFreeStruct(s); mc.structures[j]=rebuilt; } else mcFreeStruct(rebuilt);   // se retiró mientras se reconstruía
   }
-  mcMeshAll();   // el terreno vecino toma la luz de bloque de las estructuras (paredes encendidas)
+  if(luzCambio) mcMeshAll();   // el terreno vecino toma la luz de bloque de las estructuras (paredes encendidas)
+}
+// Al guardar desde el editor (Guardar / Guardar como…) el objeto puede estar YA en el Mundo por triplicado: en la
+// galería del selector, como material de una ranura y estampado en el mapa. Cada sitio tiene su caché y ninguna se
+// invalidaba, así que la edición no se veía hasta recargar la página. Esto tira de la cadena entera para `key`.
+// No mira el TIPO del objeto sino quién lo usa, porque un habitante de tipo `bloque` también puede ser material de
+// terreno y una textura puede estar horneada dentro de una sala ya colocada.
+// Nunca lanza: el guardado ya fue bien y el catch de save() diría "guardado local" sin serlo.
+async function mcRefreshSavedKey(key){
+  try{ await mcRefreshSaved(key); }catch(e){ console.warn('No se pudo refrescar el Mundo tras guardar', key, e); }
+}
+async function mcRefreshSaved(key){
+  invalidateTex(key);                        // texDefs / texFaceCache / texReprCache / roomDataCache + caché del editor 3D
+  delete mc.structs[key];                    // huella gruesa (mcStructCells) y meshRot ya horneado
+  mc.catalog=null; try{ await mcBuildCatalog(); }catch(e){}   // el selector lee mc.catalog una sola vez y lo cachea
+  if(!mc.gl) return;                          // el Mundo no se ha abierto en esta sesión: no hay nada horneado que tocar
+  mcClearPreview();                           // el fantasma de colocación está memoizado por clave+destino+giro
+  // Material de terreno: el atlas NO cambia de tamaño al reeditar (solo crece al AÑADIR bloques), así que las UV de
+  // la rejilla siguen valiendo y basta rehacerlo y resubirlo. La hotbar pinta el icono de cada ranura desde él.
+  if(mc.blockKey.indexOf(key)>0){ await mcBuildPalette(); mcUploadAtlas(); mcBuildHotbar(); }
+  // Estructuras: hornean color y luz en su VBO al estamparse, así que lo ya colocado solo cambia reconstruyéndolo.
+  // Afecta tanto si la instancia ES la clave editada como si la USA de textura (`tex:<clave>`).
+  let afectadas=false;
+  for(const k of new Set(mc.structures.map(s=>s.key))){
+    if(k===key || (await mcStructTexKeys(k)).includes(key)){ afectadas=true; break; }
+  }
+  if(afectadas) await mcRestampAll();
 }
 // Retira una estructura entera (se estampó de una pieza → se borra de una pieza): libera su VBO y la saca
 // de mc.structures (su colisión fina desaparece con ella: se sondea por instancia viva).
@@ -5795,12 +5940,14 @@ async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet){
   rot=(rot|0)&15;                       // orientación combinada (yaw + vuelco); ver mcStructGeom
   const s={key:srcKey, ox,oy,oz, rot, colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[ox,oy,oz,ox,oy,oz]};
   mc.structures.push(s);                                        // en la lista ya (el render la ignora sin malla; el atlas la ve)
-  // ¿aparece alguna clave tex: nueva? ⇒ recomponer el atlas de estructuras y re-mallar TODO (las UV cambian de fila),
-  // como el terreno remesha al crecer su atlas. Solo importa con textureado activo (si no, van al flujo de color).
+  // ¿aparece alguna clave tex: nueva? ⇒ recomponer el atlas de estructuras. Con filas fijas y altura escalonada eso
+  // NO mueve las UV de las demás casi nunca, así que solo hay que re-mallarlo todo cuando el atlas sube de escalón
+  // (mc.structUVMoved). Solo importa con textureado activo (si no, van al flujo de color).
   const keys=await mcStructTexKeys(srcKey);
   const grow=mc.structTextures!==false && keys.some(k=>!(mc.structUV && mc.structUV[k]));
-  if(grow){
-    await mcRestampAll();                                       // recompone atlas (ya incluye la nueva) + re-malla todas (ya recomputa luz de bloque)
+  if(grow) await mcBuildStructAtlas();
+  if(grow && mc.structUVMoved){
+    await mcRestampAll();                                       // el atlas creció de escalón → re-malla todas (ya recomputa luz de bloque)
   } else {
     Object.assign(s, await mcBuildStructMesh(srcKey, ox, oy, oz, rot));   // cachea también el bitset de colisión fina
     if(s.emitCells && s.emitCells.length){                      // la nueva estructura tiene voxeles emisivos:
@@ -6343,13 +6490,30 @@ try{ const a=parseFloat(localStorage.getItem('vf_mcStructGhostAlpha')); if(isFin
 // clic derecho) (0..1): 0 = sin vista-previa, 1 = opaca. Separada de game.ghostAlpha (bloque suelto).
 Object.defineProperty(game,'structGhostAlpha',{ enumerable:true, get:()=>mc.structGhostAlpha,
   set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:1)); mc.structGhostAlpha=v; try{localStorage.setItem('vf_mcStructGhostAlpha',v);}catch(e){} return v; } });
+try{ const a=parseFloat(localStorage.getItem('vf_mcStructBias')); if(isFinite(a)) mc.structBias=Math.max(-8,Math.min(0,a)); }catch(e){}
+// game.structBias = sesgo de profundidad de las estructuras estampadas (0..-8, def. 0 = sin sesgo). Una cara de
+// estructura pegada a un bloque del terreno cae en el mismo plano y el z-test empata: el reparto de píxeles lo
+// decide el ruido y el dibujo del bloque de fondo asoma a manchas entre el color de la cara, bailando al mover la
+// cámara. Negativo acerca la estructura a la cámara y gana siempre. Hoy el empate lo rompe antes structCull (la
+// cara de estructura del plano compartido da la espalda a la cámara y ni se rasteriza), así que esto queda de
+// RESERVA: subir el margen a -2/-3 si alguna GPU aún moteara. Se ve en vivo y persiste.
+Object.defineProperty(game,'structBias',{ enumerable:true, get:()=>mc.structBias,
+  set:v=>{ v=Math.max(-8,Math.min(0, isFinite(+v)?+v:0)); mc.structBias=v; try{localStorage.setItem('vf_mcStructBias',v);}catch(e){} return v; } });
+try{ const a=localStorage.getItem('vf_mcStructCull'); if(a!=null) mc.structCull=(a==='1'); }catch(e){}
+// game.structCull = culling de caras traseras en las estructuras (true por def.). El sesgo de arriba sólo desempata
+// estructura contra TERRENO (el terreno no lleva sesgo); entre dos bloques ESTAMPADOS vecinos las dos caras llevan el
+// mismo sesgo y el empate sigue exacto. Como cada uno emite su propia cara en el plano compartido, con normales
+// opuestas, basta tirar la que da la espalda a la cámara: queda una sola, sin nada que repartir. También ahorra
+// relleno. false = comportamiento viejo (escape si en tu GPU desapareciera alguna cara). Se ve en vivo y persiste.
+Object.defineProperty(game,'structCull',{ enumerable:true, get:()=>mc.structCull,
+  set:v=>{ v=!!v; mc.structCull=v; try{localStorage.setItem('vf_mcStructCull', v?'1':'0');}catch(e){} return v; } });
 try{ const a=parseFloat(localStorage.getItem('vf_mcNoteAlpha')); if(isFinite(a)) mc.noteAlpha=Math.max(0,Math.min(1,a)); }catch(e){}
 // game.noteAlpha (t1) = opacidad del post-it flotante que marca un bloque anotado (0..1; 0 = ocultar marcadores).
 // El texto de la nota se ve al mirar el bloque, independientemente de esto. Se ve en vivo y persiste.
 Object.defineProperty(game,'noteAlpha',{ enumerable:true, get:()=>mc.noteAlpha,
   set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.85)); mc.noteAlpha=v; try{localStorage.setItem('vf_mcNoteAlpha',v);}catch(e){} return v; } });
 Object.defineProperty(game,'playerSpeed',{ enumerable:true, get:()=>mc.speed,
-  set:v=>{ v=Math.max(1,Math.min(40,+v||10)); mc.speed=v; try{localStorage.setItem('vf_mcSpeed',v);}catch(e){} return v; } });
+  set:v=>{ v=Math.max(1,Math.min(40,+v||5)); mc.speed=v; try{localStorage.setItem('vf_mcSpeed',v);}catch(e){} return v; } });
 // game.airControl / airAccel / airCap = movimiento en el AIRE estilo Quake (air-strafe). airControl on: la velocidad
 // horizontal NO se reescribe en el aire, así girar el ratón no redirige el salto y soltar teclas conserva la inercia;
 // W/A/S/D solo aceleran de forma acotada hacia donde miras (la componente en esa dirección no pasa de airCap·√scale).
@@ -6402,7 +6566,7 @@ Object.defineProperty(game,'structGreedy',{ enumerable:true, get:()=>mc.structGr
 // (una sala con poca luz se apaga del todo, no solo el fondo con luz 0). Re-malla el terreno en vivo y persiste.
 try{ const d=parseFloat(localStorage.getItem('vf_mcInteriorDark')); if(isFinite(d)) mc.interiorDark=Math.max(0,Math.min(1,d)); }catch(e){}
 Object.defineProperty(game,'interiorDark',{ enumerable:true, get:()=>mc.interiorDark,
-  set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.08)); mc.interiorDark=v; try{localStorage.setItem('vf_mcInteriorDark',v);}catch(e){}
+  set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.1)); mc.interiorDark=v; try{localStorage.setItem('vf_mcInteriorDark',v);}catch(e){}
     if(mc.grid){ mcMeshAll(); if(mc.structures.length) mcRestampAll(); }   // re-oscurece terreno Y estructuras en vivo
     return v; } });
 // game.sunShade = SOMBRA PROYECTADA del sol vertical, que es COSA APARTE de game.interiorDark. interiorDark es
@@ -6410,6 +6574,28 @@ Object.defineProperty(game,'interiorDark',{ enumerable:true, get:()=>mc.interior
 // encima, estás en sombra, y se aplica a las 6 caras porque cada una pregunta por el aire al que da. 1 = desactivada
 // (y entonces ni se renderiza el mapa: coste cero); 0.55 por defecto; 0 = sombra a negro. NO re-malla nada — es un
 // uniforme, así que cambia en el frame siguiente. Persiste en vf_mcSunShade.
+// game.sunProbe = a qué distancia (en bloques) pregunta cada cara al mapa del sol. La sombra del sol vertical se
+// resuelve con una altura por columna, así que una cara VERTICAL tiene que preguntar por una columna que no sea la
+// suya (la suya siempre tiene su propio techo encima); por eso se sondea «hacia el aire al que da».
+// Por qué 0.51 y no 0.5: EMPÍRICO, no derivado. El dueño veía manchas moteadas en los laterales de una estructura
+// pegada a un bloque, barrió este valor en su GPU y a 0.51 se van. No está explicado por qué un cambio tan pequeño
+// basta: el barrido headless (SwiftShader, 4 separaciones × 4 sondas) no midió NINGUNA diferencia de brillo, así que
+// el moteado no se reproduce fuera de una GPU real y la causa sigue sin confirmarse. Sospecha viva, sin comprobar: el
+// mapa se lee con NEAREST y 0.5 bloques puede caer justo en un borde de téxel, donde el redondeo elige uno u otro
+// píxel a píxel. Si alguien lo confirma, que lo escriba aquí; mientras tanto no se toca porque «0.5 es más redondo».
+// Mínimo útil ≈ 1 téxel del mapa (mc.dim.x/mc.shadowSize) o vuelve el acné.
+// game.shadowMoveMs = cada cuánto, como mucho, se rehace el mapa de sombra cuando lo único que ha cambiado es que un
+// agente se ha movido. Rehacerlo cuesta ~20 ms medidos con 48 estructuras (mundo entero a 2048²), así que hacerlo en
+// cada frame mientras alguien anda es justo lo que tiraba los fps de 144 a 60-80 durante los segundos posteriores a
+// colocar una estructura (los agentes reaccionan, se mueven un rato y luego se quedan quietos → los fps volvían).
+// Una edición del mundo NO pasa por aquí: esa va por mcShadowDirty() y se rehornea en el acto.
+// 0 = comportamiento de antes. Subirlo = más fps y la sombra de los que andan va a saltos.
+try{ const d=parseFloat(localStorage.getItem('vf_mcShadowMoveMs')); if(isFinite(d)) mc.shadowMoveMs=Math.max(0,Math.min(500,d)); }catch(e){}
+Object.defineProperty(game,'shadowMoveMs',{ enumerable:true, get:()=>mc.shadowMoveMs,
+  set:v=>{ v=Math.max(0,Math.min(500, isFinite(+v)?+v:45)); mc.shadowMoveMs=v; try{localStorage.setItem('vf_mcShadowMoveMs',v);}catch(e){} return v; } });
+try{ const d=parseFloat(localStorage.getItem('vf_mcSunProbe')); if(isFinite(d)) mc.sunProbe=Math.max(0.01,Math.min(1,d)); }catch(e){}
+Object.defineProperty(game,'sunProbe',{ enumerable:true, get:()=>mc.sunProbe,
+  set:v=>{ v=Math.max(0.01,Math.min(1, isFinite(+v)?+v:0.51)); mc.sunProbe=v; try{localStorage.setItem('vf_mcSunProbe',v);}catch(e){} return v; } });
 try{ const d=parseFloat(localStorage.getItem('vf_mcSunShade')); if(isFinite(d)) mc.sunShade=Math.max(0,Math.min(1,d)); }catch(e){}
 Object.defineProperty(game,'sunShade',{ enumerable:true, get:()=>mc.sunShade,
   set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.55)); mc.sunShade=v; try{localStorage.setItem('vf_mcSunShade',v);}catch(e){}
@@ -6465,7 +6651,7 @@ game.toast=game.showToast=function(msg, secs){ toast(String(msg), secs); return 
 game.dumpVars=function(){
   const keys=['nearClip','perspStrength','playFill','playZoom','playLift',   // edición 3D / modo jugar
     'fov','renderDist','renderScale','mouseSpeed','yaw','pitch','hotbarHide','reach',   // Mundo (WebGL)
-    'ghostAlpha','structGhostAlpha','noteAlpha','playerSpeed','playerScale','playerTool',
+    'ghostAlpha','structGhostAlpha','noteAlpha','structBias','structCull','playerSpeed','playerScale','playerTool',
     'airControl','airAccel','airCap',
     'structTextures','structGreedy','interiorDark','sunShade','shadowSize','glowLevel','glowFocus','worldSize',
     'agentSpeed','agentSaveMs'];
@@ -6672,7 +6858,8 @@ function mcAgentMesh(a){
   gl.bindBuffer(gl.ARRAY_BUFFER, a.vbo);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
   a.count=36;
-  mcShadowDirty();   // el agente se movió → su sombra también (esta es TODA la integración que necesita)
+  mcShadowMoved();   // el agente se movió → su sombra también (esta es TODA la integración que necesita), pero sin
+                     // prisa: un cuerpo que APARECE o cambia de nº de vértices sí entra ya, vía la firma de geometría
 }
 function mcAgentFreeMesh(a){ if(a.vbo && mc.gl) mc.gl.deleteBuffer(a.vbo); a.vbo=null; a.count=0; mcShadowDirty(); }
 
@@ -6961,7 +7148,7 @@ function mcAgentsSmoothUpdate(dt){
     // nunca llegaban al mcShadowDirty de app.js): la nube se deslizaba con la sombra clavada donde estuvo, y solo
     // saltaba al colocar un bloque, que es lo que sí marcaba el mapa. La regla es del motor, no de los agentes:
     // si la geometría se mueve entre frames, el mapa de sombra caduca.
-    if(a.renderX!==oldRx || a.renderY!==oldRy || a.renderZ!==oldRz) mcShadowDirty();
+    if(a.renderX!==oldRx || a.renderY!==oldRy || a.renderZ!==oldRz) mcShadowMoved();   // andar no es urgente (ver mcShadowMoved)
     if(mounted){
       const dxP = a.renderX - oldRx;
       const dyP = a.renderY - oldRy;
