@@ -660,10 +660,20 @@ asíncrona de construcción), y solo anota si el bloque **cambió de verdad**.
 - **No modifica lo que diagnostica.** `game.skills.isTrapPit()` **escribe una nota** cuando acierta
   (`recordTrapPitVisit`), así que el informe usa una copia de solo lectura. Misma razón para no llamar a
   nada que pueda plantar un pino.
+- **Un veredicto no puede ser `ok` con 0 celdas ganadas.** Cambiar de celda **no es** avanzar: una serpiente
+  que hace ping-pong entre dos casillas cambia de celda siempre. Con ≥10 juzgadas y `celdasGanadas === 0` el
+  veredicto es `SIN AVANCE` y **R1 dispara**. Y R1/R2 **no** se condicionan a que el detector marque atasco:
+  la serpiente andaba en cada tick, así que salía «sana» llevando 975 ticks sin ganar una celda.
 - **Mide con la vara del framework.** El vecindario 5×5 pregunta por `mcSurfaceNear(x, z, a.y, climb, drop)`,
   no por `a.surfaceY` (que es el sólido más alto de la columna) ni por `a.canWalk` (que es **relativo al
   agente**, §21.3). De ahí que distinga `TAPIADO` —sólido a cota alcanzable, se pica— de `DESNIVEL` —no se
-  arregla picando—.
+  arregla picando—. **Y la vara incluye los envoltorios**: `a.canWalk` va envuelto por `desnivelProhibido`
+  (§15), que mide **cima contra cima**, así que un vecino con suelo pisable y voladizo encima se rechaza
+  porque el paso acabaría en la azotea. El informe lo etiqueta `AZOTEA +n`; imprimir `LIBRE · canWalk=false`
+  era la contradicción que delataba que medía una vuelta de envoltorio por detrás.
+- **Los segundos hacen caso a `game.agentSpeed`.** La ventana no es `ticks × 0.2`: con `agentSpeed=100` eran
+  ~0,8 s y el informe anunciaba 80. Y si un solo agente ha llenado el anillo de escrituras (>70 %), se avisa
+  en PROCEDENCIA: de los demás **no se puede decir nada**, sus pruebas fueron desalojadas.
 - **El informe también está sujeto a §22.** Presupuesto duro (`max`, 30 000 por defecto). Orden de
   sacrificio: traza → heatmap → tickets → notas → agentes sanos. Cada recorte **se declara en la sección 6**;
   el corte duro se hace **sobre el cuerpo**, nunca sobre la sección 6, que es la que avisa de que se cortó.
@@ -696,3 +706,34 @@ autores; `max: 2000` respeta el presupuesto **y** declara los recortes; `guardar
 En el navegador (Playwright + SwiftShader, 3 agentes reales corriendo): `game.informe({todos:true})` genera
 las secciones 3.1-3.8 contra el mundo real sin un solo error de consola, y `game.informe()` deja
 `data/snippets/informe-atascos.json` en el servidor.
+
+---
+
+## 24. Muerte por la propia cola (`modoSerpiente`) ☠️
+
+El envoltorio de `a.walk` prohíbe pisar cuerpo propio y girar 180°, y tenía una **válvula de escape**: si
+ninguna otra dirección era viable, dejaba pasar el paso prohibido «antes que congelar al agente». En un
+callejón de 1 de ancho esa válvula se abre **siempre**, y la única celda a la que la cabeza puede entrar es
+la que acaba de dejar: el cuerpo entero se pliega en dos casillas y hace ping-pong para siempre.
+
+Medido en un informe real: **52.825 ticks, 975 sin ganar una celda**, `UTURN_DEADEND` 44.606 veces con **0
+celdas ganadas**, y las dos casillas repintadas 300 veces cada una. Lo peor: **no contaba como atasco**
+porque el agente *andaba* en cada tick (`bloqueos 0`), así que la cadena de rescate no llegó a mirarlo
+(`picados 0`).
+
+Ahora esa situación es la **muerte**: `game.skills.serpienteMuerePorSuCola(a)`
+
+1. planta una lápida con **el pino de siempre** (`plantarPinoDeEmergencia(a, {alto: 16, …})` — la misma
+   función, con el tronco estirado; **no se duplica el pino**) y deja la nota *«serpiente muerta por su
+   propia cola»* con la causa y el largo del cuerpo;
+2. **reaparece** en una celda sorteada al azar (`celdaLibreAlAzar`) con ≥2 vecinos pisables y a ≥10 de
+   distancia — se sortea, no se barre el mapa, para que dos muertes seguidas no la manden al mismo sitio;
+3. renace entera: cuerpo, rumbo, historial y contadores de atasco a cero (`a.stats.muertes` lleva la cuenta).
+
+**La marca de lava también tiene tope.** «Aquí no hay lava» no basta como condición: si alguien repone el
+suelo —el propio cuerpo de la serpiente lo hacía— se repinta en cada tick. Se marca **una vez por celda**
+(`v.lavaCeldas`, cota 300); si te la borran, no se pelea.
+
+**Verificado**: `node test_serpiente.js` (17 tests) — la lápida mide ≥12 de tronco con su copa, la nota lleva
+causa, reaparece lejos y sobre suelo con salida, y **sin `opts` el pino de emergencia sigue midiendo 5
+exactamente como antes**.
