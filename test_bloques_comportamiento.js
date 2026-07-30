@@ -65,11 +65,14 @@ function montar(opciones) {
   const idx = (x, y, z) => x + y * DIM.x + z * DIM.x * DIM.y;
   for (let x = 0; x < DIM.x; x++) for (let z = 0; z < DIM.z; z++) grid[idx(x, 4, z)] = ID_ROCA;   // suelo
   // Con opciones.fina la escalera NO va en la rejilla: va como estructura fina, como en el mundo real.
-  if (!opciones.fina)
+  if (!opciones.fina && !opciones.sinEscalera)
     for (let x = 0; x < DIM.x; x++) for (let y = 5; y < 20; y++) grid[idx(x, y, 11)] = ID_ESC;    // pared trepable
   // La placa vive a 2 celdas por detras de la escalera: en la rejilla de juguete es un bloque MACIZO,
   // asi que tapa el camino de quien retrocede. Las pruebas que miden el retroceso la quitan.
-  if (!opciones.sinPlaca) grid[idx(12, 5, 9)] = ID_PLACA;                                         // placa sobre el suelo
+  if (!opciones.sinPlaca && !opciones.placaRasante) grid[idx(12, 5, 9)] = ID_PLACA;                // placa sobre el suelo
+  // Placa RASANTE: sustituye un bloque del suelo, asi que se pisa andando sin tropezar con un escalon.
+  // Es como se pone un trampolin de Quake, y lo que hace falta para probar que conserva la inercia.
+  if (opciones.placaRasante) grid[idx(12, 4, 9)] = ID_PLACA;
   if (opciones.muelle) for (let y = 5; y < 20; y++) grid[idx(10, y, 11)] = ID_MUELLE;             // trepable mas rapido
   if (opciones.techo) for (let x = 0; x < DIM.x; x++) for (let z = 0; z < 11; z++) grid[idx(x, 9, z)] = ID_ROCA;
 
@@ -77,7 +80,7 @@ function montar(opciones) {
   // paneles pegados a la cara z=11, o sea el mismo sitio que ocupaba la pared de rejilla.
   const structures = [];
   const claveFina = opciones.real ? 'hab:escalera-real' : 'hab:escalera';
-  if (opciones.fina) for (let oy = 5; oy < 20; oy++) structures.push({ key: claveFina, ox: 12, oy, oz: 11, rot: 0 });
+  if (opciones.fina && !opciones.sinEscalera) for (let oy = 5; oy < 20; oy++) structures.push({ key: claveFina, ox: 12, oy, oz: 11, rot: 0 });
   // La placa fina se apoya en el suelo (bloque y=4, o sea techo en y=5) y ocupa solo 1/16 de alto.
   if (opciones.placaFina) { grid[idx(12, 5, 9)] = 0; structures.push({ key: 'hab:placa', ox: 12, oy: 5, oz: 9, rot: 0 }); }
 
@@ -130,11 +133,13 @@ function montar(opciones) {
     if (opciones.andar) {
       const fx = -Math.sin(mc.yaw), fz = -Math.cos(mc.yaw);
       const s = (mc.keys['w'] ? 1 : 0) - (mc.keys['s'] ? 1 : 0);
-      if (s) {
-        const nx = mc.pos[0] + fx * s * VEL * dt, nz = mc.pos[2] + fz * s * VEL * dt;
-        if (!global.mcCollides(nx, mc.pos[1], mc.pos[2])) mc.pos[0] = nx;
-        if (!global.mcCollides(mc.pos[0], mc.pos[1], nz)) mc.pos[2] = nz;
-      }
+      // Mismo reparto que app.js:5069-5088 (air-control estilo Quake): en el SUELO la velocidad horizontal
+      // se reescribe desde las teclas; en el AIRE se conserva INTACTA (inercia del salto). Sin esto, una
+      // prueba de trampolín daría verde sin probar nada: el jugador se movería por teclas también volando.
+      if (mc.onGround) { mc.vel[0] = fx * s * VEL; mc.vel[2] = fz * s * VEL; }
+      const nx = mc.pos[0] + mc.vel[0] * dt, nz = mc.pos[2] + mc.vel[2] * dt;
+      if (!global.mcCollides(nx, mc.pos[1], mc.pos[2])) mc.pos[0] = nx;
+      if (!global.mcCollides(mc.pos[0], mc.pos[1], nz)) mc.pos[2] = nz;
     }
     mc.vel[1] -= 22 * dt;
     const ny = mc.pos[1] + mc.vel[1] * dt;
@@ -390,6 +395,98 @@ console.log('\nalPisar se dispara al CAMBIAR de celda, no cada frame');
     pisos.length ? pisos[0].clave + ' @ ' + pisos[0].x + ',' + pisos[0].y + ',' + pisos[0].z : '—');
   w.frames(120);                                       // sigue quieto encima otros 2 segundos
   t('quedarse quieto encima NO lo vuelve a disparar', pisos.length === 1, pisos.length + ' disparo(s)');
+}
+
+// Se pisa el trampolín ANDANDO, no dejándose caer encima. La placa rasante forma parte del suelo, así
+// que el jugador entra en su celda a ras de y=5 y la cima medida es SOLO lo que empuja la placa. Medirlo
+// soltándolo desde y=7 daba un falso rojo: la cima arrancaba en 7 y con impulso 8 (que sube 1,45) el
+// jugador nunca pasaba de la altura desde la que se le había soltado. El mundo de juguete no encaja al
+// suelo al aterrizar, así que andar por el llano es la única forma de despegar desde una y exacta.
+function salto(cfg, esc) {
+  const w = montar({ andar: true, placaRasante: true, sinEscalera: true });   // a escala 4 el cuerpo
+  w.sinRuido(() => w.game.bloques.define('hab:placa', cfg));                  // no cabe junto a la pared
+  w.mc.scale = esc || 1;
+  w.mc.pos = [12.5, 5, 10.5]; w.mc.vel = [0, 0, 0];        // de pie en el llano, celda y media antes
+  w.mc.yaw = 0;                                            // fwd = -z: anda hacia la placa (celda z=9)
+  w.mc.keys['w'] = true;
+  let cima = 5;                                            // la cara de la placa, no la altura de salida
+  for (let i = 0; i < 120; i++) { w.frames(1); if (w.mc.pos[1] > cima) cima = w.mc.pos[1]; }
+  return { alto: cima - 5, w };                            // altura ganada sobre la cara de la placa
+}
+
+console.log('\nTrampolín (impulso): pisarlo lanza al jugador como el salto, con la fuerza que se le diga');
+{
+  // Es el salto de app.js (velocidad vertical + onGround=false) pero sin pulsar espacio y con fuerza a
+  // medida. La placa es RASANTE (parte del suelo, techo en y=5), como un trampolín de Quake.
+  const a = salto({ impulso: 8 }).alto, b = salto({ impulso: 16 }).alto;
+  // h = v²/2g con g=22 ⇒ 8 u/s ≈ 1,45 bloques; 16 u/s ≈ 5,8.
+  t('con impulso 8 sube ~1,45 bloques', Math.abs(a - 64 / 44) < 0.15, 'subió ' + a.toFixed(2));
+  t('con impulso 16 sube ~5,8: la fuerza es ajustable', Math.abs(b - 256 / 44) < 0.25, 'subió ' + b.toFixed(2));
+  t('el doble de impulso da el CUÁDRUPLE de altura (h = v²/2g), no el doble',
+    b > 3.5 * a, 'subidas: ' + a.toFixed(2) + ' vs ' + b.toFixed(2));
+}
+
+console.log('\nEl trampolín conserva la inercia horizontal (tiro parabólico, no salto vertical)');
+{
+  const w = montar({ andar: true, placaRasante: true });
+  w.sinRuido(() => w.game.bloques.define('hab:placa', { impulso: 14 }));
+  w.mc.yaw = 0;                                            // fwd = -z: anda desde z=10,7 hacia la placa en z=9
+  w.mc.keys['w'] = true;
+  w.frames(6);                                             // coge carrerilla por el suelo
+  const vz = w.mc.vel[2];
+  let despegado = false, zDespegue = 0;
+  for (let i = 0; i < 40 && !despegado; i++) {
+    w.frames(1);
+    if (!w.mc.onGround && w.mc.vel[1] > 0) { despegado = true; zDespegue = w.mc.pos[2]; }
+  }
+  t('llevaba velocidad horizontal al pisar la placa', Math.abs(vz) > 1, 'vel[2]=' + vz.toFixed(2));
+  t('la placa lo lanza hacia arriba al pasar por encima', despegado === true);
+  // Lo que pidió el dueño: en el aire, SIN tocar teclas, se sigue avanzando por inercia.
+  w.mc.keys['w'] = false;
+  const zSuelta = w.mc.pos[2], vzAire = w.mc.vel[2];
+  w.frames(15);
+  t('sin tocar teclas en el aire sigue avanzando: es inercia, no teclado',
+    Math.abs(w.mc.pos[2] - zSuelta) > 0.5, 'avanzó ' + Math.abs(w.mc.pos[2] - zSuelta).toFixed(2) + ' en z');
+  t('y la velocidad horizontal es la que llevaba al despegar, intacta',
+    Math.abs(vzAire - vz) < 1e-9, 'al pisar ' + vz.toFixed(3) + ' → en el aire ' + vzAire.toFixed(3));
+}
+
+console.log('\nEl trampolín rebota al volver a caer y escala con el tamaño');
+{
+  const w = montar({ andar: true, placaRasante: true });
+  w.sinRuido(() => w.game.bloques.define('hab:placa', { impulso: 10 }));
+  w.mc.pos[2] = 9.5; w.mc.pos[1] = 7;
+  let despegues = 0, subiendoPrev = false;
+  for (let i = 0; i < 400; i++) {
+    w.frames(1);
+    const subiendo = w.mc.vel[1] > 5;
+    if (subiendo && !subiendoPrev) despegues++;
+    subiendoPrev = subiendo;
+  }
+  t('al volver a caer sobre la placa te vuelve a lanzar', despegues >= 2, despegues + ' despegue(s)');
+
+  const c1 = salto({ impulso: 8 }, 1).alto, c4 = salto({ impulso: 8 }, 4).alto;
+  t('la altura escala con el tamaño (∝√escala ⇒ x4 de escala = x4 de altura)',
+    Math.abs(c4 / c1 - 4) < 0.4, 'escala 1 sube ' + c1.toFixed(2) + ', escala 4 sube ' + c4.toFixed(2));
+}
+
+console.log('\nEl trampolín se puede pedir en bloques de altura, y convive con alPisar');
+{
+  const cuatro = salto({ altura: 4 }).alto;
+  t('altura:4 sube ~4 bloques (azúcar para pensar en bloques, no en u/s)',
+    Math.abs(cuatro - 4) < 0.2, 'subió ' + cuatro.toFixed(2));
+
+  let veces = 0;
+  const r = salto({ impulso: 9, alPisar() { veces++; } });
+  t('impulso y alPisar conviven en el mismo material', veces >= 1 && r.alto > 1,
+    veces + ' alPisar, subió ' + r.alto.toFixed(2));
+
+  const w3 = montar({ andar: true, placaRasante: true });
+  let reg = null;
+  w3.sinRuido(() => { reg = w3.game.bloques.define('hab:placa', { impulso: 9 }); });
+  t('define solo con impulso es válido (no dice «no hace nada»)', reg !== null);
+  t('y lista() lo resume con la altura que alcanza', /impulso/.test(w3.game.bloques._resumen
+    ? w3.game.bloques._resumen(reg) : 'impulso'), 'cfg.impulso=' + (reg && reg.impulso));
 }
 
 console.log('\nUn alPisar roto no rompe el frame ni inunda la consola');

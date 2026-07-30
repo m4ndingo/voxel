@@ -293,6 +293,8 @@ serían **442 368** closures en un mundo 96×48×96.
 ```js
 game.bloques.define('hab:escalera', { trepable:true, subida:4, bajada:5 });  // u/s
 game.bloques.define('hab:placa',    { alPisar(c){ game.tp(51,20,50); } });   // c = {x,y,z,clave,cfg,veces,pos}
+game.bloques.define('hab:muelle',   { impulso:12 });        // trampolín: u/s verticales al pisarlo
+game.bloques.define('hab:muelle',   { altura:4 });          // lo mismo, dicho en bloques de altura
 game.bloques.info();      // clave EXACTA de lo que piso / tengo delante / detrás  ← el descubridor
 game.bloques.lista(); game.bloques.quitar('hab:muelle'); game.bloques.avisos();
 ```
@@ -336,6 +338,15 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
 - **`alPisar` es por flanco**, como `onEntityCollision` de Minecraft, en `try/catch` con aviso acotado
   — nunca una línea por frame (§22). La identidad del flanco es **celda + clave de lo pisado**, no
   solo la celda: una placa fina de 1/16 no cambia la celda de debajo al caer sobre ella.
+- **`impulso` = trampolín estilo Quake**, y es *exactamente* el salto de `app.js:5090` (fijar
+  `mc.vel[1]` + `mc.onGround=false`) pero sin pulsar espacio y con la fuerza que diga el material. Va
+  por el mismo flanco que `alPisar`, así que se dispara al **entrar** en la celda, no cada frame, y
+  rebota solo al volver a caer encima. Unidades: **u/s verticales** (el salto normal son `8.0`);
+  `altura:N` es azúcar y se convierte con `v = √(2·g·h)`, `g = 22` ⇒ la altura sube con el **cuadrado**
+  del impulso (`h = v²/2g`), doblar la fuerza cuadruplica el salto. Escala `∝√escala` como la marcha y
+  el salto. La **inercia horizontal es gratis**: `app.js` conserva `vel[0]/vel[2]` intactos mientras no
+  haya suelo, así que sales despedido con la velocidad que llevabas — pero eso depende de
+  `game.airControl`; apagado, `define` avisa de que el tiro parabólico se convierte en salto vertical.
 - Solo afecta al **jugador**; los agentes siguen con su `climb`/`drop`.
 
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
