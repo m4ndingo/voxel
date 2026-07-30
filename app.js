@@ -5543,8 +5543,23 @@ function mcXrayVolume(out){
     const fx0=Math.floor((p[0]-HW-M)*T), fx1=Math.floor((p[0]+HW+M)*T);
     const fy0=Math.floor((p[1]-M)*T),    fy1=Math.floor((p[1]+PH+M)*T);
     const fz0=Math.floor((p[2]-HW-M)*T), fz1=Math.floor((p[2]+HW+M)*T);
-    for(let x=fx0;x<=fx1;x++) for(let y=fy0;y<=fy1;y++) for(let z=fz0;z<=fz1;z++)
-      if(mcFineSolidAt(x,y,z)) mcPushBoxTris(out, x/T,y/T,z/T, (x+1)/T,(y+1)/T,(z+1)/T, 1,0.55,0.1);
+    // Se recorre ESTRUCTURA a estructura recortando la caja del jugador contra la suya, en vez de ir voxel
+    // fino a voxel fino preguntando a todas (mcFineSolidAt). Aquello costaba |caja| × |estructuras|: a escala
+    // 1 son ~17 600 voxels × 48 estructuras ≈ 850 000 pruebas POR FRAME (17 ms medidos, el frame entero), y
+    // encima crecía con scale³. Así el coste lo marcan los voxels que de verdad hay cerca. Mismo dibujo, salvo
+    // que dos estructuras solapadas pintan su voxel común dos veces (invisible: es el mismo cubo).
+    for(const s of mc.structures){
+      const g=mcStructColl(s); if(!g) continue;
+      const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T;
+      const x0=Math.max(fx0-bx,0), x1=Math.min(fx1-bx,d[0]-1); if(x0>x1) continue;
+      const y0=Math.max(fy0-by,0), y1=Math.min(fy1-by,d[1]-1); if(y0>y1) continue;
+      const z0=Math.max(fz0-bz,0), z1=Math.min(fz1-bz,d[2]-1); if(z0>z1) continue;
+      for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){
+        const row=(y*d[2]+z)*d[0];
+        for(let x=x0;x<=x1;x++) if(g.bits[row+x])
+          mcPushBoxTris(out, (bx+x)/T,(by+y)/T,(bz+z)/T, (bx+x+1)/T,(by+y+1)/T,(bz+z+1)/T, 1,0.55,0.1);
+      }
+    }
   }
 }
 
