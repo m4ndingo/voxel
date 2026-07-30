@@ -275,6 +275,16 @@ lado. La etiqueta DOM del impacto dice si paró en `voxel fino` o en `bloque` y 
 Test: `node test_rayo_apuntado.js` (extrae las funciones verbatim de `app.js`; fija la regresión
 comprobando que la celda **sí** da sólida por AABB pero el rayo **no** cruza voxel lleno).
 
+**Coste de rayos-X: se recorre la ESTRUCTURA, nunca el voxel.** `mcXrayVolume` dibujaba las cajas
+naranjas preguntando `mcFineSolidAt` **voxel fino a voxel fino** de la caja del jugador, y cada pregunta
+recorre todas las estructuras del mundo: `|caja| × |estructuras|` = ~17 600 × 48 ≈ **850 000 pruebas por
+frame** (17 ms medidos: el frame entero), y crecía con `playerScale³`. Ahora se itera **estructura a
+estructura recortando** la caja del jugador contra la suya (mismo recorte que `mcFineBoxHit`) y solo se
+recorren los voxels que de verdad caen dentro: 17 ms → **0,23 ms**. Es la misma lección de la colisión
+fina — **barrer el AABB en voxels finos no escala**. Test: `node test_rayos_x.js` (dibuja el mismo
+conjunto que la versión ingenua, no llama a `mcFineSolidAt` ni una vez, y 200 estructuras lejanas no
+reciben ni una lectura).
+
 ## Bloques con comportamiento (`game.bloques`) — el material manda, no el voxel
 
 Una escalera que se trepa, un muelle que impulsa, una placa que dispara algo al pisarla. El
@@ -295,6 +305,7 @@ game.bloques.define('hab:escalera', { trepable:true, subida:4, bajada:5 });  // 
 game.bloques.define('hab:placa',    { alPisar(c){ game.tp(51,20,50); } });   // c = {x,y,z,clave,cfg,veces,pos}
 game.bloques.define('hab:muelle',   { impulso:12 });        // trampolín: u/s verticales al pisarlo
 game.bloques.define('hab:muelle',   { altura:4 });          // lo mismo, dicho en bloques de altura
+game.bloques.define('arena',        { impulso:12 });        // vale el nombre CORTO si no es ambiguo
 game.bloques.info();      // clave EXACTA de lo que piso / tengo delante / detrás  ← el descubridor
 game.bloques.lista(); game.bloques.quitar('hab:muelle'); game.bloques.avisos();
 ```
@@ -347,6 +358,11 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   el salto. La **inercia horizontal es gratis**: `app.js` conserva `vel[0]/vel[2]` intactos mientras no
   haya suelo, así que sales despedido con la velocidad que llevabas — pero eso depende de
   `game.airControl`; apagado, `define` avisa de que el tiro parabólico se convierte en salto vertical.
+- **`define` acepta el nombre corto**: sin namespace, sin carpeta y sin extensión (`arena` →
+  `asset:assets/arena.vox.json`, `escalera` → `hab:escalera`), y dice por consola cuál ha elegido. Lo
+  que **registra** es siempre la clave larga, que es la que traen los voxels. Si el nombre corto vale
+  para dos materiales **no elige**: enseña los candidatos y no registra nada. `quitar` entiende lo
+  mismo. Un material inexistente sigue avisando y mandando a `info()`.
 - Solo afecta al **jugador**; los agentes siguen con su `climb`/`drop`.
 
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no

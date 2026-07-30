@@ -164,7 +164,14 @@ function montar(opciones) {
     llamadas: () => llamadas,
     // Reejecuta el snippet tal cual (lo que hace el dueno al afinar subida/bajada).
     recargar: () => { const l = console.log, w = console.warn; console.log = () => {}; console.warn = (...a) => avisosConsola.push(a.join(' ')); ejecutar(); console.log = l; console.warn = w; },
-    sinRuido: (fn) => { const w = console.warn; console.warn = (...a) => avisosConsola.push(a.join(' ')); try { return fn(); } finally { console.warn = w; } },
+    // Silencia warn Y log: define() informa por log cuando resuelve un nombre corto ("roca" → asset:…),
+    // y esa línea es útil en la consola del navegador pero ruido en la salida del test.
+    sinRuido: (fn) => {
+      const w = console.warn, l = console.log;
+      console.warn = (...a) => avisosConsola.push(a.join(' '));
+      console.log = (...a) => avisosConsola.push(a.join(' '));
+      try { return fn(); } finally { console.warn = w; console.log = l; }
+    },
     frames: (n, dt) => { for (let i = 0; i < n; i++) global.mcUpdate(dt || 1 / 60); }
   };
 }
@@ -534,14 +541,44 @@ console.log('\nLa caché densa se reconstruye cuando crece la paleta');
   t('y la escalera sigue resolviendo', cache[ID_ESC] && cache[ID_ESC].clave === 'hab:escalera');
 }
 
-console.log('\ndefine avisa cuando falta el namespace');
+console.log('\ndefine acepta el nombre corto mientras no haya dos materiales que se llamen igual');
+{
+  // Lo que pidió el dueño: «podría ser "arena" en lugar de la ruta larga». El nombre corto es la clave
+  // sin namespace, sin carpeta y sin extensión; lo que se REGISTRA es siempre la clave larga, que es la
+  // que traen los voxels del mundo.
+  const w = montar();
+  const r = w.sinRuido(() => w.game.bloques.define('roca', { impulso: 5 }));
+  t('"roca" registra asset:assets/roca.vox.json, sin escribir la ruta entera',
+    r !== null && !!w.game.bloques._tabla['asset:assets/roca.vox.json'] && !w.game.bloques._tabla['roca'],
+    r && r.clave);
+  const r2 = w.sinRuido(() => w.game.bloques.define('escalera', { trepable: true, subida: 7 }));
+  t('"escalera" registra hab:escalera, sin escribir el namespace',
+    r2 !== null && w.game.bloques._tabla['hab:escalera'].subida === 7 && !w.game.bloques._tabla['escalera']);
+  t('y el bloque del mundo lo encuentra por su id (que es lo que se consulta por frame)',
+    w.game.bloques._porId()[ID_ROCA] && w.game.bloques._porId()[ID_ROCA].impulso === 5);
+
+  // Con nombre corto se puede quitar igual que se puso.
+  t('quitar("roca") también entiende el nombre corto',
+    w.sinRuido(() => w.game.bloques.quitar('roca')) === true &&
+    !w.game.bloques._tabla['asset:assets/roca.vox.json']);
+}
+
+console.log('\ndefine se planta si el nombre corto es ambiguo o no existe');
 {
   const w = montar();
+  w.mc.blockKey.push('asset:assets/escalera.vox.json');  // ahora hay DOS «escalera» en el mundo
   const antes = w.avisosConsola.length;
   const r = w.sinRuido(() => w.game.bloques.define('escalera', { trepable: true }));
   const aviso = w.avisosConsola.slice(antes).join(' | ');
-  t('no registra la clave sin namespace', r === null && !w.game.bloques._tabla['escalera']);
-  t('y sugiere la clave real', aviso.indexOf('hab:escalera') >= 0, aviso);
+  t('con dos materiales llamados «escalera» no elige por el dueño', r === null);
+  t('y enseña los dos candidatos para que desempate',
+    aviso.indexOf('hab:escalera') >= 0 && aviso.indexOf('asset:assets/escalera.vox.json') >= 0, aviso);
+
+  const antes2 = w.avisosConsola.length;
+  const r2 = w.sinRuido(() => w.game.bloques.define('ladrillo', { trepable: true }));
+  const aviso2 = w.avisosConsola.slice(antes2).join(' | ');
+  t('un material que no existe sigue sin registrarse', r2 === null && !w.game.bloques._tabla['ladrillo']);
+  t('y el aviso manda usar info() para ver la clave exacta', /info\(\)/.test(aviso2), aviso2);
 }
 
 console.log('\nEl snippet trae la escalera ya definida');
