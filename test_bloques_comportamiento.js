@@ -272,6 +272,42 @@ console.log('\nCon S siempre se puede soltar la escalera');
   t('y aterriza de verdad, sin quedarse colgado', w.mc.onGround === true);
 }
 
+console.log('\nAl soltar la tecla uno se queda COLGADO, no se cae');
+{
+  // «si dejo de pulsar se cae al suelo»: subir exigía una sola tirada sin pausas, y cualquier pausa
+  // era una caída desde lo alto.
+  const w = montar({ fina: true, real: true, andar: true });
+  w.sinRuido(() => w.game.bloques.define('hab:escalera-real', { trepable: true, subida: 4, bajada: 5 }));
+  w.mc.yaw = Math.PI;
+  w.mc.keys['w'] = true; w.frames(60);                     // un segundo trepando
+  const yArriba = w.mc.pos[1];
+  t('ha subido antes de soltar', yArriba > 8, 'y=' + yArriba.toFixed(2));
+  w.mc.keys['w'] = false; w.frames(120);                   // dos segundos sin tocar nada
+  t('sigue colgado a la misma altura', Math.abs(w.mc.pos[1] - yArriba) < 0.05,
+    'y=' + w.mc.pos[1].toFixed(2) + ' (soltó en ' + yArriba.toFixed(2) + ')');
+  t('y no ha caído al suelo', w.mc.pos[1] > 8, 'y=' + w.mc.pos[1].toFixed(2));
+  // Y desde colgado y quieto se sigue pudiendo bajar y subir.
+  w.mc.keys['s'] = true; w.frames(30);
+  t('desde colgado, S vuelve a bajar', w.mc.pos[1] < yArriba - 2, 'y=' + w.mc.pos[1].toFixed(2));
+}
+
+console.log('\nColgado NO engancha a quien está de pie en el suelo');
+{
+  // El agarre sin tecla solo sostiene a quien YA venía agarrado: si no, plantarse al lado de una
+  // escalera dejaría al jugador flotando y sin poder saltar.
+  const w = montar({ fina: true, real: true, andar: true, sinPlaca: true });
+  w.sinRuido(() => w.game.bloques.define('hab:escalera-real', { trepable: true, subida: 4, bajada: 5 }));
+  w.mc.yaw = Math.PI;
+  w.frames(60);                                            // quieto al pie de la escalera, sin tocar nada
+  t('de pie junto a la escalera sigue en el suelo', w.mc.onGround === true && Math.abs(w.mc.pos[1] - 5) < 0.02,
+    'y=' + w.mc.pos[1].toFixed(2) + ' onGround=' + w.mc.onGround);
+  // Y tras trepar un poco y volver abajo con S, se aterriza en vez de quedar flotando a un pelo.
+  w.mc.keys['w'] = true; w.frames(10); w.mc.keys['w'] = false;
+  w.mc.keys['s'] = true; w.frames(60); w.mc.keys['s'] = false; w.frames(30);
+  t('tras bajar del todo se queda apoyado, no flotando', w.mc.onGround === true,
+    'y=' + w.mc.pos[1].toFixed(2) + ' onGround=' + w.mc.onGround);
+}
+
 console.log('\nCon espacio se salta desde la escalera');
 {
   // Colgado, mc.onGround queda en false, así que el salto de app.js (exige onGround) no dispararía
