@@ -146,17 +146,16 @@ function montar(opciones) {
   // Cuenta sus llamadas para detectar envoltorios apilados.
   let llamadas = 0;
   const VEL = 4.3;                                          // marcha, del orden de app.js:5059
-  // Escalon automatico, calco de mcMoveAxis (app.js:4915): si el eje esta bloqueado se prueba a
-  // levantar al jugador hasta MC_STEP y, si arriba cabe, sube DE GOLPE dentro del mismo frame. Ese
-  // tiron es justo lo que se quiere suavizar. Solo con opciones.escalones, para no cambiar de
-  // comportamiento las pruebas que ya existian.
-  const subirEscalon = (nx, nz, eje) => {
-    if (!opciones.escalones) return;
+  // Calco de mcMoveAxis (app.js:4915), auto-escalon incluido: si el eje choca se prueba a levantar al
+  // jugador hasta MC_STEP y colarlo por arriba, DE GOLPE y dentro del mismo frame. Es una funcion
+  // global de verdad porque el snippet la envuelve para medir el escalon donde se da.
+  global.mcMoveAxis = (ai, target) => {
+    const p = mc.pos, tp = [p[0], p[1], p[2]]; tp[ai] = target;
+    if (!global.mcCollides(tp[0], tp[1], tp[2])) { p[ai] = target; return; }
     const stepH = MC_STEP * mc.scale, inc = Math.max(1 / T, stepH / 12);
     for (let h = inc; h <= stepH + 1e-6; h += inc) {
-      if (global.mcCollides(nx, mc.pos[1] + h, nz)) continue;
-      mc.pos[eje] = eje === 0 ? nx : nz;
-      mc.pos[1] += h;
+      if (global.mcCollides(tp[0], p[1] + h, tp[2])) continue;
+      p[ai] = target; p[1] += h;
       if (mc.vel[1] < 0) mc.vel[1] = 0;
       mc.onGround = true;
       return;
@@ -173,11 +172,16 @@ function montar(opciones) {
       // se reescribe desde las teclas; en el AIRE se conserva INTACTA (inercia del salto). Sin esto, una
       // prueba de trampolín daría verde sin probar nada: el jugador se movería por teclas también volando.
       if (mc.onGround) { mc.vel[0] = fx * s * VEL; mc.vel[2] = fz * s * VEL; }
-      const nx = mc.pos[0] + mc.vel[0] * dt, nz = mc.pos[2] + mc.vel[2] * dt;
-      if (!global.mcCollides(nx, mc.pos[1], mc.pos[2])) mc.pos[0] = nx; else subirEscalon(nx, mc.pos[2], 0);
-      if (!global.mcCollides(mc.pos[0], mc.pos[1], nz)) mc.pos[2] = nz; else subirEscalon(mc.pos[0], nz, 2);
     }
+    // ORDEN EXACTO de app.js:5089-5098, y no es un detalle: la gravedad va ANTES del horizontal, asi
+    // que el frame en que se sube un escalon acaba con vel[1]=0, ny === pos[1], sin colision y por
+    // tanto con onGround FALSE. Este juguete lo tenia al reves (gravedad al final) y por eso dio
+    // verde un suavizado de escalon que en el juego no hacia absolutamente nada.
     mc.vel[1] -= 22 * dt;
+    if (opciones.andar) {
+      global.mcMoveAxis(0, mc.pos[0] + mc.vel[0] * dt);
+      global.mcMoveAxis(2, mc.pos[2] + mc.vel[2] * dt);
+    }
     const ny = mc.pos[1] + mc.vel[1] * dt;
     if (!global.mcCollides(mc.pos[0], ny, mc.pos[2])) { mc.pos[1] = ny; mc.onGround = false; }
     else { if (mc.vel[1] < 0) mc.onGround = true; mc.vel[1] = 0; }
@@ -683,6 +687,7 @@ console.log('\nSubida de escalones: el cuerpo salta, el ojo lo alcanza');
   t('pero la cámara ya no da el tirón', tiron(suave.pintada) < 0.2, '+' + tiron(suave.pintada).toFixed(3));
   t('el ojo nunca se queda más de un escalón por detrás', Math.max(...suave.desfase) <= 0.6 + 1e-9,
     'máx ' + Math.max(...suave.desfase).toFixed(3));
+
   t('y siempre por DEBAJO del cuerpo, nunca por encima', Math.min(...suave.desfase) >= 0);
 
   // Coronado y quieto: el ojo tiene que acabar de subir, no quedarse hundido para siempre.
@@ -691,6 +696,26 @@ console.log('\nSubida de escalones: el cuerpo salta, el ojo lo alcanza');
   t('parado un cuarto de segundo, el ojo alcanza al cuerpo',
     (suave.w.mc._pasoDesfase || 0) === 0 && Math.abs(suave.w.mc.pos[1] - 6.5) < 1e-9,
     'y=' + suave.w.mc.pos[1].toFixed(4));
+
+  // Esta clava el porqué de medir dentro de mcMoveAxis: el frame que sube un escalón acaba SIN suelo
+  // (gravedad antes del horizontal ⇒ vel[1]=0 ⇒ ny===pos[1] ⇒ no choca ⇒ onGround=false). Cualquier
+  // versión que vuelva a guardarse con `mc.onGround` se apagará justo en el frame que hay que suavizar.
+  const w = montar({ andar: true, escalones: true, sinEscalera: true, sinPlaca: true });
+  w.mc.pos = [12.5, 5, 10.5]; w.mc.vel = [0, 0, 0]; w.mc.yaw = 0; w.mc.keys['w'] = true;
+  let conSuelo = null;
+  for (let i = 0; i < 20 && conSuelo === null; i++) {
+    const y0 = w.mc.pos[1] + (w.mc._pasoDesfase || 0);
+    w.frames(1);
+    if (w.mc.pos[1] + (w.mc._pasoDesfase || 0) - y0 > 0.1) conSuelo = w.mc.onGround;
+  }
+  t('el frame del escalón acaba SIN suelo: onGround no vale como guarda', conSuelo === false, 'onGround=' + conSuelo);
+
+  // Y que el segundo enganche tampoco se apile al reejecutar: dos capas contarían el escalón dos
+  // veces y el ojo se hundiría el doble.
+  const antesMove = global.mcMoveAxis;
+  w.recargar();
+  t('reejecutar no apila envoltorios sobre mcMoveAxis',
+    global.mcMoveAxis !== antesMove && global.mcMoveAxis._orig === antesMove._orig);
 }
 
 console.log('\nEl suavizado no depende de los fps ni se traga un teletransporte');
