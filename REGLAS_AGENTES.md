@@ -63,6 +63,9 @@ el framework**, creando cada segmento como **otro agente pausado** (`autostart:f
 ## 5. Prevención de Bucle por Desgaste de Frecuencia (Mapa de Calor Temporal)
 - El agente evalúa las pisadas recientes en los últimos 50 ticks (`v.recentVisits`).
 - Si una casilla ha sido pisada $\ge 4$ veces en la ventana temporal de 10 segundos, se marca como punto caliente y el agente gira automáticamente hacia la celda adyacente más fría.
+- **Este desvío (`FREQ_BREAK`) tiene presupuesto (v4.39, §21.c)**: tras `FREQ_BREAK_MAX_SIN_CELDA` (12)
+  disparos sin descubrir columna nueva deja de capturar el tick y el control cae por la escalera de §6. La
+  cadencia dice *cuándo puede* actuar, no *cuánto tiempo* puede quedarse el tick.
 
 ---
 
@@ -614,17 +617,44 @@ la llaman los tres caminos.
 ⚠️ **Regla general:** si una rama del tick hace `a.walk()` y `return`, tiene que llamar a `anotarPaso(a)`.
 Un paso que no se anota es peor que un paso que no se da: el agente se mueve y el diagnóstico no se enfrenta.
 
-**Verificado**: `node test_contador_celda_nueva.js` (14 tests) es **diferencial** — monta el pasillo de 1 de
-ancho del caso real con la librería de `HEAD` y con la actual y compara. Lo que cambia: el contador pasa de
-congelarse en **9** a llegar a **138** con 150 pasos, y la ficha de `game.stuck()` pasa de `9/18` a `138/18`.
-Lo que **no** cambia: mismos pasos, misma celda final, mismas columnas descubiertas y la escalera disparándose
-en **los mismos ticks**.
+**Verificado**: `node test_contador_celda_nueva.js` es **diferencial** — monta el pasillo de 1 de ancho del
+caso real con la librería de un **commit fijado** y con la actual, y compara. La referencia es un commit
+concreto (`c070444~1`), **no `HEAD`**: contra `HEAD` la prueba deja de medir lo mismo en cuanto se comete el
+arreglo siguiente. Lo que cambia: el contador pasa de congelarse en **9** a llegar a **138** con 150 pasos, y
+la ficha de `game.stuck()` pasa de `9/18` a `138/18`.
 
-**Lo que este arreglo NO arregla** (siguiente defecto, medido en la misma prueba): con el contador honesto la
-escalera de rescate **sigue sin alcanzarse** para ese agente, porque `FREQ_BREAK` se dispara cada tick, rearma
-`v.escapeSteps = 3` y hace `return` antes de llegar a ella. El agente vive permanentemente «escapando»: ni
-escala a minado/salto ni agota la cuenta atrás, así que tampoco se emite la nota de §17. El informe lo enseña
-ahora en la tabla 3.3 (`FREQ_BREAK` con miles de ejecuciones y ~0 celdas ganadas).
+**Lo que este arreglo NO arregló** — y por qué hizo falta §21.c: con el contador honesto la escalera de rescate
+**seguía sin alcanzarse** para ese agente, porque `FREQ_BREAK` se disparaba cada tick, rearmaba
+`v.escapeSteps = 3` y hacía `return` antes de llegar a ella.
+
+---
+
+## 21.c `FREQ_BREAK` era preferente; ahora es un peldaño con presupuesto (v4.39) ⏳
+
+Arreglado el contador (§21.b), quedaba el segundo eslabón: **el agente no llegaba nunca a los peldaños de
+abajo de la escalera de §6**. `FREQ_BREAK` (desgaste de frecuencia, §5) se dispara *por cadencia*, se queda el
+tick y hace `return`. Mientras la cadencia toque, el agente vive permanentemente «escapando»: ni escala a
+minado ni a salto táctico, ni agota la cuenta atrás, así que tampoco se emite la nota de §17.
+
+Ahora `FREQ_BREAK` **tiene que ganarse el tick**: lleva su propio contador `v.freqBreakSinCelda` de disparos
+**sin descubrir columna nueva**, y al pasar de `FREQ_BREAK_MAX_SIN_CELDA` (**12**) deja de ser preferente y el
+tick **cae por la escalera**. El contador se pone a cero en `anotarPaso` cuando se pisa columna nueva: si el
+peldaño sirve, sigue mandando; si no sirve, se aparta.
+
+⚠️ **Regla general:** ningún peldaño que se dispare **por cadencia** (no por diagnóstico de atasco) puede
+capturar el tick indefinidamente. La cadencia dice *cuándo puede*, no *cuánto tiempo*. Si un peldaño se queda
+el tick, necesita un presupuesto medido en **efecto** —celdas nuevas—, no en intentos.
+
+**Verificado**: `node test_contador_celda_nueva.js` (13 tests), segunda mitad. Mismo pasillo pero con
+`minadoEmergencia: true`, es decir **con salida**, y 400 ticks. Con la librería de `c070444` (contador ya
+honesto, `FREQ_BREAK` aún preferente): `FREQ_BREAK` ×379 y **0 bloques picados** — el minado estaba encendido
+y no se usó ni una vez. Con la actual: `FREQ_BREAK` ×36, `EMERGENCY_MINE` ×6 y **14 bloques picados**. La
+prueba fija su referencia en el commit, no en `HEAD`.
+
+⚠️ Trampa de los mundos de juguete: el `matId` del agente de prueba **no puede devolver siempre el mismo id**.
+El envoltorio de protección de obsidiana de `onStart` compara `a.getBlock(...)` con `a.matId('obsidian')`, así
+que con `matId: () => 1` toda la piedra es obsidiana y **no se pica nada** — la prueba daba «0 picados» por el
+motivo equivocado.
 
 ---
 
@@ -708,6 +738,8 @@ asíncrona de construcción), y solo anota si el bloque **cambió de verdad**.
   que hace ping-pong entre dos casillas cambia de celda siempre. Con ≥10 juzgadas y `celdasGanadas === 0` el
   veredicto es `SIN AVANCE` y **R1 dispara**. Y R1/R2 **no** se condicionan a que el detector marque atasco:
   la serpiente andaba en cada tick, así que salía «sana» llevando 975 ticks sin ganar una celda.
+- **Y el cero exacto tampoco basta como criterio** (v4.39, ver abajo): lo que separa un peldaño útil de uno
+  estéril es el **orden de magnitud**, no el cero.
 - **Mide con la vara del framework.** El vecindario 5×5 pregunta por `mcSurfaceNear(x, z, a.y, climb, drop)`,
   no por `a.surfaceY` (que es el sólido más alto de la columna) ni por `a.canWalk` (que es **relativo al
   agente**, §21.3). De ahí que distinga `TAPIADO` —sólido a cota alcanzable, se pica— de `DESNIVEL` —no se
@@ -732,6 +764,33 @@ asíncrona de construcción), y solo anota si el bloque **cambió de verdad**.
 - **No se vuelca a la consola.** 30 000 caracteres son ~600 líneas. `game.informe()` imprime dos líneas de
   resumen; el texto está en el fichero, en el valor devuelto y en `game.informe.ultimo`.
 
+### El informe también mentía: tres puntos ciegos (v4.39) 🕳️
+
+El informe real del 30/7 salió con **~100 filas de tabla 3.3 y TODAS decían `ok`** mientras los cinco agentes
+llevaban 975 ticks sin descubrir una celda. Tres reglas escritas de más o de menos:
+
+1. **Veredicto por tasa (`ESTÉRIL`).** El peldaño culpable, `FREQ_BREAK`, ganó **110 celdas en 19.215
+   ejecuciones** (0,006 por vez) y, por no ser cero exacto, pasaba por bueno. En ese mismo informe `WALK` daba
+   **4,3 celdas por ejecución**: tres órdenes de magnitud. Ahora la tabla lleva columna **`celdas/vez`** y con
+   ≥`TASA_MIN_JUZGADAS` (20) juzgadas y tasa < `TASA_ESTERIL` (**0,05**) el veredicto es **`ESTÉRIL`**; R1
+   dispara citando **el mejor peldaño del propio agente**, para que la comparación no dependa de un número
+   mágico de este código.
+2. **R2 (celda imán) estaba anidada dentro del caso «no cambió de celda»**, que es justo el que **no** se da en
+   un peldaño que camina: era inalcanzable y no salió nunca en un informe real, habiendo candidatas de sobra
+   (`UTURN_DEADEND`, 48 repeticiones desde la misma celda). Ahora cuelga sola de `mismaPos >= 10`.
+3. **El suelo de área de R8 estaba invertido.** Pedía una caja de merodeo de ≥100 celdas, pero **la caja la
+   dibuja el propio agente**: cuanto más atascado, más pequeña, y menos posible era que la regla hablara. Los
+   cinco atascados tenían cajas de 48..72 celdas (uno pisaba 6 de 72 = **8 %**) y R8 no salió ni una vez. El
+   suelo es ahora **25** (5×5), que sigue dejando fuera la caja de 3×3 donde el porcentaje no significa nada.
+
+⚠️ **Regla general:** un veredicto que solo dispara con un **cero exacto** no acusa a nadie; y una regla cuyo
+umbral se mide contra algo que **encoge con el problema** se calla justo cuando hace falta. Toda regla nueva se
+contrasta contra un informe real antes de darla por buena — las tres se escribieron «razonando» y ninguna sonó.
+
+**Una sola versión.** La sección 0 imprimía `v4.37` con la librería ya en `v4.38`, y ese dato es justo el que
+sirve para saber **si la pestaña recargó**. La versión vive ahora en `VERSION_LIB` y `test_informe.js`
+comprueba que la cabecera del fichero y la sección 0 digan lo mismo, sin fijar ningún número.
+
 ### Límites conocidos
 
 1. **Es un retrato del instante.** Cubre hacia atrás lo que quepa en los anillos (~500 entradas de traza,
@@ -743,10 +802,13 @@ asíncrona de construcción), y solo anota si el bloque **cambió de verdad**.
 4. La vía fichero necesita el servidor; la vía string funciona siempre.
 5. No lleva captura ni datos de render: si la sospecha es visual, la captura la manda el dueño.
 
-**Verificado**: `node test_informe.js` (23 tests) — un agente de juguete que pica 14 veces sin abrir paso
+**Verificado**: `node test_informe.js` (34 tests) — un agente de juguete que pica 14 veces sin abrir paso
 produce un informe con **R1, R2 y `INEFICAZ`**; dos agentes turnándose una celda producen **R3** con los dos
 autores; `max: 2000` respeta el presupuesto **y** declara los recortes; `guardar:false` no toca `fetch`; el
 `code` enviado al servidor es JS válido y contiene el Markdown íntegro; generar el informe **no crea notas**.
+Los tres puntos ciegos de v4.39 tienen caso propio: un peldaño de 19.215 ejecuciones y 110 celdas sale
+**`ESTÉRIL`** (y `WALK`, `ok`), **R2** sale con 19.000 ejecuciones *con* efecto, y **R8** acusa una caja de
+**98** celdas — la talla que antes callaba.
 En el navegador (Playwright + SwiftShader, 3 agentes reales corriendo): `game.informe({todos:true})` genera
 las secciones 3.1-3.8 contra el mundo real sin un solo error de consola, y `game.informe()` deja
 `data/snippets/informe-atascos.json` en el servidor.
