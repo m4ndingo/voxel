@@ -315,9 +315,13 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
 
 - **Caché densa `id → cfg`** invalidada por `mc.blockKey.length` (mismo truco que `mcXnameCache`,
   `app.js:5429`) ⇒ la consulta por frame es un índice de array.
-- **Una sola costura**: envoltorio sobre `mcUpdate` (`app.js:5053`, única llamada en `app.js:6323`),
-  **idempotente** por `mcUpdate._bloques` — reejecutar el snippet al afinar `subida` no debe duplicar
-  la velocidad.
+- **Una sola costura**: envoltorio sobre `mcUpdate` (`app.js:5053`, única llamada en `app.js:6323`).
+  Reejecutar el snippet **desenvuelve el anterior por `mcUpdate._orig` y reinstala el nuevo**; ni se
+  apilan envoltorios (duplicaría la velocidad de trepado) ni se deja el viejo. Dejarlo puesto era peor
+  de lo que parece: el envoltorio viejo sigue leyendo **su** tabla por closure, así que todo lo que se
+  definiera después salía en `lista()`/`info()` y **no hacía nada en el mundo**. Al reinstalar, las
+  definiciones anteriores se heredan pasándolas otra vez por `define()` (se renormalizan con el código
+  actual). Si cambias el snippet, **sube `VERSION`**.
 - **`mcSolid` NO se parchea** (lo usan mallado, raycast y romper/poner): la escalera es **sólida** y
   se sube *pegado* a ella ⇒ una escalera embutida en un hueco de 1×1 no se puede trepar.
 - **Barrido acotado, no punto suelto**: desde el borde del cuerpo hacia delante, en pasos de **un

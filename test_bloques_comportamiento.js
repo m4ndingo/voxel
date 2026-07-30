@@ -529,6 +529,31 @@ console.log('\nReejecutar el snippet no apila envoltorios');
   t('el mcUpdate original se llama una sola vez por frame', w.llamadas() === 120, w.llamadas() + ' llamadas en 120 frames');
 }
 
+console.log('\nReejecutar el snippet REINSTALA la física, no solo la API');
+{
+  // El fallo que reportó el dueño: definía un trampolín, lista()/info() lo enseñaban tal cual
+  // («impulso ↑12 (~3.3 bloques)») y el bloque no lanzaba nada. La guarda de idempotencia dejaba
+  // puesto el envoltorio VIEJO, que sigue leyendo SU tabla por closure; la ejecución nueva creaba una
+  // tabla que no miraba nadie. Se detecta definiendo DESPUÉS de recargar: si la física no se
+  // reinstala, lo definido a partir de ahí no existe para el mundo.
+  const w = montar({ andar: true, placaRasante: true, sinEscalera: true });
+  w.recargar();                                            // Alt+C otra vez, con el snippet editado
+  w.sinRuido(() => w.game.bloques.define('hab:placa', { impulso: 12 }));
+  w.mc.pos = [12.5, 5, 10.5]; w.mc.vel = [0, 0, 0]; w.mc.yaw = 0; w.mc.keys['w'] = true;
+  let cima = 5;
+  for (let i = 0; i < 120; i++) { w.frames(1); if (w.mc.pos[1] > cima) cima = w.mc.pos[1]; }
+  t('un material definido TRAS reejecutar el snippet sí lanza de verdad',
+    cima - 5 > 2, 'subió ' + (cima - 5).toFixed(2));
+
+  // Y al revés: reejecutar no debe borrar lo que el dueño ya tenía puesto.
+  const w2 = montar();
+  w2.sinRuido(() => w2.game.bloques.define('hab:muelle', { trepable: true, subida: 9, bajada: 2 }));
+  w2.recargar();
+  const heredado = w2.game.bloques._tabla['hab:muelle'];
+  t('y lo definido ANTES sobrevive a la reejecución', !!heredado && heredado.subida === 9,
+    heredado ? '↑' + heredado.subida : 'se perdió');
+}
+
 console.log('\nLa caché densa se reconstruye cuando crece la paleta');
 {
   const w = montar();
