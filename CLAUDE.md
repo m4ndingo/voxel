@@ -253,6 +253,72 @@ extra pausados** (`autostart:false` + `pause()`), porque `mcAgentsTick` salta lo
 `'running'` pero `mcAgentsSmoothUpdate` solo salta `'stopped'` y el bucle de dibujo solo mira
 `vbo && count`. Especificación de comportamiento: **`REGLAS_AGENTES.md`**.
 
+## Bloques con comportamiento (`game.bloques`) — el material manda, no el voxel
+
+Una escalera que se trepa, un muelle que impulsa, una placa que dispara algo al pisarla. El
+comportamiento cuelga del **MATERIAL** (`hab:escalera`), **nunca del voxel**: es el modelo de
+Minecraft (índice de paleta por voxel + comportamiento compartido por tipo). Un script por voxel
+serían **442 368** closures en un mundo 96×48×96.
+
+⚠️ **Un material vive en UNO DE DOS SITIOS y hay que mirar los dos.** Solo un asset **16³ macizo**
+(`blockLike`, `app.js:4006`: `nvox >= 4096`, o sea hierba/roca) entra en `mc.grid`; cualquier cosa
+**con forma o huecos** — `escalera.json` son 160 voxels — se estampa como **estructura fina**
+(`mc.structures`), con malla propia a **1/16 de bloque** y **fuera de la rejilla**. Rayos-X lo canta:
+`bloque · asset` vs `estructura · guardada`. `materialEn(x,y,z)` resuelve las dos vías —
+`mc.grid[idx]` → id → `mc.blockKey[id]`, y si ahí hay aire, `claveFinaEn` (calco de `mcFineBoxHit`,
+`app.js:4935`, devolviendo `s.key`). **Mirar solo `mc.grid` es ver medio mundo.**
+
+```js
+game.bloques.define('hab:escalera', { trepable:true, subida:4, bajada:5 });  // u/s
+game.bloques.define('hab:placa',    { alPisar(c){ game.tp(51,20,50); } });   // c = {x,y,z,clave,cfg,veces,pos}
+game.bloques.info();      // clave EXACTA de lo que piso / tengo delante / detrás  ← el descubridor
+game.bloques.lista(); game.bloques.quitar('hab:muelle'); game.bloques.avisos();
+```
+
+Todo vive en el snippet **`data/snippets/mundo-autoarranque.json`** (el JSON *es* la fuente; se edita
+con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del diseño:
+
+- **Caché densa `id → cfg`** invalidada por `mc.blockKey.length` (mismo truco que `mcXnameCache`,
+  `app.js:5429`) ⇒ la consulta por frame es un índice de array.
+- **Una sola costura**: envoltorio sobre `mcUpdate` (`app.js:5053`, única llamada en `app.js:6323`),
+  **idempotente** por `mcUpdate._bloques` — reejecutar el snippet al afinar `subida` no debe duplicar
+  la velocidad.
+- **`mcSolid` NO se parchea** (lo usan mallado, raycast y romper/poner): la escalera es **sólida** y
+  se sube *pegado* a ella ⇒ una escalera embutida en un hueco de 1×1 no se puede trepar.
+- **Barrido acotado, no punto suelto**: desde el borde del cuerpo hacia delante, en pasos de **un
+  voxel fino** hasta `ALCANCE` (0,45) — un panel fino de 1/16 casi nunca cae bajo un sondeo de un
+  solo punto. El coste es **lineal** con `playerScale` y está topado (≤64 muestras); NO barrer el
+  AABB del jugador, que crece con `playerScale³` (lección de la colisión fina).
+- **Se sondea la COLUMNA ENTERA del cuerpo, no una altura fija.** `escalera.json` es una escalera de
+  verdad: largueros en los bordes y peldaños solo en 2 de cada 4 filas, o sea **aire a la altura del
+  pecho** en la mayoría de las alturas. Sondeando una sola altura solo se agarran los largueros — el
+  dueño lo reportó como «sube por los laterales pero no por los escalones». `trepableEnColumna`
+  recorre de los pies a la cabeza y se agarra al primer material trepable que encuentre, así que la
+  **forma del dibujo deja de importar**. Es también lo que permite coronar: sondeando solo al pecho,
+  el agarre se pierde con los pies 0,9 por debajo del remate, más de lo que sube el auto-escalón.
+- **Soltarse siempre tiene que ser posible**, o el jugador se queda pegado (reportado por el dueño).
+  Bajando con S se anula la componente que despega de la escalera **solo mientras se está colgado**;
+  en cuanto hay suelo debajo se suelta el agarre entero y se anda normal. Y el **espacio** es la
+  salida de emergencia: estando agarrado `mc.onGround` es `false`, así que el salto de `app.js` no
+  puede dispararse nunca y hay que reproducirlo en el snippet (por flanco, para no reimpulsar).
+- El sondeo va **partido en dos** alrededor del `mcUpdate` original (`sondearAgarre` antes,
+  `aplicarTrepado` después). Anular la gravedad *después* de aplicada pierde `22·dt²` por frame ⇒ la
+  velocidad de trepado dependería de los fps (a 30 fps, el doble de pérdida que a 60).
+- Se sondea **hacia donde MIRA el jugador**, también al bajar (con S se mira igualmente la escalera);
+  sondear hacia atrás mira aire y «bajar» pasa a ser caída libre disfrazada.
+- **`alPisar` es por flanco**, como `onEntityCollision` de Minecraft, en `try/catch` con aviso acotado
+  — nunca una línea por frame (§22). La identidad del flanco es **celda + clave de lo pisado**, no
+  solo la celda: una placa fina de 1/16 no cambia la celda de debajo al caer sobre ella.
+- Solo afecta al **jugador**; los agentes siguen con su `climb`/`drop`.
+
+**Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
+se autoejecutan (solo a mano desde Alt+C), así que la escalera dejaba de ser escalera en cada recarga.
+`mcAutoarranque()` (final de `openWorld`) ejecuta ese snippet si existe: `app.js` **no sabe qué hace**,
+solo ofrece dónde engancharse; si no hay snippet, el Mundo se comporta como antes. Editar el snippet
+exige recargar la pestaña (o reejecutarlo a mano, que es idempotente).
+
+Test: `node test_bloques_comportamiento.js` (headless, con un mundo de juguete; sin navegador).
+
 ## Convenciones
 
 - Cualquier cambio de `state` termina llamando a `render()` (= `drawEdit` + `drawIso` +
