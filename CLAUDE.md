@@ -376,9 +376,15 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   `mc.pos[1]`, así que el desfase se **resta al salir** del frame y se **repone al entrar** en el
   siguiente — entre medias solo hay dibujado. Se repone la y **guardada**, no `pos[1]+desfase`: sumar
   y restar no devuelve el mismo float y ese pelo acabaría en la colisión (el test compara los 90
-  frames con `===`). Decae con `exp(-dt/τ)`, o sea igual a 30 que a 120 fps, se recorta a un escalón
-  y **solo** se aplica al escalón automático: saltar (`onGround` false) y trepar (ya es continuo) no
-  se suavizan. El estado vive en `mc` (`_pasoDesfase`/`_pasoReal`/`_pasoY`), no en un closure, para
+  frames con `===`). Decae con `exp(-dt/τ)`, o sea igual a 30 que a 120 fps, y se recorta a un escalón.
+  **El escalón se mide dentro de `mcMoveAxis`** (segundo envoltorio del snippet), porque ahí el único
+  efecto sobre la `y` es el `p[1]+=h` del auto-escalón y sus dos únicos llamantes son las dos líneas
+  horizontales de `mcUpdate`; así saltar y trepar no se cuelan sin necesidad de ninguna heurística.
+  **No se puede deducir al final del frame preguntando `mc.onGround`**: en `app.js:5089-5098` la
+  gravedad va **antes** del horizontal, así que el frame del escalón acaba con `vel[1]=0`,
+  `ny === p[1]`, sin colisión y con **`onGround` false** — una guarda de «estar en el suelo» se apaga
+  justo en el único frame que hay que suavizar. El estado vive en `mc`
+  (`_pasoDesfase`/`_pasoReal`/`_pasoY`/`_pasoSubido`), no en un closure, para
   que reejecutar el snippet herede el desfase en vez de dejar al jugador medio bloque hundido; si la
   `y` no es la que se pintó, alguien movió al jugador (`game.tp`, respawn, un `alPisar`) y el desfase
   se tira.
@@ -390,7 +396,12 @@ se autoejecutan (solo a mano desde Alt+C), así que la escalera dejaba de ser es
 solo ofrece dónde engancharse; si no hay snippet, el Mundo se comporta como antes. Editar el snippet
 exige recargar la pestaña (o reejecutarlo a mano, que es idempotente).
 
-Test: `node test_bloques_comportamiento.js` (headless, con un mundo de juguete; sin navegador).
+Test: `node test_bloques_comportamiento.js` (headless, con un mundo de juguete; sin navegador) y
+`node test_paso_navegador.js` (**el `app.js` de verdad** con playwright: monta una plataforma con un
+escalón, anda contra él llamando al `mcUpdate` real y lee la altura de la cámara de la matriz de vista;
+deshace los bloques y bloquea `POST /api/mundo`). El segundo existe porque el juguete **calcaba mal el
+orden de `mcUpdate`** (gravedad después del horizontal) y dio 81 ok a un suavizado que en el juego no
+hacía nada: cuando la física del juguete se separa de la real, esa diferencia es exactamente el bug.
 
 ## Convenciones
 
