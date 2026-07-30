@@ -190,6 +190,47 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     assert(mueve.quieto === false, 'el mapa se rehace cada frame sin que se mueva nada');
   });
 
+  // Rayos-X dibuja ahora el rayo de apuntado (segmento magenta + cubo en el impacto + celda que lo para +
+  // celda donde iria el bloque). Eso es un camino de dibujo nuevo, con LINES y sin test de profundidad:
+  // aqui se comprueba que no revienta en un GL de verdad y que mcRayoInfo cuadra con mcRaycast.
+  const rayo = await p.evaluate(() => {
+    const errs = [];
+    const antes = mc.xray;
+    try {
+      mc.xray = true;
+      mcUpdatePreview();                       // construye y sube la geometria del overlay
+      const r = mcRayoInfo();
+      const hit = mcRaycast(mcReach(), true);
+      const fijo = game.rayoFijo();            // congela
+      mcUpdatePreview();                       // y se vuelve a dibujar, ahora con el rayo fijo
+      const habiaFijo = !!mc.rayFijo;
+      game.rayoFijo();                         // suelta
+      const suelto = !mc.rayFijo;
+      return { errs, hayRayo: !!r, coincide: !!r && !!hit && r.cell != null &&
+               r.cell.join() === hit.cell.join(), habiaFijo, suelto, glErr: mc.gl.getError(),
+               place: r && r.place, cell: r && r.cell, normal: hit && hit.normal, fijoDevuelve: !!fijo };
+    } catch (e) { errs.push(e.message); return { errs }; }
+    finally { mc.xray = antes; mc.rayFijo = null; }
+  });
+
+  test('rayos-X dibuja el rayo de apuntado sin reventar', () => {
+    assert(rayo.errs.length === 0, 'excepcion: ' + rayo.errs[0]);
+    assert(rayo.glErr === 0, 'gl.getError()=' + rayo.glErr + ' tras dibujar el rayo');
+  });
+  test('mcRayoInfo coincide con mcRaycast y sabe donde iria el bloque', () => {
+    assert(rayo.hayRayo, 'mcRayoInfo devolvio null dentro del Mundo');
+    if (rayo.cell) {
+      assert(rayo.coincide, 'mcRayoInfo y mcRaycast no golpean la misma celda');
+      // place = cell + normal: la celda pegada a la cara golpeada, que es donde cae el bloque nuevo.
+      assert(rayo.place.every((v, i) => v === rayo.cell[i] + rayo.normal[i]),
+        'place=' + rayo.place + ' no es cell+normal (' + rayo.cell + ' + ' + rayo.normal + ')');
+    }
+  });
+  test('game.rayoFijo() congela el rayo y vuelve a soltarlo', () => {
+    assert(rayo.habiaFijo === true, 'game.rayoFijo() no dejo mc.rayFijo puesto');
+    assert(rayo.suelto === true, 'la segunda llamada no solto el rayo');
+  });
+
   // Segunda pasada: el MISMO fuente compilado como ESSL 1.00. En WebGL1 las derivadas van por extension y la
   // directiva tiene que ser la primera linea; es un camino distinto de mcGLSL y hay que compilarlo tambien.
   const p1 = await b.newPage();
