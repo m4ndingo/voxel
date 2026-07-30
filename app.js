@@ -3842,6 +3842,7 @@ const mc={
   structGreedy:true,              // game.structGreedy: true = greedy meshing (fusiona caras coplanares de la misma textura/color → muchas menos caras) · false = una cara por voxel (como antes)
   heldBtn:-1, actAt:0,            // botón de ratón mantenido (construir/romper continuo) y último instante de acción
   xray:false,                     // modo rayos-X (tecla X): dibuja el volumen de colisión translúcido a través de las paredes
+  rayFijo:null,                   // rayo de apuntado CONGELADO (game.rayoFijo()): desde el ojo el rayo se ve como un punto
   ovbo:null,                      // VBO reutilizable para overlays (fantasma de colocación, marcador «demasiado lejos», rayos-X)
   ghostAlpha:0,                   // transparencia del fantasma de bloque suelto —verde (colocable) y ámbar («demasiado lejos»)— (game.ghostAlpha, 0..1; 0=invisible)
   structGhostAlpha:1,             // transparencia de la vista-previa de estructuras/habitaciones —caja de huella + malla renderizada— (game.structGhostAlpha, 0..1)
@@ -5370,7 +5371,8 @@ function mcDrawOverlays(pj, view){
     }
   }
   // 2) Rayos-X (tecla X): volumen de colisión alrededor del jugador, VISIBLE a través de las paredes.
-  if(mc.xray) mcXrayVolume(xray);
+  const xrayLines=[];
+  if(mc.xray){ mcXrayVolume(xray); mcXrayRay(xray, xrayLines); }
   // 3) t1 · marcadores de nota: un post-it amarillo flotando sobre cada bloque anotado (dentro de la distancia de render).
   const notes=[]; const R=mc.renderDist*MC_CHUNK, p=mc.pos;
   if(mc.noteAlpha>0) for(const k in mc.notes){ const q=k.split(','), x=+q[0], y=+q[1], z=+q[2];
@@ -5392,7 +5394,7 @@ function mcDrawOverlays(pj, view){
   }
   const showGhost=lines.length && mc.ghostAlpha>0;
   const showStruct=structLines.length && mc.structGhostAlpha>0;
-  if(!showGhost && !showStruct && !xray.length && !notes.length && !selLines.length) return;
+  if(!showGhost && !showStruct && !xray.length && !xrayLines.length && !notes.length && !selLines.length) return;
 
   gl.useProgram(mc.structProg);
   gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
@@ -5404,6 +5406,13 @@ function mcDrawOverlays(pj, view){
     gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
     gl.enable(gl.BLEND); gl.blendColor(0,0,0,0.38); gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
     mcDrawArr(SL, xray, gl.TRIANGLES);
+    gl.disable(gl.BLEND);
+  }
+  // Rayo de apuntado: también sin test de profundidad, para verlo atravesar la estructura que lo confundía.
+  if(xrayLines.length){
+    gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+    gl.enable(gl.BLEND); gl.blendColor(0,0,0,0.95); gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+    mcDrawArr(SL, xrayLines, gl.LINES);
     gl.disable(gl.BLEND);
   }
   // Fantasma de bloque suelto (verde) + marcador «demasiado lejos» (ámbar): game.ghostAlpha, y caja de huella de
@@ -5490,7 +5499,38 @@ function mcUpdateXrayLabels(){
     if(Math.abs(mxc-p[0])>R+8 || Math.abs(mzc-p[2])>R+8) continue;           // solo el entorno (como los bloques)
     emit(mxc, myc, mzc, s.ox+','+s.oy+','+s.oz, mcMatKind(s.key, true), String(s.key), true);
   }
+  // Impacto del rayo de apuntado: si paró en un voxel fino o en un bloque, y dónde caería el bloque nuevo.
+  const r=mc.rayFijo||mcRayoInfo();
+  if(r && r.cell) emit(r.point[0], r.point[1], r.point[2],
+    r.point[0].toFixed(2)+', '+r.point[1].toFixed(2)+', '+r.point[2].toFixed(2),
+    'rayo · '+(r.hit&&r.hit.fina?'voxel fino':'bloque')+(mc.rayFijo?' · FIJO':''),
+    'pone en '+r.place.join(','), !!(r.hit&&r.hit.fina));
   for(let i=n;i<mcXlbls.length;i++) if(!mcXlbls[i].hidden) mcXlbls[i].hidden=true;   // sobrantes ocultos
+}
+// Rayo de apuntado tal y como lo ve mcRaycast: de dónde sale, dónde golpea, qué celda para el rayo y
+// en qué celda caería el bloque nuevo. Es lo que hace falta para entender por qué un bloque sale flotando.
+function mcRayoInfo(){
+  if(!mc.grid || !mc.pos) return null;
+  const o=[mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]], cp=Math.cos(mc.pitch);
+  const d=[-Math.sin(mc.yaw)*cp, Math.sin(mc.pitch), -Math.cos(mc.yaw)*cp];
+  const hit=mcRaycast(mcReach(), true), R=mcReach();
+  if(!hit) return { o, d, point:[o[0]+d[0]*R, o[1]+d[1]*R, o[2]+d[2]*R], cell:null, place:null, hit:null };
+  const n=hit.normal;
+  return { o, d, point:hit.point, cell:hit.cell,
+           place:[hit.cell[0]+n[0], hit.cell[1]+n[1], hit.cell[2]+n[2]], hit };
+}
+// Dibujo del rayo en rayos-X. OJO: desde el propio ojo el rayo se proyecta justo en la mira (es un punto),
+// así que para VERLO como segmento hay que congelarlo con game.rayoFijo() y apartarse.
+function mcXrayRay(tris, lines){
+  const r = mc.rayFijo || mcRayoInfo();
+  if(!r) return;
+  const o=r.o, e=r.point;
+  lines.push(o[0],o[1],o[2], 1,0.25,0.9,1,  e[0],e[1],e[2], 1,0.25,0.9,1);         // el rayo, magenta
+  if(!r.cell) return;                                                              // sin impacto: solo el rayo
+  mcPushBoxTris(tris, e[0]-0.05,e[1]-0.05,e[2]-0.05, e[0]+0.05,e[1]+0.05,e[2]+0.05, 1,0.25,0.9);  // impacto
+  const c=r.cell, q=r.place;
+  mcPushBoxEdges(lines, c[0],c[1],c[2], c[0]+1,c[1]+1,c[2]+1, 1,1,1);              // celda que PARA el rayo
+  mcPushBoxEdges(lines, q[0],q[1],q[2], q[0]+1,q[1]+1,q[2]+1, 0.35,1,0.45);        // celda donde iría el bloque
 }
 function mcXrayVolume(out){
   const p=mc.pos, R=3;
@@ -5523,15 +5563,47 @@ function mcRaycast(maxd, hitStruct){   // desde el ojo, dirección de mirada; de
   let tX=d[0]!==0?((d[0]>0?(x+1-o[0]):(o[0]-x))*dX):inf;
   let tY=d[1]!==0?((d[1]>0?(y+1-o[1]):(o[1]-y))*dY):inf;
   let tZ=d[2]!==0?((d[2]>0?(z+1-o[2]):(o[2]-z))*dZ):inf;
-  let nx=0,ny=0,nz=0;
+  let nx=0,ny=0,nz=0, tEnter=0;     // tEnter: distancia a la que el rayo ENTRÓ en la celda actual (d es unitario)
   const cap=Math.ceil(MAXD*3)+12;   // el DDA avanza ~1 bloque por eje/paso; cota holgada para el alcance
+  const golpe=(t,fina)=>({ cell:[x,y,z], normal:[nx,ny,nz], dist:t, fina:fina,
+                           point:[o[0]+d[0]*t, o[1]+d[1]*t, o[2]+d[2]*t] });
   for(let i=0;i<cap;i++){
-    if(mcSolid(x,y,z) || (hitStruct && mcStructCellSolid(x,y,z))) return { cell:[x,y,z], normal:[nx,ny,nz] };
-    if(tX<tY && tX<tZ){ if(tX>MAXD) break; x+=sX; tX+=dX; nx=-sX; ny=0; nz=0; }
-    else if(tY<tZ){    if(tY>MAXD) break; y+=sY; tY+=dY; nx=0; ny=-sY; nz=0; }
-    else {             if(tZ>MAXD) break; z+=sZ; tZ+=dZ; nx=0; ny=0; nz=-sZ; }
+    if(mcSolid(x,y,z)) return golpe(tEnter, false);
+    // Estructuras: NO basta con que la estructura toque la celda — hay que atravesar un voxel fino LLENO.
+    // Una escalera es casi toda aire dentro de su celda; dar por sólida la celda entera hacía que el rayo
+    // se parase en su caja y el bloque nuevo saliera flotando delante, en vez de pegarse a la pared del fondo.
+    if(hitStruct){ const tf=mcStructRayHit(x,y,z, o,d, tEnter); if(tf>=0) return golpe(tf, true); }
+    if(tX<tY && tX<tZ){ if(tX>MAXD) break; x+=sX; tEnter=tX; tX+=dX; nx=-sX; ny=0; nz=0; }
+    else if(tY<tZ){    if(tY>MAXD) break; y+=sY; tEnter=tY; tY+=dY; nx=0; ny=-sY; nz=0; }
+    else {             if(tZ>MAXD) break; z+=sZ; tEnter=tZ; tZ+=dZ; nx=0; ny=0; nz=-sZ; }
   }
   return null;
+}
+// ¿El rayo atraviesa un voxel fino LLENO dentro de la celda (x,y,z)? Devuelve la distancia del impacto, o -1.
+// Sub-DDA a resolución fina (1/16) acotado a la celda: ≤48 pasos, y solo se entra aquí si la celda toca alguna
+// estructura, así que el coste va con las celdas de estructura que cruza el rayo, no con el alcance.
+function mcStructRayHit(x,y,z, o,d, t0){
+  if(!mcStructCellSolid(x,y,z)) return -1;          // rechazo barato por AABB: ni roza una estructura
+  const T=MC_TILE, inf=1e9;
+  const px=o[0]+d[0]*t0, py=o[1]+d[1]*t0, pz=o[2]+d[2]*t0;   // punto de entrada a la celda
+  // En el borde exacto el floor puede caer en la celda vecina por redondeo: se recorta al interior.
+  const cl=(v,lo)=>v<lo?lo:(v>lo+T-1?lo+T-1:v);
+  let fx=cl(Math.floor(px*T), x*T), fy=cl(Math.floor(py*T), y*T), fz=cl(Math.floor(pz*T), z*T);
+  const sX=d[0]>0?1:-1, sY=d[1]>0?1:-1, sZ=d[2]>0?1:-1;
+  const aX=Math.abs(d[0]), aY=Math.abs(d[1]), aZ=Math.abs(d[2]);
+  const dX=aX>0?1/(aX*T):inf, dY=aY>0?1/(aY*T):inf, dZ=aZ>0?1/(aZ*T):inf;   // t por voxel fino
+  let tX=aX>0?((d[0]>0?(fx+1)/T-px:px-fx/T)/aX):inf;
+  let tY=aY>0?((d[1]>0?(fy+1)/T-py:py-fy/T)/aY):inf;
+  let tZ=aZ>0?((d[2]>0?(fz+1)/T-pz:pz-fz/T)/aZ):inf;
+  let t=0;                                           // t relativo a t0 al entrar en el voxel fino actual
+  for(let i=0;i<3*T+3;i++){
+    if(fx<x*T||fx>=x*T+T||fy<y*T||fy>=y*T+T||fz<z*T||fz>=z*T+T) return -1;   // salió de la celda: sigue el DDA grueso
+    if(mcFineSolidAt(fx,fy,fz)) return t0+t;
+    if(tX<tY && tX<tZ){ fx+=sX; t=tX; tX+=dX; }
+    else if(tY<tZ){     fy+=sY; t=tY; tY+=dY; }
+    else {              fz+=sZ; t=tZ; tZ+=dZ; }
+  }
+  return -1;
 }
 // ¿qué instancia de estructura ocupa el voxel fino de mundo (fx,fy,fz)? (busca en su malla cacheada)
 function mcStructAt(px,py,pz){
@@ -6228,6 +6300,18 @@ game.gotoNote=function(i){
   i=i|0; if(i<0||i>=ks.length){ toast('No existe la nota '+i); return false; }
   const [x,y,z]=ks[i].split(',').map(Number);
   return mcTeleport(x,y,z);
+};
+// game.rayoFijo() · congela el rayo de apuntado donde esté ahora (o lo suelta si ya estaba fijo).
+// Rayos-X (tecla X) ya dibuja el rayo, pero DESDE EL OJO se proyecta justo en la mira, o sea que se ve
+// como un punto: para verlo de verdad hay que fijarlo aquí y luego apartarse a mirarlo de lado.
+game.rayoFijo=function(){
+  if(mc.rayFijo){ mc.rayFijo=null; toast('Rayo suelto'); return null; }
+  const r=mcRayoInfo();
+  if(!r){ toast('No hay rayo (¿estás en el Mundo?)'); return null; }
+  mc.rayFijo=r;
+  if(!mc.xray) toast('Rayo fijo — pulsa X para verlo'); else toast('Rayo fijo');
+  return r.cell ? { golpea:r.cell, punto:r.point.map(v=>+v.toFixed(3)), pone:r.place,
+                    fina:!!(r.hit&&r.hit.fina) } : { golpea:null };
 };
 // ── setVoxel(x,y,z,material): puente para scripts de construcción por consola ──────────────────────────
 const MC_MAT_ALIAS={ stone:'asset:assets/roca.vox.json', smooth_stone:'asset:assets/adoquin.vox.json',

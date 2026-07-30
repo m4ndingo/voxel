@@ -253,6 +253,28 @@ extra pausados** (`autostart:false` + `pause()`), porque `mcAgentsTick` salta lo
 `'running'` pero `mcAgentsSmoothUpdate` solo salta `'stopped'` y el bucle de dibujo solo mira
 `vbo && count`. Especificación de comportamiento: **`REGLAS_AGENTES.md`**.
 
+## El rayo de apuntado y las estructuras finas
+
+`mcRaycast(maxd, hitStruct)` decide **dónde cae el bloque que colocas** (`cell + normal`). Con
+`hitStruct` mira también las estructuras finas, y ahí está la trampa: `mcStructCellSolid` responde por
+la **caja de la celda entera** (`mcFineBoxHit` de `x*T` a `x*T+T-1`), o sea que **una escalera daba por
+sólida su celda estando casi toda hueca**. El rayo se paraba en la caja, la normal era la de la celda y
+el bloque nuevo salía **flotando delante** en vez de pegarse a la pared del fondo a la que apuntabas.
+
+`mcStructRayHit(x,y,z, o,d, t0)` lo arregla: sub-DDA a **resolución fina** acotado a esa celda (≤48
+pasos), y solo cuenta como impacto si el rayo cruza un voxel fino **lleno**. Solo se entra ahí si
+`mcStructCellSolid` ya dijo que sí, así que el coste va con las celdas de estructura que cruza el rayo,
+**no** con el alcance. `mcRaycast` devuelve además `point` (impacto exacto), `dist` y `fina`.
+
+**Depuración (tecla `X`)**: rayos-X dibuja el rayo (magenta), un cubo en el impacto, la celda que lo
+**para** (blanco) y la celda donde **iría el bloque** (verde), sin test de profundidad para verlo a
+través de la estructura. ⚠️ **Desde el ojo el rayo se proyecta justo en la mira, o sea que se ve como un
+punto**: para verlo como segmento hay que congelarlo con **`game.rayoFijo()`** y apartarse a mirarlo de
+lado. La etiqueta DOM del impacto dice si paró en `voxel fino` o en `bloque` y en qué celda pone.
+
+Test: `node test_rayo_apuntado.js` (extrae las funciones verbatim de `app.js`; fija la regresión
+comprobando que la celda **sí** da sólida por AABB pero el rayo **no** cruza voxel lleno).
+
 ## Bloques con comportamiento (`game.bloques`) — el material manda, no el voxel
 
 Una escalera que se trepa, un muelle que impulsa, una placa que dispara algo al pisarla. El
