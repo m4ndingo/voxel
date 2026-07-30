@@ -296,6 +296,11 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   recorre de los pies a la cabeza y se agarra al primer material trepable que encuentre, así que la
   **forma del dibujo deja de importar**. Es también lo que permite coronar: sondeando solo al pecho,
   el agarre se pierde con los pies 0,9 por debajo del remate, más de lo que sube el auto-escalón.
+- **Soltar la tecla NO suelta la escalera**: sin `W`/`S` uno se queda **colgado** donde estaba, como
+  en Minecraft. Caerse al dejar de pulsar (reportado por el dueño) obliga a subirlo todo de una
+  tirada y convierte cualquier pausa en una caída desde lo alto. Solo sostiene a quien **ya venía
+  agarrado**, para no enganchar a quien está de pie al lado; y si la física original encontró suelo
+  (`mc.onGround`) se suelta, para no dejarlo flotando a un pelo del piso sin poder saltar.
 - **Soltarse siempre tiene que ser posible**, o el jugador se queda pegado (reportado por el dueño).
   Bajando con S se anula la componente que despega de la escalera **solo mientras se está colgado**;
   en cuanto hay suelo debajo se suelta el agarre entero y se anda normal. Y el **espacio** es la
