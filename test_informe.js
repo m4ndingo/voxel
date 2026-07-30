@@ -62,7 +62,9 @@ function nuevoAgente(id, nombre, x, z) {
     stats: { ticks: 0, steps: 0, blocked: 0, mined: 0, painted: 0 },
     vars: { dir: [1, 0], historial: [], visited: new Set(), recentVisits: [], tickets: {},
             ticketLog: [], executionTrace: [], runId: 'test' },
-    matId: () => 1,
+    // La obsidiana tiene que tener un id PROPIO: con matId()=>1 el envoltorio de proteccion de
+    // obsidiana toma cualquier piedra por obsidiana y bloquea todas las escrituras.
+    matId: n => (n === 'obsidian' || n === 'obsidiana') ? 99 : 1,
     getBlock: (bx, by, bz) => mundo[bx + ',' + by + ',' + bz] ? 1 : 0,
     setBlock: function (bx, by, bz, mat) {
       const k = bx + ',' + by + ',' + bz;
@@ -105,7 +107,7 @@ const inf = game.informe({ guardar: false });
 if (process.env.VER) console.log(inf);
 t('caso 1: no se llamo a fetch con guardar:false', fetchLlamado === 0);
 t('caso 1: el agente sale como atascado', inf.indexOf('Minero') >= 0 && inf.indexOf('VEREDICTO — 1 de') >= 0);
-t('caso 1: la tabla 3.3 marca el peldano INEFICAZ', /EMERGENCY_MINE \|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\| \*\*INEFICAZ\*\*/.test(inf));
+t('caso 1: la tabla 3.3 marca el peldano INEFICAZ', /EMERGENCY_MINE \|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\| \*\*INEFICAZ\*\*/.test(inf));
 t('caso 1: dispara R1 (se ejecuto sin producir celda nueva)', inf.indexOf('R1 ·') >= 0 && inf.indexOf('§21.1') >= 0);
 t('caso 1: dispara R2 (siempre desde la misma celda)', inf.indexOf('R2 ·') >= 0 && inf.indexOf('10,15,10') >= 0);
 t('caso 1: el vecindario explica el bloqueo (TAPIADO)', inf.indexOf('TAPIADO') >= 0);
@@ -148,7 +150,13 @@ t('caso 4: el markdown viaja crudo dentro del comentario', enviado.body.code.ind
 t('caso 4: game.informe.ultimo guarda el mismo texto', game.informe.ultimo === inf4);
 
 // Caso 5: la procedencia esta, para no depurar codigo que ya no corre.
-t('caso 5: lleva version y huella de la libreria', /libreria: v4\.37 · huella [a-z0-9]+/.test(inf4));
+// La version se escribia dos veces (cabecera del fichero y seccion 0) y se fueron de la mano: el
+// informe anunciaba v4.37 con la libreria ya en v4.38, que es justo el dato que sirve para saber si la
+// pestana recargo. Aqui se comprueba que las dos digan lo mismo, no que digan un numero concreto.
+const verCabecera = (code.match(/Habilidades de Agentes (v4\.\d+)/) || [])[1];
+t('caso 5: lleva version y huella de la libreria', /libreria: v4\.\d+ · huella [a-z0-9]+/.test(inf4));
+t('caso 5: la version del informe es la de la cabecera de la libreria',
+  !!verCabecera && inf4.indexOf('- libreria: ' + verCabecera + ' · huella ') >= 0);
 t('caso 5: declara el tamano de los anillos', inf4.indexOf('Lo anterior a eso NO esta en este informe') >= 0);
 
 // Caso 6: el informe no escribe en el mundo que esta diagnosticando.
@@ -167,7 +175,7 @@ a3.vars.recentVisits = [];
 for (let i = 0; i < 30; i++) a3.vars.recentVisits.push({ x: 20, z: 20 + (i % 2), tick: i });
 a3.stats.ticks = 4000;
 const inf7 = game.informe({ guardar: false, todos: true });
-t('caso 7: el veredicto es SIN AVANCE, no ok', /UTURN_DEADEND \|[^|]*\|[^|]*\|[^|]*\| 0 \|[^|]*\| \*\*SIN AVANCE\*\*/.test(inf7));
+t('caso 7: el veredicto es SIN AVANCE, no ok', /UTURN_DEADEND \|[^|]*\|[^|]*\|[^|]*\| 0 \|[^|]*\|[^|]*\| \*\*SIN AVANCE\*\*/.test(inf7));
 t('caso 7: R1 explica que moverse no es avanzar', inf7.indexOf('gano 0 celdas nuevas') >= 0 && inf7.indexOf('§21.1') >= 0);
 
 // Caso 8: vecino con suelo pisable pero con voladizo encima. canWalk lo rechaza (desnivelProhibido
@@ -185,6 +193,41 @@ game.agentSpeed = 100;
 const inf9 = game.informe({ guardar: false });
 t('caso 9: los segundos cuentan la velocidad', /400 ticks \(~0\.[0-9] s con tickMs 120 y agentSpeed 100\)/.test(inf9));
 game.agentSpeed = 1;
+
+// Caso 10: el peldano ESTERIL. Es el caso real del informe del 30/7: FREQ_BREAK gano 110 celdas en
+// 19215 ejecuciones (0,006 por vez) y, por no ser CERO exacto, la tabla lo daba por "ok" mientras los
+// cinco agentes llevaban 975 ticks sin descubrir una celda. Lo que separa un peldano util de uno
+// esteril es el orden de magnitud, no el cero. De paso comprueba las otras dos correcciones del
+// informe, que fallaban en el mismo agente: R2 (que colgaba de un caso inalcanzable) y R8 (cuyo suelo
+// de area estaba invertido).
+mundo = {};
+for (let x = 55; x <= 72; x++) for (let z = 55; z <= 66; z++) mundo[x + ',14,' + z] = 1;
+const a5 = nuevoAgente('freq', 'Esteril', 60, 60);
+a5.stats.ticks = 400;
+a5.vars.acciones = {
+  // El mejor peldano del propio agente, para que la comparacion no dependa de un numero magico.
+  WALK: { n: 1000, conEfecto: 1000, sinEfecto: 0, celdasGanadas: 4300, mismaPos: 1, celdaIman: '' },
+  FREQ_BREAK: { n: 19215, conEfecto: 19000, sinEfecto: 215, celdasGanadas: 110,
+                mismaPos: 48, celdaIman: '60,15,60' }
+};
+// Recorre una LINEA de 8 columnas una y otra vez: pisa poco de la caja por la que merodea.
+a5.vars.recentVisits = [];
+for (let i = 0; i < 120; i++) a5.vars.recentVisits.push({ x: 60 + (i % 8), z: 60, tick: 395 });
+const inf10 = game.informe({ guardar: false, agentes: ['freq'] });
+t('caso 10: el peldano que gana 0,006 celdas por vez sale ESTERIL, no ok',
+  /FREQ_BREAK \|[^|]*\|[^|]*\|[^|]*\|[^|]*\| 0\.006 \|[^|]*\| \*\*ESTÉRIL\*\*/.test(inf10));
+t('caso 10: el que si funciona sigue saliendo ok', /WALK \|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\| ok \|/.test(inf10));
+t('caso 10: R1 lo acusa por tasa y lo compara con el mejor del mismo agente',
+  inf10.indexOf('0.006 celdas por vez') >= 0 && inf10.indexOf('**WALK** da 4.30') >= 0);
+// R2 colgaba del caso "no cambio de celda", que es justo el que NO se da en un peldano que camina:
+// era inalcanzable. Aqui FREQ_BREAK tiene 19000 ejecuciones CON efecto y aun asi R2 tiene que salir.
+t('caso 10: R2 sale aunque el peldano si cambie de celda',
+  inf10.indexOf('R2 · Esteril') >= 0 && inf10.indexOf('48 veces seguidas') >= 0 &&
+  inf10.indexOf('[60,15,60]') >= 0);
+// R8 pedia una caja de >=100 celdas, y la caja la dibuja el propio agente: cuanto mas atascado, mas
+// pequena. Esta es de 98 — justo la talla que antes callaba.
+t('caso 10: R8 acusa la caja pequena (el suelo de area estaba invertido)',
+  /R8 · Esteril: solo pisa 8 celdas de las 98 de su caja de merodeo \(8%\)/.test(inf10));
 
 console.log('\n' + ok + ' ok, ' + fail + ' fallos');
 process.exit(fail ? 1 : 0);
