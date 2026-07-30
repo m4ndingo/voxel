@@ -57,7 +57,14 @@ function geomLosa() {                                     // placa de presion: 1
   for (let z = 0; z < T; z++) for (let x = 0; x < T; x++) bits[z * fdim[0] + x] = 1;
   return { fdim, bits };
 }
-const GEOM = { 'hab:escalera': geomPanel(), 'hab:escalera-real': geomEscaleraReal(), 'hab:placa': geomLosa() };
+function geomMediaLosa() {                                // peldano de MEDIO bloque: 8 voxeles finos
+  const fdim = [T, T / 2, T], bits = new Uint8Array(T * (T / 2) * T).fill(1);
+  return { fdim, bits };
+}
+const GEOM = {
+  'hab:escalera': geomPanel(), 'hab:escalera-real': geomEscaleraReal(),
+  'hab:placa': geomLosa(), 'hab:media': geomMediaLosa()
+};
 
 function montar(opciones) {
   opciones = opciones || {};
@@ -83,6 +90,18 @@ function montar(opciones) {
   if (opciones.fina && !opciones.sinEscalera) for (let oy = 5; oy < 20; oy++) structures.push({ key: claveFina, ox: 12, oy, oz: 11, rot: 0 });
   // La placa fina se apoya en el suelo (bloque y=4, o sea techo en y=5) y ocupa solo 1/16 de alto.
   if (opciones.placaFina) { grid[idx(12, 5, 9)] = 0; structures.push({ key: 'hab:placa', ox: 12, oy: 5, oz: 9, rot: 0 }); }
+  // Escalera de PELDANOS de medio bloque (8 voxeles finos), como la que enseño el dueno: cada
+  // peldano cabe de sobra en MC_STEP, asi que app.js lo sube solo y de golpe. Cimas: 5.5, 6.0, 6.5.
+  // El ultimo peldano sigue como meseta hasta el borde del mundo: si acabara en z=7 el jugador se
+  // caeria por el otro lado a mitad de prueba y la medida seria de la caida, no de la subida.
+  if (opciones.escalones) for (let x = 0; x < DIM.x; x++) {
+    structures.push({ key: 'hab:media', ox: x, oy: 5, oz: 9, rot: 0 });
+    grid[idx(x, 5, 8)] = ID_ROCA;
+    for (let z = 7; z >= 0; z--) {
+      grid[idx(x, 5, z)] = ID_ROCA;
+      structures.push({ key: 'hab:media', ox: x, oy: 6, oz: z, rot: 0 });
+    }
+  }
 
   const mc = {
     dim: DIM, grid, blockKey: CLAVES.slice(), catalog: [], structures, notes: {}, agents: new Map(),
@@ -91,6 +110,7 @@ function montar(opciones) {
   global.mc = mc;
   global.window = global;
   global.MC_TILE = T;
+  global.MC_STEP = 0.6;                                   // app.js:4912
   global.mcIdx = (x, y, z) => idx(x, y, z);
   global.mcInside = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < DIM.x && y < DIM.y && z < DIM.z;
   global.mcStructColl = (s) => GEOM[s.key] || null;
@@ -126,6 +146,22 @@ function montar(opciones) {
   // Cuenta sus llamadas para detectar envoltorios apilados.
   let llamadas = 0;
   const VEL = 4.3;                                          // marcha, del orden de app.js:5059
+  // Escalon automatico, calco de mcMoveAxis (app.js:4915): si el eje esta bloqueado se prueba a
+  // levantar al jugador hasta MC_STEP y, si arriba cabe, sube DE GOLPE dentro del mismo frame. Ese
+  // tiron es justo lo que se quiere suavizar. Solo con opciones.escalones, para no cambiar de
+  // comportamiento las pruebas que ya existian.
+  const subirEscalon = (nx, nz, eje) => {
+    if (!opciones.escalones) return;
+    const stepH = MC_STEP * mc.scale, inc = Math.max(1 / T, stepH / 12);
+    for (let h = inc; h <= stepH + 1e-6; h += inc) {
+      if (global.mcCollides(nx, mc.pos[1] + h, nz)) continue;
+      mc.pos[eje] = eje === 0 ? nx : nz;
+      mc.pos[1] += h;
+      if (mc.vel[1] < 0) mc.vel[1] = 0;
+      mc.onGround = true;
+      return;
+    }
+  };
   global.mcUpdate = function (dt) {
     llamadas++;
     // Con opciones.andar tambien se mueve en horizontal (eje a eje, como mcMoveAxis): hace falta
@@ -138,8 +174,8 @@ function montar(opciones) {
       // prueba de trampolín daría verde sin probar nada: el jugador se movería por teclas también volando.
       if (mc.onGround) { mc.vel[0] = fx * s * VEL; mc.vel[2] = fz * s * VEL; }
       const nx = mc.pos[0] + mc.vel[0] * dt, nz = mc.pos[2] + mc.vel[2] * dt;
-      if (!global.mcCollides(nx, mc.pos[1], mc.pos[2])) mc.pos[0] = nx;
-      if (!global.mcCollides(mc.pos[0], mc.pos[1], nz)) mc.pos[2] = nz;
+      if (!global.mcCollides(nx, mc.pos[1], mc.pos[2])) mc.pos[0] = nx; else subirEscalon(nx, mc.pos[2], 0);
+      if (!global.mcCollides(mc.pos[0], mc.pos[1], nz)) mc.pos[2] = nz; else subirEscalon(mc.pos[0], nz, 2);
     }
     mc.vel[1] -= 22 * dt;
     const ny = mc.pos[1] + mc.vel[1] * dt;
@@ -612,6 +648,102 @@ console.log('\nEl snippet trae la escalera ya definida');
   const cfg = w.game.bloques._tabla['hab:escalera'];
   t('hab:escalera viene configurada de fábrica', !!cfg && cfg.trepable === true && cfg.subida === 4 && cfg.bajada === 5,
     cfg ? '↑' + cfg.subida + ' ↓' + cfg.bajada : 'no está');
+}
+
+console.log('\nSubida de escalones: el cuerpo salta, el ojo lo alcanza');
+{
+  // Sube la escalera de peldaños de medio bloque y anota, frame a frame, la y FÍSICA (con la que se
+  // colisiona) y la y PINTADA (la que ve la cámara). Con suavizado son distintas; sin él, la misma.
+  const subir = (tau, dt, n) => {
+    const w = montar({ andar: true, escalones: true, sinEscalera: true, sinPlaca: true });
+    w.sinRuido(() => w.game.bloques.pasoSuave(tau));
+    w.mc.pos = [12.5, 5, 10.5]; w.mc.vel = [0, 0, 0]; w.mc.yaw = 0; w.mc.keys['w'] = true;
+    const fisica = [], pintada = [], desfase = [];
+    for (let i = 0; i < n; i++) {
+      w.frames(1, dt);
+      pintada.push(w.mc.pos[1]);
+      desfase.push(w.mc._pasoDesfase || 0);
+      fisica.push(w.mc.pos[1] + (w.mc._pasoDesfase || 0));
+    }
+    return { fisica, pintada, desfase, w };
+  };
+  const tiron = (a) => a.reduce((m, y, i) => (i && y - a[i - 1] > m ? y - a[i - 1] : m), 0);
+  const N = 90;
+  const crudo = subir(0, 1 / 60, N);
+  const suave = subir(0.06, 1 / 60, N);
+
+  t('el cuerpo corona los tres peldaños (5 → 6,5)', Math.abs(crudo.fisica[N - 1] - 6.5) < 1e-9,
+    'y=' + crudo.fisica[N - 1].toFixed(3));
+  t('sin suavizar, la cámara pega tirones de medio bloque', Math.abs(tiron(crudo.pintada) - 0.5) < 1e-9,
+    '+' + tiron(crudo.pintada).toFixed(3));
+
+  // Esta es la que importa: si el suavizado tocase la física, el juego se sentiría distinto.
+  const identica = crudo.fisica.every((y, i) => y === suave.fisica[i]);
+  t('suavizar NO cambia la física: la misma y de verdad en los 90 frames', identica);
+  t('pero la cámara ya no da el tirón', tiron(suave.pintada) < 0.2, '+' + tiron(suave.pintada).toFixed(3));
+  t('el ojo nunca se queda más de un escalón por detrás', Math.max(...suave.desfase) <= 0.6 + 1e-9,
+    'máx ' + Math.max(...suave.desfase).toFixed(3));
+  t('y siempre por DEBAJO del cuerpo, nunca por encima', Math.min(...suave.desfase) >= 0);
+
+  // Coronado y quieto: el ojo tiene que acabar de subir, no quedarse hundido para siempre.
+  suave.w.mc.keys['w'] = false;
+  suave.w.frames(15);                                     // 0,25 s
+  t('parado un cuarto de segundo, el ojo alcanza al cuerpo',
+    (suave.w.mc._pasoDesfase || 0) === 0 && Math.abs(suave.w.mc.pos[1] - 6.5) < 1e-9,
+    'y=' + suave.w.mc.pos[1].toFixed(4));
+}
+
+console.log('\nEl suavizado no depende de los fps ni se traga un teletransporte');
+{
+  // Mismo desfase inicial, mismo tiempo simulado, dos frecuencias de frame: tiene que quedar lo mismo.
+  const trasQuietoY = (dt, frames) => {
+    const w = montar({ escalones: true, sinEscalera: true, sinPlaca: true });
+    w.mc.pos = [12.5, 5, 10.5];
+    w.mc._pasoDesfase = 0.5; w.mc._pasoReal = 5; w.mc.pos[1] = 4.5; w.mc._pasoY = 4.5;
+    w.frames(frames, dt);
+    return w.mc._pasoDesfase || 0;
+  };
+  const a30 = trasQuietoY(1 / 30, 6), a120 = trasQuietoY(1 / 120, 24);   // 0,2 s los dos
+  t('a 30 y a 120 fps queda el mismo desfase tras 0,2 s', Math.abs(a30 - a120) < 1e-9,
+    a30.toFixed(5) + ' vs ' + a120.toFixed(5));
+  t('y a los 0,2 s ya casi no queda nada que subir', a30 < 0.02, a30.toFixed(4));
+
+  // Si alguien mueve al jugador por su cuenta (game.tp, un respawn, un alPisar), el desfase pendiente
+  // ya no significa nada: sumarlo lo dejaría medio bloque por encima de donde lo mandaron.
+  const w = montar({ escalones: true, sinEscalera: true, sinPlaca: true });
+  w.mc.pos = [12.5, 5, 10.5];
+  w.mc._pasoDesfase = 0.5; w.mc._pasoReal = 5; w.mc.pos[1] = 4.5; w.mc._pasoY = 4.5;
+  w.mc.pos = [12.5, 9, 10.5];                             // «game.tp» a media altura
+  w.frames(1);
+  t('un teletransporte tira el desfase pendiente en vez de sumarlo', (w.mc._pasoDesfase || 0) === 0);
+  t('y el jugador cae desde donde lo mandaron, no medio bloque más arriba', w.mc.pos[1] < 9 && w.mc.pos[1] > 8.9,
+    'y=' + w.mc.pos[1].toFixed(3));
+
+  // Saltar también sube de golpe, pero eso el jugador lo pidió: no se suaviza.
+  w.mc.pos = [12.5, 5, 10.5]; w.mc.vel = [0, 8, 0]; w.mc.onGround = false;
+  w.frames(1);
+  t('un salto no se suaviza (sube porque el dueño lo pidió)', (w.mc._pasoDesfase || 0) === 0);
+}
+
+console.log('\npasoSuave: se ajusta, se apaga y sobrevive a reejecutar el snippet');
+{
+  const w = montar({ escalones: true, sinEscalera: true, sinPlaca: true });
+  t('de fábrica el escalón viene suavizado', w.game.bloques.pasoSuave() === 0.06, '' + w.game.bloques.pasoSuave());
+  w.sinRuido(() => w.game.bloques.pasoSuave(0.1));
+  w.recargar();                                           // Alt+C otra vez
+  t('lo que ajustó el dueño sobrevive a la reejecución', w.game.bloques.pasoSuave() === 0.1, '' + w.game.bloques.pasoSuave());
+
+  const antes = w.avisosConsola.length;
+  w.sinRuido(() => w.game.bloques.pasoSuave(-3));
+  t('un valor absurdo se rechaza y no deja el ojo colgado',
+    w.game.bloques.pasoSuave() === 0.1 && w.avisosConsola.slice(antes).join(' ').indexOf('segundos') >= 0);
+
+  // Apagarlo con un desfase pendiente tiene que devolver al jugador a su y de verdad, no dejarlo hundido.
+  w.mc.pos = [12.5, 5, 10.5];
+  w.mc._pasoDesfase = 0.5; w.mc._pasoReal = 5; w.mc.pos[1] = 4.5; w.mc._pasoY = 4.5;
+  w.sinRuido(() => w.game.bloques.pasoSuave(0));
+  t('apagarlo repone la y de verdad al instante', w.mc.pos[1] === 5 && (w.mc._pasoDesfase || 0) === 0,
+    'y=' + w.mc.pos[1]);
 }
 
 console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');

@@ -308,6 +308,7 @@ game.bloques.define('hab:muelle',   { altura:4 });          // lo mismo, dicho e
 game.bloques.define('arena',        { impulso:12 });        // vale el nombre CORTO si no es ambiguo
 game.bloques.info();      // clave EXACTA de lo que piso / tengo delante / detrás  ← el descubridor
 game.bloques.lista(); game.bloques.quitar('hab:muelle'); game.bloques.avisos();
+game.bloques.pasoSuave(0.06);   // segundos que tarda el ojo en subir un escalón; 0 = como antes
 ```
 
 Todo vive en el snippet **`data/snippets/mundo-autoarranque.json`** (el JSON *es* la fuente; se edita
@@ -367,6 +368,20 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   que **registra** es siempre la clave larga, que es la que traen los voxels. Si el nombre corto vale
   para dos materiales **no elige**: enseña los candidatos y no registra nada. `quitar` entiende lo
   mismo. Un material inexistente sigue avisando y mandando a `info()`.
+- **`pasoSuave` sube el ojo, no el cuerpo.** `app.js` sube los escalones **de golpe** dentro de un
+  frame (`mcMoveAxis`: `p[1] += h`, hasta `MC_STEP=0.6`), y en una escalera de peldaños de 8 voxels
+  eso se ve como saltos de y+0,5. Se tapa como en Minecraft: **la física no se toca** (misma colisión,
+  mismo alcance de escalón, mismo tacto) y solo se **pinta** al jugador un poco más abajo, desfase que
+  se consume en ~0,1 s. Mecánica: el ojo se calcula en **seis** sitios de `app.js` a partir de
+  `mc.pos[1]`, así que el desfase se **resta al salir** del frame y se **repone al entrar** en el
+  siguiente — entre medias solo hay dibujado. Se repone la y **guardada**, no `pos[1]+desfase`: sumar
+  y restar no devuelve el mismo float y ese pelo acabaría en la colisión (el test compara los 90
+  frames con `===`). Decae con `exp(-dt/τ)`, o sea igual a 30 que a 120 fps, se recorta a un escalón
+  y **solo** se aplica al escalón automático: saltar (`onGround` false) y trepar (ya es continuo) no
+  se suavizan. El estado vive en `mc` (`_pasoDesfase`/`_pasoReal`/`_pasoY`), no en un closure, para
+  que reejecutar el snippet herede el desfase en vez de dejar al jugador medio bloque hundido; si la
+  `y` no es la que se pintó, alguien movió al jugador (`game.tp`, respawn, un `alPisar`) y el desfase
+  se tira.
 - Solo afecta al **jugador**; los agentes siguen con su `climb`/`drop`.
 
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
