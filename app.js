@@ -6444,6 +6444,21 @@ async function openWorld(){
   mc.active=true; mc.fpsN=0; mc.fpsT=0; mc.last=performance.now();
   mcResumeAgents();     // reanudar agentes pausados al volver del editor
   mc.raf=requestAnimationFrame(mcTick);
+  await mcAutoarranque();
+}
+// PUNTO DE EXTENSIÓN DEL MUNDO. Los snippets no se ejecutan solos (solo a mano desde Alt+C), así que
+// nada podía hacer que el mundo «se comporte» al abrirlo: la escalera dejaba de ser escalera en cada
+// recarga. Esto ejecuta el snippet 'mundo-autoarranque' si existe, una vez, con el Mundo ya vivo.
+// app.js NO sabe qué hace ese snippet — solo le da un sitio donde engancharse (bloques con
+// comportamiento, atajos de teclado…), igual que es agnóstico a cómo se comportan los agentes.
+// Fallar es inocuo: sin snippet, el Mundo se comporta exactamente como antes.
+async function mcAutoarranque(){
+  let s=null;
+  try{ s=await fetch('/api/snippets/mundo-autoarranque',{cache:'no-store'}).then(r=>r.ok?r.json():null); }catch(e){}
+  if(!s || !s.code) return;                       // no hay snippet de arranque: nada que hacer
+  const AsyncFn=Object.getPrototypeOf(async function(){}).constructor;   // igual que el modal (app.js:2851)
+  try{ await (new AsyncFn(s.code))(); }
+  catch(e){ console.warn('mundo-autoarranque falló:', e && e.message ? e.message : e); }
 }
 // Tunables de consola del Mundo (patrón game.nearClip): game.fov (grados) y game.renderDist (nº de chunks).
 try{ const f=parseFloat(localStorage.getItem('vf_mcFov')); if(f) mc.fov=f*Math.PI/180; }catch(e){}
