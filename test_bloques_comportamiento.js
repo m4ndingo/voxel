@@ -203,7 +203,7 @@ function montar(opciones) {
   console.log = () => {};                                   // el snippet se presenta al cargarse (§22)
   console.warn = (...a) => avisosConsola.push(a.join(' '));
   ejecutar();
-  function ejecutar() { (new Function(CODE))(); }
+  function ejecutar(codigo) { (new Function(codigo || CODE))(); }
   console.log = realLog; console.warn = realWarn;
 
   return {
@@ -211,6 +211,15 @@ function montar(opciones) {
     llamadas: () => llamadas,
     // Reejecuta el snippet tal cual (lo que hace el dueno al afinar subida/bajada).
     recargar: () => { const l = console.log, w = console.warn; console.log = () => {}; console.warn = (...a) => avisosConsola.push(a.join(' ')); ejecutar(); console.log = l; console.warn = w; },
+    // Reejecuta el snippet con un define EDITADO, que es lo que hace el dueño de verdad: abre Alt+C,
+    // cambia un número en los comportamientos por defecto y le da a ejecutar.
+    recargarEditado: (buscar, poner) => {
+      const codigo = CODE.replace(buscar, poner);
+      if (codigo === CODE) throw new Error('el test no encontró qué editar en el snippet: ' + buscar);
+      const l = console.log, w = console.warn;
+      console.log = () => {}; console.warn = (...a) => avisosConsola.push(a.join(' '));
+      try { ejecutar(codigo); } finally { console.log = l; console.warn = w; }
+    },
     // Silencia warn Y log: define() informa por log cuando resuelve un nombre corto ("roca" → asset:…),
     // y esa línea es útil en la consola del navegador pero ruido en la salida del test.
     sinRuido: (fn) => {
@@ -599,6 +608,19 @@ console.log('\nReejecutar el snippet REINSTALA la física, no solo la API');
   const heredado = w2.game.bloques._tabla['hab:muelle'];
   t('y lo definido ANTES sobrevive a la reejecución', !!heredado && heredado.subida === 9,
     heredado ? '↑' + heredado.subida : 'se perdió');
+
+  // Pero heredar NO puede pisar lo que el snippet acaba de definir, que es justo lo que hacía: el
+  // dueño editaba el define de la escalera, reejecutaba, y la tabla de la pasada anterior lo volvía a
+  // sobrescribir dos líneas después. El define nuevo entraba (hasta avisaba por consola) y acto
+  // seguido desaparecía: lista() seguía enseñando el valor viejo y el mundo tampoco cambiaba.
+  const w3 = montar({ sinEscalera: true });
+  const antes = w3.game.bloques._tabla['hab:escalera'].subida;
+  w3.recargarEditado('subida: 4, bajada: 5', 'subida: 30, bajada: 5');
+  const despues = w3.game.bloques._tabla['hab:escalera'];
+  t('editar un define y reejecutar SÍ cambia el valor (la herencia no lo pisa)',
+    !!despues && despues.subida === 30, '↑' + antes + ' -> ↑' + (despues ? despues.subida : '(se perdió)'));
+  t('y el cambio llega a la física, no solo a la tabla',
+    w3.game.bloques._porId().some(c => c && c.subida === 30), 'la caché densa sigue con el valor viejo');
 }
 
 console.log('\nLa caché densa se reconstruye cuando crece la paleta');
