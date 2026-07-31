@@ -512,7 +512,29 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     esto `sentido` sobra para el brazo; el número suelto sigue significando el giro de siempre.
     - Los `limites` se miden desde la pose de origen, así que con `frente:{x:-90}` el `x:[-90,90]` de
       serie deja la pieza sin poder pasar de la horizontal: para que se levante hay que abrirlo
-      (`limites:{ x:[-90,180] }`).
+      (`limites:{ x:[-90,180] }`). Con ese `frente` el cabeceo se lee así: **0 = colgando, 90 =
+      horizontal, 180 = tieso hacia arriba**.
+    - ⚠️ **`frente.x` tiene que ser el HONESTO, no el que "queda bien".** El dueño lo tuvo en `-180`
+      y el brazo parecía apuntar: en realidad el cabeceo pedido era `elevación+180` (90..270), o sea
+      **siempre pinzado en el tope de arriba**, clavado en la horizontal a cualquier distancia y con
+      `limites.x[0]` que no llegaba a tocarse nunca (su «xmax sube el brazo, xmin no parece ir»).
+      Medido: con `{x:-180}` el cabeceo vale 90° a cualquier altura del jugador; con `{x:-90}`, 59°→90°.
+  - **`sinVolteo: true` para piezas ESPEJO (dos brazos con `rot` opuesto).** Una misma dirección se
+    apunta con **dos** posturas — `(giro, cab)` y `(giro+180, 180−cab−2·frenteX)` — y dejan la punta
+    exactamente igual. Por defecto se coge la primera, que es la natural para una cabeza; pero dos
+    piezas iguales puestas con `rot` opuesto acaban las dos en la **misma orientación absoluta**, así
+    que una tiene que **darse media vuelta sobre sí misma** para llegar: el dueño lo reportó como «el
+    brazo izquierdo gira por la espalda y acaba con los dedos del revés». Con `sinVolteo` se elige la
+    postura que **menos gira** sobre su eje vertical y lo que sobra sale por el cabeceo, que es lo que
+    hace un hombro: el brazo espejo se queda con el giro casi a cero y **sube por delante**, el mismo
+    movimiento que el otro. Detalles que no son opcionales:
+    - Exige `ejes:'xy'` (sin cabeceo no hay con qué compensar la media vuelta) y **el `frente.x`
+      honesto**, porque la postura alternativa se calcula con él.
+    - El cabeceo se **pinza con `limites.x` ANTES** de convertirlo, para que `x:[30,90]` signifique
+      «cuánto levanta el brazo» en los dos y no una cosa y su negativa.
+    - **Banda muerta 80/100°** en vez de 90 pelado: en la frontera las dos posturas son igual de
+      válidas y sin histéresis plantarse ahí hace **aletear** la pieza. Rayos-X marca con **`↺`** la
+      instancia que está en la otra postura (si no, un cabeceo negativo parece un error).
   - **El cabeceo va sobre el eje izquierda-derecha DE LA PIEZA, no sobre el X del mundo.** La matriz
     es `Ry(giro)·Rx(cabeceo)·Ry(-horneado)`: hay que **deshacer** el cuarto de vuelta ya horneado en
     `rot`, cabecear, y volver a ponerlo. Con el `Rx` a secas solo acierta la pieza estampada sin

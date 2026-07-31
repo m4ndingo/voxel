@@ -1478,5 +1478,146 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 }
 
+// ── 13. Piezas espejo: apuntar sin darse media vuelta (sinVolteo) ───────────────────────────────
+// REPORTADO POR EL DUENO: sus dos brazos son el MISMO dibujo puesto con `rot` opuesto. Apuntar la
+// CARA de los dos al mismo sitio obliga a uno a girar 180° sobre si mismo: llegaba apuntando bien
+// pero «con los dedos del reves», y para llegar barria por la espalda en vez de subir por delante.
+// La misma flecha se apunta con DOS posturas — (giro, cab) y (giro+180, 180-cab-2*frenteX) — y la
+// segunda deja la pieza en su orientacion de origen y sube por cabeceo, que es lo que hace un hombro.
+{
+  const BRAZO = 'asset:assets/brazo.vox.json';
+  const RAD = Math.PI / 180;
+  const gira = (m, x, y, z) => [m[0] * x + m[4] * y + m[8] * z, m[1] * x + m[5] * y + m[9] * z,
+                                m[2] * x + m[6] * y + m[10] * z];
+  const norm = (v) => { const n = Math.hypot(v[0], v[1], v[2]); return [v[0] / n, v[1] / n, v[2] / n]; };
+  const punto = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  // Dos brazos colgando a los lados de un busto, con `rot` opuesto: es como estan en el mundo del
+  // dueño. Sus hombros (el punto fijo del pivote [1,2,0.5]) caen en (12.5,12,7) y (12.5,12,10).
+  const ponerBrazos = (w) => {
+    const izq = { key: BRAZO, ox: 12, oy: 10, oz: 6,  rot: 1, aabb: [12, 10, 6, 13, 12, 7] };
+    const der = { key: BRAZO, ox: 12, oy: 10, oz: 10, rot: 3, aabb: [12, 10, 10, 13, 12, 11] };
+    w.mc.structures.push(izq, der);
+    return { izq, der, hombro: { izq: [12.5, 12, 7], der: [12.5, 12, 10] } };
+  };
+  // Con frente:{x:-90} el cabeceo se cuenta desde el brazo COLGANDO: 0 = colgando, 90 = horizontal,
+  // 180 = tieso hacia arriba. Por eso el tope de arriba aqui es 180 y no 90; con 90 el brazo no
+  // podria pasar de la horizontal ni aunque el jugador se le suba encima (que es, de hecho, lo que
+  // hace el limite [30,90] que el dueño tiene puesto en el mundo: sube hasta la horizontal y para).
+  const CFG = { ejes: 'xy', suavidad: 0, alcance: 50, pivote: [1, 2, 0.5], frente: { x: -90 },
+                limites: { y: [-180, 180], x: [0, 180] } };
+  // Un brazo que cuelga apunta con su eje LARGO hacia abajo, asi que su flecha es la (0,-1,0) del
+  // dibujo — y esa no la toca el horneado, porque girar sobre Y deja la vertical quieta. La
+  // direccion a la que de verdad apunta la pieza es entonces la matriz aplicada a (0,-1,0).
+  const apunta = (s) => norm(gira(s.model, 0, -1, 0));
+  // El «pulgar»: el eje izquierda-derecha DE LA PIEZA. Al cabecear no se mueve (Rx lo deja quieto),
+  // asi que si aparece del reves es que la pieza se ha dado media vuelta. Es literalmente lo que
+  // vio el dueño. Va en coordenadas de la malla YA horneada: Ry(rot·90)·(1,0,0).
+  const pulgar = (s) => {
+    const a = (s.rot & 3) * 90 * RAD;
+    return norm(gira(s.model, Math.cos(a), 0, -Math.sin(a)));
+  };
+  const pulgarEnReposo = (s) => { const a = (s.rot & 3) * 90 * RAD; return [Math.cos(a), 0, -Math.sin(a)]; };
+
+  {
+    // Lo esencial: las dos posturas apuntan EXACTAMENTE igual. Si esto falla, el arreglo no arregla
+    // nada — el brazo espejo dejaria de seguir al jugador, que es peor que llegar girado.
+    const w = montar({});
+    const b = ponerBrazos(w);
+    w.sinRuido(() => w.game.bloques.define(BRAZO, { mirar: Object.assign({ sinVolteo: true }, CFG) }));
+    w.mc.pos[0] = 24; w.mc.pos[1] = 11; w.mc.pos[2] = 8.5;   // delante de los dos, casi a su altura
+    w.frames(1);
+    const dIzq = punto(apunta(b.izq), norm([w.mc.pos[0] - b.hombro.izq[0], w.mc.pos[1] - b.hombro.izq[1], w.mc.pos[2] - b.hombro.izq[2]]));
+    const dDer = punto(apunta(b.der), norm([w.mc.pos[0] - b.hombro.der[0], w.mc.pos[1] - b.hombro.der[1], w.mc.pos[2] - b.hombro.der[2]]));
+    t('con sinVolteo los dos brazos siguen apuntando al jugador', dIzq > 0.999 && dDer > 0.999,
+      'izq ' + dIzq.toFixed(4) + ' · der ' + dDer.toFixed(4));
+    t('...y ninguno se da media vuelta sobre si mismo',
+      Math.abs(b.izq._mirarYaw) <= 90 && Math.abs(b.der._mirarYaw) <= 90,
+      'izq yaw ' + Math.round(b.izq._mirarYaw) + '° · der yaw ' + Math.round(b.der._mirarYaw) + '°');
+    t('...y el pulgar de los dos sigue apuntando al mismo lado que en reposo',
+      punto(pulgar(b.izq), pulgarEnReposo(b.izq)) > 0.99 && punto(pulgar(b.der), pulgarEnReposo(b.der)) > 0.99,
+      'izq ' + punto(pulgar(b.izq), pulgarEnReposo(b.izq)).toFixed(3)
+        + ' · der ' + punto(pulgar(b.der), pulgarEnReposo(b.der)).toFixed(3));
+  }
+
+  {
+    // El defecto que reporto el dueño, para que no vuelva sin que nadie se entere: SIN sinVolteo uno
+    // de los dos apunta igual de bien pero llega con el pulgar del reves.
+    const w = montar({});
+    const b = ponerBrazos(w);
+    w.sinRuido(() => w.game.bloques.define(BRAZO, { mirar: CFG }));
+    w.mc.pos[0] = 24; w.mc.pos[1] = 11; w.mc.pos[2] = 8.5;
+    w.frames(1);
+    const gira180 = Math.abs(b.izq._mirarYaw) > 90 || Math.abs(b.der._mirarYaw) > 90;
+    const alReves = punto(pulgar(b.izq), pulgarEnReposo(b.izq)) < -0.9
+                 || punto(pulgar(b.der), pulgarEnReposo(b.der)) < -0.9;
+    t('sin sinVolteo (lo de antes) uno de los dos SI se da media vuelta y saca el pulgar del reves',
+      gira180 && alReves, 'izq yaw ' + Math.round(b.izq._mirarYaw) + '° · der yaw ' + Math.round(b.der._mirarYaw) + '°');
+  }
+
+  {
+    // El brazo espejo tiene que SUBIR, no barrer en horizontal: con el jugador delante y por encima
+    // del hombro, la punta se va hacia arriba y hacia el, y su giro se queda pegado a cero.
+    const w = montar({});
+    const b = ponerBrazos(w);
+    w.sinRuido(() => w.game.bloques.define(BRAZO, { mirar: Object.assign({ sinVolteo: true }, CFG) }));
+    w.mc.pos[0] = 20; w.mc.pos[1] = 16; w.mc.pos[2] = 8.5;   // delante y mas alto que el hombro
+    w.frames(1);
+    const esp = b.izq._mirarVolteada ? b.izq : b.der;          // el que esta puesto del reves
+    const dir = apunta(esp);
+    t('el brazo espejo sube por delante (la punta va hacia arriba y hacia el jugador)',
+      dir[1] > 0.15 && dir[0] > 0.5 && Math.abs(esp._mirarYaw) < 15,
+      'punta (' + dir.map((v) => v.toFixed(2)).join(', ') + ') con yaw ' + Math.round(esp._mirarYaw) + '°');
+  }
+
+  {
+    // Plantarse justo en la frontera entre las dos posturas no puede hacer aletear la pieza: son
+    // igual de validas ahi, y sin banda muerta el brazo se pasaria el rato dandose la vuelta.
+    // Con el hombro izquierdo en (12.5,12,7) y su origen horneado a 90°, el jugador al norte (mismo
+    // x, mas z) le cae justo a 90° de giro pedido, que es la frontera pelada.
+    const w = montar({});
+    const b = ponerBrazos(w);
+    w.sinRuido(() => w.game.bloques.define(BRAZO, { mirar: Object.assign({ sinVolteo: true }, CFG) }));
+    const en = (grados) => {   // coloca al jugador en el rumbo que pide ESE giro para el brazo izq
+      const th = (grados + 90) * RAD;
+      w.mc.pos[0] = 12.5 + Math.sin(th) * 20; w.mc.pos[1] = 12; w.mc.pos[2] = 7 - Math.cos(th) * 20;
+      w.frames(1);
+      return b.izq._mirarVolteada;
+    };
+    const enLaRaya = en(90), pasada = en(105), volviendo = en(95), fuera = en(70);
+    t('la banda muerta evita el aleteo: en la raya no voltea, y una vez volteada aguanta',
+      enLaRaya === false && pasada === true && volviendo === true && fuera === false,
+      [enLaRaya, pasada, volviendo, fuera].join(' '));
+  }
+
+  {
+    // sinVolteo sin cabeceo no es «casi bien», es apuntar al lado contrario: la media vuelta se
+    // compensa con el cabeceo y sin eje x no hay con que.
+    const w = montar({});
+    ponerBrazos(w);
+    const antes = w.avisosConsola.length;
+    t('sinVolteo sin ejes:"xy" no se registra',
+      w.sinRuido(() => w.game.bloques.define(BRAZO, { mirar: { sinVolteo: true, alcance: 50 } })) === null);
+    t('...y el aviso explica que hace falta el cabeceo',
+      /sinVolteo necesita ejes/.test(w.avisosConsola.slice(antes).join(' ')),
+      w.avisosConsola.slice(antes).join(' '));
+  }
+
+  {
+    // En rayos-X hay que poder distinguir «esta en su postura de siempre» de «esta en la otra», o
+    // los angulos de la etiqueta no se pueden leer: un cabeceo negativo no es un error, es la otra.
+    const w = montar({});
+    const b = ponerBrazos(w);
+    w.sinRuido(() => w.game.bloques.define(BRAZO, { mirar: Object.assign({ sinVolteo: true }, CFG) }));
+    w.mc.pos[0] = 24; w.mc.pos[1] = 11; w.mc.pos[2] = 8.5;
+    w.frames(1);
+    const volteado = b.izq._mirarVolteada ? b.izq : b.der, normal = b.izq._mirarVolteada ? b.der : b.izq;
+    t('la etiqueta marca con ↺ la pieza que esta en la otra postura, y solo esa',
+      /↺/.test(global.mcXrayExtra(BRAZO, volteado)) && !/↺/.test(global.mcXrayExtra(BRAZO, normal)),
+      global.mcXrayExtra(BRAZO, volteado) + '   ||   ' + global.mcXrayExtra(BRAZO, normal));
+    t('...y el resumen del material dice que lleva sinVolteo',
+      /sinVolteo/.test(global.mcXrayExtra(BRAZO, normal)), global.mcXrayExtra(BRAZO, normal));
+  }
+}
+
 console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');
 process.exit(fail ? 1 : 0);
