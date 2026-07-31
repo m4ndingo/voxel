@@ -953,6 +953,65 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 
   {
+    // REPORTADO POR EL DUENO: «al acercarme el brazo gira en el plano y entonces ya apunta al
+    // jugador; el apunte se hace bien, pero a costa de girar el brazo». Es la diferencia entre
+    // INCLINARSE y APUNTAR: 'mirar' orienta la CARA de la pieza (su -Z), y un brazo apunta con su
+    // eje LARGO. Sin descontarlo, el brazo se inclina tantos grados como la elevacion del jugador
+    // — casi nada de lejos, un barrido de golpe de cerca. Con frente:{x:-90} apunta siempre.
+    // Se mide lo unico que se ve: el angulo entre la linea HOMBRO→MANO y la linea HOMBRO→JUGADOR.
+    const desvio = (s, hombro, mano, jug) => {
+      const m = s.model, ap = (q) => [m[0]*q[0]+m[4]*q[1]+m[8]*q[2]+m[12],
+                                      m[1]*q[0]+m[5]*q[1]+m[9]*q[2]+m[13],
+                                      m[2]*q[0]+m[6]*q[1]+m[10]*q[2]+m[14]];
+      const t = ap(mano);
+      const u = [t[0]-hombro[0], t[1]-hombro[1], t[2]-hombro[2]];
+      const v = [jug[0]-hombro[0], jug[1]-hombro[1], jug[2]-hombro[2]];
+      const nu = Math.hypot(u[0],u[1],u[2]), nv = Math.hypot(v[0],v[1],v[2]);
+      const cos = (u[0]*v[0] + u[1]*v[1] + u[2]*v[2]) / (nu * nv);
+      return Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+    };
+    const apunta = (mirar, jug) => {
+      const w = montar({});
+      const s = { key: CABEZA, ox: 12, oy: 10, oz: 6, rot: 0, aabb: [12, 10, 6, 13, 12, 7] };
+      w.mc.structures.push(s);
+      w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: Object.assign(
+        { ejes: 'xy', suavidad: 0, alcance: 60, pivote: [0.5, 2, 0.5], limites: { x: [-90, 180] } }, mirar) }));
+      w.mc.pos[0] = jug[0]; w.mc.pos[1] = jug[1]; w.mc.pos[2] = jug[2];
+      w.frames(1);
+      return desvio(s, [12.5, 12, 6.5], [12.5, 10, 6.5], jug);
+    };
+    // El hombro esta en (12.5, 12, 6.5). Lejos y a ras de suelo, cerca y abajo, y por encima.
+    const casos = [['lejos y a ras', [12.5, 11, 26]], ['cerca y abajo', [14, 8, 8]],
+                   ['por encima', [12.5, 18, 16]], ['al otro lado', [12.5, 11, -8]]];
+    let peorSin = 0, peorCon = 0, detalle = [];
+    for (const [nombre, jug] of casos) {
+      const sin = apunta({}, jug), con = apunta({ frente: { x: -90 } }, jug);
+      peorSin = Math.max(peorSin, sin); peorCon = Math.max(peorCon, con);
+      detalle.push(nombre + ' ' + Math.round(sin) + '°→' + Math.round(con) + '°');
+    }
+    t('sin frente vertical el brazo NO apunta al jugador (solo se inclina)', peorSin > 30,
+      'se desvia hasta ' + Math.round(peorSin) + '°');
+    t('frente:{x:-90} hace que el brazo APUNTE al jugador a cualquier distancia', peorCon < 2,
+      detalle.join(' · '));
+
+    // frente numerico sigue siendo el horizontal de siempre, y {y:...} es lo mismo.
+    {
+      const giroCon = (fr) => {
+        const w = montar({});
+        const s = ponerCabeza(w, 0);
+        w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: Object.assign({ suavidad: 0, alcance: 50 }, fr) }));
+        w.mc.pos[0] = 20; w.mc.pos[2] = 9;
+        w.frames(1);
+        return grados(gira(s.model, 0, 0, -1));
+      };
+      t('frente numerico y frente:{y:...} son lo mismo (el de siempre, horizontal)',
+        Math.abs(giroCon({ frente: 40 }) - giroCon({ frente: { y: 40 } })) < 1e-9
+        && Math.abs(giroCon({ frente: 40 }) - giroCon({})) > 30,
+        giroCon({}).toFixed(1) + '° → ' + giroCon({ frente: 40 }).toFixed(1) + '°');
+    }
+  }
+
+  {
     // REPORTADO POR EL DUENO: «en lugar de girar el hombro para apuntar con el brazo al jugador
     // apunta hacia atras». 'mirar' apunta la CARA de la pieza (su -Z), pero un brazo que cuelga
     // apunta con su eje LARGO (su -Y): el mismo cabeceo que le sube la cara a una cabeza le aparta

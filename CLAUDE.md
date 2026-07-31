@@ -487,10 +487,19 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     debajo del hombro (el caso normal, andando por el suelo) el brazo se iba hacia atrás — el dueño
     lo reportó así. Se arregla con **`sentido: { x:-1 }`** (y `{ y:-1 }` espeja el giro). Es un
     signo, no un parche a un caso: invierte los dos lados.
-    - ⚠️ `sentido` hace que la pieza se **incline hacia** el objetivo tantos grados como la elevación,
-      pero **no le apunta de verdad**: a la altura del hombro la elevación es 0 y el brazo se queda
-      colgando. Un apuntado real querría `cabeceo = elevación + 90°`, o sea un **desfase**, que no
-      existe (`frente` solo desfasa el giro).
+    - ⚠️ Pero `sentido` **inclina, no apunta**: la pieza se ladea tantos grados como la elevación del
+      objetivo, o sea **casi nada de lejos y un barrido de golpe al acercarse** (medido en el mundo
+      del dueño andando hacia el brazo: cabeceo de −5° a 11 bloques → +64° a 1 bloque). Así lo
+      reportó: «al acercarme el brazo gira y entonces ya apunta».
+  - **`frente: { x:-90 }` es lo que separa APUNTAR de INCLINARSE.** `frente` (que ya existía como
+    número para el giro) pasa a admitir `{ x, y }`: son los grados hacia los que **ya apunta el
+    dibujo**, para descontarlos. Una pieza que apunta con su **eje largo** — brazo, cañón, aguja —
+    apunta hacia abajo, o sea `{ x:-90 }`, y entonces el cabeceo que sale es `elevación + 90°`, que
+    es el que la deja apuntando **a cualquier distancia** (medido: desvío 0° de 11 a 1 bloque). Con
+    esto `sentido` sobra para el brazo; el número suelto sigue significando el giro de siempre.
+    - Los `limites` se miden desde la pose de origen, así que con `frente:{x:-90}` el `x:[-90,90]` de
+      serie deja la pieza sin poder pasar de la horizontal: para que se levante hay que abrirlo
+      (`limites:{ x:[-90,180] }`).
   - **El cabeceo va sobre el eje izquierda-derecha DE LA PIEZA, no sobre el X del mundo.** La matriz
     es `Ry(giro)·Rx(cabeceo)·Ry(-horneado)`: hay que **deshacer** el cuarto de vuelta ya horneado en
     `rot`, cabecear, y volver a ponerlo. Con el `Rx` a secas solo acierta la pieza estampada sin
