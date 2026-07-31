@@ -70,6 +70,23 @@ rotación 90° válida también para base rectangular (rot1/rot3 intercambian X/
 y `load(map, meta, size)` lo aplica. Presets = 16³; assets Alis/chef = 32 (legado cúbico). Todo se
 serializa del Map. UI: inputs X×Y×Z + "Aplicar" en la tarjeta Objeto.
 
+**Pivotes dibujados (herramienta 📍, tecla `P`):** puntos de articulación que se **dibujan** en el
+editor en vez de escribirse a mano en el snippet (`state.pivotes`, `[[x,y,z],…]` en coordenadas de la
+rejilla). **NO son voxels**: no se estampan, no cuentan en `#voxel-count` y no se ven en el Mundo. Van
+en el JSON como **clave de primer nivel `pivotes`**, que sobrevive al guardado sin tocar `server.py`
+(`POST /api/habitantes` hace `atomic_dump` del documento entero). El **orden del array es el número**
+que se pinta encima (el 1º dibujado es el nº1) y es lo que elige `game.bloques` con `pivote: N`; sin
+número se usa el 1º. Clic pone, clic encima quita (y renumera). En **Capas** el pivote de la capa
+actual sale en magenta sólido y los de otras capas tenues; en **3D** se pinta la chapa siempre encima
+(son marcas, no geometría: no se ocultan tras los voxels). Viajan por `edit()`/`snapshot()` (deshacer),
+`rotateModel`, `resizeGrid` (se descartan los que quedan fuera) y `load`/`exportJSON`/`localSnap`.
+
+⚠️ **Tres conversiones separan la celda dibujada del punto de giro** (`pivoteDeDibujo` en
+`mundo-autoarranque`), y saltarse una cuelga el brazo de otro sitio: el editor es **Z-arriba** y el
+Mundo **Y-arriba** (el `y` del dibujo es la PROFUNDIDAD); el origen es la **esquina de la celda 16³**
+que contiene el mínimo (`Math.floor(min/16)*16`), no el mínimo — es lo que hace `mcStructGeom` al
+mallar; y el punto es el **centro** de la celda marcada (`+0.5`), no su esquina.
+
 **Historial (deshacer/rehacer):** snapshots `{voxels,size}` en `undoStack`/`redoStack`, **una entrada
 por gesto** (`beginGesture`/`endGesture` en trazos con arrastre; `edit(fn)` para acciones atómicas —
 borrar selección, vaciar capa; `commit` directo en `resizeGrid`). `setVoxel` activa `mutated` solo si
@@ -483,14 +500,23 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     recorte: dentro se sigue al objetivo con el ángulo exacto, fuera se vuelve a casa.
   - El **cabeceo** al tope **no** cuenta como rendirse: llegar al límite del cuello mirando hacia
     arriba es seguir mirándote, y si contara, pegar un salto apagaría la cabeza entera de golpe.
-  - **`pivote: [x,y,z]` elige por dónde se engancha**, en **coordenadas del objeto** (bloques desde
-    su esquina; 1 bloque = 16 voxels del dibujo). Sin él se gira sobre el centro de la caja, que en
-    una pieza de dos bloques cae en el **codo** y no en el **hombro** — así lo reportó el dueño con
-    `brazo.vox.json`. Va en coordenadas del objeto y **no** del mundo porque la tabla es por
-    MATERIAL: hay que deshacer el `rot` (con `rot` impar los lados X y Z de `s.aabb` salen
-    intercambiados) para que una sola línea sirva estampes la pieza donde la estampes. Salirse de la
-    caja vale: un hombro puede caer en el cuerpo. El culling no necesita nada: `mcStructVisible` pasa
-    el centro **por la matriz**, que ya lleva la traslación del pivote.
+  - **El pivote elige por dónde se engancha.** Sin él se gira sobre el centro de la caja, que en una
+    pieza de dos bloques cae en el **codo** y no en el **hombro** — así lo reportó el dueño con
+    `brazo.vox.json`. Se dice de dos maneras, y **el literal gana** por ser lo más concreto:
+    - **`pivote: 2`** = el nº2 de los **DIBUJADOS con la herramienta 📍** del editor (ver abajo). Sin
+      poner nada se usa **el primero que haya dibujado**, así que lo normal es no escribir la línea.
+    - **`pivote: [x,y,z]`** a mano, en **coordenadas del objeto** (bloques desde su esquina; 1 bloque
+      = 16 voxels del dibujo).
+    - Va en coordenadas del objeto y **no** del mundo porque la tabla es por MATERIAL: hay que
+      deshacer el `rot` (con `rot` impar los lados X y Z de `s.aabb` salen intercambiados) para que
+      una sola línea sirva estampes la pieza donde la estampes. Salirse de la caja vale: un hombro
+      puede caer en el cuerpo. El culling no necesita nada: `mcStructVisible` pasa el centro **por la
+      matriz**, que ya lleva la traslación del pivote.
+    - El dibujado **no se puede resolver en `define()`**: es síncrono y el JSON del objeto viaja por
+      red. Se pide con `getRoomData(clave)` y se le pone el `piv` a la config que **ya está viva**, o
+      sea que la pieza arranca girando sobre el centro de su caja y se recoloca sola en el primer
+      frame que haya datos. Si el objeto no trae ese pivote, avisa **solo si se pidió por número**
+      (no ponerlo significa «si lo hay»).
     - ⚠️ **Con `ejes:'y'` la altura del pivote no se nota.** El giro es sobre la vertical **del
       pivote**, y todo punto de esa vertical queda fijo: subir el enganche de un brazo que cuelga no
       mueve ni un voxel. El pivote alto solo se ve cuando hay **cabeceo** (`ejes:'xy'`).

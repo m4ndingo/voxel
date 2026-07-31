@@ -15,6 +15,11 @@ const state = {
   layer: 0,
   rot: 0,                 // 0..3
   meta: { name: 'Objeto sin título', type: 'objeto' },
+  // Pivotes: puntos de articulación DIBUJADOS con la herramienta 📍. NO son voxels (no se
+  // estampan ni se ven en el Mundo): son [x,y,z] de la rejilla y su ORDEN es el número que
+  // se pinta en el editor (el 1º dibujado es el nº 1). Viajan en el JSON como `pivotes`
+  // (clave de primer nivel) y el snippet elige cuál usar; por defecto, el primero.
+  pivotes: [],
 };
 
 // Paletas temáticas conmutables. Cada color es [hex, nombre]; la elegida se
@@ -151,6 +156,8 @@ function resizeGrid(x,y,z){
     const [vx,vy,vz]=k.split(',').map(Number);
     if(vx>=x||vy>=y||vz>=z){ state.voxels.delete(k); mutated=true; voxRev++; }
   }
+  const pv=state.pivotes.filter(p=>p[0]<x&&p[1]<y&&p[2]<z);   // pivotes fuera de la nueva rejilla: fuera
+  if(pv.length!==state.pivotes.length){ state.pivotes=pv; mutated=true; }
   if(changed||mutated) commit(before);
   setSize(x,y,z);
   view.zoom=1; view.panX=0; view.panY=0; updateZoomLabel(); hover3d=null; selection.clear();
@@ -172,6 +179,7 @@ function rotateModel(ax, dir){
   const [fn,nx,ny,nz]=R, nv=new Map();
   for(const [k,c] of state.voxels){ const [x,y,z]=k.split(',').map(Number); const [a,b,cc]=fn(x,y,z); nv.set(a+','+b+','+cc,c); }
   state.voxels=nv; setSize(nx,ny,nz);
+  state.pivotes=state.pivotes.map(p=>fn(p[0],p[1],p[2]));   // los pivotes giran con el dibujo
   if(state.layer>nz-1) state.layer=nz-1;
   hover3d=null; selection.clear();
   view.zoom=1; view.panX=0; view.panY=0; updateZoomLabel();
@@ -258,11 +266,26 @@ const texReprCache=new Map();                          // clave -> color represe
 function texRepr(key){ return texReprCache.get(key) || '#8a8f94'; }
 function voxFill(c){ return isTex(c) ? texRepr(texKeyOf(c)) : bareColor(c); }   // color plano para pintar en 2D (canvas admite #rrggbbaa)
 
+// ---- Pivotes (herramienta 📍) ----
+// Un pivote es una CELDA marcada, no un voxel: no entra en state.voxels, así que no cambia la
+// huella del objeto ni aparece en el Mundo. `mutated` se toca a mano porque el historial mide
+// por ahí (setVoxel es quien lo pone en el resto de herramientas).
+function pivIndexAt(x,y,z){ // -1 si no hay pivote en esa celda; si lo hay, su índice 0-based
+  const p=state.pivotes;
+  for(let i=0;i<p.length;i++) if(p[i][0]===x && p[i][1]===y && p[i][2]===z) return i;
+  return -1;
+}
+function togglePivote(x,y,z){ // clic pone; clic encima quita (y los siguientes se renumeran)
+  const i=pivIndexAt(x,y,z);
+  if(i>=0) state.pivotes.splice(i,1); else state.pivotes.push([x,y,z]);
+  mutated=true;
+}
 function applyTool(cx,cy){
   if(cx<0||cy<0||cx>=SX||cy>=SY) return;
   const z = state.layer;
   switch(state.tool){
     case 'paint': setVoxel(cx,cy,z,paintValue()); break;
+    case 'pivot': togglePivote(cx,cy,z); break;
     case 'build': if(getVoxel(cx,cy,z)===undefined) setVoxel(cx,cy,z,paintValue()); break;  // Construir: solo rellena huecos, no repinta
     case 'erase': setVoxel(cx,cy,z,null); break;
     case 'pick':  { const c=getVoxel(cx,cy,z); if(c) pickColorTool(c); break; }
@@ -290,9 +313,10 @@ function floodFill(sx,sy,z){
 // Snapshot = {voxels, size}. Se registra una entrada por "gesto" (trazo, borrado,
 // relleno, redimensionado…). `mutated` (en setVoxel) evita registrar cambios nulos.
 const undoStack=[], redoStack=[]; const MAXUNDO=80;
-const snapshot=()=>({ v:[...state.voxels], s:[SX,SY,SZ], sel:[...selection] });
+const snapshot=()=>({ v:[...state.voxels], s:[SX,SY,SZ], sel:[...selection], p:state.pivotes.map(p=>p.slice()) });
 function applySnapshot(snap){
   state.voxels=new Map(snap.v); setSize(...snap.s);
+  state.pivotes=(snap.p||[]).map(p=>p.slice());                                // los pivotes también se deshacen
   selection.clear(); if(snap.sel) for(const k of snap.sel) selection.add(k);   // restaura la selección
   hover=null; hover3d=null;
   syncLayer(); render();
@@ -342,6 +366,26 @@ function drawVoxCell(c, X, Y, W, H){
   if(isTex(c)){ const fc=getTexFaces(texKeyOf(c)); if(fc){ ectx.imageSmoothingEnabled=false; ectx.drawImage(fc.faces[0], X, Y, W, H); return; } }
   ectx.fillStyle=voxFill(c); ectx.fillRect(X, Y, W, H);
 }
+// Pivotes en la vista de capas. El NÚMERO es lo que importa: es el orden en que se dibujaron y
+// es lo que el snippet nombra con `pivote: N`. Los de otras capas se pintan apagados para poder
+// contarlos sin ir capa por capa (si no, el nº 2 «desaparece» y el 3 parece el 2).
+function drawPivotes2d(px,py,cell){
+  if(!state.pivotes.length) return;
+  ectx.save();
+  ectx.textAlign='center'; ectx.textBaseline='middle';
+  const r=Math.max(6, cell*0.34);
+  state.pivotes.forEach((p,i)=>{
+    if(p[0]>=SX||p[1]>=SY||p[2]>=SZ) return;
+    const aqui=(p[2]===state.layer), cx=px(p[0])+cell/2, cy=py(p[1])+cell/2;
+    ectx.globalAlpha = aqui ? 1 : 0.32;
+    ectx.beginPath(); ectx.arc(cx,cy,r,0,Math.PI*2);
+    ectx.fillStyle='#ff3fd0'; ectx.fill();
+    ectx.strokeStyle='#fff'; ectx.lineWidth=aqui?2:1; ectx.stroke();
+    ectx.fillStyle='#fff'; ectx.font='bold '+Math.round(r*1.15)+'px system-ui';
+    ectx.fillText(String(i+1), cx, cy+0.5);
+  });
+  ectx.restore();
+}
 function drawEdit(){
   const {W,H,cell,gx,gy,originX,originY}=viewGeom();
   ectx.fillStyle='#0e1119'; ectx.fillRect(0,0,W,H);
@@ -371,6 +415,7 @@ function drawEdit(){
   for(let i=0;i<=SX;i++){ ectx.moveTo(px(i),originY); ectx.lineTo(px(i),originY+gy); }
   for(let j=0;j<=SY;j++){ ectx.moveTo(originX,py(j)); ectx.lineTo(originX+gx,py(j)); }
   ectx.stroke();
+  drawPivotes2d(px,py,cell);
   // selección (compartida con la vista 3D): tinte cian en los voxels seleccionados de ESTA capa
   if(selection.size){
     let others=0;
@@ -1083,8 +1128,28 @@ function drawEdit3d(){
     if(hover3d) drawHover3d();
     if(state.tool==='build' && buildGhost) drawBuildGhost();
     if(pasting) drawPasteGhost3d();
+    drawPivotes3d();
   }
   updateVoxMeter();                                  // voxels dibujados en este frame
+}
+// Los pivotes en 3D: el marcador va al CENTRO de su celda, que es exactamente el punto por el
+// que engancha la pieza en el Mundo. Sin prueba de profundidad — un pivote suele caer DENTRO
+// del objeto (un hombro), y esconderlo dejaría la herramienta a ciegas.
+function drawPivotes3d(){
+  if(!state.pivotes.length || !g3d) return;
+  e3ctx.save();
+  e3ctx.textAlign='center'; e3ctx.textBaseline='middle';
+  const r=Math.max(8, g3d.S*0.34);
+  state.pivotes.forEach((p,i)=>{
+    if(p[0]>=SX||p[1]>=SY||p[2]>=SZ) return;
+    const s=g3d.screen(p[0]+0.5, p[1]+0.5, p[2]+0.5);
+    e3ctx.beginPath(); e3ctx.arc(s[0],s[1],r,0,Math.PI*2);
+    e3ctx.fillStyle='rgba(255,63,208,0.9)'; e3ctx.fill();
+    e3ctx.strokeStyle='#fff'; e3ctx.lineWidth=2; e3ctx.stroke();
+    e3ctx.fillStyle='#fff'; e3ctx.font='bold '+Math.round(r*1.15)+'px system-ui';
+    e3ctx.fillText(String(i+1), s[0], s[1]+0.5);
+  });
+  e3ctx.restore();
 }
 function updateVoxMeter(){
   const el=$('#e3-vox'); if(el) el.textContent=_voxDrawnLast+' vox';
@@ -1316,9 +1381,19 @@ function presetSlime(){
 
 const PRESETS={ vacio:presetVacio, barril:presetBarril, slime:presetSlime };
 
-function load(map,meta,size){
+// `pivotes` viene de un fichero que puede estar a medias o venir de otra herramienta: se acepta
+// solo lo que es de verdad [x,y,z] entero. Un pivote basura sería peor que ninguno, porque el
+// Mundo colgaría la pieza de un punto inventado y el número de los siguientes bailaría.
+function normPivotes(ps){
+  if(!Array.isArray(ps)) return [];
+  return ps.filter(p=>Array.isArray(p)&&p.length>=3&&p.every(n=>Number.isFinite(n)))
+           .map(p=>[Math.round(p[0]),Math.round(p[1]),Math.round(p[2])]);
+}
+
+function load(map,meta,size,pivotes){
   setSize(...normSize(size||16));
   state.voxels=map;
+  state.pivotes=normPivotes(pivotes);
   if(meta){ state.meta={...meta}; }
   state.layer=0; state.rot=0; hover3d=null; selection.clear(); serverId=null;
   view3d.zoom=1; view3d.panX=0; view3d.panY=0;
@@ -1381,7 +1456,7 @@ async function loadFromUrl(url){
   try{
     const d=await fetch(url,{cache:'no-store'}).then(r=>r.json());
     ingestTextures(d);
-    load(new Map(Object.entries(d.voxels||{})), d.meta||{name:url,type:'objeto'}, d.size);
+    load(new Map(Object.entries(d.voxels||{})), d.meta||{name:url,type:'objeto'}, d.size, d.pivotes);
     toast('Cargado «'+((d.meta&&d.meta.name)||url)+'»');
   }catch(e){ toast('No se pudo cargar '+url); }
 }
@@ -1405,7 +1480,7 @@ async function loadHabitante(id){
   try{
     const d=await fetch('/api/habitantes/'+id,{cache:'no-store'}).then(r=>r.json());
     ingestTextures(d);
-    load(new Map(Object.entries(d.voxels||{})), d.meta||{name:id,type:'personaje'}, d.size);
+    load(new Map(Object.entries(d.voxels||{})), d.meta||{name:id,type:'personaje'}, d.size, d.pivotes);
     serverId=id; closeHabitantes();
     document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-active',x.dataset.tab==='objeto'));
     toast('Cargado «'+((d.meta&&d.meta.name)||id)+'»');
@@ -1539,9 +1614,10 @@ function embeddedTextures(){
 function currentVox(){
   const doc={format:'voxelforge-1', size:{x:SX,y:SY,z:SZ}, meta:state.meta, voxels:Object.fromEntries(state.voxels)};
   const t=embeddedTextures(); if(t) doc.textures=t;
+  if(state.pivotes.length) doc.pivotes=state.pivotes.map(p=>p.slice());   // clave de 1er nivel: el server guarda el doc tal cual
   return doc;
 }
-function localSnap(){ const s={size:{x:SX,y:SY,z:SZ}, meta:state.meta, voxels:[...state.voxels]}; const t=embeddedTextures(); if(t) s.textures=t; return JSON.stringify(s); }
+function localSnap(){ const s={size:{x:SX,y:SY,z:SZ}, meta:state.meta, voxels:[...state.voxels], pivotes:state.pivotes}; const t=embeddedTextures(); if(t) s.textures=t; return JSON.stringify(s); }
 async function save(){
   // copia local siempre (para recuperar al recargar)
   localStorage.setItem(LS, localSnap());
@@ -1593,6 +1669,7 @@ function restore(){
     setSize(...normSize(d.size));
     state.meta=d.meta||state.meta;
     state.voxels=new Map(d.voxels||[]);
+    state.pivotes=normPivotes(d.pivotes);
     return true;
   }catch(e){ return false; }
 }
@@ -1600,6 +1677,7 @@ function slug(s){ return (s||'objeto').toLowerCase().replace(/[^a-z0-9]+/g,'-').
 function exportJSON(){
   const data={format:'voxelforge-1', size:{x:SX,y:SY,z:SZ}, meta:state.meta,
     voxels:Object.fromEntries(state.voxels)};
+  if(state.pivotes.length) data.pivotes=state.pivotes.map(p=>p.slice());
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -1613,7 +1691,7 @@ function importJSON(file){
     try{
       const d=JSON.parse(rd.result);
       const m=new Map(Object.entries(d.voxels||{}));
-      load(m, d.meta||{name:file.name.replace(/\.vox\.json$/,''),type:'objeto'}, d.size);
+      load(m, d.meta||{name:file.name.replace(/\.vox\.json$/,''),type:'objeto'}, d.size, d.pivotes);
       try {
         const isTex = (d.meta && d.meta.type === 'textura');
         const endpoint = isTex ? '/api/assets' : '/api/habitantes';
@@ -1766,7 +1844,9 @@ editCv.addEventListener('pointermove',e=>{
   if(!hover||hover.x!==c.x||hover.y!==c.y){
     hover=c;
     if(painting && sel2d) apply2dSelect(c);
-    else if(painting) applyTool(c.x,c.y);
+    // Pivote NO se arrastra: es un interruptor por celda, y un arrastre dejaría un reguero de
+    // pivotes numerados (o los quitaría al volver sobre ellos). Solo actúa al pulsar.
+    else if(painting && state.tool!=='pivot') applyTool(c.x,c.y);
     else drawEdit();
   }
 });
@@ -2116,6 +2196,11 @@ edit3d.addEventListener('pointerdown',e=>{
     const p0=g3d.screen(0,0,0), pN=g3d.screen(exDir[0],exDir[1],exDir[2]); exVx=pN[0]-p0[0]; exVy=pN[1]-p0[1];
     exStart=edit3dPx(e); update3dCursor(); e.preventDefault(); return;
   }
+  if(e.button===0 && state.tool==='pivot'){          // Pivote: cae en la celda del voxel apuntado (clic encima = quitar)
+    if(v){ edit(()=>togglePivote(v.x,v.y,v.z)); last3dLayer=v.z; render(); }
+    else toast('Apunta a un voxel (o coloca el pivote en la vista de capas)');
+    e.preventDefault(); return;
+  }
   if(e.button===0 && state.tool==='build'){          // Construir: añade un voxel sobre la cara clicada
     buildGeom=snapshotGeom3d();                      // congela la superficie: el arrastre construye una fila plana, no una torre
     const t=buildTargetAt(e, buildGeom);
@@ -2243,6 +2328,7 @@ function setTool(t){
       t==='hand'   ? 'arrastra para desplazar la vista' :
       t==='extrude' ? 'extruye la selección según su normal (arrastra, o ↑ fuera / ↓ dentro)' :
       t==='select' ? 'selecciona (izq) · deselecciona (der) · arrastra o flechas mueve · Supr elimina' :
+      t==='pivot'  ? 'clic sobre un voxel pone el pivote en su celda · clic encima lo quita · el nº es su orden' :
                      'clic aplica la herramienta al voxel'
     ) + ' · botón der. rota · Alt+clic color · Ctrl+arrastre mueve · rueda zoom (acerca para ver el interior)';
     update3dCursor();
@@ -2545,7 +2631,7 @@ window.addEventListener('keydown',e=>{
     view3d.yaw += (e.key==='ArrowLeft' ? Math.PI/4 : -Math.PI/4);
     hover3d=null; buildGhost=null; drawEdit3d(); return;
   }
-  const map={b:'paint',e:'erase',i:'pick',g:'fill',s:'select',h:'hand',o:'orbit',x:'extrude',c:'build'};
+  const map={b:'paint',e:'erase',i:'pick',g:'fill',s:'select',h:'hand',o:'orbit',x:'extrude',c:'build',p:'pivot'};
   if(map[e.key]){ setTool(map[e.key]); }
   else if(e.key===']') setLayer(state.layer+1);
   else if(e.key==='[') setLayer(state.layer-1);
