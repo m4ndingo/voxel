@@ -510,8 +510,10 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .mc-xlbl-struct{background:rgba(190,90,10,.74)}   /* estructura fina: mismo naranja que su caja de rayos-X */
 .mc-xlbl-mat{font-weight:400; font-size:9px; opacity:.9; color:#ffe08a}   /* nombre de material, usable tal cual en tntMat/setVoxel */
 .mc-xlbl-tipo{font-weight:400; font-size:9px; opacity:.8; color:#cfe9ff}   /* bloque de terreno vs estructura fina + origen en la galería */
+.mc-xlbl-extra{font-weight:400; font-size:9px; opacity:.95; color:#9ff6b0}  /* línea del snippet: comportamientos + giros */
 .mc-xlbl-tipo:empty{display:none}
 .mc-xlbl-mat:empty{display:none}
+.mc-xlbl-extra:empty{display:none}
 .mc-xlbl[hidden]{display:none}
 /* ===== Gestor de snippets · editor estilo Minecraft (panel de piedra, bordes biselados, código monoespaciado) ===== */
 .tab-snip{color:var(--accent-2); font-weight:600; border:1px solid color-mix(in srgb, var(--accent-2) 45%, transparent)}
