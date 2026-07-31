@@ -316,5 +316,67 @@
       "z": 16
     },
     "file": "assets/cubo-liso.vox.json"
+  },
+  {
+    "id": "diana",
+    "name": "Diana",
+    "role": "Bloque · diana",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 1
+    },
+    "file": "assets/diana.vox.json"
+  },
+  {
+    "id": "hierba-escalonada",
+    "name": "Hierba Escalonada",
+    "role": "Textura · césped sobre tierra",
+    "icon": "🌿",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hierba-escalonada.vox.json"
+  },
+  {
+    "id": "valla-madera",
+    "name": "Valla Madera",
+    "role": "Bloque · madera de roble (oak planks)",
+    "icon": "🪵",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 4
+    },
+    "file": "assets/valla-madera.vox.json"
+  },
+  {
+    "id": "hielo",
+    "name": "Hielo",
+    "role": "Bloque · hielo (ice)",
+    "icon": "🧊",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/hielo.vox.json"
+  },
+  {
+    "id": "hielo-pista-de-patinaje",
+    "name": "Hielo Pista de Patinaje",
+    "role": "Bloque · hielo pista de patinaje (ice rink)",
+    "icon": "⛸️",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/hielo-pista-de-patinaje.vox.json"
   }
 ]
