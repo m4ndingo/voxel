@@ -470,6 +470,17 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     recorte: dentro se sigue al objetivo con el ángulo exacto, fuera se vuelve a casa.
   - El **cabeceo** al tope **no** cuenta como rendirse: llegar al límite del cuello mirando hacia
     arriba es seguir mirándote, y si contara, pegar un salto apagaría la cabeza entera de golpe.
+  - **`pivote: [x,y,z]` elige por dónde se engancha**, en **coordenadas del objeto** (bloques desde
+    su esquina; 1 bloque = 16 voxels del dibujo). Sin él se gira sobre el centro de la caja, que en
+    una pieza de dos bloques cae en el **codo** y no en el **hombro** — así lo reportó el dueño con
+    `brazo.vox.json`. Va en coordenadas del objeto y **no** del mundo porque la tabla es por
+    MATERIAL: hay que deshacer el `rot` (con `rot` impar los lados X y Z de `s.aabb` salen
+    intercambiados) para que una sola línea sirva estampes la pieza donde la estampes. Salirse de la
+    caja vale: un hombro puede caer en el cuerpo. El culling no necesita nada: `mcStructVisible` pasa
+    el centro **por la matriz**, que ya lleva la traslación del pivote.
+    - ⚠️ **Con `ejes:'y'` la altura del pivote no se nota.** El giro es sobre la vertical **del
+      pivote**, y todo punto de esa vertical queda fijo: subir el enganche de un brazo que cuelga no
+      mueve ni un voxel. El pivote alto solo se ve cuando hay **cabeceo** (`ejes:'xy'`).
   - **El cabeceo va sobre el eje izquierda-derecha DE LA PIEZA, no sobre el X del mundo.** La matriz
     es `Ry(giro)·Rx(cabeceo)·Ry(-horneado)`: hay que **deshacer** el cuarto de vuelta ya horneado en
     `rot`, cabecear, y volver a ponerlo. Con el `Rx` a secas solo acierta la pieza estampada sin
