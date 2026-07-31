@@ -470,6 +470,14 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     sobre el mismo eje que lo horneado y los dos conmutan, así que el bug se esconde hasta que se usa
     `ejes:'xy'`. Al probarlo hay que aplicar la matriz a la **cara ya horneada**, no a `(0,0,-1)`:
     contra `-Z` el error se cuela entero.
+  - **NO se puede cachear qué piezas miran.** Al terminar de cargar, `mcRestampAll` desestampa y
+    vuelve a estampar **cada** instancia (`splice` en `app.js:5772` + `push` en `app.js:6096`): el
+    array de `mc.structures` es **el mismo**, tiene **el mismo número** de elementos, y **ni uno**
+    es el objeto de antes. Ninguna firma barata lo ve (ni el recuento, ni la identidad del array —
+    las dos se probaron y las dos fallan), así que una lista cacheada acaba poniéndole la matriz a
+    instancias **muertas**, que ya no se dibujan: el dueño lo reportó como «la cabeza no me mira al
+    cargar, solo si reejecuto el snippet». Se recorre `mc.structures` entera cada frame, que al lado
+    de lo que ya hay sale gratis: `mcRender` la recorre **cuatro veces por frame** solo para cullear.
 - Solo afecta al **jugador**; los agentes siguen con su `climb`/`drop`.
 
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no

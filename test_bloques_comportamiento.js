@@ -958,6 +958,31 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 
   {
+    // REPORTADO POR EL DUENO: «la cabeza no me mira al cargar, solo si reejecuto el snippet». Al
+    // terminar de cargar, mcClearStructures (app.js:3988) hace `mc.structures=[]` y mcBake
+    // (app.js:6255) apila objetos NUEVOS: mismo recuento, otras instancias. La lista de mirones se
+    // quedaba con las viejas y les ponia la matriz a ellas — invisible, porque ya no se dibujan.
+    const w = montar({});
+    ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50 } }));
+    w.frames(1);
+    // El mundo se re-hornea COMO LO HACE app.js: no cambia el array, se desestampa cada instancia
+    // (splice, app.js:5772) y se vuelve a estampar una nueva (push, app.js:6096). Neto: el MISMO
+    // array, el MISMO numero de elementos, y ni un solo objeto en comun. Reemplazar el array entero
+    // seria una prueba mas floja — la caza cualquier firma que mire la identidad del array.
+    const arr = w.mc.structures, n0 = arr.length;
+    const copias = arr.map(s => Object.assign({}, s, { model: null, _mirarYaw: undefined, _mirarPit: undefined }));
+    arr.length = 0;
+    copias.forEach(s => arr.push(s));
+    const mismoArray = w.mc.structures === arr && arr.length === n0;
+    const nueva = arr.find(s => s.key === CABEZA);
+    w.frames(1);
+    t('tras re-hornear el mundo la matriz va a la instancia VIVA, no a la muerta',
+      !!nueva.model && mismoArray,
+      'estructuras ' + arr.length + ' en el mismo array, instancia viva con matriz: ' + !!nueva.model);
+  }
+
+  {
     // Suavidad: con tau>0 el primer frame solo recorre una parte del camino, no salta al objetivo.
     const w = montar({});
     const s = ponerCabeza(w);
