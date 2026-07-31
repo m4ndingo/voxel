@@ -310,6 +310,7 @@ game.bloques.define('hab:hielo',    { velocidad:2 });       // ×2 la marcha MIE
 game.bloques.info();      // clave EXACTA de lo que piso / tengo delante / detrás  ← el descubridor
 game.bloques.lista(); game.bloques.quitar('hab:muelle'); game.bloques.avisos();
 game.bloques.pasoSuave(0.06);   // segundos que tarda el ojo en subir un escalón; 0 = como antes
+game.bloques.inercia(0.7);      // segundos que tarda la marcha en bajar al salir de un bloque rápido
 ```
 
 Todo vive en el snippet **`data/snippets/mundo-autoarranque.json`** (el JSON *es* la fuente; se edita
@@ -370,7 +371,13 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   para dos materiales **no elige**: enseña los candidatos y no registra nada. `quitar` entiende lo
   mismo. Un material inexistente sigue avisando y mandando a `info()`.
 - **`velocidad` es CONTINUO, no un disparo por flanco** como `alPisar`/`impulso`: manda mientras el pie
-  esté encima, y en cuanto se sale el jugador vuelve a su marcha. Se implementa poniendo **`mc.speed`**
+  esté encima. Al salir, la marcha **no se corta en seco**: decae con `exp(-dt/τ)`, `τ` = `game.bloques
+  .inercia(0.7)` s (`0` = como antes). Sin eso, **un solo bloque** de suelo normal entre el hielo y un
+  trampolín te hacía llegar a marcha base (medido: 10 → 5 en un frame; con inercia, 9,4), que es como
+  lo reportó el dueño: «llega al bloque impulso y pierde la velocidad». Es inercia de **rapidez, no de
+  patinaje**: soltar las teclas sigue parando en seco, porque en el suelo `app.js:5089` pone `vel=0`
+  cuando no hay dirección. El estado (`mc._velInercia`) vive en `mc`, así que **se arrastra entre
+  pasadas de un test**: hay que reponerlo a 0 igual que `_pasoDesfase`. Se implementa poniendo **`mc.speed`**
   a pelo justo antes del `mcUpdate` original y restaurándolo en un `finally`, porque `app.js:5060` lo
   lee **una vez por frame** y de ahí salen tanto la marcha en el suelo como la aceleración en el aire.
   **NO se toca `game.playerSpeed`**: ese setter **persiste en `localStorage`**, así que un bloque le
