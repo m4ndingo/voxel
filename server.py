@@ -330,6 +330,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return self._send(404, {'error': 'ruta'})
 
     def do_PATCH(self):
+        aid = self._asset_id()
+        if aid and os.path.exists(self._asset_path(aid)):
+            body = self._read()
+            name = (body.get('name') or '').strip()
+            if not name:
+                return self._send(400, {'error': 'falta el nombre'})
+            # Renombrar un asset cambia SOLO el rotulo: el id y el fichero se quedan. Los voxels del
+            # mundo guardan la clave del material como 'asset:assets/<fichero>.vox.json', asi que mover
+            # el fichero (como si hace el rename de habitantes) dejaria sin textura cada bloque pintado
+            # con el en cada mundo. El nombre es de la vitrina; el fichero es la identidad.
+            d = json.load(open(self._asset_path(aid), encoding='utf-8'))
+            d.setdefault('meta', {})['name'] = name
+            atomic_dump(d, self._asset_path(aid))
+            idx_path = os.path.join(BASE, 'assets', 'index.json')
+            if os.path.exists(idx_path):
+                try:
+                    with open(idx_path, 'r', encoding='utf-8') as f:
+                        idx = json.load(f)
+                    for item in idx:
+                        if item.get('id') == aid or item.get('file') == f'assets/{aid}.vox.json':
+                            item['name'] = name
+                    atomic_dump(idx, idx_path)
+                except Exception:
+                    pass
+            return self._send(200, {'ok': True, 'id': aid, 'name': name})
         idd = self._id()
         if idd and os.path.exists(self._path(idd)):
             d = json.load(open(self._path(idd), encoding='utf-8'))

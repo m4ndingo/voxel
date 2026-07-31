@@ -1424,6 +1424,22 @@ async function delHabitante(id,name){
   if(serverId===id) serverId=null;
   openHabitantes(); refreshRosters();
 }
+// Renombrar un asset cambia SOLO el rótulo. El id y el fichero se quedan porque los voxels del mundo
+// guardan el material como 'asset:assets/<id>.vox.json': mover el fichero (como sí hace el rename de
+// habitantes) dejaría sin textura cada bloque pintado con él, en cada mundo.
+async function renameAsset(id,cur){
+  const name=prompt('Nuevo nombre del asset (el fichero no cambia):', cur||'');
+  if(name==null || !name.trim() || name===cur) return;
+  const r=await fetch('/api/assets/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim()})});
+  if(!r.ok){ alert('No se pudo renombrar: '+r.status); return; }
+  openHabitantes(); refreshRosters();
+}
+async function delAsset(id,name){
+  if(!confirm('¿Borrar el asset «'+(name||id)+'»?\n\nVa a la papelera (data/habitantes_trash), pero si está\nen uso en algún mundo esos bloques se quedan sin textura.')) return;
+  const r=await fetch('/api/assets/'+id,{method:'DELETE'});
+  if(!r.ok){ alert('No se pudo borrar: '+r.status); return; }
+  openHabitantes(); refreshRosters();
+}
 // Galería (modal)
 // clasifica un item guardado por su tipo: habitación (bloque), objeto (objeto/decoración) o habitante (resto)
 function habBucket(t){ return t==='bloque' ? 'habitacion' : t==='textura' ? 'textura' : (t==='objeto'||t==='decoracion') ? 'objeto' : 'habitante'; }
@@ -1441,8 +1457,10 @@ async function openHabitantes(kind){
   catch(e){ grid.innerHTML='<p class="hab-empty">No se pudo conectar con el servidor.</p>'; return; }
   list=list.filter(h=> habBucket(h.type)===habKind);   // enruta por tipo
   // Assets del juego del mismo tipo (assets/index.json): también se pueden CARGAR desde la galería (como punto
-  // de partida). Son ficheros de solo lectura → sin Renombrar/Borrar; cargarlos limpia serverId para que Guardar
-  // cree un habitante nuevo en vez de intentar sobrescribir el asset.
+  // de partida); cargarlos limpia serverId para que Guardar cree un habitante nuevo en vez de intentar
+  // sobrescribir el asset. También se RENOMBRAN y se BORRAN: ya no son "de solo lectura" de hecho, porque
+  // guardar una textura la manda a /api/assets (ver save(), isTex), así que todo lo que el dueño importa
+  // aterriza aquí. Sin estos botones, cada textura nueva era para siempre.
   let assets=[];
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
        assets=idx.filter(a=> habBucket(a.type)===habKind); }catch(e){}
@@ -1456,6 +1474,8 @@ async function openHabitantes(kind){
       <p class="hab-date">🎮 Asset del juego</p>
       <div class="hab-acts">
         <button class="btn sm" data-a="load">Cargar</button>
+        <button class="btn sm" data-a="ren">Renombrar</button>
+        <button class="btn sm danger" data-a="del">Borrar</button>
       </div>`;
     grid.appendChild(card);
     getRoomData('asset:'+a.file).then(d=>drawThumb(card.querySelector('canvas'),d)).catch(()=>{});
@@ -1464,6 +1484,8 @@ async function openHabitantes(kind){
       closeHabitantes();
       document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-active',x.dataset.tab==='objeto'));
     };
+    card.querySelector('[data-a=ren]').onclick=()=>renameAsset(a.id,a.name);
+    card.querySelector('[data-a=del]').onclick=()=>delAsset(a.id,a.name);
   }
   for(const h of list){
     const card=document.createElement('div'); card.className='hab-card';
