@@ -953,6 +953,88 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 
   {
+    // REPORTADO POR EL DUENO: un brazo de dos bloques giraba «centrado entre los dos», o sea por el
+    // codo. El pivote es, por definicion, el UNICO punto que la matriz deja quieto: eso es lo que se
+    // mide aqui, no una coordenada calculada a mano.
+    const fijo = (m, x, y, z) => Math.hypot(
+      m[0] * x + m[4] * y + m[8] * z + m[12] - x,
+      m[1] * x + m[5] * y + m[9] * z + m[13] - y,
+      m[2] * x + m[6] * y + m[10] * z + m[14] - z);
+    // Un brazo: 1 ancho, 2 de alto, colgando de (12.5, [10..12], 6.5). El hombro es el extremo de
+    // arriba (y=12), el centro de la caja es el codo (y=11).
+    // OJO: hace falta ejes:'xy'. Con giro a secas la pieza rota sobre la vertical DEL PIVOTE, y
+    // todo punto de esa vertical se queda fijo, asi que subir o bajar el enganche no cambia ni un
+    // voxel de un brazo que cuelga. El pivote alto solo se nota cuando hay CABECEO.
+    const ponerBrazo = (w, rot) => {
+      const s = { key: CABEZA, ox: 12, oy: 10, oz: 6, rot: rot || 0, aabb: [12, 10, 6, 13, 12, 7] };
+      w.mc.structures.push(s);
+      return s;
+    };
+    {
+      const w = montar({});
+      const s = ponerBrazo(w);
+      w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { ejes: 'xy', suavidad: 0, alcance: 50, pivote: [0.5, 2, 0.5] } }));
+      w.mc.pos[0] = 20;                                  // de lado, para que tenga que girar de verdad
+      w.frames(1);
+      t('pivote [0.5,2,0.5] cuelga la pieza de ese punto suyo, no del centro de su caja',
+        fijo(s.model, 12.5, 12, 6.5) < 1e-4 && fijo(s.model, 12.5, 11, 6.5) > 0.1,
+        'hombro se mueve ' + fijo(s.model, 12.5, 12, 6.5).toFixed(4)
+        + ' · codo se mueve ' + fijo(s.model, 12.5, 11, 6.5).toFixed(3));
+    }
+    {
+      // Sin pivote sigue girando por el centro: nada de cambiarle el enganche a lo que ya funciona.
+      const w = montar({});
+      const s = ponerBrazo(w);
+      w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { ejes: 'xy', suavidad: 0, alcance: 50 } }));
+      w.mc.pos[0] = 20;
+      w.frames(1);
+      t('sin pivote se sigue girando por el centro de la caja (nada cambia para la cabeza)',
+        fijo(s.model, 12.5, 11, 6.5) < 1e-4);
+    }
+    {
+      // y=1.5 del objeto = el centro del bloque de arriba en una pieza de 2 de alto (mundo y=11.5),
+      // que es el punto fino que hace falta cuando el extremo se queda corto.
+      const w = montar({});
+      const s = ponerBrazo(w);
+      w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { ejes: 'xy', suavidad: 0, alcance: 50, pivote: [0.5, 1.5, 0.5] } }));
+      w.mc.pos[0] = 20;
+      w.frames(1);
+      t('coordenadas del objeto: [0.5,1.5,0.5] engancha a media altura del bloque de arriba',
+        fijo(s.model, 12.5, 11.5, 6.5) < 1e-4, 'y=11.5 se mueve ' + fijo(s.model, 12.5, 11.5, 6.5).toFixed(4));
+    }
+    {
+      // Lo que hace que una sola linea de config sirva para las cuatro poses: el pivote se da en el
+      // marco DEL DIBUJO, asi que con rot impar (donde los lados X y Z de la caja estan cambiados)
+      // 'delante' tiene que seguir cayendo en la misma parte de la PIEZA, no en la misma del mundo.
+      // Pieza tumbada: 1 ancho, 1 alto, 2 de fondo. z=0 del objeto = su cara -Z de origen.
+      const esperado = { 0: [12.5, 10.5, 6], 1: [14, 10.5, 6.5], 2: [12.5, 10.5, 8], 3: [11, 10.5, 6.5] };
+      let malas = [];
+      for (const rot of [0, 1, 2, 3]) {
+        const w = montar({});
+        const s = { key: CABEZA, ox: 12, oy: 10, oz: 6, rot,
+                    aabb: (rot & 1) ? [11, 10, 6, 14, 11, 7] : [12, 10, 6, 13, 11, 8] };
+        w.mc.structures.push(s);
+        w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50, pivote: [0.5, 0.5, 0] } }));
+        w.mc.pos[0] = 20; w.mc.pos[2] = 30;
+        w.frames(1);
+        const e = esperado[rot];
+        if (fijo(s.model, e[0], e[1], e[2]) > 1e-4) malas.push('rot=' + rot);
+      }
+      t('el pivote va en coordenadas del OBJETO: z=0 sigue a la pieza en los cuatro rot',
+        malas.length === 0, malas.length ? 'falla en ' + malas.join(', ') : 'los cuatro clavados');
+    }
+    {
+      const w = montar({});
+      ponerBrazo(w);
+      const antes = w.avisosConsola.length;
+      t('un pivote que no es [x,y,z] no se registra',
+        w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { pivote: 'arriba' } })) === null);
+      t('...y el aviso dice en que unidades va',
+        /coordenadas del OBJETO/.test(w.avisosConsola.slice(antes).join(' ')));
+    }
+  }
+
+  {
     // La misma pieza YA estampada con rot=1 (un cuarto de vuelta horneado): el giro que se le pone
     // encima tiene que descontar ese cuarto, o miraria 90° de mas.
     const w = montar({});
