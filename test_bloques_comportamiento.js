@@ -1391,6 +1391,54 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 
   {
+    // REPORTADO POR EL DUENO: dos brazos iguales, uno sigue al jugador y el otro «solo se activa
+    // cuando pasas por detras». La causa no era el brazo sino el sitio: puestos con `rot` 180°
+    // distinto, y como los limites se cuentan desde la pose horneada de CADA UNO, sus conos miran a
+    // lados opuestos del mundo. La etiqueta tiene que decir eso, no un «en reposo» pelado.
+    const w = montar({});
+    const s = ponerCabeza(w, 0);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50, limites: { y: [-30, 30] } } }));
+    w.frames(2);                                              // el jugador esta DETRAS: pide ~180°
+    const txt = global.mcXrayExtra(CABEZA, s);
+    t('parada por el cono: la etiqueta dice cuanto pide y cual es el tope', /pide -?18[01]/.test(txt) && /cono -30\.\.30/.test(txt), txt);
+  }
+
+  {
+    // El otro motivo de estar parada es la distancia, y no se puede confundir con el cono: son
+    // arreglos distintos (mover la pieza / abrir 'limites' vs subir 'alcance').
+    const w = montar({});
+    const s = ponerCabeza(w, 0);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 2 } }));
+    w.frames(2);
+    const txt = global.mcXrayExtra(CABEZA, s);
+    t('parada por distancia: la etiqueta dice a cuanto esta y cual es el alcance',
+      /bloques, alcance 2/.test(txt) && !/cono/.test(txt), txt);
+  }
+
+  {
+    // Girando no hay motivo que enseñar: si quedara pegado el de antes, la etiqueta diria que esta
+    // en reposo justo mientras se mueve.
+    const w = montar({});
+    const s = ponerCabeza(w, 0);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50 } }));
+    w.frames(2);
+    t('mientras gira no se enseña ningun motivo', !/reposo/.test(global.mcXrayExtra(CABEZA, s)),
+      global.mcXrayExtra(CABEZA, s));
+  }
+
+  {
+    // Dos piezas del MISMO material con `rot` 180° distinto: la de enfrente gira y la otra no, y la
+    // etiqueta tiene que dejar claro que la diferencia esta en el origen horneado, no en la config.
+    const w = montar({});
+    const a = ponerCabeza(w, 0), bb = ponerCabeza(w, 2);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50, limites: { y: [-30, 30] } } }));
+    w.frames(2);
+    const ta = global.mcXrayExtra(CABEZA, a), tb = global.mcXrayExtra(CABEZA, bb);
+    t('dos piezas iguales con rot opuesto: una gira y la otra no, y se ve por que',
+      (!!bb.model && !a.model) && /pide/.test(ta) && /origen 180°/.test(tb), ta + '   ||   ' + tb);
+  }
+
+  {
     // Reejecutar el snippet no puede dejar enganchada la funcion VIEJA: leeria la tabla vieja y la
     // etiqueta enseñaria comportamientos que ya no existen (es el mismo fallo que tuvo mcUpdate).
     const w = montar({});

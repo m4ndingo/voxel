@@ -276,7 +276,11 @@ lado. La etiqueta DOM del impacto dice si paró en `voxel fino` o en `bloque` y 
 (coordenadas · tipo · material) y deja un hueco: `mcXrayExtra(clave, s|null) => 'texto'`, que rellena quien
 sepa algo que el framework no sabe. Hoy lo engancha `mundo-autoarranque`, y muestra **el comportamiento del
 material y los giros de ESA instancia** (`X` cabeceo · `Y` giro · `Z —`, más `(origen …°)` con el horneado
-de `rot`+`frente`). Es `var` y no `let` a propósito: un `let` de nivel superior **no** es propiedad de
+de `rot`+`frente`). Si la pieza está parada dice **por qué**: `en reposo (pide 90°, cono -90..30°)` o
+`en reposo (a 14 bloques, alcance 12)` — son arreglos distintos (abrir `limites` / recolocar la pieza vs
+subir `alcance`). **`limites` se cuenta desde la pose horneada de CADA instancia**, así que dos piezas del
+mismo material puestas con `rot` distinto tienen conos que apuntan a sitios distintos del mundo: es la
+causa de «un brazo me sigue y el otro solo si paso por detrás», y se ve comparando sus `(origen …°)`. Es `var` y no `let` a propósito: un `let` de nivel superior **no** es propiedad de
 `window`, así que un snippet (que corre en `new Function`) no podría engancharse. Si el hook lanza, `app.js`
 lo **desengancha y avisa una vez** — si no, sería un warning por etiqueta y frame.
 
