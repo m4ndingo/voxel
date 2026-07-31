@@ -460,8 +460,16 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   - `limites` se mide **desde la orientación de origen**: el motor descuenta el cuarto de vuelta ya
     horneado en `rot` (`yaw = rot&3`), y el sentido del giro es el de `mcRotXZ` para que la capa
     continua y los pasos horneados vayan en la misma dirección. `frente` corrige en grados si el
-    dibujo no mira hacia `-Z`. Fuera de `alcance` vuelve a su pose y **suelta la matriz** (`model =
-    null`), para que `app.js` recupere su camino de siempre.
+    dibujo no mira hacia `-Z`.
+  - **Dejar de mirar tiene dos motivos y los dos acaban igual: volviendo despacio a la pose de
+    origen** y **soltando la matriz** (`model = null`), para que `app.js` recupere su camino de
+    siempre. Uno es salirse de `alcance`; el otro es **no poder girar tanto** — si el ángulo pedido
+    se sale de `limites`, la pieza se **rinde** en vez de quedarse clavada en el tope, que es la
+    postura de un maniquí mirando a la pared (el dueño lo reportó así: se le ponía detrás y la cabeza
+    se quedaba en `-70,00°` para siempre). O sea que `limites` es un **cono de atención**, no un
+    recorte: dentro se sigue al objetivo con el ángulo exacto, fuera se vuelve a casa.
+  - El **cabeceo** al tope **no** cuenta como rendirse: llegar al límite del cuello mirando hacia
+    arriba es seguir mirándote, y si contara, pegar un salto apagaría la cabeza entera de golpe.
   - **El cabeceo va sobre el eje izquierda-derecha DE LA PIEZA, no sobre el X del mundo.** La matriz
     es `Ry(giro)·Rx(cabeceo)·Ry(-horneado)`: hay que **deshacer** el cuarto de vuelta ya horneado en
     `rot`, cabecear, y volver a ponerlo. Con el `Rx` a secas solo acierta la pieza estampada sin

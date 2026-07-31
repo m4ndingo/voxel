@@ -904,15 +904,52 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 
   {
-    // 'limites' se mide DESDE la orientacion de origen, asi que con el jugador a 180° y un tope de
-    // 70° la pieza se queda clavada en 70, no en 180.
+    // 'limites' se mide DESDE la orientacion de origen: dentro del cono la pieza sigue al jugador
+    // con el angulo EXACTO, sin que el tope se lo recorte a medias.
+    const RAD = Math.PI / 180;
     const w = montar({});
     const s = ponerCabeza(w);
     w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50, limites: { y: [-70, 70] } } }));
+    // 40° a la derecha de su frente horneado (-Z), a 4 bloques de la pieza (12.5, 6.5, 6.5).
+    w.mc.pos[0] = 12.5 + Math.sin(40 * RAD) * 4;
+    w.mc.pos[2] = 6.5 - Math.cos(40 * RAD) * 4;
     w.frames(1);
-    t('los limites recortan el giro en vez de dejarlo dar la vuelta',
-      Math.abs(Math.abs(grados(gira(s.model, 0, 0, -1))) - 70) < 1.5,
+    t('dentro del cono el giro es el exacto, no uno recortado por los limites',
+      Math.abs(grados(gira(s.model, 0, 0, -1)) - 40) < 1.5,
       grados(gira(s.model, 0, 0, -1)).toFixed(1) + '°');
+  }
+
+  {
+    // REPORTADO POR EL DUENO: «cuando cabeza no mira, deberia volver a su posicion natural». Con el
+    // jugador CERCA pero a media vuelta, el tope de 70° antes dejaba la pieza clavada en 70° (-70,00
+    // frame tras frame, mirando a la pared) hasta que te ponias delante otra vez. No poder girar mas
+    // es una razon para RENDIRSE, no para quedarse en el tope como un maniqui.
+    const w = montar({});
+    const s = ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50, limites: { y: [-70, 70] } } }));
+    w.frames(1);   // el jugador de partida (z~10.7) le queda justo detras: 180°, fuera del cono
+    t('fuera del cono vuelve a su pose de origen en vez de clavarse en el tope',
+      !s.model && s._mirarYaw === 0, 'giro ' + (s._mirarYaw || 0).toFixed(2) + '°');
+  }
+
+  {
+    // ...y vuelve SUAVE, que es lo que pidio el dueno: nada de apagar la matriz de un frame para
+    // otro. Se le deja enganchar al jugador dentro del cono y luego se le sale por detras.
+    const RAD = Math.PI / 180;
+    const w = montar({});
+    const s = ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0.15, alcance: 50, limites: { y: [-70, 70] } } }));
+    w.mc.pos[0] = 12.5 + Math.sin(60 * RAD) * 4;
+    w.mc.pos[2] = 6.5 - Math.cos(60 * RAD) * 4;
+    w.frames(120);                                     // 2 s: engancha y se estabiliza en ~60°
+    const enganchada = s._mirarYaw;
+    w.mc.pos[0] = 12.5; w.mc.pos[2] = Z_PEGADO;        // ahora le sale por detras (180°)
+    const camino = [];
+    for (let i = 0; i < 90 && s.model; i++) { w.frames(1); camino.push(Math.abs(s._mirarYaw)); }
+    const baja = camino.every((v, i) => i === 0 || v <= camino[i - 1] + 1e-9);
+    t('la vuelta al reposo es progresiva, no un corte de un frame',
+      Math.abs(enganchada - 60) < 1.5 && camino.length > 5 && baja && s.model === null,
+      'de ' + enganchada.toFixed(1) + '° a 0 en ' + camino.length + ' frames');
   }
 
   {
