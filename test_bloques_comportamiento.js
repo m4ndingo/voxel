@@ -1619,5 +1619,132 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 }
 
-console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');
-process.exit(fail ? 1 : 0);
+// ── 14. Pivotes DIBUJADOS en el editor (herramienta 📍) ─────────────────────────────────────────
+// PEDIDO POR EL DUENO: elegir el pivote desde el editor en vez de contarlo a mano en el snippet.
+// El editor guarda `pivotes` (celdas de SU rejilla) como clave de primer nivel del JSON del objeto.
+// Toda la prueba esta en la TRADUCCION a coordenadas del objeto, donde hay tres trampas y cada una
+// cuelga el brazo de un sitio distinto:
+//   · el editor es Z-arriba y el Mundo Y-arriba (el eje Y del dibujo es la PROFUNDIDAD);
+//   · el origen es la ESQUINA DE CELDA que contiene el minimo, no el minimo (lo mismo que mallar);
+//   · el punto es el CENTRO de la celda marcada, no su esquina.
+// Y hay una cuarta que no es de cuentas: el JSON viaja por red, asi que la resolucion es ASINCRONA
+// y la pieza tiene que arrancar girando sobre el centro de su caja sin romperse mientras llega.
+async function seccionPivotes() {
+  const BRAZO = 'asset:assets/brazo.vox.json';
+  const CFG = { ejes: 'xy', suavidad: 0, alcance: 50, frente: { x: -90 },
+                limites: { y: [-180, 180], x: [0, 180] } };
+  // Un brazo de 1x2x1 bloques = 16x16x32 voxels del editor. `o` desplaza el contenido en X para
+  // poder probar que el origen es la celda y no el minimo.
+  const dibujo = (pivotes, o) => {
+    o = o || 0;
+    const v = {};
+    v[o + ',0,0'] = '#fff';
+    v[(o + 15) + ',15,31'] = '#fff';
+    return { voxels: v, pivotes: pivotes };
+  };
+  const esperar = () => new Promise(r => setImmediate(r));
+  const cerca = (a, b) => !!a && !!b && a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
+  let doc = dibujo([]);
+  global.getRoomData = (clave) => Promise.resolve(clave === BRAZO ? doc : { voxels: {} });
+  const avisos = [];
+  // La resolucion cae FUERA del define (es una promesa), asi que el aviso llega con la consola ya
+  // restaurada: hay que capturarla alrededor de la espera, no alrededor de la llamada.
+  const definir = async (w, mirar) => {
+    const cw = console.warn, cl = console.log;
+    console.warn = (...a) => avisos.push(a.join(' '));
+    console.log = () => {};
+    try {
+      const n = w.game.bloques.define(BRAZO, { mirar: mirar });
+      await esperar();
+      return n;
+    } finally { console.warn = cw; console.log = cl; }
+  };
+  const conBrazos = () => {
+    const w = montar({});
+    const izq = { key: BRAZO, ox: 12, oy: 10, oz: 6,  rot: 1, aabb: [12, 10, 6, 13, 12, 7] };
+    const der = { key: BRAZO, ox: 12, oy: 10, oz: 10, rot: 3, aabb: [12, 10, 10, 13, 12, 11] };
+    w.mc.structures.push(izq, der);
+    return { w, izq, der };
+  };
+  // El hombro de un brazo 1x2x1: el voxel de arriba del todo, pegado a la cara que toca el busto y
+  // centrado en profundidad. En coordenadas del objeto es el CENTRO de esa celda.
+  const HOMBRO = [15, 8, 31];
+  const HOMBRO_OBJ = [15.5 / 16, 31.5 / 16, 8.5 / 16];
+
+  console.log('\nEl pivote nº1 dibujado sale de la rejilla del editor');
+  {
+    doc = dibujo([HOMBRO]);
+    const n = await definir(conBrazos().w, Object.assign({ pivote: 1 }, CFG));
+    t('pivote:1 se traduce a coordenadas del objeto (la Z del editor es la altura del mundo)',
+      cerca(n.mirar.piv, HOMBRO_OBJ), JSON.stringify(n.mirar.piv));
+    t('...y sin pedir ninguno se usa el PRIMERO dibujado',
+      cerca((await definir(conBrazos().w, Object.assign({}, CFG))).mirar.piv, HOMBRO_OBJ));
+  }
+
+  console.log('\nSe elige por NUMERO, que es el que el editor pinta al lado');
+  {
+    doc = dibujo([HOMBRO, [0, 8, 0]]);
+    const n = await definir(conBrazos().w, Object.assign({ pivote: 2 }, CFG));
+    t('pivote:2 coge el segundo, no el primero',
+      cerca(n.mirar.piv, [0.5 / 16, 0.5 / 16, 8.5 / 16]), JSON.stringify(n.mirar.piv));
+    const antes = avisos.length;
+    const n5 = await definir(conBrazos().w, Object.assign({ pivote: 5 }, CFG));
+    t('pedir un nº que no existe avisa y deja la pieza girando sobre su centro',
+      n5.mirar.piv === null && /pivote nº5/.test(avisos.slice(antes).join(' ')),
+      avisos.slice(antes).join(' '));
+    const w0 = conBrazos().w;
+    t('...y un nº menor que 1 se rechaza en el define (no es un indice)',
+      w0.sinRuido(() => w0.game.bloques.define(BRAZO, { mirar: Object.assign({ pivote: 0 }, CFG) })) === null);
+  }
+
+  console.log('\nEl origen es la CELDA del minimo, no el minimo');
+  {
+    // Un dibujo que empieza en x=20 vive en la celda 16..31: su esquina es 16, no 20. Si se tomara
+    // el minimo, el pivote se correria 4/16 de bloque y el brazo colgaria fuera del hombro.
+    doc = dibujo([[20, 8, 31]], 20);
+    const n = await definir(conBrazos().w, Object.assign({ pivote: 1 }, CFG));
+    t('un dibujo desplazado dentro de su celda conserva su posicion RELATIVA',
+      cerca(n.mirar.piv, [4.5 / 16, 31.5 / 16, 8.5 / 16]), JSON.stringify(n.mirar.piv));
+  }
+
+  console.log('\nEl pivote escrito a mano sigue mandando sobre el dibujado');
+  {
+    doc = dibujo([[0, 0, 0]]);
+    const n = await definir(conBrazos().w, Object.assign({ pivote: [1, 2, 0.5] }, CFG));
+    t('un literal [x,y,z] no lo pisa el dibujo', cerca(n.mirar.piv, [1, 2, 0.5]),
+      JSON.stringify(n.mirar.piv));
+    doc = dibujo([]);
+    const sin = await definir(conBrazos().w, Object.assign({}, CFG));
+    t('un objeto SIN pivotes dibujados no rompe nada: gira sobre el centro de su caja',
+      sin.mirar.piv === null);
+  }
+
+  console.log('\nEl pivote dibujado manda de verdad en el giro, no solo en la tabla');
+  {
+    // Lo unico que prueba que esto sirve para algo: la MATRIZ que sale. Dibujado y escrito a mano
+    // en el mismo punto tienen que dar exactamente la misma pose; si no, la traduccion es decorado.
+    doc = dibujo([HOMBRO]);
+    const a = conBrazos();
+    await definir(a.w, Object.assign({ pivote: 1 }, CFG));
+    a.w.mc.pos[0] = 24; a.w.mc.pos[1] = 11; a.w.mc.pos[2] = 8.5;
+    a.w.frames(1);
+    const dibujada = a.izq.model && Array.from(a.izq.model);
+    doc = dibujo([]);
+    const b = conBrazos();
+    await definir(b.w, Object.assign({ pivote: HOMBRO_OBJ.slice() }, CFG));
+    b.w.mc.pos[0] = 24; b.w.mc.pos[1] = 11; b.w.mc.pos[2] = 8.5;
+    b.w.frames(1);
+    const manual = b.izq.model && Array.from(b.izq.model);
+    const IDENT = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+    t('la pose con el pivote dibujado es la misma que con ese punto escrito a mano',
+      !!dibujada && !!manual && dibujada.every((v, i) => Math.abs(v - manual[i]) < 1e-9),
+      JSON.stringify(dibujada) + ' vs ' + JSON.stringify(manual));
+    t('...y no es la matriz identidad (el pivote se esta usando de verdad)',
+      !!dibujada && dibujada.some((v, i) => Math.abs(v - IDENT[i]) > 1e-6));
+  }
+}
+
+seccionPivotes().then(() => {
+  console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');
+  process.exit(fail ? 1 : 0);
+}, (e) => { console.log('\nla sección de pivotes se rompió: ' + (e && e.stack || e)); process.exit(1); });
