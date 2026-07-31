@@ -1,4 +1,5 @@
-// test_paso_navegador.js — la subida suave de escalones, contra el app.js DE VERDAD.
+// test_fisica_navegador.js — los bloques que tocan la fisica del jugador, contra el app.js DE VERDAD.
+// Cubre la subida suave de escalones (pasoSuave) y el factor de marcha (velocidad).
 //
 // Por que existe este fichero teniendo ya test_bloques_comportamiento.js: el mundo de juguete de aquel
 // aplicaba la gravedad DESPUES del movimiento horizontal, y app.js la aplica ANTES. Con ese orden, el
@@ -8,7 +9,7 @@
 // pasoSuave(0) y pasoSuave(1000). Un calco a mano de la fisica siempre puede desviarse del original;
 // esto ejecuta el mcUpdate real, el mcMoveAxis real y lee la camara de la matriz de vista real.
 //
-//   node test_paso_navegador.js [url]        por defecto http://localhost:8500/map/agents
+//   node test_fisica_navegador.js [url]      por defecto http://localhost:8500/map/agents
 //
 // El mundo del dueño NO se toca: se bloquea POST /api/mundo y ademas se deshacen los bloques al salir.
 
@@ -90,6 +91,25 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     const crudo = pasada(0, N);
     const suave = pasada(0.06, N);
 
+    // --- velocidad: el mismo escenario, pero andando por el llano de la plataforma y a escala 1.
+    // El material del suelo es el que se define, porque 'velocidad' mira el bloque BAJO LOS PIES.
+    // 10 frames: a ×2 son ~1,7 bloques y el escalon esta a 2,2, asi que la medida es de llano puro
+    // (se comprueba con `subio`, que tiene que quedarse en 0).
+    const claveSuelo = mc.blockKey[1];
+    const correr = (fac, n) => {
+      mc.scale = 1; mc.yaw = 0; mc.pitch = 0;
+      mc.pos = [BX + 3.5, SUELO, BZ + 4.5]; mc.vel = [0, 0, 0];
+      mc.keys = {}; mc.keys['w'] = true; mc.onGround = true;
+      mc._pasoDesfase = 0; mc._pasoSubido = 0;
+      if (fac) game.bloques.define(claveSuelo, { velocidad: fac }); else game.bloques.quitar(claveSuelo);
+      const z0 = mc.pos[2], spd0 = mc.speed;
+      for (let i = 0; i < n; i++) mcUpdate(1 / 60);
+      return { avance: z0 - mc.pos[2], intacta: mc.speed === spd0, suelo: mc.onGround, subio: mc.pos[1] - SUELO };
+    };
+    const marcha = mc.speed;
+    const vel = { normal: correr(0, 10), doble: correr(2, 10), medio: correr(0.5, 10), marcha: marcha };
+    game.bloques.quitar(claveSuelo);                                // la tabla queda como estaba
+
     // Deshacer: primero el mundo, luego el jugador y el ajuste.
     for (const [x, y, z, id] of previos) mcSetBlock(x, y, z, id);
     const cs = new Set();
@@ -101,7 +121,7 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     game.bloques.pasoSuave(est0.tau);
     const limpio = previos.every(([x, y, z, id]) => mc.grid[mcIdx(x, y, z)] === id);
 
-    return { base, SUELO, crudo, suave, limpio,
+    return { base, SUELO, crudo, suave, vel, limpio,
              hayApi: typeof game.bloques.pasoSuave === 'function',
              envuelto: !!(mcMoveAxis && mcMoveAxis._orig), eye: MC_EYE, step: MC_STEP };
   });
@@ -155,6 +175,41 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     // 1e-4 y no 1e-9: la matriz de vista es un Float32Array (36.2400016784668 por 36.24).
     assert(Math.abs(r.suave.camara[i] - (r.suave.fisica[i] + r.eye * 2)) < 1e-4,
       'camara=' + r.suave.camara[i] + ' y pos+ojo=' + (r.suave.fisica[i] + r.eye * 2));
+  });
+
+  // --- velocidad: el factor del bloque que se pisa, con el app.js de verdad ---
+  console.log('\n  avance en 10 frames:  normal ' + r.vel.normal.avance.toFixed(3) +
+              '   ×2 ' + r.vel.doble.avance.toFixed(3) +
+              '   ×0.5 ' + r.vel.medio.avance.toFixed(3) + '   (marcha ' + r.vel.marcha.toFixed(2) + ' u/s)\n');
+
+  // Guarda contra el error de siempre: medir una caida o una trepada creyendo medir la marcha.
+  test('las tres pasadas son llanas: se midio andar, no caer ni subir', () => {
+    for (const [n, v] of Object.entries(r.vel)) {
+      if (n === 'marcha') continue;
+      assert(v.suelo === true, n + ': acabo sin suelo bajo los pies');
+      assert(Math.abs(v.subio) < 1e-9, n + ': cambio de altura ' + v.subio);
+    }
+  });
+
+  test('sin velocidad se anda a la marcha de siempre', () => {
+    const esperado = r.vel.marcha * 10 / 60;
+    assert(Math.abs(r.vel.normal.avance - esperado) < 1e-6,
+      'avanzo ' + r.vel.normal.avance + ' y la marcha da ' + esperado);
+  });
+
+  test('velocidad ×2 avanza exactamente el doble, ×0.5 la mitad', () => {
+    assert(Math.abs(r.vel.doble.avance / r.vel.normal.avance - 2) < 1e-9,
+      'la razon fue ' + (r.vel.doble.avance / r.vel.normal.avance));
+    assert(Math.abs(r.vel.medio.avance / r.vel.normal.avance - 0.5) < 1e-9,
+      'la razon fue ' + (r.vel.medio.avance / r.vel.normal.avance));
+  });
+
+  // mc.speed es del jugador, no del bloque: el efecto dura lo que dura el frame.
+  test('mc.speed queda intacto tras el frame (no se persiste nada)', () => {
+    for (const [n, v] of Object.entries(r.vel)) {
+      if (n === 'marcha') continue;
+      assert(v.intacta === true, n + ': mc.speed no volvio a su valor');
+    }
   });
 
   test('el mundo del dueño queda como estaba', () => {
