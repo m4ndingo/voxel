@@ -931,6 +931,33 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 
   {
+    // REPORTADO POR EL DUENO: «si salto la cabeza mira hacia abajo, si ando normal mira hacia
+    // arriba». El cabeceo se aplicaba sobre el eje X del MUNDO y antes del yaw, asi que solo salia
+    // bien con la pieza estampada sin girar: a media vuelta (rot=2) cabeceaba AL REVES, y de perfil
+    // (rot=1/3) no cabeceaba nada, RODABA de lado. El yaw no lo delataba porque gira sobre el mismo
+    // eje que lo horneado y los dos conmutan. Se prueban las cuatro poses, arriba y abajo.
+    const RAD = Math.PI / 180;
+    // Hay que girar la cara YA HORNEADA, no (0,0,-1): la matriz se multiplica por unos vertices que
+    // vienen con sus cuartos de vuelta puestos. Mirando (0,0,-1) el error se cuela entero.
+    const caraHorneada = (rot) => [Math.sin(rot * 90 * RAD), 0, -Math.cos(rot * 90 * RAD)];
+    for (const rot of [0, 1, 2, 3]) {
+      const alturas = {};
+      for (const [caso, y] of [['saltando', 11], ['agachado', 2]]) {
+        const w = montar({});
+        const s = ponerCabeza(w, rot);
+        w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { ejes: 'xy', suavidad: 0, alcance: 50 } }));
+        w.mc.pos[1] = y;                                   // el centro de la pieza esta en 6.5
+        w.frames(1);
+        const c = caraHorneada(rot);
+        alturas[caso] = gira(s.model, c[0], c[1], c[2]);
+      }
+      t('rot=' + rot + ': cabecea HACIA el jugador (ni al reves ni rodando de lado)',
+        alturas.saltando[1] > 0.2 && alturas.agachado[1] < -0.2,
+        'saltando y=' + alturas.saltando[1].toFixed(2) + ' · agachado y=' + alturas.agachado[1].toFixed(2));
+    }
+  }
+
+  {
     // Suavidad: con tau>0 el primer frame solo recorre una parte del camino, no salta al objetivo.
     const w = montar({});
     const s = ponerCabeza(w);

@@ -462,6 +462,14 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     continua y los pasos horneados vayan en la misma dirección. `frente` corrige en grados si el
     dibujo no mira hacia `-Z`. Fuera de `alcance` vuelve a su pose y **suelta la matriz** (`model =
     null`), para que `app.js` recupere su camino de siempre.
+  - **El cabeceo va sobre el eje izquierda-derecha DE LA PIEZA, no sobre el X del mundo.** La matriz
+    es `Ry(giro)·Rx(cabeceo)·Ry(-horneado)`: hay que **deshacer** el cuarto de vuelta ya horneado en
+    `rot`, cabecear, y volver a ponerlo. Con el `Rx` a secas solo acierta la pieza estampada sin
+    girar — a media vuelta cabecea **al revés** (el dueño lo reportó como «salto y la cabeza mira
+    hacia abajo») y de perfil no cabecea nada, **rueda de lado**. El **yaw** no lo delata porque gira
+    sobre el mismo eje que lo horneado y los dos conmutan, así que el bug se esconde hasta que se usa
+    `ejes:'xy'`. Al probarlo hay que aplicar la matriz a la **cara ya horneada**, no a `(0,0,-1)`:
+    contra `-Z` el error se cuela entero.
 - Solo afecta al **jugador**; los agentes siguen con su `climb`/`drop`.
 
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
