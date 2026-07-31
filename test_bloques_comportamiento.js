@@ -28,6 +28,7 @@ const CLAVES = [null, 'asset:assets/roca.vox.json', 'hab:escalera', 'hab:muelle'
 // queda estrictamente por debajo de 11. Con z+0,3 = 11,0 exacto, floor() da 11 y el propio jugador
 // «colisiona» con la escalera en la que se apoya, que es lo que bloqueaba el trepado.
 const Z_PEGADO = 11 - 0.3 - 1e-4;
+const VEL = 4.3;                                          // mc.speed de juguete, del orden de app.js:3835
 
 // ── Estructuras finas: la mitad del mundo que NO esta en mc.grid ────────────────────────────────
 // Un asset solo entra en la rejilla si es un 16³ MACIZO (app.js:4006); escalera.json tiene 160
@@ -80,6 +81,9 @@ function montar(opciones) {
   // Placa RASANTE: sustituye un bloque del suelo, asi que se pisa andando sin tropezar con un escalon.
   // Es como se pone un trampolin de Quake, y lo que hace falta para probar que conserva la inercia.
   if (opciones.placaRasante) grid[idx(12, 4, 9)] = ID_PLACA;
+  // Pista rasante: TODA la columna x=12 del suelo es placa, asi que el jugador anda sobre ella un buen
+  // trecho. Con una sola celda no se distingue «me acelera mientras la piso» de «me dio un empujon».
+  if (opciones.pistaRasante) for (let z = 0; z < DIM.z; z++) grid[idx(12, 4, z)] = ID_PLACA;
   if (opciones.muelle) for (let y = 5; y < 20; y++) grid[idx(10, y, 11)] = ID_MUELLE;             // trepable mas rapido
   if (opciones.techo) for (let x = 0; x < DIM.x; x++) for (let z = 0; z < 11; z++) grid[idx(x, 9, z)] = ID_ROCA;
 
@@ -105,7 +109,8 @@ function montar(opciones) {
 
   const mc = {
     dim: DIM, grid, blockKey: CLAVES.slice(), catalog: [], structures, notes: {}, agents: new Map(),
-    pos: [12.5, 5, Z_PEGADO], vel: [0, 0, 0], yaw: 0, scale: 1, keys: {}, onGround: true, active: true
+    pos: [12.5, 5, Z_PEGADO], vel: [0, 0, 0], yaw: 0, scale: 1, keys: {}, onGround: true, active: true,
+    speed: VEL
   };
   global.mc = mc;
   global.window = global;
@@ -145,7 +150,6 @@ function montar(opciones) {
   // resolución el jugador atraviesa el suelo y no llega a tocar nada (así falló la primera versión).
   // Cuenta sus llamadas para detectar envoltorios apilados.
   let llamadas = 0;
-  const VEL = 4.3;                                          // marcha, del orden de app.js:5059
   // Calco de mcMoveAxis (app.js:4915), auto-escalon incluido: si el eje choca se prueba a levantar al
   // jugador hasta MC_STEP y colarlo por arriba, DE GOLPE y dentro del mismo frame. Es una funcion
   // global de verdad porque el snippet la envuelve para medir el escalon donde se da.
@@ -171,7 +175,10 @@ function montar(opciones) {
       // Mismo reparto que app.js:5069-5088 (air-control estilo Quake): en el SUELO la velocidad horizontal
       // se reescribe desde las teclas; en el AIRE se conserva INTACTA (inercia del salto). Sin esto, una
       // prueba de trampolín daría verde sin probar nada: el jugador se movería por teclas también volando.
-      if (mc.onGround) { mc.vel[0] = fx * s * VEL; mc.vel[2] = fz * s * VEL; }
+      // La marcha sale de mc.speed y del ∝√escala, como app.js:5060 — no de una constante: los
+      // bloques con 'velocidad' actuan multiplicando justo esa propiedad durante el frame.
+      const sp = mc.speed * (mc.keys['shift'] ? 0.5 : 1) * Math.sqrt(mc.scale);
+      if (mc.onGround) { mc.vel[0] = fx * s * sp; mc.vel[2] = fz * s * sp; }
     }
     // ORDEN EXACTO de app.js:5089-5098, y no es un detalle: la gravedad va ANTES del horizontal, asi
     // que el frame en que se sube un escalon acaba con vel[1]=0, ny === pos[1], sin colision y por
@@ -769,6 +776,72 @@ console.log('\npasoSuave: se ajusta, se apaga y sobrevive a reejecutar el snippe
   w.sinRuido(() => w.game.bloques.pasoSuave(0));
   t('apagarlo repone la y de verdad al instante', w.mc.pos[1] === 5 && (w.mc._pasoDesfase || 0) === 0,
     'y=' + w.mc.pos[1]);
+}
+
+console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
+{
+  // Anda en linea recta sobre la pista y devuelve lo que ha avanzado. Con cfg = null la pista es un
+  // bloque cualquiera, o sea la medida de control.
+  const correr = (cfg, n, x) => {
+    const w = montar({ andar: true, pistaRasante: true, sinEscalera: true, sinPlaca: true });
+    if (cfg) w.sinRuido(() => w.game.bloques.define('hab:placa', cfg));
+    w.mc.pos = [x === undefined ? 12.5 : x, 5, 10.5]; w.mc.vel = [0, 0, 0]; w.mc.yaw = 0;
+    w.mc.keys['w'] = true;
+    const z0 = w.mc.pos[2];
+    w.frames(n);
+    return { avance: z0 - w.mc.pos[2], w };
+  };
+  const N = 30;
+  const normal = correr(null, N).avance;
+  const doble = correr({ velocidad: 2 }, N);
+  const medio = correr({ velocidad: 0.5 }, N).avance;
+
+  t('sobre un bloque normal la marcha es la de siempre', Math.abs(normal - VEL * N / 60) < 1e-9,
+    normal.toFixed(3) + ' bloques');
+  t('velocidad ×2 avanza exactamente el doble', Math.abs(doble.avance - 2 * normal) < 1e-9,
+    doble.avance.toFixed(3) + ' vs ' + normal.toFixed(3));
+  t('velocidad 0.5 frena a la mitad (sirve de barro)', Math.abs(medio - normal / 2) < 1e-9,
+    medio.toFixed(3));
+  t('mc.speed queda como estaba: el factor no se pega ni se persiste', doble.w.mc.speed === VEL,
+    'mc.speed=' + doble.w.mc.speed);
+
+  // Lo que distingue 'velocidad' de 'impulso'/'alPisar': no es un disparo al entrar en la celda, manda
+  // en TODOS los frames que el pie siga encima. Si fuera de flanco, el segundo tramo iria a marcha normal.
+  const seguido = correr({ velocidad: 2 }, 60).avance;
+  t('es continuo, no un disparo al entrar: 60 frames rinden el doble que 30',
+    Math.abs(seguido - 2 * doble.avance) < 1e-9, seguido.toFixed(3));
+
+  // Y manda el bloque BAJO LOS PIES, no el de al lado: en x=11 el suelo es roca normal.
+  t('en la fila de al lado no acelera (cuenta lo que se pisa, no lo cercano)',
+    Math.abs(correr({ velocidad: 2 }, N, 11.5).avance - normal) < 1e-9);
+
+  // Emergente y buscado: al saltar el pie deja la pista, pero app.js conserva la inercia horizontal
+  // (control de aire), asi que una pista rapida + un salto = un salto largo.
+  const s = correr({ velocidad: 2 }, 10);
+  const vAire = Math.abs(s.w.mc.vel[2]);
+  s.w.mc.vel[1] = 8; s.w.mc.onGround = false;
+  s.w.frames(3);
+  t('al saltar desde la pista se conserva la velocidad ganada', Math.abs(Math.abs(s.w.mc.vel[2]) - vAire) < 1e-9,
+    vAire.toFixed(2) + ' u/s en el aire');
+
+  const w = montar();
+  const antes = w.avisosConsola.length;
+  t('define rechaza un factor negativo', w.sinRuido(() => w.game.bloques.define('hab:placa', { velocidad: -2 })) === null);
+  t('y explica que es un factor', /factor/.test(w.avisosConsola.slice(antes).join(' ')));
+  t('un material solo con velocidad es válido (no hace falta trepable ni alPisar)',
+    !!w.sinRuido(() => w.game.bloques.define('hab:placa', { velocidad: 3 })));
+  const filas = w.sinRuido(() => w.game.bloques.lista());
+  t('lista/info lo describen con el factor y las u/s resultantes',
+    /velocidad ×3 \(12\.9 u\/s\)/.test(JSON.stringify(filas) + w.avisosConsola.join(' ')),
+    JSON.stringify(filas && filas[filas.length - 1]));
+
+  // El tope existe porque app.js mueve el eje de un tiron y solo mira el AABB final: a 430 u/s se
+  // atraviesan paredes. 40 es el mismo techo que ya impone el setter de game.playerSpeed.
+  // 12 frames y no 30: a 40 u/s el jugador cruza el mundo de juguete (24 bloques) y se cae por el
+  // borde, y entonces lo medido seria la caida. Por eso se comprueba tambien que sigue en el suelo.
+  const r = correr({ velocidad: 100 }, 12);
+  t('un factor absurdo se recorta a 40 u/s en vez de atravesar paredes',
+    Math.abs(r.avance - 40 * 12 / 60) < 1e-9 && r.w.mc.onGround, r.avance.toFixed(3) + ' bloques');
 }
 
 console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');

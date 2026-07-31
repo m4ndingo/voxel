@@ -306,6 +306,7 @@ game.bloques.define('hab:placa',    { alPisar(c){ game.tp(51,20,50); } });   // 
 game.bloques.define('hab:muelle',   { impulso:12 });        // trampolín: u/s verticales al pisarlo
 game.bloques.define('hab:muelle',   { altura:4 });          // lo mismo, dicho en bloques de altura
 game.bloques.define('arena',        { impulso:12 });        // vale el nombre CORTO si no es ambiguo
+game.bloques.define('hab:hielo',    { velocidad:2 });       // ×2 la marcha MIENTRAS se pisa (0.5 = barro)
 game.bloques.info();      // clave EXACTA de lo que piso / tengo delante / detrás  ← el descubridor
 game.bloques.lista(); game.bloques.quitar('hab:muelle'); game.bloques.avisos();
 game.bloques.pasoSuave(0.06);   // segundos que tarda el ojo en subir un escalón; 0 = como antes
@@ -368,6 +369,17 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   que **registra** es siempre la clave larga, que es la que traen los voxels. Si el nombre corto vale
   para dos materiales **no elige**: enseña los candidatos y no registra nada. `quitar` entiende lo
   mismo. Un material inexistente sigue avisando y mandando a `info()`.
+- **`velocidad` es CONTINUO, no un disparo por flanco** como `alPisar`/`impulso`: manda mientras el pie
+  esté encima, y en cuanto se sale el jugador vuelve a su marcha. Se implementa poniendo **`mc.speed`**
+  a pelo justo antes del `mcUpdate` original y restaurándolo en un `finally`, porque `app.js:5060` lo
+  lee **una vez por frame** y de ahí salen tanto la marcha en el suelo como la aceleración en el aire.
+  **NO se toca `game.playerSpeed`**: ese setter **persiste en `localStorage`**, así que un bloque le
+  cambiaría la marcha al jugador para siempre. El producto se topa a **40 u/s** (el mismo techo que el
+  setter): más rápido que eso y un frame de 1/60 avanza ~0,7 bloques, más que la media anchura del
+  cuerpo ⇒ se atraviesan paredes. `define` avisa si el factor pide más de ese techo. Como el factor
+  vive en el material, `velocidad:0` **no existe** — se dice `quitar(clave)`; tratar el 0 como «sin
+  valor» es lo que mantiene `define` idempotente cuando el snippet se reejecuta y hereda la tabla ya
+  normalizada.
 - **`pasoSuave` sube el ojo, no el cuerpo.** `app.js` sube los escalones **de golpe** dentro de un
   frame (`mcMoveAxis`: `p[1] += h`, hasta `MC_STEP=0.6`), y en una escalera de peldaños de 8 voxels
   eso se ve como saltos de y+0,5. Se tapa como en Minecraft: **la física no se toca** (misma colisión,
@@ -397,11 +409,13 @@ solo ofrece dónde engancharse; si no hay snippet, el Mundo se comporta como ant
 exige recargar la pestaña (o reejecutarlo a mano, que es idempotente).
 
 Test: `node test_bloques_comportamiento.js` (headless, con un mundo de juguete; sin navegador) y
-`node test_paso_navegador.js` (**el `app.js` de verdad** con playwright: monta una plataforma con un
-escalón, anda contra él llamando al `mcUpdate` real y lee la altura de la cámara de la matriz de vista;
-deshace los bloques y bloquea `POST /api/mundo`). El segundo existe porque el juguete **calcaba mal el
-orden de `mcUpdate`** (gravedad después del horizontal) y dio 81 ok a un suavizado que en el juego no
-hacía nada: cuando la física del juguete se separa de la real, esa diferencia es exactamente el bug.
+`node test_fisica_navegador.js` (**el `app.js` de verdad** con playwright: monta una plataforma con un
+escalón, anda contra él llamando al `mcUpdate` real, lee la altura de la cámara de la matriz de vista y
+cronometra el avance con y sin `velocidad`; deshace los bloques y bloquea `POST /api/mundo`). El segundo
+existe porque el juguete **calcaba mal el orden de `mcUpdate`** (gravedad después del horizontal) y dio
+81 ok a un suavizado que en el juego no hacía nada: cuando la física del juguete se separa de la real,
+esa diferencia es exactamente el bug. Todo lo que dependa de la **secuencia** de `mcUpdate` (o de que un
+enganche corra en el sitio correcto) se prueba ahí, no en el juguete.
 
 ## Convenciones
 
