@@ -312,6 +312,8 @@ game.bloques.info();      // clave EXACTA de lo que piso / tengo delante / detr�
 game.bloques.lista(); game.bloques.quitar('hab:muelle'); game.bloques.avisos();
 game.bloques.pasoSuave(0.06);   // segundos que tarda el ojo en subir un escalón; 0 = como antes
 game.bloques.inercia(0.7);      // segundos que tarda la marcha en bajar al salir de un bloque rápido
+game.bloques.define('asset:assets/cabeza.vox.json', { mirar:{ ejes:'xy', limites:{y:[-70,70]}, alcance:12 } });
+game.bloques.mirones();      // qué piezas están girando ahora y cuánto
 game.bloques.roce(0.08);        // lo que se sigue patinando UNA VEZ FUERA del bloque deslizante
 ```
 
@@ -430,6 +432,36 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   que reejecutar el snippet herede el desfase en vez de dejar al jugador medio bloque hundido; si la
   `y` no es la que se pintó, alguien movió al jugador (`game.tp`, respawn, un `alPisar`) y el desfase
   se tira.
+- **`mirar` gira la pieza hacia algo, y es lo ÚNICO de la librería que necesitó tocar `app.js`.** Los
+  `rot` del mundo son de **90° en 90°** y cada paso se **hornea en su propia malla**
+  (`mcStructGeom`, cacheada en `mc.structs[srcKey].meshRot[rot]`): girar así es un tirón y encima
+  recompila geometría. Por eso el giro continuo va **encima**, como matriz por instancia. El reparto
+  es el mismo que con `mc.sunExtra`: **`app.js` expone la capacidad, el snippet decide el
+  comportamiento** — `app.js` no sabe qué es `mirar`, solo aplica `s.model` si está.
+  - Lo que se añadió a `app.js`: `uniform mat4 uModel` en los **dos** programas de estructura
+    (`MC_STRUCT_VS` y `MC_STEX_VS`) y en la pasada del sol; `mcModelOf(s)` (identidad si no hay
+    matriz) puesto **siempre** antes de cada `drawArrays` de estructura, porque el uniform es estado
+    y si no se pone se hereda el de la instancia anterior. `vWorld` pasa a ser la posición **ya
+    transformada**, o sea que la búsqueda de sol/sombra sigue al giro.
+  - **Culling:** `s.aabb` se calculó de los vértices, que van en **coordenadas de mundo y sin girar**,
+    así que una pieza rotada se sale de esa caja y el frustum la borraría al asomar por el borde.
+    `mcStructVisible` infla: centro pasado por la matriz **± la semidiagonal** (vale para cualquier
+    giro). Sin `s.model` llama a `mcChunkVisible` tal cual: mismo coste de siempre.
+  - **Sombra:** una pieza que gira **no cambia ni un vértice**, así que sin más su sombra se quedaba
+    clavada en la pose horneada. La matriz entra en la firma de **movimiento** (no la de geometría):
+    se re-hornea a ~22 Hz, igual que los agentes que andan.
+  - **Lo que NO gira, a propósito:** la **colisión** (el bitset se horneó con la orientación de `rot`:
+    sigues chocando con la pose original — da igual para una cabeza en un pedestal, no para un puente
+    giratorio) y el **sombreado por cara**, que también viene horneado, así que la cara iluminada gira
+    con la pieza.
+  - **Solo estructuras, y eso no se ve en el prefijo**: el mundo del dueño está lleno de estructuras
+    `hab:` (`hab:cubo-trans`…). Se valida mirando si hay alguna instancia viva con esa clave, no por
+    `asset:`. Un material de terreno está fundido en la malla de su chunk junto a miles de celdas.
+  - `limites` se mide **desde la orientación de origen**: el motor descuenta el cuarto de vuelta ya
+    horneado en `rot` (`yaw = rot&3`), y el sentido del giro es el de `mcRotXZ` para que la capa
+    continua y los pasos horneados vayan en la misma dirección. `frente` corrige en grados si el
+    dibujo no mira hacia `-Z`. Fuera de `alcance` vuelve a su pose y **suelta la matriz** (`model =
+    null`), para que `app.js` recupere su camino de siempre.
 - Solo afecta al **jugador**; los agentes siguen con su `climb`/`drop`.
 
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
@@ -438,7 +470,12 @@ se autoejecutan (solo a mano desde Alt+C), así que la escalera dejaba de ser es
 solo ofrece dónde engancharse; si no hay snippet, el Mundo se comporta como antes. Editar el snippet
 exige recargar la pestaña (o reejecutarlo a mano, que es idempotente).
 
-Test: `node test_bloques_comportamiento.js` (headless, con un mundo de juguete; sin navegador) y
+Test: `node test_bloques_comportamiento.js` (headless, con un mundo de juguete; sin navegador),
+`node test_giro_navegador.js` (el `mirar` de arriba: comprueba en Chromium que la **identidad dibuja
+exactamente lo mismo** que no poner matriz, que una traslación **sí** mueve la pieza — o sea que
+`uModel` llega al shader y no se queda en una variable que nadie lee — y que a la distancia donde la
+caja cruda ya sale del visor la inflada sigue dibujando; los ángulos y límites se prueban headless,
+porque lo que el navegador aporta es que **se dibuje**) y
 `node test_fisica_navegador.js` (**el `app.js` de verdad** con playwright: monta una plataforma con un
 escalón, anda contra él llamando al `mcUpdate` real, lee la altura de la cámara de la matriz de vista y
 cronometra el avance con y sin `velocidad`; deshace los bloques y bloquea `POST /api/mundo`). El segundo
