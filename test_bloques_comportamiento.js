@@ -953,6 +953,71 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 
   {
+    // REPORTADO POR EL DUENO: «en lugar de girar el hombro para apuntar con el brazo al jugador
+    // apunta hacia atras». 'mirar' apunta la CARA de la pieza (su -Z), pero un brazo que cuelga
+    // apunta con su eje LARGO (su -Y): el mismo cabeceo que le sube la cara a una cabeza le aparta
+    // la punta al brazo, y con el jugador POR DEBAJO del hombro — el caso normal, andando por el
+    // suelo — se iba al reves. Se mide la punta, que es lo que se ve, no el angulo interno.
+    const brazo = (w, rot) => {
+      const s = { key: CABEZA, ox: 12, oy: 10, oz: 6, rot: rot || 0, aabb: [12, 10, 6, 13, 12, 7] };
+      w.mc.structures.push(s);
+      return s;
+    };
+    // Cuanto se inclina la punta HACIA el jugador (positivo) o hacia atras (negativo).
+    const inclina = (s, jug) => {
+      const m = s.model, punta = [12.5, 10, 6.5];
+      const t = [m[0]*punta[0]+m[4]*punta[1]+m[8]*punta[2]+m[12],
+                 m[1]*punta[0]+m[5]*punta[1]+m[9]*punta[2]+m[13],
+                 m[2]*punta[0]+m[6]*punta[1]+m[10]*punta[2]+m[14]];
+      const ux = jug[0] - 12.5, uz = jug[2] - 6.5, n = Math.hypot(ux, uz);
+      return ((t[0] - punta[0]) * ux + (t[2] - punta[2]) * uz) / n;
+    };
+    const caso = (sentido, jugY) => {
+      const w = montar({});
+      const s = brazo(w);
+      w.sinRuido(() => w.game.bloques.define(CABEZA, Object.assign(
+        { mirar: Object.assign({ ejes: 'xy', suavidad: 0, alcance: 50, pivote: [0.5, 2, 0.5] },
+          sentido ? { sentido: sentido } : {}) })));
+      const jug = [12.5, jugY, 14];
+      w.mc.pos[0] = jug[0]; w.mc.pos[1] = jug[1]; w.mc.pos[2] = jug[2];
+      w.frames(1);
+      return inclina(s, jug);
+    };
+    // El hombro esta en y=12. El jugador de a pie queda POR DEBAJO: ese es el caso que fallaba.
+    t('sin sentido, con el jugador por debajo del hombro la punta se va hacia atras (lo reportado)',
+      caso(null, 8) < -0.2, caso(null, 8).toFixed(2));
+    t('sentido:{x:-1} la manda HACIA el jugador que esta por debajo',
+      caso({ x: -1 }, 8) > 0.2, caso({ x: -1 }, 8).toFixed(2));
+    t('...y con el jugador por ENCIMA se invierte tambien (es un signo, no un parche a un caso)',
+      caso(null, 16) > 0.2 && caso({ x: -1 }, 16) < -0.2,
+      'normal ' + caso(null, 16).toFixed(2) + ' · invertido ' + caso({ x: -1 }, 16).toFixed(2));
+
+    {
+      // sentido:{y:-1} espeja el GIRO: la pieza acaba mirando al lado contrario del que mira sin el.
+      const conY = (sy) => {
+        const w = montar({});
+        const s = ponerCabeza(w, 0);
+        w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: Object.assign({ suavidad: 0, alcance: 50 },
+          sy ? { sentido: { y: -1 } } : {}) }));
+        w.mc.pos[0] = 20; w.mc.pos[2] = 9;
+        w.frames(1);
+        return grados(gira(s.model, 0, 0, -1));
+      };
+      t('sentido:{y:-1} espeja el giro', Math.abs(conY(false) + conY(true)) < 1.5,
+        conY(false).toFixed(1) + '° vs ' + conY(true).toFixed(1) + '°');
+    }
+    {
+      const w = montar({});
+      brazo(w);
+      const antes = w.avisosConsola.length;
+      t('un sentido que no es 1 ni -1 no se registra',
+        w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { sentido: { x: 0.5 } } })) === null);
+      t('...y el aviso dice para que sirve',
+        /eje largo/.test(w.avisosConsola.slice(antes).join(' ')));
+    }
+  }
+
+  {
     // REPORTADO POR EL DUENO: un brazo de dos bloques giraba «centrado entre los dos», o sea por el
     // codo. El pivote es, por definicion, el UNICO punto que la matriz deja quieto: eso es lo que se
     // mide aqui, no una coordenada calculada a mano.
