@@ -101,11 +101,28 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
       mc.pos = [BX + 3.5, SUELO, BZ + 4.5]; mc.vel = [0, 0, 0];
       mc.keys = {}; mc.keys['w'] = true; mc.onGround = true;
       mc._pasoDesfase = 0; mc._pasoSubido = 0;
+      // La inercia se ARRASTRA entre pasadas (vive en mc, no en un closure): sin este reset, la pasada
+      // de ×0.5 venia frenando desde los 10 u/s de la de ×2 y media el decaimiento, no la marcha.
+      mc._velInercia = 0;
       if (fac) game.bloques.define(claveSuelo, { velocidad: fac }); else game.bloques.quitar(claveSuelo);
       const z0 = mc.pos[2], spd0 = mc.speed;
       for (let i = 0; i < n; i++) mcUpdate(1 / 60);
       return { avance: z0 - mc.pos[2], intacta: mc.speed === spd0, suelo: mc.onGround, subio: mc.pos[1] - SUELO };
     };
+    // La queja del dueño: corriendo por hielo (velocidad:2) y saliendo a suelo normal, la marcha se
+    // cortaba en seco EL MISMO FRAME, asi que al trampolin de mas alla se llegaba a marcha base. Aqui
+    // se corre a ×2, se quita la definicion (= pisar fuera del hielo) y se mide UN frame: tiene que
+    // avanzar mas que a marcha base, que es justo lo que antes no pasaba.
+    const inercia = (() => {
+      correr(2, 10);                                  // llega lanzado
+      game.bloques.quitar(claveSuelo);                // el pie sale del bloque rapido
+      const z0 = mc.pos[2];
+      mcUpdate(1 / 60);
+      // Sin el arreglo, game.bloques.inercia ni existe: se informa como 0 para que el test de un FALLO
+      // legible en vez de reventar la evaluacion entera.
+      const tau = typeof game.bloques.inercia === 'function' ? game.bloques.inercia() : 0;
+      return { avance: z0 - mc.pos[2], base: mc.speed / 60, tau };
+    })();
     const marcha = mc.speed;
     const vel = { normal: correr(0, 10), doble: correr(2, 10), medio: correr(0.5, 10), marcha: marcha };
     game.bloques.quitar(claveSuelo);                                // la tabla queda como estaba
@@ -121,7 +138,7 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     game.bloques.pasoSuave(est0.tau);
     const limpio = previos.every(([x, y, z, id]) => mc.grid[mcIdx(x, y, z)] === id);
 
-    return { base, SUELO, crudo, suave, vel, limpio,
+    return { base, SUELO, crudo, suave, vel, inercia, limpio,
              hayApi: typeof game.bloques.pasoSuave === 'function',
              envuelto: !!(mcMoveAxis && mcMoveAxis._orig), eye: MC_EYE, step: MC_STEP };
   });
@@ -210,6 +227,12 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
       if (n === 'marcha') continue;
       assert(v.intacta === true, n + ': mc.speed no volvio a su valor');
     }
+  });
+
+  test('al salir del bloque rapido la marcha NO se corta en seco (inercia)', () => {
+    assert(r.inercia.tau > 0, 'la inercia esta desactivada: tau = ' + r.inercia.tau);
+    assert(r.inercia.avance > r.inercia.base * 1.2,
+      'avanzo ' + r.inercia.avance.toFixed(4) + ' y a marcha base serian ' + r.inercia.base.toFixed(4));
   });
 
   test('el mundo del dueño queda como estaba', () => {
