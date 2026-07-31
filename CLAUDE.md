@@ -481,6 +481,16 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     - ⚠️ **Con `ejes:'y'` la altura del pivote no se nota.** El giro es sobre la vertical **del
       pivote**, y todo punto de esa vertical queda fijo: subir el enganche de un brazo que cuelga no
       mueve ni un voxel. El pivote alto solo se ve cuando hay **cabeceo** (`ejes:'xy'`).
+  - **`mirar` apunta la CARA de la pieza (su `-Z`), no su eje largo**, y eso invierte el cabeceo de
+    todo lo que apunta con el eje largo. Un brazo que cuelga apunta hacia **`-Y`**: el mismo cabeceo
+    que le sube la cara a una cabeza le **aparta la punta** al brazo, así que con el jugador por
+    debajo del hombro (el caso normal, andando por el suelo) el brazo se iba hacia atrás — el dueño
+    lo reportó así. Se arregla con **`sentido: { x:-1 }`** (y `{ y:-1 }` espeja el giro). Es un
+    signo, no un parche a un caso: invierte los dos lados.
+    - ⚠️ `sentido` hace que la pieza se **incline hacia** el objetivo tantos grados como la elevación,
+      pero **no le apunta de verdad**: a la altura del hombro la elevación es 0 y el brazo se queda
+      colgando. Un apuntado real querría `cabeceo = elevación + 90°`, o sea un **desfase**, que no
+      existe (`frente` solo desfasa el giro).
   - **El cabeceo va sobre el eje izquierda-derecha DE LA PIEZA, no sobre el X del mundo.** La matriz
     es `Ry(giro)·Rx(cabeceo)·Ry(-horneado)`: hay que **deshacer** el cuarto de vuelta ya horneado en
     `rot`, cabecear, y volver a ponerlo. Con el `Rx` a secas solo acierta la pieza estampada sin
