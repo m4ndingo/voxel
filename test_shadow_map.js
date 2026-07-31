@@ -55,8 +55,18 @@ test('cada varying del FS lo escribe su VS', () => {
 test('vWorld es la posicion de MUNDO, no la de vista', () => {
   for (const p of PROGRAMAS) {
     const vsSrc = glsl(p.vs);
-    assert(/vWorld\s*=\s*aPos\s*;/.test(vsSrc),
-      p.n + ': vWorld deberia ser aPos tal cual (el mapa se indexa en coordenadas de mundo)');
+    // El terreno asigna aPos tal cual (sus vertices YA van en mundo). Las estructuras pasan primero por
+    // uModel, la matriz por instancia que las gira: sigue siendo posicion de mundo, y tiene que serlo la
+    // GIRADA, o el sol/la sombra se consultarian en el sitio donde estaba la pieza antes de girar.
+    const crudo = /vWorld\s*=\s*aPos\s*;/.test(vsSrc);
+    const conModelo = /\bvec3\s+(\w+)\s*=\s*\(\s*uModel\s*\*\s*vec4\s*\(\s*aPos/.test(vsSrc)
+      && /vWorld\s*=\s*(\w+)\s*;/.test(vsSrc)
+      && vsSrc.match(/\bvec3\s+(\w+)\s*=\s*\(\s*uModel/)[1] === vsSrc.match(/vWorld\s*=\s*(\w+)\s*;/)[1];
+    assert(crudo || conModelo,
+      p.n + ': vWorld deberia ser aPos, o aPos pasado por uModel (el mapa se indexa en coordenadas de mundo)');
+    // Lo que NO puede pasar nunca: que salga de uView. Ahi es donde el bug seria invisible en pantalla
+    // y en cambio movería la sombra con la camara.
+    assert(!/vWorld\s*=\s*[^;]*uView/.test(vsSrc), p.n + ': vWorld sale de uView, o sea coordenadas de VISTA');
   }
 });
 

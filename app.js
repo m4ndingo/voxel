@@ -4528,9 +4528,9 @@ function mcBuildProgram(){
 // Programa de estructuras: gemelo del terreno pero con COLOR POR VÉRTICE (no atlas) → cada voxel fino su color.
 const MC_STRUCT_VS=`
 attribute vec3 aPos; attribute vec3 aColor; attribute float aShade; attribute float aEmit; attribute float aAlpha;
-uniform mat4 uProj; uniform mat4 uView;
+uniform mat4 uProj; uniform mat4 uView; uniform mat4 uModel;
 varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld;
-void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vColor=aColor; vShade=aShade; vDist=length(vp.xyz); vEmit=aEmit; vAlpha=aAlpha; vWorld=aPos; }`;
+void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz; vec4 vp=uView*vec4(w,1.0); gl_Position=uProj*vp; vColor=aColor; vShade=aShade; vDist=length(vp.xyz); vEmit=aEmit; vAlpha=aAlpha; vWorld=w; }`;
 const MC_STRUCT_FS=`
 precision mediump float;
 varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld;
@@ -4543,7 +4543,7 @@ function mcBuildStructProgram(){
   const gl=mc.gl, p=glProgram(gl,mcVS(MC_STRUCT_VS),mcFS(MC_STRUCT_FS)); mc.structProg=p;
   mc.structLoc={ aPos:gl.getAttribLocation(p,'aPos'), aColor:gl.getAttribLocation(p,'aColor'), aShade:gl.getAttribLocation(p,'aShade'),
     aEmit:gl.getAttribLocation(p,'aEmit'), aAlpha:gl.getAttribLocation(p,'aAlpha'),
-    uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'),
+    uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'), uModel:gl.getUniformLocation(p,'uModel'),
     uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
@@ -4556,9 +4556,9 @@ function mcBuildStructProgram(){
 // para que aTile no pierda precisión en paredes grandes (fract de valores altos) ni en GPUs móviles.
 const MC_STEX_VS=`
 attribute vec3 aPos; attribute vec2 aTile; attribute vec4 aRect; attribute float aShade;
-uniform mat4 uProj; uniform mat4 uView;
+uniform mat4 uProj; uniform mat4 uView; uniform mat4 uModel;
 varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld;
-void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vTile=aTile; vRect=aRect; vShade=aShade; vDist=length(vp.xyz); vWorld=aPos; }`;
+void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz; vec4 vp=uView*vec4(w,1.0); gl_Position=uProj*vp; vTile=aTile; vRect=aRect; vShade=aShade; vDist=length(vp.xyz); vWorld=w; }`;
 const MC_STEX_FS=`
 precision highp float;
 varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld;
@@ -4570,7 +4570,7 @@ void main(){ vec2 uv=vRect.xy+(vRect.zw-vRect.xy)*fract(vTile); vec4 t=texture2D
 function mcBuildStructTexProgram(){
   const gl=mc.gl, p=glProgram(gl,mcVS(MC_STEX_VS),mcFS(MC_STEX_FS)); mc.stexProg=p;
   mc.stexLoc={ aPos:gl.getAttribLocation(p,'aPos'), aTile:gl.getAttribLocation(p,'aTile'), aRect:gl.getAttribLocation(p,'aRect'), aShade:gl.getAttribLocation(p,'aShade'),
-    uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'), uTex:gl.getUniformLocation(p,'uTex'),
+    uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'), uModel:gl.getUniformLocation(p,'uModel'), uTex:gl.getUniformLocation(p,'uTex'),
     uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
@@ -4663,11 +4663,16 @@ function mcRenderShadow(){
   //    con 48 estructuras, y hacerlo a 144 Hz solo porque un agente da un paso es lo que hundía los fps a 60-80
   //    durante los segundos en que los agentes se mueven tras colocar algo. La sombra de un cuerpo que anda
   //    refrescada a ~22 Hz no se distingue, y el coste se divide por 6.
-  let sigGeo=mc.structures.length; for(const st of mc.structures) sigGeo+=st.colCount+st.texCount;
+  let sigMov=0;
+  // Una estructura con matriz de modelo (un bloque que gira) se mueve sin cambiar ni un vértice: si su orientación no
+  // entra en ninguna firma, la sombra se queda clavada en la pose con la que se horneó. Va en la de MOVIMIENTO, no en
+  // la de geometría: refrescarla a ~22 Hz es exactamente lo que ya se hace con los agentes que andan.
+  let sigGeo=mc.structures.length;
+  for(const st of mc.structures){ sigGeo+=st.colCount+st.texCount;
+    const m=st.model; if(m && m.length===16) sigMov+=m[0]*31+m[2]*57+m[8]*91+m[10]*113+m[12]*7+m[14]*11; }
   // El nº de vértices va en la firma de geometría porque un cuerpo lo puede construir alguien de fuera (skills.cuerpo
   // se hace su propia malla a escala sin pasar por mcAgentMesh) y entonces nadie avisa. Sin esto, una nube que NO se
   // mueve no llegaba nunca al mapa: se veía la panza al sol y sin sombra debajo.
-  let sigMov=0;
   for(const a of mc.agents.values()){ sigGeo+=a.count;
     sigMov+=(a.renderX||0)*7 + (a.renderY||0)*13 + (a.renderZ||0)*17; }
   if(sigGeo!==S.sigGeo){ S.sigGeo=sigGeo; S.dirty=true; }
@@ -4695,8 +4700,8 @@ function mcRenderShadow(){
   for(const ch of mc.chunks.values()) if(ch.count && ch.vbo) draw(ch.vbo, ch.count, 6*4);
   for(const a of mc.agents.values()) if(a.count && a.vbo) draw(a.vbo, a.count, 6*4);
   for(const st of mc.structures){
-    if(st.colCount && st.colVbo) draw(st.colVbo, st.colCount, 9*4);
-    if(st.texCount && st.texVbo) draw(st.texVbo, st.texCount, 10*4);
+    if(st.colCount && st.colVbo) draw(st.colVbo, st.colCount, 9*4, st.model);
+    if(st.texCount && st.texVbo) draw(st.texVbo, st.texCount, 10*4, st.model);
   }
   // Lo que dibuja otro (p.ej. los cuerpos de ESTRUCTURA de los agentes, que van con matriz de modelo propia y no
   // están en ninguna de las listas de arriba). app.js no sabe qué es: solo le presta el dibujante de la pasada.
@@ -5142,6 +5147,30 @@ function mcProjMatrix(){
   return { m:mat4.perspective(mc.fov, aspect, 0.1, far), far };
 }
 // Frustum cull por AABB del chunk: descarta si sus 8 esquinas caen todas fuera del mismo plano de clip.
+// Matriz de modelo POR INSTANCIA de estructura. app.js no sabe quien la pone ni para que: solo la aplica
+// si esta (mismo trato que mc.sunExtra con la pasada del sol). Sin ella, identidad — que es como se dibujo
+// siempre, porque los vertices de una estructura ya vienen en coordenadas de MUNDO.
+// Hay que ponerla SIEMPRE, tambien la identidad: el uniform es estado del programa y se queda pegado entre
+// draw calls, asi que una sola instancia girada arrastraria a todas las que se dibujen despues.
+const MC_IDENT = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+function mcModelOf(s){ const m = s && s.model; return (m && m.length === 16) ? m : MC_IDENT; }
+// Culling de una estructura CON matriz de modelo. Su aabb se calculo de los vertices, que van en coordenadas de
+// MUNDO y sin girar: en cuanto la matriz la rota, la pieza se sale de esa caja y el frustum la borra un poco antes
+// de tiempo — parpadea al asomar por el borde de la pantalla. La caja conservadora es la esfera que la envuelve:
+// centro pasado por la matriz ± la semidiagonal, que vale para cualquier giro (y tambien si la matriz traslada).
+// Sin modelo no se toca nada: mismo coste y mismo resultado de siempre.
+const MC_AABB_GIRO = { aabb:[0,0,0,0,0,0] };
+function mcStructVisible(s, pv){
+  const m = s.model; if(!(m && m.length === 16)) return mcChunkVisible(s, pv);
+  const a = s.aabb;
+  const cx=(a[0]+a[3])*0.5, cy=(a[1]+a[4])*0.5, cz=(a[2]+a[5])*0.5;
+  const hx=a[3]-cx, hy=a[4]-cy, hz=a[5]-cz, r=Math.sqrt(hx*hx+hy*hy+hz*hz);
+  const wx=m[0]*cx+m[4]*cy+m[8]*cz+m[12], wy=m[1]*cx+m[5]*cy+m[9]*cz+m[13], wz=m[2]*cx+m[6]*cy+m[10]*cz+m[14];
+  const b = MC_AABB_GIRO.aabb;
+  b[0]=wx-r; b[1]=wy-r; b[2]=wz-r; b[3]=wx+r; b[4]=wy+r; b[5]=wz+r;
+  return mcChunkVisible(MC_AABB_GIRO, pv);
+}
+
 function mcChunkVisible(ch, pv){
   const a=ch.aabb, out=[0,0,0,0,0,0];
   for(let i=0;i<8;i++){
@@ -5225,7 +5254,8 @@ function mcRender(){
       mcSunUniforms(SL, SM);
       mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);
       for(const s of mc.structures){
-        if(!s.colCount || !mcChunkVisible(s,pv)) continue;
+        if(!s.colCount || !mcStructVisible(s,pv)) continue;
+        gl.uniformMatrix4fv(SL.uModel,false,mcModelOf(s));
         gl.bindBuffer(gl.ARRAY_BUFFER, s.colVbo);
         mcStructAttrib(SL, sstr);
         gl.drawArrays(gl.TRIANGLES,0,s.colCount);
@@ -5244,7 +5274,8 @@ function mcRender(){
       mcSunUniforms(SL, SM);
       mcAttribs([SL.aPos,SL.aTile,SL.aRect,SL.aShade]);
       for(const s of mc.structures){
-        if(!s.texCount || !mcChunkVisible(s,pv)) continue;
+        if(!s.texCount || !mcStructVisible(s,pv)) continue;
+        gl.uniformMatrix4fv(SL.uModel,false,mcModelOf(s));
         gl.bindBuffer(gl.ARRAY_BUFFER, s.texVbo);
         gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,stride2,0);
         gl.vertexAttribPointer(SL.aTile,2,gl.FLOAT,false,stride2,12);
@@ -5257,7 +5288,7 @@ function mcRender(){
     // 3) Translúcido (voxeles #rrggbbaa) — pasada con blend SIN escribir profundidad (sin ordenar: pixel-art,
     //    order-independent, barato). Va después de TODO lo opaco (terreno + estructuras) para mezclarse encima.
     if(mc.structProg){
-      let any=false; for(const s of mc.structures){ if(s.alphaCount && mcChunkVisible(s,pv)){ any=true; break; } }
+      let any=false; for(const s of mc.structures){ if(s.alphaCount && mcStructVisible(s,pv)){ any=true; break; } }
       if(any){
         const SL=mc.structLoc, sstr=9*4;
         gl.useProgram(mc.structProg);
@@ -5270,7 +5301,8 @@ function mcRender(){
         // pegada a una opaca pierde el empate y se ve el fondo pelado en vez del cristal compuesto encima.
         gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
         for(const s of mc.structures){
-          if(!s.alphaCount || !mcChunkVisible(s,pv)) continue;
+          if(!s.alphaCount || !mcStructVisible(s,pv)) continue;
+          gl.uniformMatrix4fv(SL.uModel,false,mcModelOf(s));
           gl.bindBuffer(gl.ARRAY_BUFFER, s.alphaVbo);
           mcStructAttrib(SL, sstr);
           gl.drawArrays(gl.TRIANGLES,0,s.alphaCount);
@@ -5300,6 +5332,7 @@ function mcDrawPreview(pj, view){
     gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
     gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
     mcSunUniforms(SL, null);                                                    // el fantasma es una ayuda, no proyecta ni recibe sombra
+    gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);                              // el fantasma nunca gira; sin esto hereda la matriz de la ultima instancia girada
     mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);                // el blend del fantasma usa CONSTANT_ALPHA → ignora vAlpha (el vidrio se ve al alpha del fantasma)
     if(s.colCount){ gl.bindBuffer(gl.ARRAY_BUFFER, s.colVbo); mcStructAttrib(SL, sstr); gl.drawArrays(gl.TRIANGLES,0,s.colCount); }
     if(s.alphaCount){ gl.bindBuffer(gl.ARRAY_BUFFER, s.alphaVbo); mcStructAttrib(SL, sstr); gl.drawArrays(gl.TRIANGLES,0,s.alphaCount); }
@@ -5312,6 +5345,7 @@ function mcDrawPreview(pj, view){
     gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.structAtlasTex); gl.uniform1i(SL.uTex,0);
     mcSunUniforms(SL, null);
+    gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
     mcAttribs([SL.aPos,SL.aTile,SL.aRect,SL.aShade]);
     gl.bindBuffer(gl.ARRAY_BUFFER, s.texVbo);
     gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,stride2,0);

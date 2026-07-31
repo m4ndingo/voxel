@@ -866,5 +866,163 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
     Math.abs(r.avance - 40 * 12 / 60) < 1e-9 && r.w.mc.onGround, r.avance.toFixed(3) + ' bloques');
 }
 
+// ── 11. Mirar: la pieza gira hacia el jugador ───────────────────────────────────────────────────
+// Esto NO mueve al jugador: lo unico que produce es s.model, la matriz que app.js multiplica al
+// dibujar esa instancia. Asi que lo que se comprueba es la matriz, que es todo lo que sale de aqui.
+{
+  const CABEZA = 'asset:assets/cabeza.vox.json';
+  // Una pieza de 1 bloque centrada en (12.5, 6.5, 6.5), o sea 4 bloques al norte del jugador
+  // (12.5, 5, ~10.7) mirando hacia -Z, que es la orientacion de origen del dibujo.
+  const ponerCabeza = (w, rot) => {
+    const s = { key: CABEZA, ox: 12, oy: 6, oz: 6, rot: rot || 0, aabb: [12, 6, 6, 13, 7, 7] };
+    w.mc.structures.push(s);
+    return s;
+  };
+  // Aplica la matriz (columna-mayor, como WebGL) al vector director dado.
+  const gira = (m, x, y, z) => [m[0] * x + m[4] * y + m[8] * z, m[1] * x + m[5] * y + m[9] * z,
+                                m[2] * x + m[6] * y + m[10] * z];
+  const grados = (v) => Math.atan2(v[0], -v[2]) * 180 / Math.PI;
+  const separa = (a, b) => Math.abs(((a - b + 540) % 360) - 180);   // distancia angular por el camino corto
+
+  {
+    const w = montar({});
+    const s = ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50 } }));
+    // El jugador esta en z~10.7, la pieza en z=6.5: le queda justo detras, o sea media vuelta.
+    w.frames(1);
+    t('mirar pone matriz de modelo en la instancia', !!(s.model && s.model.length === 16));
+    const frente = gira(s.model, 0, 0, -1);
+    t('...y el frente de la pieza apunta al jugador (media vuelta)',
+      Math.abs(Math.abs(grados(frente)) - 180) < 1.5, grados(frente).toFixed(1) + '°');
+    // El pivote es el centro de la pieza: girar no la debe mover de sitio.
+    const c = [s.model[0] * 12.5 + s.model[4] * 6.5 + s.model[8] * 6.5 + s.model[12],
+               s.model[1] * 12.5 + s.model[5] * 6.5 + s.model[9] * 6.5 + s.model[13],
+               s.model[2] * 12.5 + s.model[6] * 6.5 + s.model[10] * 6.5 + s.model[14]];
+    t('...girando sobre su centro: la pieza no se desplaza',
+      Math.hypot(c[0] - 12.5, c[1] - 6.5, c[2] - 6.5) < 1e-4,
+      c.map(v => v.toFixed(3)).join(','));
+  }
+
+  {
+    // 'limites' se mide DESDE la orientacion de origen, asi que con el jugador a 180° y un tope de
+    // 70° la pieza se queda clavada en 70, no en 180.
+    const w = montar({});
+    const s = ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50, limites: { y: [-70, 70] } } }));
+    w.frames(1);
+    t('los limites recortan el giro en vez de dejarlo dar la vuelta',
+      Math.abs(Math.abs(grados(gira(s.model, 0, 0, -1))) - 70) < 1.5,
+      grados(gira(s.model, 0, 0, -1)).toFixed(1) + '°');
+  }
+
+  {
+    // La misma pieza YA estampada con rot=1 (un cuarto de vuelta horneado): el giro que se le pone
+    // encima tiene que descontar ese cuarto, o miraria 90° de mas.
+    const w = montar({});
+    const s0 = ponerCabeza(w, 0);
+    const s1 = ponerCabeza(w, 1);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50 } }));
+    w.frames(1);
+    // Las dos acaban mirando al jugador, asi que el giro EXTRA que reciben (que es lo unico que
+    // lleva la matriz; el otro cuarto ya esta en los vertices) tiene que diferir exactamente en 90.
+    const d = separa(grados(gira(s0.model, 0, 0, -1)), grados(gira(s1.model, 0, 0, -1)));
+    t('una pieza estampada con rot=1 descuenta el cuarto de vuelta ya horneado',
+      Math.abs(d - 90) < 1.5, 'diferencia ' + d.toFixed(1) + '°');
+  }
+
+  {
+    // Suavidad: con tau>0 el primer frame solo recorre una parte del camino, no salta al objetivo.
+    const w = montar({});
+    const s = ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0.3, alcance: 50 } }));
+    // El primer frame se coloca YA mirando (una pieza recien cargada no debe entrar dando un
+    // volantazo), asi que el suavizado se mide MOVIENDO al jugador despues.
+    w.frames(1);
+    const g0 = grados(gira(s.model, 0, 0, -1));
+    w.mc.pos[0] = 10.5; w.mc.pos[2] = 2.5;               // al otro lado de la pieza
+    w.frames(1);
+    const g1 = grados(gira(s.model, 0, 0, -1));
+    w.frames(120);                                       // 2 s = casi 7 taus: ya ha llegado
+    const g2 = grados(gira(s.model, 0, 0, -1));
+    const meta = Math.atan2(10.5 - 12.5, -(2.5 - 6.5)) * 180 / Math.PI;
+    t('con suavidad el giro no es un tiron: avanza un poco y luego llega',
+      separa(g1, g0) < 20 && separa(g1, meta) > 90 && separa(g2, meta) < 2,
+      'de ' + g0.toFixed(0) + '° a ' + meta.toFixed(0) + '°: tras 1 frame ' + g1.toFixed(0)
+      + '°, tras 2 s ' + g2.toFixed(0) + '°');
+  }
+
+  {
+    // Fuera de alcance: vuelve a la pose horneada y SUELTA la matriz, para que app.js siga por su
+    // camino de siempre (sin uniform y sin inflar la caja de culling).
+    const w = montar({});
+    const s = ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 1 } }));
+    w.frames(2);
+    t('fuera de alcance no se queda mirando al vacio: suelta la matriz', !s.model);
+  }
+
+  {
+    // Quitar el comportamiento tiene que devolver la pieza a su pose horneada, no dejarla torcida.
+    const w = montar({});
+    const s = ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50 } }));
+    w.frames(1);
+    const teniaMatriz = !!s.model;
+    w.sinRuido(() => w.game.bloques.quitar(CABEZA));
+    w.frames(1);
+    t('quitar() devuelve la pieza a su orientacion de origen', teniaMatriz && !s.model);
+  }
+
+  {
+    // Un material de TERRENO no se puede girar: esta fundido en la malla de su chunk. Tiene que
+    // avisar y NO registrarse, no fallar en silencio dentro del bucle de dibujo.
+    const w = montar({});
+    ponerCabeza(w);                                        // para que haya alguna estructura viva
+    const antes = w.avisosConsola.length;
+    const reg = w.sinRuido(() => w.game.bloques.define('hab:escalera', { mirar: true }));
+    t('mirar en un material de terreno avisa y no registra nada',
+      !reg && /ESTRUCTURAS/.test(w.avisosConsola.slice(antes).join(' ')),
+      w.avisosConsola[w.avisosConsola.length - 1]);
+  }
+
+  {
+    // El prefijo no decide nada: el mundo del dueno estampa estructuras 'hab:' (hab:cubo-trans y
+    // companía), y esas tambien tienen que poder girar.
+    const w = montar({ fina: true });
+    w.mc.structures.forEach(e => { e.aabb = [e.ox, e.oy, e.oz, e.ox + 1, e.oy + 1, e.oz + 1]; });
+    const s = w.mc.structures[0];
+    const reg = w.sinRuido(() => w.game.bloques.define(s.key, { mirar: { suavidad: 0, alcance: 50 } }));
+    w.frames(1);
+    t('una estructura "hab:" tambien gira (el prefijo no decide, decide ser estructura)',
+      !!(reg && reg.mirar && s.model), s.key);
+  }
+
+  {
+    const w = montar({});
+    ponerCabeza(w);                                        // define() valida la clave contra el mundo
+    const antes = w.avisosConsola.length;
+    const reg = w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { ejes: 'z' } }));
+    t('ejes:"z" (alabeo) avisa en vez de girar de lado', !reg && /alabeo/.test(w.avisosConsola.slice(antes).join(' ')));
+  }
+
+  {
+    // 'lookAt' es como se llamo al proponerlo, asi que sigue valiendo aunque el nombre sea 'mirar'.
+    const w = montar({});
+    ponerCabeza(w);
+    const reg = w.sinRuido(() => w.game.bloques.define(CABEZA, { lookAt: { alcance: 9 } }));
+    t('el nombre en ingles (lookAt) sigue valiendo como alias de mirar',
+      !!(reg && reg.mirar && reg.mirar.alcance === 9));
+  }
+
+  {
+    // El coste tiene que ser por pieza QUE MIRA, no por estructura del mundo: sin ningun 'mirar'
+    // definido, el motor no debe tocar ni una instancia.
+    const w = montar({ fina: true });
+    w.frames(3);
+    t('sin ningun mirar definido, ninguna estructura recibe matriz',
+      w.mc.structures.every(s => !s.model), w.mc.structures.length + ' estructuras');
+  }
+}
+
 console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');
 process.exit(fail ? 1 : 0);
