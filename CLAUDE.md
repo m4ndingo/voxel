@@ -272,6 +272,14 @@ través de la estructura. ⚠️ **Desde el ojo el rayo se proyecta justo en la 
 punto**: para verlo como segmento hay que congelarlo con **`game.rayoFijo()`** y apartarse a mirarlo de
 lado. La etiqueta DOM del impacto dice si paró en `voxel fino` o en `bloque` y en qué celda pone.
 
+**Cuarta línea de la etiqueta = punto de extensión `mcXrayExtra`.** `app.js` pinta tres líneas
+(coordenadas · tipo · material) y deja un hueco: `mcXrayExtra(clave, s|null) => 'texto'`, que rellena quien
+sepa algo que el framework no sabe. Hoy lo engancha `mundo-autoarranque`, y muestra **el comportamiento del
+material y los giros de ESA instancia** (`X` cabeceo · `Y` giro · `Z —`, más `(origen …°)` con el horneado
+de `rot`+`frente`). Es `var` y no `let` a propósito: un `let` de nivel superior **no** es propiedad de
+`window`, así que un snippet (que corre en `new Function`) no podría engancharse. Si el hook lanza, `app.js`
+lo **desengancha y avisa una vez** — si no, sería un warning por etiqueta y frame.
+
 Test: `node test_rayo_apuntado.js` (extrae las funciones verbatim de `app.js`; fija la regresión
 comprobando que la celda **sí** da sólida por AABB pero el rayo **no** cruza voxel lleno).
 
@@ -314,6 +322,7 @@ game.bloques.pasoSuave(0.06);   // segundos que tarda el ojo en subir un escaló
 game.bloques.inercia(0.7);      // segundos que tarda la marcha en bajar al salir de un bloque rápido
 game.bloques.define('asset:assets/cabeza.vox.json', { mirar:{ ejes:'xy', limites:{y:[-70,70]}, alcance:12 } });
 game.bloques.mirones();      // qué piezas están girando ahora y cuánto
+// tecla X (rayos-X): cada etiqueta lleva una cuarta línea con su comportamiento y sus giros X/Y/Z
 game.bloques.roce(0.08);        // lo que se sigue patinando UNA VEZ FUERA del bloque deslizante
 ```
 

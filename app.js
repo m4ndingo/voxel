@@ -5521,6 +5521,19 @@ function mcMatKind(key, isStruct){
   }
   return t;
 }
+// Punto de extensión de rayos-X: una CUARTA línea por etiqueta, para lo que app.js no sabe. El framework no
+// tiene ni idea de qué comportamientos existen ni de quién gira: quien los implementa (el snippet
+// 'mundo-autoarranque') pone aquí una función (clave, s|null) => 'texto corto' y app.js solo la pinta.
+// Si revienta se desengancha y avisa UNA vez — un fallo aquí no puede escupir una línea por etiqueta y frame.
+// `var` y no `let` a propósito: un `let` de nivel superior NO es propiedad de window, así que un snippet
+// (que corre en `new Function`) no podría engancharse con `window.mcXrayExtra = …`, que es como se engancha
+// todo lo demás desde 'mundo-autoarranque'. Con `var` las dos formas valen.
+var mcXrayExtra=null;
+function mcXrayExtraTexto(key, s){
+  if(!mcXrayExtra) return '';
+  try{ return mcXrayExtra(key, s) || ''; }
+  catch(e){ mcXrayExtra=null; console.warn('mcXrayExtra desenganchado:', e && e.message); return ''; }
+}
 function mcUpdateXrayLabels(){
   const box=$('#mc-xray-labels'); if(!box) return;
   if(!mc.active || !mc.xray || !mc.grid){ if(!box.hidden) box.hidden=true; return; }
@@ -5533,7 +5546,7 @@ function mcUpdateXrayLabels(){
   // (wx,wy,wz). La línea de TIPO dice si esa celda es un bloque de terreno o una estructura fina: a simple vista
   // un 16³ macizo se ve igual de las dos formas, y solo la estructura conserva el alpha.
   // isStruct la tiñe como estructura (naranja, igual que su caja de rayos-X). Devuelve true si quedó en pantalla.
-  function emit(wx,wy,wz, coText, tipoText, matText, isStruct){
+  function emit(wx,wy,wz, coText, tipoText, matText, isStruct, extraText){
     const cw=pv[3]*wx+pv[7]*wy+pv[11]*wz+pv[15];
     if(cw<=0.01) return false;                                               // detrás de la cámara
     const ndx=(pv[0]*wx+pv[4]*wy+pv[8]*wz+pv[12])/cw, ndy=(pv[1]*wx+pv[5]*wy+pv[9]*wz+pv[13])/cw;
@@ -5544,11 +5557,13 @@ function mcUpdateXrayLabels(){
       el._c=document.createElement('span'); el._c.className='mc-xlbl-xyz';   // línea 1: coordenadas
       el._t=document.createElement('span'); el._t.className='mc-xlbl-tipo';  // línea 2: tipo (bloque/estructura · origen)
       el._m=document.createElement('span'); el._m.className='mc-xlbl-mat';   // línea 3: nombre de material
-      el.appendChild(el._c); el.appendChild(el._t); el.appendChild(el._m); box.appendChild(el); mcXlbls[n]=el; }
+      el._x=document.createElement('span'); el._x.className='mc-xlbl-extra';  // línea 4: la pone mcXrayExtra
+      el.appendChild(el._c); el.appendChild(el._t); el.appendChild(el._m); el.appendChild(el._x); box.appendChild(el); mcXlbls[n]=el; }
     el.style.transform='translate('+sx.toFixed(1)+'px,'+sy.toFixed(1)+'px) translate(-50%,-50%)';
     if(el._c.textContent!==coText) el._c.textContent=coText;
     if(el._t.textContent!==tipoText) el._t.textContent=tipoText;
     if(el._m.textContent!==matText) el._m.textContent=matText;
+    extraText=extraText||''; if(el._x.textContent!==extraText) el._x.textContent=extraText;
     el.classList.toggle('mc-xlbl-struct', !!isStruct);                       // el pool se comparte → refresca el marcador cada vez
     if(el.hidden) el.hidden=false; n++;
     return true;
@@ -5556,7 +5571,8 @@ function mcUpdateXrayLabels(){
   // Bloques de rejilla del entorno.
   for(let x=cx-R;x<=cx+R;x++) for(let y=cy-1;y<=cy+3;y++) for(let z=cz-R;z<=cz+R;z++){
     if(mcInside(x,y,z) && mc.grid[mcIdx(x,y,z)]){ const id=mc.grid[mcIdx(x,y,z)];
-      emit(x+0.5,y+0.5,z+0.5, x+','+y+','+z, mcMatKind(mc.blockKey[id], false), mcMatName(id), false); }
+      emit(x+0.5,y+0.5,z+0.5, x+','+y+','+z, mcMatKind(mc.blockKey[id], false), mcMatName(id), false,
+           mcXrayExtraTexto(mc.blockKey[id], null)); }
   }
   // Estructuras finas cercanas: una etiqueta por instancia en el centro de su AABB (rayos-X ya dibuja su caja naranja).
   // La coord es su celda de origen y el «material» su clave cruda (hab:cristal / asset:…) — igual que la muestran los bloques.
@@ -5564,7 +5580,8 @@ function mcUpdateXrayLabels(){
     const a=s.aabb; if(!a) continue;
     const mxc=(a[0]+a[3])/2, myc=(a[1]+a[4])/2, mzc=(a[2]+a[5])/2;
     if(Math.abs(mxc-p[0])>R+8 || Math.abs(mzc-p[2])>R+8) continue;           // solo el entorno (como los bloques)
-    emit(mxc, myc, mzc, s.ox+','+s.oy+','+s.oz, mcMatKind(s.key, true), String(s.key), true);
+    emit(mxc, myc, mzc, s.ox+','+s.oy+','+s.oz, mcMatKind(s.key, true), String(s.key), true,
+         mcXrayExtraTexto(s.key, s));
   }
   // Impacto del rayo de apuntado: si paró en un voxel fino o en un bloque, y dónde caería el bloque nuevo.
   const r=mc.rayFijo||mcRayoInfo();

@@ -1319,5 +1319,89 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   }
 }
 
+
+// ── 12. Rayos-X: la cuarta linea de la etiqueta ─────────────────────────────────────────────────
+// app.js pinta tres lineas y deja el hueco `mcXrayExtra`; lo que se prueba aqui es lo que el snippet
+// mete en ese hueco. La etiqueta es una herramienta de depuracion, asi que lo que importa no es el
+// formato bonito sino que el numero que se lee sea EL de la instancia y que lo que no existe no
+// aparezca como cero.
+{
+  const CABEZA = 'asset:assets/cabeza.vox.json';
+  const ponerCabeza = (w, rot) => {
+    const s = { key: CABEZA, ox: 12, oy: 6, oz: 6, rot: rot || 0, aabb: [12, 6, 6, 13, 7, 7] };
+    w.mc.structures.push(s);
+    return s;
+  };
+  const leerY = (txt) => { const m = /Y\s+(-?[\d.]+)°/.exec(txt); return m ? parseFloat(m[1]) : NaN; };
+
+  {
+    const w = montar({});
+    t('el snippet engancha la cuarta linea de rayos-X al instalarse', typeof global.mcXrayExtra === 'function');
+    t('un material SIN comportamiento no añade linea', global.mcXrayExtra('hab:roca', null) === '');
+    t('un bloque de terreno con comportamiento la lleva',
+      /trepable/.test(global.mcXrayExtra('hab:escalera', null)), global.mcXrayExtra('hab:escalera', null));
+  }
+
+  {
+    // El angulo de la etiqueta es el de ESA instancia, no un promedio ni el de la config.
+    const w = montar({});
+    const s = ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50 } }));
+    w.frames(1);
+    const txt = global.mcXrayExtra(CABEZA, s);
+    t('la estructura que mira enseña su comportamiento', /mirar/.test(txt), txt);
+    t('...y el giro Y que lleva de verdad esa instancia',
+      Math.abs(leerY(txt) - s._mirarYaw) < 0.1, txt + ' vs ' + s._mirarYaw.toFixed(2) + '°');
+    // El alabeo NO existe (la matriz es Ry·Rx·Ry): sale como raya. Un '0°' se leeria como «esta a
+    // cero ahora», y el dueño se pondria a buscar por que ese eje no se mueve.
+    t('el plano Z sale como raya, no como 0°', /Z —/.test(txt) && !/Z\s+0/.test(txt), txt);
+    t('los tres planos salen siempre, no solo el que gira', /X /.test(txt) && /Y /.test(txt) && /Z /.test(txt));
+  }
+
+  {
+    // Sin matriz puesta la pieza esta en su pose de origen: hay que poder distinguirlo de «gira 0°
+    // porque justo ahora te tiene de frente», que es lo mismo que se lee en los angulos.
+    const w = montar({});
+    const s = ponerCabeza(w);
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 1 } }));  // fuera de alcance
+    w.frames(2);
+    t('una pieza que no esta girando lo dice', /en reposo/.test(global.mcXrayExtra(CABEZA, s)),
+      global.mcXrayExtra(CABEZA, s));
+  }
+
+  {
+    // La Y va RELATIVA a la pose horneada (asi se miden los 'limites'), asi que el horneado tiene que
+    // salir aparte: sin el, dos piezas iguales con `rot` distinto enseñan el mismo numero mirando a
+    // sitios opuestos.
+    const w = montar({});
+    const s = ponerCabeza(w, 2);                            // media vuelta horneada
+    w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { suavidad: 0, alcance: 50 } }));
+    w.frames(1);
+    const txt = global.mcXrayExtra(CABEZA, s);
+    t('el horneado (rot) se enseña aparte del giro vivo', /origen 180°/.test(txt), txt);
+  }
+
+  {
+    // Un bloque de terreno no es una instancia: no tiene angulos que enseñar aunque su material los
+    // configure. Enseñar ceros ahi seria decir que ese bloque esta a 0°, y no hay tal bloque girando.
+    const w = montar({});
+    w.sinRuido(() => w.game.bloques.define('hab:escalera', { trepable: true, mirar: { alcance: 50 } }));
+    const txt = global.mcXrayExtra('hab:escalera', null);
+    t('un bloque de terreno no lleva angulos (no hay instancia)', !/Y\s+-?[\d.]+°/.test(txt), txt);
+  }
+
+  {
+    // Reejecutar el snippet no puede dejar enganchada la funcion VIEJA: leeria la tabla vieja y la
+    // etiqueta enseñaria comportamientos que ya no existen (es el mismo fallo que tuvo mcUpdate).
+    const w = montar({});
+    const antes = global.mcXrayExtra;
+    w.recargar();
+    t('reejecutar el snippet reengancha la etiqueta (no se queda la vieja)',
+      typeof global.mcXrayExtra === 'function' && global.mcXrayExtra !== antes);
+    w.sinRuido(() => w.game.bloques.quitar('hab:escalera'));
+    t('...y lo que se quita deja de salir en la etiqueta', global.mcXrayExtra('hab:escalera', null) === '');
+  }
+}
+
 console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');
 process.exit(fail ? 1 : 0);
