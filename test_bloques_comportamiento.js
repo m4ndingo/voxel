@@ -1148,6 +1148,33 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
         malas.length === 0, malas.length ? 'falla en ' + malas.join(', ') : 'los cuatro clavados');
     }
     {
+      // REPORTADO POR EL DUENO: los dos brazos de su figura estan puestos con `rot` opuesto (uno a
+      // cada lado del busto) y con el pivote en el CENTRO de la celda se despegaban del cuerpo al
+      // apuntar: el punto fijo caia medio bloque fuera del busto en los dos. Poniendolo en la cara
+      // (x=1 del objeto) cae en la cara que toca el busto — y con UNA sola linea de config, porque
+      // el pivote va en coordenadas del objeto y a piezas opuestas les toca la cara opuesta.
+      const w = montar({});
+      const izq = { key: CABEZA, ox: 12, oy: 10, oz: 6, rot: 1, aabb: [12, 10, 6, 13, 12, 7] };
+      const der = { key: CABEZA, ox: 12, oy: 10, oz: 10, rot: 3, aabb: [12, 10, 10, 13, 12, 11] };
+      w.mc.structures.push(izq, der);
+      w.sinRuido(() => w.game.bloques.define(CABEZA, { mirar: { ejes: 'xy', suavidad: 0, alcance: 50, pivote: [1, 2, 0.5] } }));
+      w.mc.pos[0] = 20; w.mc.pos[2] = 8.5;
+      w.frames(1);
+      // Las dos piezas miran al mismo hueco de en medio (z=7 y z=10), cada una por su cara.
+      t('dos piezas con rot opuesto: el pivote de la cara les cae en la cara de dentro a las dos',
+        fijo(izq.model, 12.5, 12, 7) < 1e-4 && fijo(der.model, 12.5, 12, 10) < 1e-4,
+        'izq se mueve ' + fijo(izq.model, 12.5, 12, 7).toFixed(4)
+        + ' · der se mueve ' + fijo(der.model, 12.5, 12, 10).toFixed(4));
+      // La que apenas gira apenas se desplaza, mida uno el pivote donde lo mida; el destrozo se ve en
+      // la que tiene que dar media vuelta (yaw ~169° aqui), que es justo la que se le despegaba al
+      // dueño: con el pivote en el centro, ese centro se va UN BLOQUE ENTERO — el hueco de la captura.
+      t('...y en la que da media vuelta, el centro de la celda se va un bloque entero',
+        fijo(der.model, 12.5, 12, 10.5) > 0.9,
+        'centro der se mueve ' + fijo(der.model, 12.5, 12, 10.5).toFixed(3)
+        + ' con yaw ' + Math.round(der._mirarYaw) + '° · la otra gira solo '
+        + Math.round(izq._mirarYaw) + '° y se mueve ' + fijo(izq.model, 12.5, 12, 6.5).toFixed(3));
+    }
+    {
       const w = montar({});
       ponerBrazo(w);
       const antes = w.avisosConsola.length;
