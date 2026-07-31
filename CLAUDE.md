@@ -388,7 +388,10 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   cuerpo ⇒ se atraviesan paredes. `define` avisa si el factor pide más de ese techo. Como el factor
   vive en el material, `velocidad:0` **no existe** — se dice `quitar(clave)`; tratar el 0 como «sin
   valor» es lo que mantiene `define` idempotente cuando el snippet se reejecuta y hereda la tabla ya
-  normalizada.
+  normalizada. La inercia es marcha **llevada**, así que **pararse del todo la gasta**: si estás en el suelo
+  sin tecla de rumbo y sin derrape, se pone a 0 en el acto. Antes decaía por **reloj** aunque estuvieras
+  quieto, y con `×10` (recortado a 40 u/s) tardaba ~3 s: parabas, volvías a pulsar W y arrancabas a **×4,96**
+  la marcha normal habiendo parado antes.
 - **`deslizamiento` es lo otro: patinar al SOLTAR las teclas** (el hielo de Minecraft), y es *ortogonal* a
   `velocidad`/`inercia` — aquéllas cambian cuánto corres, ésta qué pasa cuando dejas de pilotar. **No se
   puede hacer dejando puesta `mc.vel`**, y ahí está el motivo de que sea la única parte de la librería que

@@ -123,8 +123,32 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
       const tau = typeof game.bloques.inercia === 'function' ? game.bloques.inercia() : 0;
       return { avance: z0 - mc.pos[2], base: mc.speed / 60, tau };
     })();
+    // --- pararse del todo GASTA la inercia: la marcha llevada se lleva CORRIENDO, no esperando. Se
+    // corre a ×10, se sale del bloque soltando las teclas (el jugador se para), se esperan 10 frames
+    // quieto y se vuelve a pulsar W: tiene que arrancar a marcha normal, no a media marcha del bloque.
+    // El recinto son 6 bloques: a ×10 (40 u/s de tope) el jugador se empotra en la pared en 3 frames y
+    // ya no mide nada. Se le devuelve a casa cada frame de las dos fases previas — lo que se mide es la
+    // MARCHA del arranque, no el viaje, y quieto o cargando inercia la posición da igual.
+    const arrancarTrasParar = (() => {
+      const casa = () => { mc.pos = [BX + 3.5, SUELO, BZ + 4.5]; mc.vel = [0, 0, 0]; };
+      mc.scale = 1; mc.yaw = 0; mc.pitch = 0;
+      mc.keys = {}; mc.keys['w'] = true; mc.onGround = true;
+      mc._pasoDesfase = 0; mc._pasoSubido = 0; mc._velInercia = 0; mc._deslizVel = null;
+      game.bloques.define(claveSuelo, { velocidad: 10 });
+      for (let i = 0; i < 5; i++) { casa(); mcUpdate(1 / 60); }      // carga la inercia del bloque
+      const cargada = mc._velInercia;
+      game.bloques.quitar(claveSuelo); mc.keys = {};                 // sale del bloque Y suelta
+      for (let i = 0; i < 10; i++) { casa(); mcUpdate(1 / 60); }     // parado del todo
+      mc.keys['w'] = true;
+      casa();
+      const z0 = mc.pos[2];
+      for (let i = 0; i < 5; i++) mcUpdate(1 / 60);                  // vuelve a arrancar
+      return { arranque: z0 - mc.pos[2], cargada: cargada };
+    })();
+    mc.keys = {}; mc._velInercia = 0;
     const marcha = mc.speed;
     const vel = { normal: correr(0, 10), doble: correr(2, 10), medio: correr(0.5, 10), marcha: marcha };
+    arrancarTrasParar.normal = marcha * 5 / 60;
 
     // --- deslizamiento (el hielo de Minecraft): al SOLTAR ASWD encima del bloque se sigue rodando.
     // Se corre 10 frames con la tecla puesta, se sueltan las teclas y se miden los 10 siguientes. El
@@ -174,7 +198,7 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     game.bloques.pasoSuave(est0.tau);
     const limpio = previos.every(([x, y, z, id]) => mc.grid[mcIdx(x, y, z)] === id);
 
-    return { base, SUELO, crudo, suave, vel, inercia, desliz, limpio,
+    return { base, SUELO, crudo, suave, vel, inercia, desliz, arrancarTrasParar, limpio,
              hayApi: typeof game.bloques.pasoSuave === 'function',
              envuelto: !!(mcMoveAxis && mcMoveAxis._orig), eye: MC_EYE, step: MC_STEP };
   });
@@ -280,6 +304,13 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
       'sin deslizamiento avanzo ' + r.desliz.sin.toFixed(4) + ' tras soltar las teclas (deberia ser ~0)');
     assert(r.desliz.con > r.desliz.tramo * 0.5,
       'con deslizamiento solo avanzo ' + r.desliz.con.toFixed(4) + ' de los ' + r.desliz.tramo.toFixed(4) + ' de un tramo a marcha entera');
+  });
+
+  test('tras PARARSE del todo se arranca a marcha normal, no con la inercia guardada', () => {
+    const r2 = r.arrancarTrasParar;
+    assert(Math.abs(r2.arranque - r2.normal) < r2.normal * 0.05,
+      'arranco avanzando ' + r2.arranque.toFixed(4) + ' donde a marcha normal serian ' +
+      r2.normal.toFixed(4) + ' (×' + (r2.arranque / r2.normal).toFixed(2) + ')');
   });
 
   test('salir de la pista deslizante SIN soltar W no da un aceleron', () => {
