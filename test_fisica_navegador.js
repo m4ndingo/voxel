@@ -141,9 +141,26 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
       for (let i = 0; i < 10; i++) mcUpdate(1 / 60);
       return z0 - mc.pos[2];
     };
+    // --- salir de la pista deslizante CON LA TECLA PUESTA no puede acelerar: app.js ya ha movido al
+    // jugador ese frame, asi que si el derrape empuja ademas, se mueve DOS VECES (el aceleron que vio
+    // el dueño). Se corre sobre el bloque, se le quita el deslizamiento (= pisar suelo normal) y se
+    // miden 5 frames mas SIN soltar W: tiene que ser exactamente un tramo a marcha normal.
+    const salirPisandoW = (() => {
+      mc.scale = 1; mc.yaw = 0; mc.pitch = 0;
+      mc.pos = [BX + 3.5, SUELO, BZ + 4.5]; mc.vel = [0, 0, 0];
+      mc.keys = {}; mc.keys['w'] = true; mc.onGround = true;
+      mc._pasoDesfase = 0; mc._pasoSubido = 0; mc._velInercia = 0; mc._deslizVel = null;
+      game.bloques.define(claveSuelo, { deslizamiento: 1.2 });
+      for (let i = 0; i < 10; i++) mcUpdate(1 / 60);
+      game.bloques.quitar(claveSuelo);                              // como si saliera a suelo normal
+      const z0 = mc.pos[2];
+      for (let i = 0; i < 5; i++) mcUpdate(1 / 60);                 // W sigue pulsada
+      return z0 - mc.pos[2];
+    })();
     const desliz = { con: patinar(1.2), sin: patinar(0), tramo: mc.speed * 10 / 60,
+                     salirW: salirPisandoW, tramo5: mc.speed * 5 / 60,
                      hay: typeof game.bloques.roce === 'function' };
-    mc._deslizVel = null;
+    mc.keys = {}; mc._deslizVel = null;
     game.bloques.quitar(claveSuelo);                                // la tabla queda como estaba
 
     // Deshacer: primero el mundo, luego el jugador y el ajuste.
@@ -263,6 +280,12 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
       'sin deslizamiento avanzo ' + r.desliz.sin.toFixed(4) + ' tras soltar las teclas (deberia ser ~0)');
     assert(r.desliz.con > r.desliz.tramo * 0.5,
       'con deslizamiento solo avanzo ' + r.desliz.con.toFixed(4) + ' de los ' + r.desliz.tramo.toFixed(4) + ' de un tramo a marcha entera');
+  });
+
+  test('salir de la pista deslizante SIN soltar W no da un aceleron', () => {
+    assert(Math.abs(r.desliz.salirW - r.desliz.tramo5) < r.desliz.tramo5 * 0.02,
+      'con W pulsada avanzo ' + r.desliz.salirW.toFixed(4) + ' donde a marcha normal serian ' +
+      r.desliz.tramo5.toFixed(4) + ' (×' + (r.desliz.salirW / r.desliz.tramo5).toFixed(2) + ')');
   });
 
   test('el mundo del dueño queda como estaba', () => {

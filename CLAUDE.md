@@ -398,7 +398,10 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   original: guarda la marcha llevada en `mc._deslizVel`, la decae con `exp(-dt/τ)` (igual a 30 que a 120 fps)
   y avanza con el **mismo `mcMoveAxis`** que usa `app.js`, para que muros y auto-escalón se comporten
   idéntico; si un eje no se movió, se anula esa componente. `τ` = los segundos del propio bloque mientras lo
-  pisas, y `game.bloques.roce(0.08)` **una vez fuera** (sales patinando, no flotando). En el aire **no toca
+  pisas, y `game.bloques.roce(0.08)` **una vez fuera** (sales patinando, no flotando). **Con una tecla de
+  rumbo pulsada no se conduce nada**: `app.js` ya movió al jugador ese frame, así que empujar además lo
+  movería **dos veces** — se notaba como un acelerón (×1,56 medido) al salir de una pista rápida con W
+  puesta. Patinar es lo que pasa **cuando sueltas**, no un extra que se suma a andar. En el aire **no toca
   nada**: `app.js` ya conserva la inercia horizontal él solo, solo sigue el vector para retomar el derrape al
   aterrizar. La marcha llevada solo se **crea** encima del bloque y se apaga por debajo de 0,05 u/s, así que
   andar normal queda exactamente igual (medido: tras soltar ASWD, 0,773 de los 0,833 de un tramo a marcha
