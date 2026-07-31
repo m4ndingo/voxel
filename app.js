@@ -2846,7 +2846,10 @@ async function snipLoad(id){
   try{ d=await fetch('/api/snippets/'+id,{cache:'no-store'}).then(r=>r.json()); }catch(e){}
   if(!d || d.error){ toast('No se pudo abrir el snippet'); return; }
   snipCur=d.id; $('#snip-name').value=d.name||''; $('#snip-code').value=d.code||'';
-  $('#snip-del').hidden=false; renderSnipList();
+  // Los protegidos (el Mundo los ejecuta al entrar) se editan y se guardan, pero no se borran: se
+  // esconde el botón para no ofrecer algo que el servidor va a rechazar. La lista trae el flag.
+  const meta=snips.find(s=>s.id===d.id);
+  $('#snip-del').hidden=!!(meta && meta.protegido); renderSnipList();
 }
 function snipNew(){
   snipCur=null; $('#snip-name').value=''; $('#snip-code').value=SNIP_TEMPLATE;
@@ -2863,7 +2866,15 @@ async function snipSave(){
 async function snipDelete(){
   if(!snipCur){ snipNew(); return; }
   if(!confirm('¿Borrar este snippet? (va a la papelera del servidor)')) return;
-  try{ await fetch('/api/snippets/'+snipCur,{method:'DELETE'}); }catch(e){}
+  let r=null;
+  try{ r=await fetch('/api/snippets/'+snipCur,{method:'DELETE'}); }catch(e){}
+  // Antes se decía «borrado» pasara lo que pasara: no se miraba la respuesta. Con snippets protegidos
+  // (el Mundo ejecuta 'mundo-autoarranque' al entrar) eso anunciaría como hecho un borrado rechazado.
+  if(!r || !r.ok){
+    let msg='No se pudo borrar';
+    if(r){ try{ const d=await r.json(); if(d && d.error) msg=d.error; }catch(e){} }
+    toast(msg); return;
+  }
   toast('Snippet borrado'); snipCur=null; await snipReload();
   if(snips.length) snipLoad(snips[0].id); else snipNew();
 }

@@ -12,6 +12,11 @@ MAPFILE = os.path.join(BASE, 'data', 'mapa.json')         # mapa del mundo (reji
 WORLDFILE = os.path.join(BASE, 'data', 'mundo.json')       # mundo sandbox 3D (REQ-MC) — fichero único "sagrado" (mapa «default»)
 WORLDS = os.path.join(BASE, 'data', 'worlds')             # mundos con nombre: /map/<nombre> -> data/worlds/<slug>.json (persistentes)
 SNIPS = os.path.join(BASE, 'data', 'snippets')             # gestor de snippets de código (data/snippets/<id>.json)
+# Snippets que NO se pueden borrar desde la UI. 'mundo-autoarranque' lo busca app.js POR ESE ID al
+# entrar al Mundo (openWorld), así que borrarlo no rompe nada visible al momento: simplemente el
+# Mundo deja de tener bloques con comportamiento y no hay ningún error que lo delate. Editarlo y
+# guardarlo sí se puede (POST respalda la versión anterior); lo que se bloquea es el DELETE.
+SNIPS_PROTEGIDOS = {'mundo-autoarranque'}
 os.makedirs(STORE, exist_ok=True)
 os.makedirs(TRASH, exist_ok=True)
 os.makedirs(WORLDS, exist_ok=True)
@@ -40,15 +45,29 @@ def now_iso():
 
 MAX_TRASH_FILES = 30
 
+# El tope es POR FICHERO DE ORIGEN, no global, y esa es toda la diferencia entre tener papelera y
+# creer que la tienes: el autoguardado del Mundo mete un respaldo de ~5 MB de mundo.json en CADA
+# guardado, así que con un tope global de 30 los respaldos del mundo desalojaban todo lo demás. Medido
+# antes de este cambio: 30 ficheros, 26 de ellos mundo.json, y la papelera entera cubría 19,7 minutos
+# — o sea que un snippet borrado se perdía de verdad al cabo de un rato de jugar. Agrupar por nombre
+# de origen no aumenta el disco de forma apreciable (los que pesan son los mundos, y esos siguen
+# limitados a 30); solo impide que lo voluminoso y frecuente se coma a lo pequeño e irrepetible.
 def clean_trash():
     try:
-        files = [os.path.join(TRASH, f) for f in os.listdir(TRASH) if os.path.isfile(os.path.join(TRASH, f))]
-        if len(files) <= MAX_TRASH_FILES:
-            return
-        files.sort(key=lambda x: os.path.getmtime(x))
-        for f in files[:-MAX_TRASH_FILES]:
-            try: os.remove(f)
-            except OSError: pass
+        grupos = {}
+        for f in os.listdir(TRASH):
+            fp = os.path.join(TRASH, f)
+            if not os.path.isfile(fp):
+                continue
+            origen = f.split('__', 1)[1] if '__' in f else f     # '<ms>__mundo.json' -> 'mundo.json'
+            grupos.setdefault(origen, []).append(fp)
+        for origen, files in grupos.items():
+            if len(files) <= MAX_TRASH_FILES:
+                continue
+            files.sort(key=lambda x: os.path.getmtime(x))
+            for f in files[:-MAX_TRASH_FILES]:
+                try: os.remove(f)
+                except OSError: pass
     except Exception as e:
         sys.stderr.write(f"[TRASH CLEAN] Error: {e}\n")
 
@@ -100,7 +119,8 @@ def list_snips():
             continue
         out.append({'id': fn[:-5], 'name': d.get('name', '(sin nombre)'),
                     'lines': (d.get('code', '') or '').count('\n') + 1,
-                    'savedAt': d.get('savedAt', '')})
+                    'savedAt': d.get('savedAt', ''),
+                    'protegido': fn[:-5] in SNIPS_PROTEGIDOS})    # la UI esconde el botón; el DELETE lo corta el servidor
     out.sort(key=lambda s: s.get('savedAt', ''), reverse=True)   # más recientes primero
     return out
 
@@ -375,6 +395,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_DELETE(self):
         sid = self._snip_id()
         if sid:
+            if sid in SNIPS_PROTEGIDOS:
+                return self._send(409, {'error': f'«{sid}» está protegido: el Mundo lo ejecuta al entrar. '
+                                                 'Se puede editar y guardar, pero no borrar.'})
             if os.path.exists(self._snip_path(sid)):
                 to_trash(self._snip_path(sid)); return self._send(200, {'ok': True})   # a papelera, no borrado real
             return self._send(404, {'error': 'no existe'})
