@@ -307,10 +307,12 @@ game.bloques.define('hab:muelle',   { impulso:12 });        // trampolín: u/s v
 game.bloques.define('hab:muelle',   { altura:4 });          // lo mismo, dicho en bloques de altura
 game.bloques.define('arena',        { impulso:12 });        // vale el nombre CORTO si no es ambiguo
 game.bloques.define('hab:hielo',    { velocidad:2 });       // ×2 la marcha MIENTRAS se pisa (0.5 = barro)
+game.bloques.define('hab:hielo',    { deslizamiento:1.2 }); // hielo de Minecraft: al soltar ASWD sigues rodando
 game.bloques.info();      // clave EXACTA de lo que piso / tengo delante / detrás  ← el descubridor
 game.bloques.lista(); game.bloques.quitar('hab:muelle'); game.bloques.avisos();
 game.bloques.pasoSuave(0.06);   // segundos que tarda el ojo en subir un escalón; 0 = como antes
 game.bloques.inercia(0.7);      // segundos que tarda la marcha en bajar al salir de un bloque rápido
+game.bloques.roce(0.08);        // lo que se sigue patinando UNA VEZ FUERA del bloque deslizante
 ```
 
 Todo vive en el snippet **`data/snippets/mundo-autoarranque.json`** (el JSON *es* la fuente; se edita
@@ -387,6 +389,21 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   vive en el material, `velocidad:0` **no existe** — se dice `quitar(clave)`; tratar el 0 como «sin
   valor» es lo que mantiene `define` idempotente cuando el snippet se reejecuta y hereda la tabla ya
   normalizada.
+- **`deslizamiento` es lo otro: patinar al SOLTAR las teclas** (el hielo de Minecraft), y es *ortogonal* a
+  `velocidad`/`inercia` — aquéllas cambian cuánto corres, ésta qué pasa cuando dejas de pilotar. **No se
+  puede hacer dejando puesta `mc.vel`**, y ahí está el motivo de que sea la única parte de la librería que
+  mueve al jugador a mano: en el suelo `app.js:5094` **reescribe `vel[0]/vel[2]` cada frame** desde las
+  teclas y sin teclas los pone a **0 antes de mover**, así que cualquier velocidad que dejemos puesta se
+  borra al frame siguiente sin haber avanzado nada. Por eso `deslizar(dt)` corre **después** del `mcUpdate`
+  original: guarda la marcha llevada en `mc._deslizVel`, la decae con `exp(-dt/τ)` (igual a 30 que a 120 fps)
+  y avanza con el **mismo `mcMoveAxis`** que usa `app.js`, para que muros y auto-escalón se comporten
+  idéntico; si un eje no se movió, se anula esa componente. `τ` = los segundos del propio bloque mientras lo
+  pisas, y `game.bloques.roce(0.08)` **una vez fuera** (sales patinando, no flotando). En el aire **no toca
+  nada**: `app.js` ya conserva la inercia horizontal él solo, solo sigue el vector para retomar el derrape al
+  aterrizar. La marcha llevada solo se **crea** encima del bloque y se apaga por debajo de 0,05 u/s, así que
+  andar normal queda exactamente igual (medido: tras soltar ASWD, 0,773 de los 0,833 de un tramo a marcha
+  entera con `deslizamiento:1.2`; **0,000** sin él). Colgado de una escalera no se patina. `mc._deslizVel`
+  vive en `mc` — mismo cuidado que `_velInercia`: **reponerlo a `null` entre pasadas de un test**.
 - **`pasoSuave` sube el ojo, no el cuerpo.** `app.js` sube los escalones **de golpe** dentro de un
   frame (`mcMoveAxis`: `p[1] += h`, hasta `MC_STEP=0.6`), y en una escalera de peldaños de 8 voxels
   eso se ve como saltos de y+0,5. Se tapa como en Minecraft: **la física no se toca** (misma colisión,
