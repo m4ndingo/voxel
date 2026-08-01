@@ -1744,7 +1744,283 @@ async function seccionPivotes() {
   }
 }
 
-seccionPivotes().then(() => {
+// ── 15. Pivote AUTOMATICO y giros propios de cada pivote ────────────────────────────────────────
+// PEDIDO POR EL DUENO: «en funcion de donde se pegue la estructura se activa ese pivote», y ademas
+// «el pivote 1 puede funcionar de una manera en cuanto giro y limites y el 2 de otra».
+// Lo que prueba que esto sirve no es que se elija UN pivote, sino que dos piezas del MISMO material
+// elijan pivotes DISTINTOS: contra que esta pegada cada una no lo dice el material, es cosa de la
+// instancia (el brazo del dueno tiene sus dos pivotes en caras opuestas justo por eso). Y hay tres
+// trampas que no se ven desde el codigo:
+//   · la normal con la que se estampo NO se guarda, asi que el contacto hay que deducirlo del mundo;
+//   · un panel de 1/16 pegado a ras es contacto: se sondea medio voxel fino MAS ALLA del plano de
+//     la cara, no el centro de la celda vecina, que para un panel fino cae en aire;
+//   · `rot` lleva VUELCO ademas de giro (bits 2-3), asi que el «abajo» del dibujo puede acabar
+//     tocando de lado; mirar solo rot&3 elige el pivote equivocado.
+async function seccionPivoteAuto() {
+  const BRAZO = 'asset:assets/brazo.vox.json';
+  const CFG = { ejes: 'xy', suavidad: 0, alcance: 50, frente: { x: -90 },
+                limites: { y: [-180, 180], x: [0, 180] } };
+  const AUTO = (extra) => Object.assign({ pivote: 'auto' }, CFG, extra || {});
+  // Mismo brazo de 1x2x1 bloques que §14, con un pivote en cada cara que interesa. Los numeros son
+  // los que el editor pinta al lado: 1 = +X, 2 = -X, 3 = abajo.
+  const dibujo = (pivotes) => {
+    const v = {};
+    v['0,0,0'] = '#fff';
+    v['15,15,31'] = '#fff';
+    return { voxels: v, pivotes: pivotes };
+  };
+  const P_MASX = [15, 8, 16], P_MENX = [0, 8, 16], P_ABAJO = [8, 8, 0];
+  const OBJ_MENX = [0.5 / 16, 16.5 / 16, 8.5 / 16];
+  let doc = dibujo([P_MASX, P_MENX]);
+  global.getRoomData = (clave) => Promise.resolve(clave === BRAZO ? doc : { voxels: {} });
+  const avisos = [];
+  const esperar = () => new Promise(r => setImmediate(r));
+  const cerca = (a, b) => !!a && !!b && a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
+  // El dibujo llega por red: los pivotes (y con ellos la config de cada uno) no existen hasta que
+  // se resuelve la promesa, asi que hay que esperar DESPUES del define, igual que en §14.
+  const definir = async (w, mirar) => {
+    const cw = console.warn, cl = console.log;
+    console.warn = (...a) => avisos.push(a.join(' '));
+    console.log = () => {};
+    try {
+      const n = w.game.bloques.define(BRAZO, { mirar: mirar });
+      await esperar();
+      return n;
+    } finally { console.warn = cw; console.log = cl; }
+  };
+  // Un mundo limpio (solo el suelo, en y=4) donde ir poniendo piezas y sus vecinos a mano.
+  const mundo = () => {
+    const w = montar({ sinEscalera: true, sinPlaca: true });
+    const idx = global.mcIdx;
+    w.roca = (x, y, z) => { w.mc.grid[idx(x, y, z)] = ID_ROCA; };
+    w.quitar = (x, y, z) => { w.mc.grid[idx(x, y, z)] = 0; };
+    // La huella YA girada, como mcOriDims (app.js:4181): con vuelco impar, altura y profundidad
+    // se cambian el sitio. El aabb va de esquina a esquina, igual que en §14.
+    w.pieza = (ox, oy, oz, rot) => {
+      const d = ((rot >> 2) & 1) ? [1, 1, 2] : [1, 2, 1];
+      const s = { key: BRAZO, ox: ox, oy: oy, oz: oz, rot: rot || 0,
+                  aabb: [ox, oy, oz, ox + d[0], oy + d[1], oz + d[2]] };
+      w.mc.structures.push(s);
+      return s;
+    };
+    return w;
+  };
+  const mirando = (w) => { w.mc.pos[0] = 24; w.mc.pos[1] = 11; w.mc.pos[2] = 8.5; w.frames(1); };
+
+  console.log('\nLa cara por la que se pega elige el pivote, instancia a instancia');
+  {
+    doc = dibujo([P_MASX, P_MENX]);
+    const w = mundo();
+    w.roca(12, 10, 6); w.roca(12, 11, 6);                 // el «cuerpo» al que se pegan los brazos
+    const izq = w.pieza(11, 10, 6), der = w.pieza(13, 10, 6);
+    const n = await definir(w, AUTO());
+    mirando(w);
+    t('dos piezas iguales pegadas por caras opuestas cogen pivotes distintos',
+      izq._pivAuto === 1 && der._pivAuto === 2, 'izq nº' + izq._pivAuto + ' · der nº' + der._pivAuto);
+    t('...y el punto que se usa es el de ESA cara',
+      cerca(n.mirar.porPivote[der._pivAuto].piv, OBJ_MENX),
+      JSON.stringify(n.mirar.porPivote[der._pivAuto].piv));
+  }
+
+  console.log('\nY manda en la POSE, no solo en la etiqueta');
+  {
+    // Lo unico que prueba que la eleccion sirve para algo: la matriz. Con el pivote automatico
+    // tiene que salir exactamente la misma que escribiendo a mano el nº de la cara pegada.
+    doc = dibujo([P_MASX, P_MENX]);
+    const pose = async (mirar) => {
+      const w = mundo();
+      w.roca(12, 10, 6); w.roca(12, 11, 6);
+      const s = w.pieza(13, 10, 6);
+      await definir(w, mirar);
+      mirando(w);
+      return s.model && Array.from(s.model);
+    };
+    const auto = await pose(AUTO()), dos = await pose(Object.assign({ pivote: 2 }, CFG));
+    const uno = await pose(Object.assign({ pivote: 1 }, CFG));
+    t('la pose con pivote automático es la del nº2, el de la cara pegada',
+      !!auto && !!dos && auto.every((v, i) => Math.abs(v - dos[i]) < 1e-9),
+      JSON.stringify(auto) + ' vs ' + JSON.stringify(dos));
+    t('...y NO la del nº1, el de la cara que queda al aire',
+      !!uno && !!auto && auto.some((v, i) => Math.abs(v - uno[i]) > 1e-6));
+  }
+
+  console.log('\nNo tocar nada, o tocar por donde no hay pivote, no es un error');
+  {
+    doc = dibujo([P_MASX, P_MENX]);
+    const w = mundo();
+    const suelta = w.pieza(4, 12, 4);                     // en el aire, sin nada alrededor
+    w.roca(8, 10, 5); w.roca(8, 11, 5);
+    const deCanto = w.pieza(8, 10, 6);                    // pegada por -Z, y ahi no hay pivote dibujado
+    await definir(w, AUTO());
+    mirando(w);
+    t('una pieza que no toca nada cae al nº1 (lo mismo que no poner pivote)',
+      suelta._pivAuto === 1 && suelta._pivCara === -1,
+      'nº' + suelta._pivAuto + ' · cara ' + suelta._pivCara);
+    t('...y tocar por una cara SIN pivote dibujado tampoco cuenta',
+      deCanto._pivAuto === 1 && deCanto._pivCara === -1,
+      'nº' + deCanto._pivAuto + ' · cara ' + deCanto._pivCara);
+  }
+
+  console.log('\nCon varios contactos gana la cara con más superficie pegada');
+  {
+    doc = dibujo([P_MASX, P_MENX, P_ABAJO]);
+    const w = mundo();
+    w.roca(21, 10, 6);                                    // media cara por +X
+    w.roca(19, 10, 6); w.roca(19, 11, 6);                 // la cara entera por -X
+    const s = w.pieza(20, 10, 6);
+    // Empate a una celda: por -X (la cara tiene dos) y por abajo (que tiene una y esta entera).
+    w.roca(15, 10, 6); w.roca(16, 9, 6);
+    const e = w.pieza(16, 10, 6);
+    await definir(w, AUTO());
+    mirando(w);
+    t('media cara pegada pierde contra una cara entera', s._pivAuto === 2 && s._pivCara === 0,
+      'nº' + s._pivAuto + ' · cara ' + s._pivCara);
+    t('a igual superficie manda el suelo sobre los lados', e._pivAuto === 3 && e._pivCara === 2,
+      'nº' + e._pivAuto + ' · cara ' + e._pivCara);
+  }
+
+  console.log('\nLa cara es la del MUNDO, con el giro Y el vuelco ya aplicados');
+  {
+    doc = dibujo([P_MASX, P_MENX, P_ABAJO]);
+    const w = mundo();
+    w.roca(9, 10, 6); w.roca(9, 11, 6);
+    const derecha = w.pieza(10, 10, 6, 0);                // sin girar: su -X es el -X del mundo
+    w.roca(9, 14, 6); w.roca(9, 15, 6);
+    const alReves = w.pieza(10, 14, 6, 2);                // media vuelta: por ahi asoma su +X
+    w.roca(6, 12, 7);
+    const tumbada = w.pieza(6, 12, 8, 4);                 // vuelco de un cuarto: su «abajo» mira al -Z
+    await definir(w, AUTO());
+    mirando(w);
+    t('media vuelta (rot 2) cambia qué cara del dibujo está pegada',
+      derecha._pivAuto === 2 && alReves._pivAuto === 1,
+      'derecha nº' + derecha._pivAuto + ' · al revés nº' + alReves._pivAuto);
+    t('con vuelco (rot 4) el «abajo» del dibujo toca DE LADO y aun así es el pivote de abajo',
+      tumbada._pivAuto === 3 && tumbada._pivCara === 4,
+      'nº' + tumbada._pivAuto + ' · cara ' + tumbada._pivCara);
+  }
+
+  console.log('\nCada pivote con sus propios giros y límites');
+  {
+    doc = dibujo([P_MASX, P_MENX]);
+    const w = mundo();
+    w.roca(12, 10, 6); w.roca(12, 11, 6);
+    const izq = w.pieza(11, 10, 6), der = w.pieza(13, 10, 6);
+    // El hombro nº1 con el cono cerrado y el nº2 con el de siempre: mismo material, misma config,
+    // y aun asi una pieza sigue al jugador y la otra se queda en su sitio.
+    const n = await definir(w, AUTO({ pivotes: { 1: { limites: { y: [-5, 5] } } } }));
+    mirando(w);
+    t('el pivote nº1 se rinde por SU cono y el nº2 sigue mirando, con el mismo material',
+      izq._mirarPor === 2 && der._mirarPor === 0,
+      'izq por ' + izq._mirarPor + ' · der por ' + der._mirarPor);
+    t('...y lo común (alcance, objetivo) no hay que repetirlo en cada bloque',
+      n.mirar.vars[1].alcance === 50 && n.mirar.vars[1].objetivo === 'jugador');
+    t('...y el bloque solo pisa lo suyo: la base se queda con su cono',
+      n.mirar.vars[1].limY[1] === 5 && n.mirar.limY[1] === 180,
+      n.mirar.vars[1].limY + ' vs ' + n.mirar.limY);
+  }
+
+  console.log('\nLos avisos dicen qué falta y dónde se pone');
+  {
+    doc = dibujo([P_MASX, P_MENX]);
+    const w = mundo(); w.pieza(11, 10, 6);
+    const antes = avisos.length;
+    await definir(w, AUTO({ pivotes: { 3: { alcance: 4 } } }));
+    const dicho = avisos.slice(antes).join(' ');
+    t('un bloque para un pivote que el dibujo no trae avisa y dice con qué herramienta ponerlo',
+      /nº3/.test(dicho) && /📍/.test(dicho), dicho);
+
+    doc = dibujo([]);
+    const w2 = mundo(); w2.pieza(11, 10, 6);
+    const antes2 = avisos.length;
+    await definir(w2, AUTO());
+    t('pivote:"auto" sin ningún pivote dibujado avisa (y no rompe: gira sobre su centro)',
+      /no tiene ningun pivote dibujado/.test(avisos.slice(antes2).join(' ')),
+      avisos.slice(antes2).join(' '));
+
+    const w3 = mundo(); w3.pieza(11, 10, 6);              // si no hay ninguna, la clave no existe aun
+    const r = w3.sinRuido(() => w3.game.bloques.define(BRAZO, { mirar: Object.assign({ pivotes: [{}, {}] }, CFG) }));
+    t('pivotes como lista se rechaza: se indexa por el NÚMERO que pinta el editor',
+      r === null && /NUMERO del pivote|objeto \{ 1:/.test(w3.avisosConsola.join(' ')),
+      w3.avisosConsola.slice(-1)[0]);
+  }
+
+  console.log('\nSi el mundo cambia, repivotar() vuelve a mirar contra qué está pegada cada pieza');
+  {
+    doc = dibujo([P_MASX, P_MENX]);
+    const w = mundo();
+    w.roca(12, 10, 6); w.roca(12, 11, 6);
+    const s = w.pieza(11, 10, 6);
+    await definir(w, AUTO());
+    mirando(w);
+    const antes = s._pivAuto;
+    w.quitar(12, 10, 6); w.quitar(12, 11, 6);
+    w.roca(10, 10, 6); w.roca(10, 11, 6);                 // ahora el cuerpo está al otro lado
+    w.frames(1);
+    t('el contacto se resuelve UNA vez: mover el mundo no lo recalcula por frame',
+      s._pivAuto === antes, 'sigue en el nº' + s._pivAuto);
+    w.sinRuido(() => w.game.bloques.repivotar());
+    w.frames(1);
+    t('...y repivotar() la pone al día', antes === 1 && s._pivAuto === 2,
+      'antes nº' + antes + ' · ahora nº' + s._pivAuto);
+  }
+
+  {
+    // Lo que salio en el Mundo de verdad y no en el de juguete: el brazo del dueno estaba definido
+    // con `pivote:1`, y al redefinirlo con 'auto' desde la consola no se movia ni una pieza — el
+    // numero elegido vive cacheado en la instancia y nadie lo borraba. Parecia que 'auto' no existia.
+    doc = dibujo([P_MASX, P_MENX]);
+    const w = mundo();
+    w.roca(12, 10, 6); w.roca(12, 11, 6);
+    const s = w.pieza(13, 10, 6);
+    await definir(w, Object.assign({ pivote: 1 }, CFG));
+    mirando(w);
+    const conUno = s._pivAuto;
+    await definir(w, AUTO());
+    w.frames(1);
+    t('redefinir el material vuelve a elegir pivote sin tener que llamar a repivotar()',
+      conUno === 1 && s._pivAuto === 2, 'con pivote:1 era nº' + conUno + ' · con auto nº' + s._pivAuto);
+  }
+
+  console.log('\nRayos-X dice cuál le ha tocado a cada pieza y por qué cara');
+  {
+    // Dos piezas del mismo material girando distinto parecen un error hasta que la etiqueta dice
+    // por que: sin esto, la funcion pedida se lee como un fallo.
+    doc = dibujo([P_MASX, P_MENX]);
+    const w = mundo();
+    w.roca(12, 10, 6); w.roca(12, 11, 6);
+    const der = w.pieza(13, 10, 6);
+    const suelta = w.pieza(4, 12, 4);
+    await definir(w, AUTO());
+    mirando(w);
+    t('la etiqueta de la pieza pegada nombra el pivote y la cara',
+      /pivote nº2 \(pegada por -X\)/.test(global.mcXrayExtra(BRAZO, der)), global.mcXrayExtra(BRAZO, der));
+    t('...y la que no toca nada lo dice, en vez de fingir que eligió',
+      /no toca nada/.test(global.mcXrayExtra(BRAZO, suelta)), global.mcXrayExtra(BRAZO, suelta));
+    t('lista() avisa de que ese material lleva el pivote automático',
+      /pivote automático/.test(JSON.stringify(w.sinRuido(() => w.game.bloques.lista()))));
+  }
+
+  console.log('\nReejecutar el snippet no pierde lo escrito a mano');
+  {
+    doc = dibujo([P_MASX, P_MENX]);
+    const w = mundo();
+    w.roca(12, 10, 6); w.roca(12, 11, 6);
+    w.pieza(13, 10, 6);
+    const n = await definir(w, AUTO({ sentido: { x: -1 }, pivotes: { 2: { limites: { y: [-5, 5] } } } }));
+    // Esto es literalmente lo que hace el bloque `heredado` del final del snippet: re-definir con el
+    // cfg YA NORMALIZADO. Si la normalizacion no sabe leerse a si misma, lo definido en la consola
+    // se degrada solo al reejecutar y la pieza cambia de postura sin que nadie haya tocado nada.
+    const m = w.sinRuido(() => w.game.bloques.define(BRAZO, n)).mirar;
+    t('el pivote automático sobrevive a la reejecución', m.pivAuto === true);
+    t('...y los giros propios de cada pivote también', !!m.vars && m.vars[2].limY[1] === 5,
+      JSON.stringify(m.vars && m.vars[2] && m.vars[2].limY));
+    t('...y el frente VERTICAL, que es lo que hace apuntar a un brazo en vez de solo inclinarse',
+      m.frenteX === -90, String(m.frenteX));
+    t('...y el sentido invertido', m.senX === -1, String(m.senX));
+  }
+}
+
+seccionPivotes().then(seccionPivoteAuto).then(() => {
   console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');
   process.exit(fail ? 1 : 0);
 }, (e) => { console.log('\nla sección de pivotes se rompió: ' + (e && e.stack || e)); process.exit(1); });

@@ -502,9 +502,10 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     arriba es seguir mirándote, y si contara, pegar un salto apagaría la cabeza entera de golpe.
   - **El pivote elige por dónde se engancha.** Sin él se gira sobre el centro de la caja, que en una
     pieza de dos bloques cae en el **codo** y no en el **hombro** — así lo reportó el dueño con
-    `brazo.vox.json`. Se dice de dos maneras, y **el literal gana** por ser lo más concreto:
+    `brazo.vox.json`. Se dice de tres maneras, y **el literal gana** por ser lo más concreto:
     - **`pivote: 2`** = el nº2 de los **DIBUJADOS con la herramienta 📍** del editor (ver abajo). Sin
       poner nada se usa **el primero que haya dibujado**, así que lo normal es no escribir la línea.
+    - **`pivote: 'auto'`** = el de la cara por la que **esa instancia** está pegada a algo (abajo).
     - **`pivote: [x,y,z]`** a mano, en **coordenadas del objeto** (bloques desde su esquina; 1 bloque
       = 16 voxels del dibujo).
     - Va en coordenadas del objeto y **no** del mundo porque la tabla es por MATERIAL: hay que
@@ -520,6 +521,42 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     - ⚠️ **Con `ejes:'y'` la altura del pivote no se nota.** El giro es sobre la vertical **del
       pivote**, y todo punto de esa vertical queda fijo: subir el enganche de un brazo que cuelga no
       mueve ni un voxel. El pivote alto solo se ve cuando hay **cabeceo** (`ejes:'xy'`).
+  - **`pivote: 'auto'` — manda la cara por la que la pieza está PEGADA.** La tabla es por MATERIAL,
+    pero contra qué está pegada cada pieza es cosa de la **instancia**: el `brazo.vox.json` del dueño
+    lleva sus dos pivotes en **caras opuestas** (x=15 y x=0) justo porque el mismo brazo se estampa a
+    un lado o al otro del cuerpo y tiene que colgar del hombro **que toca**. Con `'auto'` se mira
+    contra qué está pegada cada una y se coge el pivote de esa cara; **si no toca nada por una cara
+    con pivote, cae al nº1** (o sea, lo mismo que no poner nada). Reglas y por qué:
+    - Un pivote **pertenece a la cara más cercana** del bbox del dibujo (sin umbral: siempre hay
+      respuesta, y para uno dibujado en el borde la distancia es 0). Varios en la misma cara: manda
+      el de **menor número**.
+    - Con **varios contactos gana el de más superficie pegada**; a igual superficie, **abajo → lados
+      → arriba** (`PRIO_CARA`). Una cara pegada **sin pivote dibujado no cuenta**.
+    - **La normal con la que se estampó NO se guarda**, así que el contacto se deduce del mundo:
+      se sondea **medio voxel fino más allá del plano** de cada cara, no el centro de la celda
+      vecina — un panel de 1/16 pegado a ras ocupa 1/16 de su celda y desde el centro no se ve. Va
+      por `materialEn`, o sea que también detecta **estructuras finas** (pegarse al cuerpo de un NPC).
+    - ⚠️ **`rot` no son solo cuartos de vuelta**: `(rot>>2)&3` es el **vuelco**, y con él el «abajo»
+      del dibujo puede acabar tocando **de lado**. La cara objeto→mundo se convierte por el mismo
+      camino que `mcStructGeom` (vuelco y luego giro); mirar solo `rot&3` elige el pivote equivocado.
+    - **Se resuelve UNA vez por instancia** y se cachea **en la instancia** (nunca en una lista
+      aparte: `mcRestampAll`, ver abajo). Si cambia el **mundo** (rompes el suelo bajo una pieza),
+      `game.bloques.repivotar()` lo vuelve a abrir; si cambia la **config**, `define()` ya lo olvida
+      solo — sin eso, redefinir el brazo con `'auto'` en la consola no movía ni una pieza y parecía
+      que la opción no existía (salió en el Mundo de verdad, no en el de juguete).
+    - Rayos-X lo dice por instancia: `· pivote nº2 (pegada por -X)` o `(por defecto: no toca nada)`.
+      Sin eso, dos piezas del mismo material girando distinto se leen como un fallo.
+  - **`pivotes: { 1:{…}, 2:{…} }` — giros y límites propios de CADA pivote.** Lo de fuera es la base
+    y cada bloque la pisa, así que lo común (`objetivo`, `alcance`…) se escribe **una sola vez**.
+    Cada variante se normaliza con la misma función, o sea que valen todas las claves y todos los
+    avisos. Es lo que permite que el hombro nº1 tenga un cono cerrado y el nº2 uno abierto **sin
+    duplicar el material**. Pedir un bloque para un pivote que el dibujo no trae avisa y dice con qué
+    herramienta ponerlo.
+    - ⚠️ Reejecutar el snippet **re-define cada material desde la tabla YA NORMALIZADA** (el bloque
+      `heredado` del final), así que `normalizarMirar` tiene que **saber leerse a sí misma**: además
+      de `pivote`/`limites` ya lo hacen `vars` (los bloques por pivote), `frenteX` y `senX/senY`. Sin
+      eso lo escrito en la consola **se degrada solo** al recargar y la pieza cambia de postura sin
+      que nadie haya tocado nada.
   - **`mirar` apunta la CARA de la pieza (su `-Z`), no su eje largo**, y eso invierte el cabeceo de
     todo lo que apunta con el eje largo. Un brazo que cuelga apunta hacia **`-Y`**: el mismo cabeceo
     que le sube la cara a una cabeza le **aparta la punta** al brazo, así que con el jugador por
