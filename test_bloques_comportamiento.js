@@ -2020,7 +2020,440 @@ async function seccionPivoteAuto() {
   }
 }
 
-seccionPivotes().then(seccionPivoteAuto).then(() => {
+// §16 'seguir': la pieza se DESPLAZA. Es la primera capacidad que mueve una estructura de sitio, y
+// mover una estructura en este motor tiene dos mitades que se pueden desincronizar: lo que se VE (la
+// matriz s.model, que app.js ya respeta al dibujar y al cullear) y lo que se TOCA (el bitset fino,
+// que app.js sondea con base s.ox y no tiene ni idea de la matriz). Casi todo lo de aqui abajo mide
+// que las dos mitades siguen pegadas: que choca donde se la ve y NO donde estaba.
+const GUARDIAN = 'hab:guardian', GUARDIAN2 = 'hab:guardian2';
+function geomCubo() {                                     // 1x1x1 macizo en voxeles finos
+  const fdim = [T, T, T], bits = new Uint8Array(T * T * T).fill(1);
+  return { fdim, bits };
+}
+async function seccionSeguir() {
+  GEOM[GUARDIAN] = geomCubo(); GEOM[GUARDIAN2] = geomCubo();
+
+  // El mundo de juguete de §15 no trae las globales que 'seguir' necesita (mcSolid, mcSurfaceNear,
+  // mcFineBoxHit, mcStructAt): son justo las que el snippet envuelve, asi que aqui se montan con la
+  // MISMA forma que en app.js. Y se montan ANTES de montar(), porque el snippet se ejecuta dentro y
+  // envuelve lo que encuentre. Ojo con mcCollides: el de montar() llama a su copia local de
+  // mcFineBoxHit, que se salta el envoltorio; se sustituye para que la prueba pase por donde de
+  // verdad pasa el jugador.
+  const globales = () => {
+    global.mcSolid = (x, y, z) => y < 0 ? true
+      : (global.mcInside(x, y, z) ? global.mc.grid[global.mcIdx(x, y, z)] !== 0 : false);
+    global.mcSurfaceNear = (x, z, y0, climb, drop) => {    // calco de app.js:7093
+      if (!global.mcInside(x, 0, z)) return -1;
+      const H = DIM.y, maxUp = climb === undefined ? 1 : climb, maxDown = drop === undefined ? 3 : drop;
+      for (let d = 0; d <= Math.max(maxUp, maxDown); d++) {
+        const cand = [];
+        if (d <= maxUp) cand.push(y0 + d);
+        if (d > 0 && d <= maxDown) cand.push(y0 - d);
+        for (const y of cand) {
+          if (y < 0 || y >= H) continue;
+          if (global.mc.grid[global.mcIdx(x, y, z)] && (y + 1 >= H || !global.mc.grid[global.mcIdx(x, y + 1, z)])) return y;
+        }
+      }
+      return -1;
+    };
+    global.mcFineBoxHit = (fx0, fy0, fz0, fx1, fy1, fz1) => {   // calco de app.js:5060
+      for (const s of global.mc.structures) {
+        const g = global.mcStructColl(s); if (!g) continue;     // ← la global, para que el envoltorio cuente
+        const d = g.fdim, bx = s.ox * T, by = s.oy * T, bz = s.oz * T;
+        const x0 = Math.max(fx0 - bx, 0), x1 = Math.min(fx1 - bx, d[0] - 1); if (x0 > x1) continue;
+        const y0 = Math.max(fy0 - by, 0), y1 = Math.min(fy1 - by, d[1] - 1); if (y0 > y1) continue;
+        const z0 = Math.max(fz0 - bz, 0), z1 = Math.min(fz1 - bz, d[2] - 1); if (z0 > z1) continue;
+        for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++)
+          for (let x = x0; x <= x1; x++) if (g.bits[(y * d[2] + z) * d[0] + x]) return true;
+      }
+      return false;
+    };
+    global.mcStructAt = (px, py, pz) => {                       // calco de app.js:5794
+      const fx = Math.floor(px * T), fy = Math.floor(py * T), fz = Math.floor(pz * T);
+      for (const s of global.mc.structures) {
+        const g = global.mcStructColl(s); if (!g) continue;
+        const d = g.fdim, lx = fx - s.ox * T, ly = fy - s.oy * T, lz = fz - s.oz * T;
+        if (lx < 0 || ly < 0 || lz < 0 || lx >= d[0] || ly >= d[1] || lz >= d[2]) continue;
+        if (g.bits[(ly * d[2] + lz) * d[0] + lx]) return s;
+      }
+      return null;
+    };
+  };
+  const colisionDeVerdad = () => {                          // calco de app.js:5090, via la global envuelta
+    global.mcCollides = (px, py, pz) => {
+      const HW = 0.3 * global.mc.scale, PH = 1.8 * global.mc.scale;
+      for (let x = Math.floor(px - HW); x <= Math.floor(px + HW); x++)
+        for (let y = Math.floor(py); y <= Math.floor(py + PH - 1e-4); y++)
+          for (let z = Math.floor(pz - HW); z <= Math.floor(pz + HW); z++)
+            if (global.mcInside(x, y, z) && global.mc.grid[global.mcIdx(x, y, z)]) return true;
+      return global.mcFineBoxHit(Math.floor((px - HW) * T), Math.floor(py * T), Math.floor((pz - HW) * T),
+                                 Math.floor((px + HW) * T), Math.floor((py + PH - 1e-4) * T), Math.floor((pz + HW) * T));
+    };
+  };
+  // Suelo de roca en y=4, o sea que se pisa a partir de y=5. Las piezas son cubos de 1x1x1.
+  const mundo = () => {
+    globales();
+    const w = montar({ sinEscalera: true, sinPlaca: true });
+    colisionDeVerdad();
+    const idx = global.mcIdx;
+    w.roca = (x, y, z) => { w.mc.grid[idx(x, y, z)] = ID_ROCA; };
+    w.quitar = (x, y, z) => { w.mc.grid[idx(x, y, z)] = 0; };
+    w.pieza = (ox, oz, clave) => {
+      const s = { key: clave || GUARDIAN, ox: ox, oy: 5, oz: oz, rot: 0,
+                  aabb: [ox, 5, oz, ox + 1, 6, oz + 1] };
+      w.mc.structures.push(s);
+      return s;
+    };
+    w.jugador = (x, z) => { w.mc.pos[0] = x; w.mc.pos[1] = 5; w.mc.pos[2] = z; };
+    w.def = (clave, cfg) => w.sinRuido(() => w.game.bloques.define(clave, cfg));
+    return w;
+  };
+  const centro = (s) => {
+    const a = s.aabb, g = s._sig || { x: 0, y: 0, z: 0 };
+    return [(a[0] + a[3]) / 2 + g.x, (a[1] + a[4]) / 2 + g.y, (a[2] + a[5]) / 2 + g.z];
+  };
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  // Con ejes:'xz' el motor mide en planta, asi que el test tambien: si midiera en 3D estaria
+  // exigiendo una distancia que depende del alto de la pieza, no la que se le pidio.
+  const planta = (a, b) => Math.hypot(a[0] - b[0], a[2] - b[2]);
+  const alJugador = (s, w) => planta(centro(s), w.mc.pos);
+  const ido = (s) => { const g = s._sig || { x: 0, y: 0, z: 0 }; return Math.hypot(g.x, g.y, g.z); };
+  // Sin suavizado el paso es velocidad*dt limpio: las cuentas del test son las del motor, no una
+  // exponencial que hay que perseguir con margenes.
+  const SIGO = { objetivo: 'jugador', deteccion: 20, distancia: 2.5, velocidad: 12, suavidad: 0, correa: 0 };
+  const cfg = (extra) => Object.assign({}, SIGO, extra || {});
+
+  console.log('\nPersigue al jugador y se para a la distancia que se le pide');
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(16, 10.5);
+    w.def(GUARDIAN, { seguir: cfg() });
+    const antes = alJugador(s, w);
+    w.frames(120);
+    t('la pieza se ha acercado al jugador', alJugador(s, w) < antes - 5,
+      antes.toFixed(2) + ' → ' + alJugador(s, w).toFixed(2));
+    t('...y se para A la distancia pedida, no encima', Math.abs(alJugador(s, w) - 2.5) < 0.05,
+      alJugador(s, w).toFixed(3));
+    const parada = ido(s);
+    w.frames(60);
+    t('...y ahi se queda: llegar no es rebasar y volver', Math.abs(ido(s) - parada) < 1e-6);
+    t('el ancla NO se toca: es lo que se guarda en mundo.json', s.ox === 6 && s.oy === 5 && s.oz === 10,
+      s.ox + ',' + s.oy + ',' + s.oz);
+    t('y el desplazamiento va en la matriz, en la última columna',
+      !!s.model && Math.abs(s.model[12] - s._sig.x) < 1e-6 && Math.abs(s.model[14] - s._sig.z) < 1e-6);
+    // Acercarse mas de la cuenta: la distancia es un SITIO donde estar, no un minimo.
+    w.jugador(centro(s)[0] + 1, 10.5);
+    w.frames(60);
+    t('si te le acercas de más, retrocede hasta su distancia', Math.abs(alJugador(s, w) - 2.5) < 0.15,
+      alJugador(s, w).toFixed(3));
+  }
+
+  console.log('\nLa detección es un radio: fuera no arranca, y al salir se vuelve al ancla');
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(20, 10.5);                                   // a 14 de la pieza, con deteccion 8
+    w.def(GUARDIAN, { seguir: cfg({ deteccion: 8, volver: true }) });
+    w.frames(60);
+    t('fuera del radio de detección no se mueve', ido(s) < 1e-6, ido(s).toFixed(3));
+    t('...y lo dice: "fuera de alcance"', s._sig.por === 1, String(s._sig.por));
+    w.jugador(11, 10.5);                                   // ahora a ~4.5: dentro
+    w.frames(60);
+    t('al entrar en el radio, arranca', ido(s) > 1.5, ido(s).toFixed(2));
+    t('...y lo dice: "persiguiendo"', s._sig.por === 0, String(s._sig.por));
+    w.jugador(23, 10.5);                                   // fuera otra vez
+    w.frames(180);
+    t('al salir del radio se rinde y vuelve al ancla', ido(s) < 1e-6, ido(s).toFixed(3));
+    t('...y en el ancla se QUITA la matriz, para que app.js recupere su camino corto', s.model === null);
+  }
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(20, 10.5);
+    w.def(GUARDIAN, { seguir: cfg({ deteccion: 8, volver: false }) });
+    w.frames(30);
+    w.jugador(11, 10.5); w.frames(60);
+    const donde = ido(s);
+    w.jugador(23, 10.5); w.frames(120);
+    t('con volver:false se queda donde la dejaste', Math.abs(ido(s) - donde) < 1e-6,
+      donde.toFixed(2) + ' → ' + ido(s).toFixed(2));
+  }
+
+  console.log('\nLa correa: no se aleja del ancla más de lo que se le deja');
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(20, 10.5);
+    w.def(GUARDIAN, { seguir: cfg({ deteccion: 0, correa: 3 }) });   // deteccion 0 = siempre
+    w.frames(180);
+    t('la correa pinza el desplazamiento', Math.abs(ido(s) - 3) < 0.05, ido(s).toFixed(3));
+    t('...y lo dice: "con la correa tensa"', s._sig.por === 2, String(s._sig.por));
+    t('deteccion:0 es "siempre", no "nunca"', ido(s) > 2.9);
+  }
+
+  console.log('\nUna pieza puede seguir a OTRA, y dos que se persiguen no cuelgan el frame');
+  {
+    const w = mundo();
+    const b = w.pieza(8, 10, GUARDIAN2);                   // B sigue al jugador
+    const a = w.pieza(4, 10, GUARDIAN);                    // A sigue a B
+    w.jugador(20, 10.5);
+    w.def(GUARDIAN2, { seguir: cfg({ objetivo: 'jugador', distancia: 2.5 }) });
+    w.def(GUARDIAN, { seguir: cfg({ objetivo: GUARDIAN2, distancia: 1.5 }) });
+    w.frames(240);
+    t('la cadena A→B→jugador se resuelve entera', Math.abs(planta(centro(b), w.mc.pos) - 2.5) < 0.2,
+      planta(centro(b), w.mc.pos).toFixed(2));
+    t('...y A se queda a su distancia de B, no de ti', Math.abs(dist(centro(a), centro(b)) - 1.5) < 0.2,
+      dist(centro(a), centro(b)).toFixed(2));
+  }
+  {
+    const w = mundo();
+    const a = w.pieza(4, 10, GUARDIAN), b = w.pieza(14, 10, GUARDIAN2);
+    w.jugador(2, 2);
+    w.def(GUARDIAN, { seguir: cfg({ objetivo: GUARDIAN2, deteccion: 0, distancia: 2 }) });
+    w.def(GUARDIAN2, { seguir: cfg({ objetivo: GUARDIAN, deteccion: 0, distancia: 2 }) });
+    w.frames(300);                                         // si el ciclo colgara, esto no volveria
+    t('A↔B mutuo no cuelga y converge a su distancia', Math.abs(dist(centro(a), centro(b)) - 2) < 0.3,
+      dist(centro(a), centro(b)).toFixed(2));
+    t('...sin dispararse a ningún lado', isFinite(ido(a)) && isFinite(ido(b)) && ido(a) < 12 && ido(b) < 12,
+      ido(a).toFixed(1) + ' / ' + ido(b).toFixed(1));
+    // Una pieza no se persigue a si misma: si lo hiciera, la instancia mas cercana de su propia clave
+    // seria ella y se quedaria intentando ponerse a `distancia` de su propio centro, para siempre.
+    const w2 = mundo();
+    const solo = w2.pieza(6, 10);
+    w2.jugador(2, 2);
+    w2.def(GUARDIAN, { seguir: cfg({ objetivo: GUARDIAN, deteccion: 0 }) });
+    w2.frames(60);
+    t('una pieza sola que persigue a su propia clave se queda quieta', ido(solo) < 1e-6, ido(solo).toFixed(3));
+  }
+
+  console.log('\nCon ejes:"xz" la Y la manda el suelo, no el objetivo');
+  {
+    const w = mundo();
+    for (let x = 10; x < 20; x++) for (let z = 8; z < 13; z++) w.roca(x, 5, z);   // meseta de un bloque
+    const s = w.pieza(6, 10);
+    w.jugador(16, 10.5);
+    w.def(GUARDIAN, { seguir: cfg({ velocidad: 4 }) });
+    w.frames(300);
+    t('sube el escalón de roca en vez de estrellarse contra él', s._sig.y > 0.9 && s._sig.y < 1.1,
+      s._sig.y.toFixed(2));
+    t('...y sigue llegando a su distancia', Math.abs(alJugador(s, w) - 2.5) < 0.2, alJugador(s, w).toFixed(2));
+  }
+  {
+    const w = mundo();
+    for (let x = 9; x < 14; x++) for (let z = 8; z < 13; z++) w.quitar(x, 4, z);  // abismo
+    const s = w.pieza(6, 10);
+    w.jugador(20, 10.5);
+    w.def(GUARDIAN, { seguir: cfg({ velocidad: 4 }) });
+    w.frames(300);
+    // El abismo va de x=9 a x=13. Se asoma (la huella puede volar sobre el vacío mientras le quede
+    // una columna con suelo, como un bloque en un borde) pero no lo cruza: sin pathing no hay puente.
+    t('no se tira por un abismo: se asoma al borde y ahí se queda', centro(s)[0] < 9.6,
+      centro(s)[0].toFixed(2));
+    t('...y no se cae (la Y sigue siendo la del suelo de partida)', Math.abs(s._sig.y) < 1e-6,
+      s._sig.y.toFixed(3));
+    t('...y lo dice: "bloqueada"', s._sig.por === 3, String(s._sig.por));
+  }
+
+  console.log('\nNo atraviesa el terreno: se para y resbala por la pared');
+  {
+    const w = mundo();
+    for (let y = 5; y < 9; y++) for (let z = 0; z < DIM.z; z++) w.roca(10, y, z);  // muro alto en x=10
+    const s = w.pieza(6, 10);
+    w.jugador(16, 10.5);
+    w.def(GUARDIAN, { seguir: cfg({ velocidad: 4 }) });
+    w.frames(240);
+    t('un muro más alto de lo que sube la para', centro(s)[0] < 10, centro(s)[0].toFixed(2));
+    t('...y NO se ha metido dentro del muro', !global.mcSolid(Math.floor(centro(s)[0]), 5, Math.floor(centro(s)[2])));
+  }
+  {
+    // Muro corto: la X esta cerrada pero la Z no. Resbalar es que el eje libre siga avanzando.
+    const w = mundo();
+    for (let y = 5; y < 9; y++) for (let z = 9; z < 12; z++) w.roca(10, y, z);
+    const s = w.pieza(6, 10);
+    w.jugador(16, 4.5);                                    // detras del muro y desplazado en Z
+    w.def(GUARDIAN, { seguir: cfg({ velocidad: 4 }) });
+    w.frames(240);
+    t('con la X cerrada, resbala por la Z en vez de clavarse', centro(s)[2] < 8.5,
+      centro(s)[2].toFixed(2));
+    t('...y acaba rodeando el muro', centro(s)[0] > 10, centro(s)[0].toFixed(2));
+  }
+
+  console.log('\nLo que se ve y lo que se toca: la pieza es sólida DONDE SE LA VE');
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(16, 10.5);
+    w.def(GUARDIAN, { seguir: cfg() });
+    w.frames(120);
+    const c = centro(s), anc = [6.5, 5.5, 10.5];
+    t('la pieza se ha ido del ancla', dist(c, anc) > 3, dist(c, anc).toFixed(2));
+    t('choca donde se la VE', global.mcCollides(c[0], 5, c[2]));
+    t('...y ya NO choca en el ancla, donde no hay nada que ver', !global.mcCollides(anc[0], 5, anc[2]));
+    t('mcStructAt la encuentra en su sitio nuevo (para romperla donde está)',
+      global.mcStructAt(c[0], c[1], c[2]) === s);
+    t('...y no la encuentra en el ancla', global.mcStructAt(anc[0], anc[1], anc[2]) === null);
+    // Y no te embute: la pieza para antes de solapar tu caja, no te expulsa el motor.
+    t('no te ha metido dentro: el jugador no está en colisión',
+      !global.mcCollides(w.mc.pos[0], w.mc.pos[1], w.mc.pos[2]));
+    // Recogerla la devuelve al ancla, y con ella la solidez — en el acto, sin esperar un frame: si
+    // hiciera falta un frame habria un instante en que la pieza no choca ni donde estaba ni donde
+    // esta. (Y despues sigue teniendo su cfg, asi que vuelve a arrancar: recoger no es apagar.)
+    w.sinRuido(() => w.game.bloques.recoger());
+    t('recoger() la devuelve al ancla en el acto', ido(s) < 1e-6);
+    t('...y la solidez vuelve con ella, sin un frame de fantasma',
+      global.mcCollides(anc[0], 5, anc[2]) && !global.mcCollides(c[0], 5, c[2]));
+    w.frames(60);
+    t('...pero no la apaga: con su cfg puesto, vuelve a perseguirte', ido(s) > 3, ido(s).toFixed(2));
+  }
+
+  console.log('\n"seguir" y "mirar" en la misma pieza: gira Y se desplaza');
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(16, 10.5);
+    w.def(GUARDIAN, { seguir: cfg(), mirar: { objetivo: 'jugador', ejes: 'y', suavidad: 0, alcance: 50 } });
+    w.frames(120);
+    const m = s.model;
+    // La composición correcta es girar sobre el pivote y DESPUÉS trasladar. m[12..14] no es el
+    // desplazamiento a secas (matrizGiro ya mete ahí la compensación del pivote), así que lo que se
+    // mide es el efecto: sin pivote propio se gira sobre el centro, o sea que el centro del ancla
+    // pasado por la matriz tiene que caer justo en el centro desplazado. Al revés (trasladar y luego
+    // girar) la pieza orbitaría el pivote en vez de perseguir, y esto lo cazaría.
+    const a = s.aabb, c0 = [(a[0] + a[3]) / 2, (a[1] + a[4]) / 2, (a[2] + a[5]) / 2];
+    const pasado = !m ? null : [0, 1, 2].map(r => m[r] * c0[0] + m[4 + r] * c0[1] + m[8 + r] * c0[2] + m[12 + r]);
+    t('la matriz lleva la pieza a donde dice el desplazamiento', !!pasado
+      && dist(pasado, centro(s)) < 1e-4, pasado ? pasado.map(v => v.toFixed(2)).join(',') : 'sin matriz');
+    t('...y el giro sigue estando (la matriz no es una traslación pura)',
+      !!m && (Math.abs(m[0] - 1) > 1e-3 || Math.abs(m[2]) > 1e-3),
+      m ? m[0].toFixed(3) + '/' + m[2].toFixed(3) : 'sin matriz');
+    t('...y aun así se acerca a su distancia', Math.abs(alJugador(s, w) - 2.5) < 0.2,
+      alJugador(s, w).toFixed(2));
+  }
+
+  console.log('\nReejecutar el snippet no apila envoltorios ni acelera la persecución');
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(20, 10.5);
+    w.def(GUARDIAN, { seguir: cfg({ velocidad: 6 }) });
+    w.frames(1);
+    const paso1 = ido(s);
+    w.recargar();
+    w.def(GUARDIAN, { seguir: cfg({ velocidad: 6 }) });     // el dueño reejecuta y vuelve a definir
+    const antes = ido(s);
+    w.frames(1);
+    t('un frame avanza lo mismo después de reejecutar', Math.abs((ido(s) - antes) - paso1) < 1e-3,
+      paso1.toFixed(4) + ' vs ' + (ido(s) - antes).toFixed(4));
+    t('los envoltorios de colisión no se apilan',
+      global.mcFineBoxHit._orig && !global.mcFineBoxHit._orig._seguir);
+    t('...ni el de mcStructColl', global.mcStructColl._orig && !global.mcStructColl._orig._seguir);
+    t('...ni el de mcStructAt', global.mcStructAt._orig && !global.mcStructAt._orig._seguir);
+    // Y la normalizacion tiene que saber leerse a si misma: el snippet re-define con el cfg YA
+    // normalizado al heredar la tabla, y si eso cambiara los numeros la pieza cambiaria de velocidad
+    // sola en cada recarga (ya paso con senX/senY de 'mirar').
+    w.pieza(2, 2, GUARDIAN2);                              // para que el objetivo por clave resuelva
+    const n1 = w.def(GUARDIAN, { seguir: cfg({ velocidad: 6, objetivo: GUARDIAN2 }) }).seguir;
+    const n2 = w.def(GUARDIAN, { seguir: n1 }).seguir;
+    t('el cfg normalizado se puede volver a normalizar sin cambiar', JSON.stringify(n1) === JSON.stringify(n2),
+      JSON.stringify(n1) + ' vs ' + JSON.stringify(n2));
+  }
+
+  console.log('\nQuitar el comportamiento recoge la pieza: nada de fantasmas permanentes');
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(16, 10.5);
+    w.def(GUARDIAN, { seguir: cfg() });
+    w.frames(120);
+    t('(de partida está desplazada)', ido(s) > 3);
+    w.sinRuido(() => w.game.bloques.quitar(GUARDIAN));
+    w.frames(2);
+    t('al quitar "seguir" la pieza vuelve al ancla', ido(s) < 1e-6 && !s._sig);
+    t('...y vuelve a ser sólida ahí', global.mcCollides(6.5, 5, 10.5));
+    t('...y se le quita la matriz', s.model === null);
+  }
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(16, 10.5);
+    w.def(GUARDIAN, { seguir: cfg() });
+    w.frames(120);
+    w.def(GUARDIAN, { trepable: true });                    // redefinir SIN seguir
+    w.frames(2);
+    t('redefinir sin "seguir" también la recoge', ido(s) < 1e-6 && !s._sig);
+  }
+
+  console.log('\nSustituir las instancias (mcRestampAll) no deja piezas muertas moviéndose');
+  {
+    const w = mundo();
+    const viejo = w.pieza(6, 10);
+    w.jugador(16, 10.5);
+    w.def(GUARDIAN, { seguir: cfg() });
+    w.frames(120);
+    const donde = ido(viejo);
+    // Esto es lo que hace mcRestampAll: la lista se rehace con instancias NUEVAS y las viejas se tiran.
+    w.mc.structures.length = 0;
+    const nuevo = w.pieza(6, 10);
+    w.frames(1);
+    t('la instancia nueva arranca en su ancla, no hereda el desplazamiento', ido(nuevo) < 0.5,
+      ido(nuevo).toFixed(3));
+    t('...y a la vieja, fuera de la lista, ya no la toca nadie', Math.abs(ido(viejo) - donde) < 1e-6);
+  }
+
+  console.log('\nLo que "seguir" NO acepta lo dice, en vez de moverse raro');
+  {
+    const w = mundo();
+    w.pieza(6, 10);
+    // El aviso se recoge y se juzga DESPUÉS de devolver la consola: si t() imprimiera con la consola
+    // amordazada, la sección entera saldría en blanco y parecería que no hay pruebas.
+    const prueba = (cfgMalo) => {
+      const avisos = [];
+      const cw = console.warn, cl = console.log;
+      console.warn = (...a) => avisos.push(a.join(' ')); console.log = () => {};
+      let r;
+      try { r = w.game.bloques.define(cfgMalo.clave || GUARDIAN, cfgMalo.cfg); }
+      finally { console.warn = cw; console.log = cl; }
+      return { r, aviso: avisos.join(' | ') };
+    };
+    let p = prueba({ clave: 'asset:assets/roca.vox.json', cfg: { seguir: { objetivo: 'jugador' } } });
+    t('seguir en un material que no es estructura se rechaza', p.r === null && /ESTRUCTURAS/.test(p.aviso), p.aviso);
+    p = prueba({ cfg: { seguir: { objetivo: 'hab:no-existe' } } });
+    t('un objetivo que no existe se rechaza, y dice cuál', p.r === null && /no-existe/.test(p.aviso), p.aviso);
+    p = prueba({ cfg: { seguir: { ejes: 'x' } } });
+    t('ejes:"x" se rechaza: perseguir en un solo eje no es perseguir', p.r === null && /ejes/.test(p.aviso), p.aviso);
+    p = prueba({ cfg: { seguir: { deteccion: 4, distancia: 6 } } });
+    t('distancia mayor que detección avisa de que así no se movería nunca',
+      /no se movera nunca/.test(p.aviso), p.aviso);
+    p = prueba({ cfg: {} });
+    t('un define vacío sigue avisando de que no hace nada, ahora nombrando seguir',
+      /seguir/.test(p.aviso), p.aviso);
+  }
+
+  console.log('\nEl informe cuenta quién persigue a quién y por qué está parada');
+  {
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    w.jugador(20, 10.5);
+    w.def(GUARDIAN, { seguir: cfg({ deteccion: 0, correa: 3 }) });
+    w.frames(180);
+    const filas = w.sinRuido(() => w.game.bloques.seguidores());
+    t('seguidores() lista la pieza con su ancla y su estado',
+      filas.length === 1 && filas[0].ancla === '6,5,10' && filas[0].estado === 'con la correa tensa',
+      JSON.stringify(filas[0]));
+    t('...y dice que es sólida donde se la ve', filas[0].solida_donde_se_ve === true);
+    const res = w.sinRuido(() => w.game.bloques.lista()).find(f => f.clave === GUARDIAN).comportamiento;
+    t('lista() cuenta a quién persigue y con qué números', /seguir a el jugador/.test(res)
+      && /correa 3/.test(res), res);
+    // La cuarta linea de rayos-X: dos piezas iguales, una pegada al jugador y otra parada a medio
+    // camino, y por que no se adivina mirando la pantalla.
+    const etiqueta = global.mcXrayExtra(GUARDIAN, s);
+    t('la etiqueta de rayos-X dice cuánto se ha ido y por qué está parada',
+      /seguir: a 3 del ancla/.test(etiqueta) && /correa tensa/.test(etiqueta), etiqueta);
+  }
+}
+
+seccionPivotes().then(seccionPivoteAuto).then(seccionSeguir).then(() => {
   console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');
   process.exit(fail ? 1 : 0);
-}, (e) => { console.log('\nla sección de pivotes se rompió: ' + (e && e.stack || e)); process.exit(1); });
+}, (e) => { console.log('\nla sección se rompió: ' + (e && e.stack || e)); process.exit(1); });

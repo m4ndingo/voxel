@@ -342,6 +342,11 @@ game.bloques.lista(); game.bloques.quitar('hab:muelle'); game.bloques.avisos();
 game.bloques.pasoSuave(0.06);   // segundos que tarda el ojo en subir un escalón; 0 = como antes
 game.bloques.inercia(0.7);      // segundos que tarda la marcha en bajar al salir de un bloque rápido
 game.bloques.define('asset:assets/cabeza.vox.json', { mirar:{ ejes:'xy', limites:{y:[-70,70]}, alcance:12 } });
+game.bloques.define('asset:assets/guardian.vox.json', { seguir:{ objetivo:'jugador',   // 'jugador' · [x,y,z] · otra clave
+  deteccion:16, distancia:2.5, velocidad:3, correa:24, volver:true, ejes:'xz', suavidad:0.12 } });   // la pieza te PERSIGUE
+game.bloques.define('hab:cria', { seguir:{ objetivo:'hab:abeja' } });   // ...o persigue a OTRA pieza (la más cercana)
+game.bloques.seguidores();   // quién persigue a quién, cuánto se ha ido del ancla y por qué está parada
+game.bloques.recoger();      // todas a su ancla (botón de pánico); no les quita el cfg, siguen persiguiendo
 game.bloques.mirones();      // qué piezas están girando ahora y cuánto
 // tecla X (rayos-X): cada etiqueta lleva una cuarta línea con su comportamiento y sus giros X/Y/Z
 game.bloques.roce(0.08);        // lo que se sigue patinando UNA VEZ FUERA del bloque deslizante
@@ -615,6 +620,64 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     cargar, solo si reejecuto el snippet». Se recorre `mc.structures` entera cada frame, que al lado
     de lo que ya hay sale gratis: `mcRender` la recorre **cuatro veces por frame** solo para cullear.
 - Solo afecta al **jugador**; los agentes siguen con su `climb`/`drop`.
+
+### `seguir` — la pieza se mueve de sitio (v1.18)
+
+Es la primera capacidad que **desplaza** una estructura. Mover una estructura en este motor tiene dos
+mitades que se pueden desincronizar, y casi todo el diseño va de mantenerlas pegadas:
+
+| | dónde vive | ¿sabe de `s.model`? |
+|---|---|---|
+| lo que se **ve** | `s.model` (matriz por instancia) | sí: culling (`app.js:5249`) y sombra del sol (`app.js:4758`, `4789`) ya transforman por ella |
+| lo que se **toca** | bitset fino de `mc.structs[key]` | **no**: se sondea con base `bx = s.ox*T` (`app.js:5064`) |
+
+**Por qué el movimiento NO toca `s.ox/oy/oz`.** El ancla es lo que `mcSerialize` escribe en
+`mundo.json` (`app.js:6333`) y lo que al cargar se trunca con `|0` (`app.js:6358`). Moverla dejaría la
+pieza dando saltos de bloque entero y **guardaría una posición que el dueño no puso**. Así que el
+desplazamiento va en `s.model` (traslación en la última columna) y el ancla se queda quieta.
+Consecuencia buscada: **al recargar el mundo la pieza vuelve a su ancla**.
+
+**La solidez son tres envoltorios, ninguno en `app.js`** (§0). Todo el sondeo fino del motor entra por
+dos globales, así que basta envolverlas:
+
+1. `mcStructColl(s)` → `null` si la instancia está desplazada. Con eso **el ancla deja de ser sólida**
+   en cuanto la pieza se va (si no, quedaría un muro invisible donde estaba), y vale de golpe para
+   colisión, raycast, pegar bloques y el resaltado.
+2. `mcFineBoxHit(...)` → si el original dice que no, resta el desplazamiento (redondeado a voxel fino)
+   a la caja de consulta y prueba el mismo bitset. Como **toda** la colisión fina pasa por aquí, con
+   un solo envoltorio la pieza es sólida para el jugador, para el rayo de romper y para pegar bloques.
+3. `mcStructAt(...)` → lo mismo, para poder **romperla donde se la ve**.
+
+Salida rápida: si no hay ninguna desplazada, los tres devuelven lo del original sin mirar nada
+(`mcCollides` se llama varias veces por frame **y por eje**).
+
+**Detalles que no se adivinan:**
+
+- Con `ejes:'xz'` la distancia se mide **en planta**, y la Y la manda el suelo (`mcSurfaceNear` sobre
+  la **huella entera**, quedándose con la columna más alta). Sondeando solo la columna del centro, un
+  escalón se comporta como un muro: lo tiene bajo el morro y no bajo el centro.
+- Seguir a **otra pieza** usa los centros **leídos antes de mover a nadie**. Ese desfase de un frame
+  es lo que hace que el orden del array no importe y que un ciclo (A sigue a B y B sigue a A) sea una
+  pareja que se persigue, no un cuelgue.
+- `distancia` es un **sitio donde estar**, no un mínimo: si te acercas de más, retrocede.
+- La `correa` pinza la **meta**, no el resultado: pinzar el desplazamiento después de moverse sería un
+  tirón hacia el ancla sin comprobar el terreno por el camino.
+- Quitar `seguir` (o `quitar()`, o redefinir sin él) **recoge la pieza**. Es obligatorio: una pieza
+  desplazada sin nadie que la mueva se quedaría ahí para siempre y, como el ancla ya no es sólida,
+  sería un fantasma permanente. Un `define` que **sí** trae `seguir` no la recoge, para que afinar
+  `velocidad` no sea un teletransporte a media persecución.
+
+**Límites conocidos** (a propósito, no pendientes):
+
+1. **Sin pathing**: va en línea recta y resbala por las paredes; un laberinto la atasca (`por = 3`).
+2. **La luz emisiva no se mueve**: `emitCells` se siembra desde `s.ox` (`app.js:4908`), así que el
+   brillo de una pieza emisiva se queda en el ancla.
+3. **La sombra de suelo del aabb** (`app.js:6433`) usa `s.aabb`: se queda en el ancla.
+4. **No te lleva encima**: si estás subido y se mueve, no te arrastra (no hay plataformas móviles).
+5. **La colisión no gira**: con `mirar`, la forma sólida es la horneada sin el giro — igual que hoy.
+6. **Dos seguidores no chocan entre sí** (ni con otras estructuras): el terreno se prueba contra
+   `mc.grid`. Meter el sondeo fino ahí costaría un barrido por eje y frame.
+7. **Se guarda el ancla, no el sitio.**
 
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
 se autoejecutan (solo a mano desde Alt+C), así que la escalera dejaba de ser escalera en cada recarga.
