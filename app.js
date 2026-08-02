@@ -3304,8 +3304,12 @@ function agPreparar(){
 async function agCatalogo(){
   if(agCat) return agCat;
   const out=[];
+  // Las piezas de agente son `type:'textura'` (así se editan y se guardan de vuelta en assets/, que
+  // es lo que deja reponer un pivote con 📍), y el filtro de texturas — que está para no ofrecer los
+  // 34 azulejos de 1×1 como piezas de un muñeco — se las llevaba por delante: en el desplegable no
+  // había ni un brazo del zombie, o sea que el panel no podía montar ningún bicho nuevo.
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
-    idx.filter(a=>a.type!=='textura').forEach(a=>out.push({key:'asset:'+a.file, name:a.name})); }catch(e){}
+    idx.filter(a=>a.type!=='textura' || a.group==='Agentes').forEach(a=>out.push({key:'asset:'+a.file, name:a.name})); }catch(e){}
   try{ (await apiHabitantes()).filter(h=>h.type!=='textura')
     .forEach(h=>out.push({key:'hab:'+h.id, name:h.name+' (guardado)'})); }catch(e){}
   agCat=out; return out;
@@ -3353,10 +3357,67 @@ function agForm(){
     box.appendChild(agCampoNum('amplitud', +art.amplitud||0, 5, v=>{ art.amplitud=v; cambia(); }));
     box.appendChild(agCampoNum('desfase (grados)', +art.fase||0, 15, v=>{ art.fase=v; cambia(); }));
   }
+  // `mirar` va aparte de la articulación y no es lo mismo: una articulación es un CICLO (fase,
+  // amplitud) y esto lo manda el jugador — es la cabeza girándose hacia ti. La raíz no lo lleva
+  // nunca: hacia dónde encara el cuerpo lo decide la persecución.
+  if(!raiz){
+    const mir=(p.mirar&&typeof p.mirar==='object')? p.mirar : null;
+    const sm=document.createElement('label'); sm.className='ag-fld';
+    const cm=document.createElement('input'); cm.type='checkbox'; cm.checked=!!mir;
+    cm.onchange=()=>{ if(cm.checked) p.mirar={alcance:12, limites:{y:[-70,70]}}; else delete p.mirar; cambia(); };
+    sm.appendChild(cm); sm.appendChild(document.createTextNode(' te mira'));
+    box.appendChild(sm);
+    if(mir){
+      box.appendChild(agCampoNum('alcance (bloques)', +mir.alcance||12, 1, v=>{ mir.alcance=v; cambia(); }));
+      const lim=(mir.limites&&mir.limites.y)||[-70,70];
+      box.appendChild(agCampoNum('tope del cuello (±°)', Math.abs(+lim[1]||70), 5,
+        v=>{ mir.limites={y:[-Math.abs(v), Math.abs(v)]}; cambia(); }));
+    }
+  }
+  if(raiz) agConducta(box, cambia);
   if(!raiz){
     const del=document.createElement('button'); del.className='btn sm danger'; del.textContent='Quitar esta pieza';
     del.onclick=()=>{ agDoc.piezas.splice(agSel-1,1); agSel=0; agRefrescar(); };
     box.appendChild(del);
+  }
+}
+// Lo que NO es el esqueleto: a qué distancia te sigue, con qué caja choca y a qué ritmo mueve las
+// patas. Cuelga del formulario de la RAÍZ porque no es de ninguna pieza, es del bicho entero.
+// ⚠️ Los números que salen cuando el documento no trae la clave son los que de verdad va a usar la
+// librería (normalizarSeguir / crearEsqueleto), no ceros ni blancos: un 0 en «distancia» diría que
+// se te echa encima, y es justo lo contrario de lo que hace un agente sin `seguir`.
+function agConducta(box, cambia){
+  const h=document.createElement('h4'); h.className='ag-h2'; h.textContent='El bicho entero';
+  box.appendChild(h);
+  const seg=(agDoc.seguir&&typeof agDoc.seguir==='object')? agDoc.seguir : null;
+  const S=(k,d)=>(seg&&seg[k]!==undefined)? +seg[k] : d;
+  const ponS=(k,v)=>{ if(!agDoc.seguir||typeof agDoc.seguir!=='object') agDoc.seguir={}; agDoc.seguir[k]=v; cambia(); };
+  box.appendChild(agCampoNum('detección (bloques)', S('deteccion',16), 1, v=>ponS('deteccion',v)));
+  // No es un mínimo, es un SITIO donde estar: si te acercas más, retrocede (pasoSeguir).
+  box.appendChild(agCampoNum('se para a (bloques)', S('distancia',2.5), 0.5, v=>ponS('distancia',v)));
+  box.appendChild(agCampoNum('velocidad (bloques/s)', S('velocidad',3), 0.2, v=>ponS('velocidad',v)));
+
+  const and=(agDoc.andar&&typeof agDoc.andar==='object')? agDoc.andar : null;
+  const ponA=(k,v)=>{ if(!agDoc.andar||typeof agDoc.andar!=='object') agDoc.andar={}; agDoc.andar[k]=v; cambia(); };
+  // Ciclos de paso por BLOQUE recorrido (no por segundo): un bicho de patas cortas necesita más, y
+  // con el número del zombie parece que va en patines.
+  box.appendChild(agCampoNum('pasos por bloque', (and&&and.cadencia!==undefined)? +and.cadencia : 0.7, 0.1, v=>ponA('cadencia',v)));
+
+  const cue=(agDoc.cuerpo&&typeof agDoc.cuerpo==='object')? agDoc.cuerpo : null;
+  const sc=document.createElement('label'); sc.className='ag-fld';
+  const cc=document.createElement('input'); cc.type='checkbox'; cc.checked=!!cue;
+  const caja=agPl&&agPl.caja;
+  cc.onchange=()=>{ if(cc.checked) agDoc.cuerpo={ancho:caja? +(caja[3]-caja[0]).toFixed(4):0.6,
+                                                 fondo:caja? +(caja[5]-caja[2]).toFixed(4):0.6,
+                                                 alto: caja? +(caja[4]-caja[1]).toFixed(4):1.8};
+                    else delete agDoc.cuerpo; cambia(); };
+  sc.appendChild(cc); sc.appendChild(document.createTextNode(' caja de choque a medida'));
+  box.appendChild(sc);
+  if(cue){
+    const ponC=(k,v)=>{ agDoc.cuerpo[k]=v; cambia(); };
+    box.appendChild(agCampoNum('ancho', +cue.ancho||0.6, 0.0625, v=>ponC('ancho',v)));
+    box.appendChild(agCampoNum('fondo', cue.fondo!==undefined? +cue.fondo : (+cue.ancho||0.6), 0.0625, v=>ponC('fondo',v)));
+    box.appendChild(agCampoNum('alto', +cue.alto||1.8, 0.0625, v=>ponC('alto',v)));
   }
 }
 function agCampo(etiqueta, ctrl){

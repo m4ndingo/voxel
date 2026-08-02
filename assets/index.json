@@ -462,5 +462,61 @@
     "file": "assets/pierna-zombie.vox.json",
     "icon": "🧟",
     "group": "Agentes"
+  },
+  {
+    "id": "torso-perro",
+    "name": "Torso de perro",
+    "role": "Pieza de agente · raíz del esqueleto (tumbada: 14 de fondo)",
+    "type": "textura",
+    "size": {
+      "x": 8,
+      "y": 14,
+      "z": 8
+    },
+    "file": "assets/torso-perro.vox.json",
+    "icon": "🐕",
+    "group": "Agentes"
+  },
+  {
+    "id": "cabeza-perro",
+    "name": "Cabeza de perro",
+    "role": "Pieza de agente · cabeza (pivote 1 = el cuello)",
+    "type": "textura",
+    "size": {
+      "x": 8,
+      "y": 9,
+      "z": 11
+    },
+    "file": "assets/cabeza-perro.vox.json",
+    "icon": "🐕",
+    "group": "Agentes"
+  },
+  {
+    "id": "pata-perro",
+    "name": "Pata de perro",
+    "role": "Pieza de agente · pata (pivote 1 = cadera +X, 2 = cadera -X)",
+    "type": "textura",
+    "size": {
+      "x": 3,
+      "y": 4,
+      "z": 9
+    },
+    "file": "assets/pata-perro.vox.json",
+    "icon": "🐕",
+    "group": "Agentes"
+  },
+  {
+    "id": "cola-perro",
+    "name": "Cola de perro",
+    "role": "Pieza de agente · cola (pivote 1 = el arranque; menea sobre el eje y)",
+    "type": "textura",
+    "size": {
+      "x": 4,
+      "y": 8,
+      "z": 4
+    },
+    "file": "assets/cola-perro.vox.json",
+    "icon": "🐕",
+    "group": "Agentes"
   }
 ]

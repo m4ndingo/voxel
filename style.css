@@ -472,6 +472,8 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .ag-form{display:flex; flex-direction:column; gap:7px; border-top:1px solid var(--line); padding-top:10px}
 .ag-form:empty{display:none}
 .ag-form h4{margin:0; font-size:12px; color:var(--ink)}
+/* Segundo título dentro del mismo formulario: separa lo de la PIEZA de lo del bicho entero. */
+.ag-form h4.ag-h2{margin-top:6px; padding-top:9px; border-top:1px solid var(--line); color:var(--muted)}
 .ag-tern{display:flex; gap:6px}
 .ag-tern input{width:100%; min-width:0}
 .ag-save-btn{color:#0a0c12; background:#d9a03a; border-color:#d9a03a; font-weight:700}
