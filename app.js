@@ -6711,6 +6711,7 @@ async function openWorld(){
   mcResize();
   mc.hotbarShown=1; mcRevealHotbar();     // la hotbar arranca visible en su sitio
   mc.active=true; mc.fpsN=0; mc.fpsT=0; mc.last=performance.now();
+  mcTouchShow(true);    // joystick y salto, si esto es un móvil (o game.touchControls=true)
   mcResumeAgents();     // reanudar agentes pausados al volver del editor
   mc.raf=requestAnimationFrame(mcTick);
   await mcAutoarranque();
@@ -6947,6 +6948,7 @@ game.dumpVars=function(){
 };
 function closeWorld(){
   mc.active=false; mc.keys={}; mc.heldBtn=-1; mcClearPreview();
+  mcTouchShow(false);
   mcPauseAgents();   // los agentes se pausan al salir al editor: retienen memoria y coords hasta reabrir el Mundo
   mcCloseNote(); { const nv=$('#mc-noteview'); if(nv) nv.hidden=true; }   // t1 · cierra el editor/visor de notas al salir
   if(mc.grid){ clearTimeout(mcSaveT); mcSaveWorld(); }   // vuelca cualquier edición pendiente al salir
@@ -7017,6 +7019,98 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   }
 });
 window.addEventListener('keyup',e=>{ if(!mc.active || !$('#snip-modal').hidden) return; mc.keys[e.key.toLowerCase()]=false; });
+
+// --- F4b · controles táctiles: sin teclado no se puede andar por el Mundo ---
+// Una pantalla táctil no tiene ni pointer-lock ni WASD, así que desde un móvil el Mundo se veía pero
+// era literalmente inmóvil: no había forma de dar un paso.
+//
+// NO se toca la física ni mcUpdate. El joystick escribe en mc.keys las MISMAS teclas que escribiría
+// un teclado (8 direcciones) y el arrastre mueve mc.yaw/mc.pitch con la misma cuenta que el ratón.
+// Así todo lo que depende del movimiento —colisión, agentes que te persiguen, la hotbar que se hunde
+// al correr— sigue funcionando igual sin enterarse de que no hay teclado.
+//
+// A propósito NO hay botones de romper/poner: un toque de más sería una edición de verdad, con su
+// autoguardado en mundo.json. Mirar y andar no escriben nada, y lo que faltaba era andar.
+const MC_TOUCH=matchMedia('(pointer:coarse)').matches || navigator.maxTouchPoints>0;
+const MC_LOOK_BASE=0.006;      // rad/px del arrastre; el ratón usa 0.000625, que en un dedo sería nada
+// El recorrido del pulgar sale del ANCHO REAL del aro, no de una constante: el CSS encoge el
+// joystick en apaisado (@media max-height) y con un número fijo el pomo se saldría del dibujo y la
+// zona muerta dejaría de coincidir. 0.39 reproduce los 46 px de siempre en el aro de 118.
+const MC_STICK_F=0.39;         // recorrido = ancho del aro × esto
+let mcLookSens=MC_LOOK_BASE, mcStickId=-1, mcLookId=-1, mcJumpId=-1, mcLookX=0, mcLookY=0;
+try{ const s=parseFloat(localStorage.getItem('vf_mcTouchLook')); if(isFinite(s)&&s>0) mcLookSens=MC_LOOK_BASE*s; }catch(e){}
+// game.touchLook = múltiplo de la sensibilidad del arrastre (1 = normal), como game.mouseSpeed.
+Object.defineProperty(game,'touchLook',{ enumerable:true, get:()=>+(mcLookSens/MC_LOOK_BASE).toFixed(2),
+  set:v=>{ v=Math.max(0.1,Math.min(10,+v||1)); mcLookSens=MC_LOOK_BASE*v; try{localStorage.setItem('vf_mcTouchLook',v);}catch(e){} return v; } });
+// game.touchControls = enseñar los mandos aunque haya ratón (o esconderlos en un portátil táctil).
+let mcTouchOn=MC_TOUCH;
+try{ const t=localStorage.getItem('vf_mcTouch'); if(t==='0'||t==='1') mcTouchOn=(t==='1'); }catch(e){}
+Object.defineProperty(game,'touchControls',{ enumerable:true, get:()=>mcTouchOn,
+  set:v=>{ mcTouchOn=!!v; try{localStorage.setItem('vf_mcTouch',mcTouchOn?'1':'0');}catch(e){} mcTouchShow(mc.active); return mcTouchOn; } });
+
+function mcTouchShow(on){ const z=$('#mc-touch'); if(z) z.hidden=!(on && mcTouchOn); if(!on) mcStickSuelta(); }
+function mcStickSuelta(){    // el pulgar levantado deja de andar: si no, te quedas caminando solo
+  mcStickId=-1; mc.keys['w']=mc.keys['a']=mc.keys['s']=mc.keys['d']=false;
+  const k=$('#mc-stick-knob'); if(k) k.style.transform='translate(-50%,-50%)';
+}
+{
+  const base=$('#mc-stick'), knob=$('#mc-stick-knob'), salto=$('#mc-tjump');
+  const mueve=e=>{
+    const r=base.getBoundingClientRect();
+    const dx=e.clientX-(r.left+r.width/2), dy=e.clientY-(r.top+r.height/2), len=Math.hypot(dx,dy);
+    const R=r.width*MC_STICK_F;                    // el aro puede encoger (apaisado): se mide, no se supone
+    const k=len>R ? R/len : 1;                     // el pomo no se sale de su aro, el dedo sí puede
+    knob.style.transform='translate(calc(-50% + '+(dx*k).toFixed(1)+'px), calc(-50% + '+(dy*k).toFixed(1)+'px))';
+    // Zona muerta: sin ella, el propio peso del pulgar apoyado en el centro ya te hace andar.
+    if(len<R*0.3){ mc.keys['w']=mc.keys['a']=mc.keys['s']=mc.keys['d']=false; return; }
+    const nx=dx/len, ny=-dy/len;                   // en pantalla +y es ABAJO; ny>0 = hacia delante
+    // 0.38 ≈ cos(67,5°): cada sector de 45° enciende una tecla o dos, exactamente como un teclado.
+    mc.keys['w']=ny>0.38; mc.keys['s']=ny<-0.38; mc.keys['d']=nx>0.38; mc.keys['a']=nx<-0.38;
+  };
+  base.addEventListener('pointerdown',e=>{ if(!mc.active) return;
+    mcStickId=e.pointerId; try{ base.setPointerCapture(e.pointerId); }catch(err){} mueve(e); e.preventDefault(); });
+  base.addEventListener('pointermove',e=>{ if(e.pointerId===mcStickId) mueve(e); });
+
+  salto.addEventListener('pointerdown',e=>{ if(!mc.active) return;
+    mcJumpId=e.pointerId; mc.keys[' ']=true; try{ salto.setPointerCapture(e.pointerId); }catch(err){} e.preventDefault(); });
+}
+// ⚠️ LOS FINALES SE ESCUCHAN EN WINDOW, NO EN CADA MANDO. Un `pointerup` perdido deja el estado
+// pegado, y los dos síntomas salen a la vez: te quedas ANDANDO SOLO (la tecla del joystick no se
+// apaga) y la cámara MUERTA (mcLookId se queda con el id de un dedo que ya no existe, y el
+// `if(mcLookId>=0) return` de abajo rechaza todos los dedos siguientes para siempre).
+// Se pierde más de lo que parece: si el dedo se sale del aro del joystick y setPointerCapture no
+// prendió, el `up` cae sobre el canvas; si el navegador se queda el gesto, llega un `pointercancel`
+// en otro sitio; y si te llaman por teléfono, no llega nada. En window (fase de captura) llegan
+// todos, y lo que no llega lo barre el blur/visibilitychange.
+function mcTouchSuelta(id){          // un dedo concreto, o TODOS si no se pasa ninguno
+  if(id===undefined || id===mcStickId) mcStickSuelta();
+  if(id===undefined || id===mcLookId) mcLookId=-1;
+  if(id===undefined || id===mcJumpId){ mcJumpId=-1; if(mc.keys) mc.keys[' ']=false; }
+}
+addEventListener('pointerup',e=>mcTouchSuelta(e.pointerId),true);
+addEventListener('pointercancel',e=>mcTouchSuelta(e.pointerId),true);
+addEventListener('blur',()=>mcTouchSuelta());
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) mcTouchSuelta(); });
+
+// Mirar = arrastrar por el canvas. Solo dedos: el ratón ya tiene su pointer-lock, y atender a los dos
+// haría que un ratón girase el doble.
+// Manda el dedo MÁS NUEVO. Antes el primero se quedaba el turno, y bastaba un id colgado para no
+// poder volver a girar la cámara en toda la sesión; así, cualquier toque nuevo rearma el control.
+$('#mc-canvas').addEventListener('pointerdown',e=>{
+  if(!mc.active || e.pointerType==='mouse') return;
+  mcLookId=e.pointerId; mcLookX=e.clientX; mcLookY=e.clientY;
+  try{ mc.canvas.setPointerCapture(e.pointerId); }catch(err){}
+});
+$('#mc-canvas').addEventListener('pointermove',e=>{
+  if(e.pointerId!==mcLookId) return;
+  const gs=mcLookSens/Math.sqrt(mc.scale);   // igual que el ratón: un gigante gira la cabezota despacio
+  mc.yaw-=(e.clientX-mcLookX)*gs; mc.pitch-=(e.clientY-mcLookY)*gs;
+  mc.pitch=Math.max(-1.55,Math.min(1.55,mc.pitch));
+  mcLookX=e.clientX; mcLookY=e.clientY;
+  e.preventDefault();
+});
+// (el final del arrastre lo suelta mcTouchSuelta desde window: aquí no hace falta nada)
+
 // game.onKey('t', fn) · liga una tecla a tu función mientras el Mundo (🌍) esté activo. Ejemplo:
 //   game.onKey('t', ()=> throwAndExplodeTNT(...game.aim(), {radius:8, fuseTimeMs:500, tntMat:'roca'}));
 // Re-registrar la misma tecla la REEMPLAZA (no acumula listeners); game.onKey('t', null) la quita.

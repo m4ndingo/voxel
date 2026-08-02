@@ -381,6 +381,13 @@
       <div class="mc-loading-text" id="mc-loading-text">Cargando mundo…</div>
     </div>
     <div class="mc-crosshair" id="mc-crosshair" aria-hidden="true">+</div>
+    <!-- Controles táctiles (móvil): sin teclado no se puede andar por el Mundo. Los enseña/esconde
+         mcTouchShow(); el contenedor no intercepta nada, así que el resto del canvas sigue siendo
+         la zona de MIRAR arrastrando. -->
+    <div class="mc-touch" id="mc-touch" hidden>
+      <div class="mc-stick" id="mc-stick"><div class="mc-stick-knob" id="mc-stick-knob"></div></div>
+      <button class="mc-tbtn" id="mc-tjump" type="button" title="Saltar">⤒</button>
+    </div>
     <div class="mc-hotbar" id="mc-hotbar"></div>
     <div class="fps-float mc-float" id="mc-fps" hidden title="FPS reales del modo Mundo">— fps</div>
     <div class="vox-float mc-float2" id="mc-vox" hidden title="Caras (quads) dibujadas por la GPU">— vox</div>
