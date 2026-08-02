@@ -824,6 +824,43 @@ El lienzo se estira por CSS y su resolución la fija `agResize` (caja × `dpr`);
 escenario lleva **su** alto (`46vh`), porque con `flex:1` la lista y el formulario lo dejaban en una
 banda de ~80 px.
 
+### Hacer un agente NUEVO desde el panel (v1.23) — y el segundo bicho, un perro
+
+Hasta v1.22 el panel **editaba** agentes pero no dejaba **crear** uno: el zombie existía porque su
+documento se escribió a mano. Montar el perro entero desde el formulario destapó dos huecos, los dos
+genéricos (ni una línea de `app.js` sabe qué es un perro):
+
+1. **El desplegable de dibujos no ofrecía ni una pieza de agente.** `agCatalogo` filtraba
+   `type!=='textura'` — un filtro que está para no listar los 34 azulejos de 1×1 como piezas de un
+   muñeco — y las piezas del zombie **son** `type:'textura'`, así que se las llevaba por delante. Y
+   tienen que serlo: ese tipo es lo que enruta el guardado del editor a `/api/assets`, que es lo
+   único que deja **reponer un pivote** con 📍 y guardar la pieza de vuelta. Se salva el `group`:
+   `a.type!=='textura' || a.group==='Agentes'`.
+2. **Faltaba la mitad del documento.** El formulario cubría las piezas pero no la **conducta**, que
+   no es de ninguna pieza sino del bicho entero: `seguir` (detección / se para a / velocidad),
+   `andar.cadencia`, `cuerpo` (caja de choque) y el `mirar` de la cabeza. Sin eso, un agente nuevo
+   nacía sin perseguir nada. Van en un bloque aparte, **«El bicho entero»**, separado del de la pieza.
+
+⚠️ Los números que enseña ese bloque cuando el documento **no** trae la clave son los que de verdad
+usará `normalizarSeguir` (detección 16, se para a 2.5, velocidad 3), no ceros: un 0 en «se para a»
+diría que se te echa encima, que es justo lo contrario de lo que hace un agente sin `seguir`.
+
+**«Seguir a una distancia» ya lo sabía hacer el motor**, y conviene no reimplementarlo: `distancia`
+no es un mínimo, es **un sitio donde estar** — si te acercas más, `pasoSeguir` hace retroceder al
+agente. Medido en el Mundo del dueño con el perro: 3.06 → 4.33 → 3.02 → 3.00 y ahí se queda clavado,
+con `teVe=1` y `andando` decayendo a 0.
+
+`data/agentes/perro.json` es el primer **cuadrúpedo**: 4 patas del mismo dibujo, en diagonal (`fase`
+0 / 180 / 180 / 0), cabeza con `mirar` y cola meneando sobre el eje **y**. Que salga de la misma
+librería sin tocarla es la prueba de que el rig **por instancia** era la decisión correcta: la pata
+delantera izquierda y la trasera derecha son el mismo material con distinta fase.
+
+`node test_panel_agentes.js` (18 ok) fija las dos cosas: que el desplegable ofrece las piezas de
+agente **sin** comerse el resto del catálogo, y que al agente montado por el formulario no le falta
+ningún campo — construye un bicho de usar y tirar entero por la UI, comprueba el JSON resultante
+campo a campo, comprueba que esos campos también **leen** un agente guardado (el zombie) y **no
+hace ni un POST**.
+
 ## Convenciones
 
 - Cualquier cambio de `state` termina llamando a `render()` (= `drawEdit` + `drawIso` +
