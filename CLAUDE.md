@@ -784,6 +784,46 @@ piezas **se dibujan** —píxeles, no `mc.structures.length`—, que sus matrice
 mover un pivote o regenerar un asset con otras medidas se entera aquí. El almacén, aparte:
 `node test_agentes_api.js` (necesita el servidor vivo).
 
+### El panel de agentes (pestaña **Agentes**, v1.22)
+
+Lista de agentes guardados, formulario por pieza (dibujo, `rot`, pivote / eje / base / reposo /
+amplitud / fase) y **preview 3D animado** con los dos interruptores de verdad (*te ve* / *anda*), un
+mando de giro y un botón **Plantar** que lo suelta delante del jugador.
+
+**El preview NO calcula la pose: se la pide a la librería.** `app.js` llama a
+
+```js
+const pl = await game.esqueletos.preparar(doc);        // no planta nada ni deja esqueletos vivos
+game.esqueletos.pose(pl, {fase, giro, activo, andando});   // devuelve las piezas con su `m` puesta
+```
+
+y solo **dibuja** esas matrices. Es lo que mantiene el §0 en pie (el framework sigue sin saber qué es
+un zombie) y, sobre todo, lo que hace **imposible que la pose del panel se desvíe de la del Mundo**:
+las dos salen de la misma `matrizPieza`. Por eso el refactor que extrajo `matrizPieza`/`centroGiro`
+va **antes** que el panel — con dos composiciones parecidas, la divergencia es cuestión de tiempo.
+
+**La única divergencia, y es a propósito:** en el Mundo la fase del ciclo de andar avanza con la
+**distancia** recorrida; en el panel no hay distancia, así que la adelanta el **reloj**. El panel es
+un maniquí, no un bicho andando.
+
+Lo que sí vive en `app.js` es un **rasterizador** (`agDibujar`), y ahí hay cuatro cosas que costaron:
+
+- **Backface culling por la normal GIRADA** contra el gradiente de profundidad, no por el orden de los
+  vértices: la matriz de una pieza puede **espejar** y entonces el winding miente.
+- **Fusión ávida de caras coplanares** (`agGeom`): el zombie entero baja de ~3.300 caras a **803
+  cuadros**. No es solo velocidad — menos cuadros son menos bordes tocándose, o sea menos costuras del
+  antialias de canvas (la misma lección que el rasterizador del iso).
+- ⚠️ **`s.aabb` es CEÑIDO, no la celda 16³**, así que el atajo de «con `rot` impar se intercambian X y
+  Z» **es falso** para cualquier dibujo que no llene su celda (el brazo del zombie es 5×5×14 centrado).
+  Hay que pasar la caja **redondeada a celda** por `mcRotXZ`, igual que `mcStructGeom`.
+- ⚠️ **La luz va atada a la CÁMARA**, no al mundo (`AG_LUZ` = `[derecha, arriba, hacia el
+  espectador]`). Con un sol fijo en coordenadas de mundo, girar el preview a un **perfil** dejaba las
+  caras visibles en el suelo del término ambiente y el muñeco se veía casi negro.
+
+El lienzo se estira por CSS y su resolución la fija `agResize` (caja × `dpr`); apilado en móvil el
+escenario lleva **su** alto (`46vh`), porque con `flex:1` la lista y el formulario lo dejaban en una
+banda de ~80 px.
+
 ## Convenciones
 
 - Cualquier cambio de `state` termina llamando a `render()` (= `drawEdit` + `drawIso` +

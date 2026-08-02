@@ -28,6 +28,7 @@
       <button class="tab tab-play" data-tab="jugar" title="Jugar ya · habitación y personaje al azar">▶ Jugar</button>
       <button class="tab tab-mundo" data-tab="mundo" title="Mundo · sandbox 3D en primera persona (WebGL)">🌍 Mundo</button>
       <button class="tab tab-snip" data-tab="codigo" title="Snippets de código · guardar, editar y ejecutar contra el Mundo (Alt+C)">🧩 Código</button>
+      <button class="tab tab-agente" data-tab="agentes" title="Agentes articulados · compón piezas y articulaciones y míralas moverse">🦴 Agentes</button>
     </nav>
 
     <div class="actions">
@@ -348,6 +349,47 @@
         <ul class="room-hablist" id="room-hablist"></ul>
         <button class="btn sm danger" id="room-del" hidden>Quitar seleccionado</button>
         <button class="btn" id="room-play" title="Jugar en esta habitación">▶ Jugar aquí</button>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ===================== Agentes articulados (fase 3) =====================
+       El preview NO compone la pose: se la pide a la librería del Mundo (game.esqueletos.pose),
+       así que el muñeco de aquí es exactamente el que luego anda por ahí. Ver app.js §agentes. -->
+  <div class="modal" id="ag-modal" hidden>
+    <div class="modal-head">
+      <div><strong>Agentes articulados</strong> <span class="muted" id="ag-sub">piezas, articulaciones y cómo se mueven</span></div>
+      <div class="modal-actions">
+        <button class="btn sm" id="ag-plantar" title="Plantarlo en el Mundo, delante del jugador">🌍 Plantar</button>
+        <button class="btn sm ag-save-btn" id="ag-save" title="Guardar en data/agentes/">💾 Guardar</button>
+        <button class="btn sm" id="ag-close" title="Cerrar (Esc)">✕ Cerrar</button>
+      </div>
+    </div>
+    <div class="ag-body">
+      <div class="ag-list-pane">
+        <button class="btn sm" id="ag-new">+ Nuevo</button>
+        <div class="ag-list" id="ag-list"></div>
+        <button class="btn sm danger" id="ag-del" hidden>Borrar agente</button>
+      </div>
+      <div class="ag-stage">
+        <canvas id="ag-canvas" width="560" height="620"></canvas>
+        <div class="ag-controls">
+          <label class="ag-sw"><input type="checkbox" id="ag-activo" checked> te ve</label>
+          <label class="ag-sw"><input type="checkbox" id="ag-andando" checked> anda</label>
+          <label class="ag-sl">giro <input type="range" id="ag-giro" min="-180" max="180" step="1" value="25"></label>
+          <span class="ag-caja muted" id="ag-caja"></span>
+        </div>
+        <p class="room-hint ag-hint">Arrastra sobre el muñeco para <b>mirarlo desde otro sitio</b>; la rueda acerca.
+          «te ve» sube los brazos a su <b>base</b>, «anda» enciende el <b>vaivén</b>: son dos interruptores distintos.</p>
+      </div>
+      <aside class="ag-side">
+        <label class="ag-fld">Nombre <input id="ag-nombre" type="text" placeholder="zombie"></label>
+        <h3>Piezas</h3>
+        <p class="room-hint">La <b>primera</b> es la <b>raíz</b>: manda el sitio y el giro del cuerpo. Las demás se colocan
+          en bloques <b>desde la esquina de la raíz</b> (1 bloque = 16 voxels del dibujo).</p>
+        <ul class="ag-piezas" id="ag-piezas"></ul>
+        <button class="btn sm" id="ag-add">+ Añadir pieza</button>
+        <div class="ag-form" id="ag-form"></div>
       </aside>
     </div>
   </div>
