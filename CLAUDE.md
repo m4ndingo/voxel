@@ -675,9 +675,33 @@ Salida rápida: si no hay ninguna desplazada, los tres devuelven lo del original
 3. **La sombra de suelo del aabb** (`app.js:6433`) usa `s.aabb`: se queda en el ancla.
 4. **No te lleva encima**: si estás subido y se mueve, no te arrastra (no hay plataformas móviles).
 5. **La colisión no gira**: con `mirar`, la forma sólida es la horneada sin el giro — igual que hoy.
-6. **Dos seguidores no chocan entre sí** (ni con otras estructuras): el terreno se prueba contra
-   `mc.grid`. Meter el sondeo fino ahí costaría un barrido por eje y frame.
+6. **Dos seguidores no chocan entre sí**: a propósito. Sí chocan con el **decorado** desde v1.24
+   (abajo); lo que no se sondea son las estructuras **desplazadas**, que son justo los demás
+   seguidores.
 7. **Se guarda el ancla, no el sitio.**
+
+#### El decorado también para a un agente (v1.24)
+
+Hasta v1.23 un seguidor —el zombie, el perro— **atravesaba las casas**: el sondeo miraba solo
+`mc.grid`, así que el terreno le paraba y las estructuras no. Ahora `pasoSeguir` prueba **las dos
+solideces** (`chocaMundo = chocaTerreno || chocaEstructura`), y la fina pasa por
+**`mcFineBoxHit._orig`** — el original, no el envoltorio de v1.18. Es lo que mantiene el límite 6: el
+envoltorio es quien añade las estructuras **desplazadas**, o sea los demás seguidores, y saltárselo
+evita además pagar un barrido fino por eje y frame sobre piezas que se están moviendo. Lo que se
+sondea es el **decorado**, que es lo que se queda quieto. El sondeo se marca con el mismo centinela
+`yoSondeando` que ya evitaba que una pieza se encontrara a sí misma.
+
+**«Como hacen los bloques» tiene dos mitades**, y la segunda es igual de importante: un bloque de 1 de
+alto **se sube**, no para. Así que en `asentar`, si lo que estorba es **solo** estructura
+(`!chocaTerreno && chocaEstructura`), se prueba a treparla en pasos de 1/16 hasta 1 bloque —
+exactamente lo que el jugador hace con `mcMoveAxis`/`MC_STEP` y lo que `mcSurfaceNear` ya le sube al
+agente por el terreno. Sin esto, una alfombra o un bordillo de 1/16 sería un muro invisible. Un muro
+de más de un bloque sigue parando, porque ninguna de las 16 alturas queda libre.
+
+⚠️ **Consecuencia nueva: un agente plantado DENTRO de una estructura nace atascado para siempre.**
+`mcSurfaceY`/`mcSurfaceNear` solo leen `mc.grid`, así que eligen una altura ciega al decorado; antes
+daba igual porque se atravesaba, y ahora no. Se ve en `game.esqueletos.lista()` como `por: 3`
+(`estado: "bloqueada"`) sin haberse movido nunca. Si pasa, plantar el bicho en otro sitio.
 
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
 se autoejecutan (solo a mano desde Alt+C), así que la escalera dejaba de ser escalera en cada recarga.
