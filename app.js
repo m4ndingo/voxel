@@ -2552,6 +2552,7 @@ $('#tabs').addEventListener('click',e=>{
   if(t.dataset.tab==='jugar'){ quickPlay(); return; }                          // jugar ya (sala + personaje al azar)
   if(t.dataset.tab==='mundo'){ openWorld(); return; }                          // sandbox 3D en primera persona (WebGL)
   if(t.dataset.tab==='codigo'){ openSnips(); return; }                         // gestor de snippets de código
+  if(t.dataset.tab==='agentes'){ openAgentes(); return; }                      // panel de agentes articulados
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-active',x===t));
   if(t.dataset.tab!=='objeto') toast('Vista mock — el MVP se centra en el editor de objeto');
 });
@@ -2589,6 +2590,7 @@ window.addEventListener('keydown',e=>{
   }
   if(e.key==='Escape' && !$('#mapa-picker').hidden){ closePicker(); return; }
   if(e.key==='Escape' && !$('#snip-modal').hidden){ closeSnips(); return; }
+  if(e.key==='Escape' && !$('#ag-modal').hidden){ closeAgentes(); return; }
   if(e.key==='Escape' && !$('#mapa-modal').hidden){ closeMapa(); return; }
   if(e.key==='Escape' && !$('#hab-modal').hidden){ closeHabitantes(); return; }
   if(e.key==='Escape' && modalOpen){ closeModal(); return; }
@@ -2984,6 +2986,448 @@ $('#snip-code').addEventListener('keydown',e=>{
   else if(e.key==='Tab'){ e.preventDefault(); const t=e.target, s=t.selectionStart, en=t.selectionEnd;   // Tab = 2 espacios
     t.value=t.value.slice(0,s)+'  '+t.value.slice(en); t.selectionStart=t.selectionEnd=s+2; }
 });
+// ===================== Panel de agentes articulados (fase 3) =====================
+// Compone piezas y articulaciones, y las enseña MOVIÉNDOSE.
+//
+// ⚠️ La pose NO se calcula aquí. §0 dice que app.js es agnóstico a cómo son los agentes, así que
+// la compone la librería del Mundo: `game.esqueletos.preparar(doc)` devuelve una plantilla con una
+// matriz por pieza y `pose(pl,{fase,giro,activo,andando})` las reescribe. Este panel solo DIBUJA lo
+// que salga de ahí, y por eso el muñeco del preview y el que luego anda por el Mundo NO PUEDEN
+// divergir: es literalmente el mismo código el que los coloca. Lo que hay aquí es un rasterizador
+// de voxels y formularios; ni un grado de ángulo.
+//
+// La librería vive en un snippet y en esta pestaña nadie la ha ejecutado todavía (solo la ejecuta
+// mcAutoarranque al entrar al Mundo), así que el panel la carga él mismo. Es idempotente.
+let libMundoP=null;
+function cargarLibMundo(){
+  if(window.game && game.esqueletos && game.esqueletos.preparar) return Promise.resolve(true);
+  if(!libMundoP) libMundoP=mcAutoarranque().then(()=>{
+    const ok=!!(window.game && game.esqueletos && game.esqueletos.preparar);
+    if(!ok) libMundoP=null;                                   // fallo: que el siguiente intento reintente
+    return ok;
+  });
+  return libMundoP;
+}
+
+let agLista=[], agDoc=null, agSel=0, agPl=null, agRAF=0, agFase=0, agTPrev=0, agCat=null, agPrepId=0;
+const agVista={yaw:0.6, pitch:0.32, zoom:1};
+const agGeomCache=new Map();                                   // clave|rot -> caras ya fusionadas
+// Las 6 caras del cubo unidad: normal y las 4 esquinas. El orden de los vértices da igual (se rellena,
+// no se cullea por él): las traseras se descartan comparando la normal ya girada con la cámara.
+const AG_CARAS=[
+  {n:[-1,0,0]}, {n:[1,0,0]}, {n:[0,-1,0]}, {n:[0,1,0]}, {n:[0,0,-1]}, {n:[0,0,1]}
+];
+// Luz de estudio ATADA A LA CÁMARA, no al mundo: [derecha, arriba, hacia el espectador]. Con un sol
+// fijo en coordenadas de mundo, girar el preview a un perfil dejaba las caras visibles en el suelo
+// del término ambiente y el muñeco se veía casi negro. Así la cara que miras siempre recibe luz.
+const AG_LUZ=[0.30,0.72,0.62];                                 // se normaliza abajo
+const AG_PLANTILLA={ nombre:'agente nuevo',
+  raiz:{nombre:'torso', pieza:'asset:assets/torso-zombie.vox.json', rot:0}, piezas:[] };
+
+function agColorHex(v){
+  if(typeof v!=='string') return '#8a8f94';
+  if(v[0]==='*') v=v.slice(1);                                 // emisivo: para el preview es un color más
+  if(v[0]==='#') return v.slice(0,7);
+  if(v.slice(0,4)==='tex:') return texRepr(v.slice(4));
+  return '#8a8f94';
+}
+function agRGB(hex){ const n=parseInt(hex.slice(1),16)||0; return [n>>16&255, n>>8&255, n&255]; }
+
+// Los voxels de un dibujo, colocados como los coloca el Mundo al estampar. Las tres conversiones que
+// no se ven y que, saltadas, dejan la pieza en otro sitio que el bicho de verdad:
+//   · el editor es Z-arriba y el Mundo Y-arriba: el Y del dibujo es la PROFUNDIDAD.
+//   · el origen es la esquina de la CELDA 16³ que contiene el mínimo, no el mínimo.
+//   · `rot` son cuartos de vuelta con el sentido de mcRotXZ, sobre la caja redondeada a celdas.
+// Es el mismo camino que mcStructGeom (app.js:4190) y que ladosDeDibujo en la librería; si alguno de
+// los tres se desvía, el preview y el aabb del Mundo dejan de contar lo mismo.
+function agGeom(clave, rot, doc){
+  const ck=clave+'|'+rot, hit=agGeomCache.get(ck); if(hit) return hit;
+  const src=(doc&&doc.voxels)||{}, T=MC_TILE, base=[];
+  let minx=Infinity, minh=Infinity, minz=Infinity;
+  for(const k in src){
+    const p=k.split(','), ax=+p[0], ay=+p[1], az=+p[2], v=src[k];
+    if(v==null || !Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(az)) continue;
+    base.push([ax, az, ay, v]);                                // [x, altura, profundidad, valor]
+    if(ax<minx)minx=ax; if(az<minh)minh=az; if(ay<minz)minz=ay;
+  }
+  const g={caras:[]};
+  if(!base.length){ agGeomCache.set(ck,g); return g; }
+  const cx=Math.floor(minx/T)*T, ch=Math.floor(minh/T)*T, cz=Math.floor(minz/T)*T;
+  let bx=0, bz=0;
+  for(const b of base){ b[0]-=cx; b[1]-=ch; b[2]-=cz; if(b[0]+1>bx)bx=b[0]+1; if(b[2]+1>bz)bz=b[2]+1; }
+  bx=Math.ceil(bx/T)*T; bz=Math.ceil(bz/T)*T;
+  const lleno=new Set(), pos=[];
+  for(const b of base){
+    const r=mcRotXZ(b[0], b[2], rot, bx, bz);
+    lleno.add(r[0]+','+b[1]+','+r[1]); pos.push([r[0], b[1], r[1], b[3]]);
+  }
+  g.caras=agFusionar(pos, lleno);
+  agGeomCache.set(ck,g); return g;
+}
+// Fusiona caras coplanares del mismo color (greedy, como el mallado del Mundo). No es solo
+// velocidad: la cabeza del zombie pasa de 1350 cuadros a un puñado, y menos cuadros = menos
+// costuras del antialias del canvas entre caras que deberían ser UNA superficie.
+function agFusionar(pos, lleno){
+  const caras=[];
+  for(let f=0;f<6;f++){
+    const a=f>>1, d=AG_CARAS[f].n[a], u=(a+1)%3, v=(a+2)%3;
+    const capas=new Map();                                     // rebanada -> Map("u,v" -> color)
+    for(const q of pos){
+      const nx=q[0]+(a===0?d:0), ny=q[1]+(a===1?d:0), nz=q[2]+(a===2?d:0);
+      if(lleno.has(nx+','+ny+','+nz)) continue;                // tapada por su vecina: no se ve
+      let cp=capas.get(q[a]); if(!cp){ cp=new Map(); capas.set(q[a],cp); }
+      cp.set(q[u]+','+q[v], agColorHex(q[3]));
+    }
+    for(const [s,cp] of capas) agFusionarCapa(caras, f, a, u, v, s, cp);
+  }
+  return caras;
+}
+function agFusionarCapa(caras, f, a, u, v, s, cp){
+  let u0=Infinity, u1=-Infinity, v0=Infinity, v1=-Infinity;
+  for(const k of cp.keys()){ const p=k.split(','), pu=+p[0], pv=+p[1];
+    if(pu<u0)u0=pu; if(pu>u1)u1=pu; if(pv<v0)v0=pv; if(pv>v1)v1=pv; }
+  const hecho=new Set(), S=1/MC_TILE, pa=(AG_CARAS[f].n[a]>0)? s+1 : s;
+  for(let pv=v0; pv<=v1; pv++) for(let pu=u0; pu<=u1; pu++){
+    const k=pu+','+pv, col=cp.get(k); if(col===undefined || hecho.has(k)) continue;
+    let w=1; while(pu+w<=u1){ const kk=(pu+w)+','+pv; if(cp.get(kk)!==col || hecho.has(kk)) break; w++; }
+    let h=1;
+    crecer: while(pv+h<=v1){
+      for(let i=0;i<w;i++){ const kk=(pu+i)+','+(pv+h); if(cp.get(kk)!==col || hecho.has(kk)) break crecer; }
+      h++;
+    }
+    for(let j=0;j<h;j++) for(let i=0;i<w;i++) hecho.add((pu+i)+','+(pv+j));
+    const esq=[[0,0],[w,0],[w,h],[0,h]], val=new Float32Array(12);
+    for(let i=0;i<4;i++){ const p=[0,0,0];
+      p[a]=pa; p[u]=pu+esq[i][0]; p[v]=pv+esq[i][1];
+      val[i*3]=p[0]*S; val[i*3+1]=p[1]*S; val[i*3+2]=p[2]*S; }
+    caras.push({f, v:val, rgb:agRGB(col)});
+  }
+}
+
+// ── El preview ──────────────────────────────────────────────────────────────────────────────────
+// Proyección ortográfica con orden pintor, el mismo esqueleto que project3d pero sobre las matrices
+// que devuelve la librería: cada pieza lleva la SUYA, así que aquí no hay jerarquía que recorrer.
+const agBuf={xy:new Float32Array(0), z:new Float32Array(0), col:[], ord:null, n:0};
+function agReservar(n){
+  if(agBuf.ord && agBuf.xy.length>=n*8) return;
+  const cap=Math.max(256, n*2);
+  agBuf.xy=new Float32Array(cap*8); agBuf.z=new Float32Array(cap); agBuf.ord=new Uint32Array(cap);
+  agBuf.col=new Array(cap);
+}
+// El lienzo lo estira el CSS (el dueño mira esto en el móvil), así que el buffer se ajusta a la caja
+// real por dpr: con la resolución fija del HTML, un móvil estrecho lo escalaba y el voxel salía borroso.
+function agResize(cv){
+  const dpr=Math.min(2, window.devicePixelRatio||1);
+  const w=Math.max(200, Math.round(cv.clientWidth*dpr)), h=Math.max(200, Math.round(cv.clientHeight*dpr));
+  if(cv.width!==w || cv.height!==h){ cv.width=w; cv.height=h; }
+}
+function agDibujar(){
+  const cv=$('#ag-canvas'); if(!cv) return;
+  agResize(cv);
+  const g=cv.getContext('2d'), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
+  if(!agPl || !agPl.partes.length){
+    g.fillStyle='#5a6270'; g.font='13px system-ui,sans-serif'; g.textAlign='center';
+    g.fillText('Sin piezas que dibujar', W/2, H/2); return;
+  }
+  const cy=Math.cos(agVista.yaw), sy=Math.sin(agVista.yaw),
+        cp=Math.cos(agVista.pitch), sp=Math.sin(agVista.pitch);
+  // Ejes de la cámara en coordenadas de MUNDO: derecha, arriba y hacia el fondo. El tercero es el
+  // gradiente de la profundidad, y con él se cullean las caras traseras sin depender del orden de
+  // los vértices — que la matriz de una pieza puede espejar.
+  const rx=cy,        ry=0,  rz=sy;
+  const ux=sp*sy,     uy=cp,  uz=-sp*cy;
+  const fx=-cp*sy,    fy=sp,  fz=cp*cy;
+  // La luz se compone con esos mismos ejes (el tercero, negado: hacia el espectador), así que
+  // acompaña al giro y la cara que se mira nunca cae al ambiente.
+  const lwx=AG_LUZ[0]*rx+AG_LUZ[1]*ux-AG_LUZ[2]*fx,
+        lwy=AG_LUZ[0]*ry+AG_LUZ[1]*uy-AG_LUZ[2]*fy,
+        lwz=AG_LUZ[0]*rz+AG_LUZ[1]*uz-AG_LUZ[2]*fz;
+  const ln=Math.hypot(lwx,lwy,lwz)||1;
+  const lx=lwx/ln, ly=lwy/ln, lz=lwz/ln;
+  // Encuadre: el eje de giro del cuerpo se queda quieto en el centro (si se centrase la caja, el
+  // muñeco se pasearía por el lienzo al girar), y la escala cabe tanto de alto como al dar la vuelta.
+  const c=agPl.caja, alto=Math.max(0.001, c[4]-c[1]);
+  const radio=Math.max(0.001, 0.5*Math.hypot(c[3]-c[0], c[5]-c[2]));
+  const esc=Math.min(0.80*H/alto, 0.42*W/radio)*agVista.zoom;
+  const ox=W/2, oy=H/2, cxm=agPl.eje[0], cym=(c[1]+c[4])/2, czm=agPl.eje[2];
+  let n=0, total=0;
+  for(const P of agPl.partes) total+=agGeom(P.clave,P.rot,P.dibujo).caras.length;
+  agReservar(total);
+  const nrm=new Float32Array(18);
+  for(const P of agPl.partes){
+    const m=P.m, geo=agGeom(P.clave,P.rot,P.dibujo).caras;
+    for(let f=0;f<6;f++){ const d=AG_CARAS[f].n;                // la normal, girada por la pieza
+      nrm[f*3]  =m[0]*d[0]+m[4]*d[1]+m[8]*d[2];
+      nrm[f*3+1]=m[1]*d[0]+m[5]*d[1]+m[9]*d[2];
+      nrm[f*3+2]=m[2]*d[0]+m[6]*d[1]+m[10]*d[2];
+    }
+    for(const cara of geo){
+      const nX=nrm[cara.f*3], nY=nrm[cara.f*3+1], nZ=nrm[cara.f*3+2];
+      if(nX*fx+nY*fy+nZ*fz >= 0) continue;                      // mira al fondo: trasera
+      const sh=0.42+0.58*Math.max(0, nX*lx+nY*ly+nZ*lz);
+      const q=cara.v; let zs=0, k=n*8;
+      for(let i=0;i<4;i++){
+        const vx=q[i*3]+P.aa[0], vy=q[i*3+1]+P.aa[1], vz=q[i*3+2]+P.aa[2];
+        const wx=m[0]*vx+m[4]*vy+m[8]*vz+m[12] - cxm,
+              wy=m[1]*vx+m[5]*vy+m[9]*vz+m[13] - cym,
+              wz=m[2]*vx+m[6]*vy+m[10]*vz+m[14] - czm;
+        agBuf.xy[k+i*2]  = ox + (wx*rx+wy*ry+wz*rz)*esc;
+        agBuf.xy[k+i*2+1]= oy - (wx*ux+wy*uy+wz*uz)*esc;
+        zs += wx*fx+wy*fy+wz*fz;
+      }
+      const r=cara.rgb;
+      agBuf.z[n]=zs; agBuf.ord[n]=n;
+      agBuf.col[n]='rgb('+(r[0]*sh|0)+','+(r[1]*sh|0)+','+(r[2]*sh|0)+')';
+      n++;
+    }
+  }
+  const orden=agBuf.ord.subarray(0,n), z=agBuf.z;
+  orden.sort((a,b)=>z[b]-z[a]);                                 // orden pintor: primero lo del fondo
+  const xy=agBuf.xy;
+  for(let i=0;i<n;i++){
+    const j=orden[i], k=j*8;
+    g.fillStyle=agBuf.col[j];
+    g.beginPath(); g.moveTo(xy[k],xy[k+1]);
+    g.lineTo(xy[k+2],xy[k+3]); g.lineTo(xy[k+4],xy[k+5]); g.lineTo(xy[k+6],xy[k+7]);
+    g.closePath(); g.fill();
+  }
+}
+function agLoop(t){
+  agRAF=requestAnimationFrame(agLoop);
+  const dt=agTPrev? Math.min(0.1,(t-agTPrev)/1000) : 0; agTPrev=t;
+  const activo=$('#ag-activo').checked?1:0, andando=$('#ag-andando').checked?1:0;
+  // ⚠️ Aquí la fase la mueve el RELOJ. En el Mundo avanza con la DISTANCIA recorrida (por eso un
+  // zombie frenado contra una pared deja de pedalear), pero un preview no anda a ningún sitio. Es
+  // la única divergencia con el bicho vivo, y la cuenta de las articulaciones es la misma.
+  if(andando) agFase+=dt*2*Math.PI*1.2;
+  if(agPl && window.game && game.esqueletos)
+    game.esqueletos.pose(agPl, {fase:agFase, giro:+$('#ag-giro').value, activo, andando});
+  agDibujar();
+}
+
+// ── Documento, lista y formulario ───────────────────────────────────────────────────────────────
+async function openAgentes(){
+  $('#ag-modal').hidden=false;
+  if(!await cargarLibMundo()) toast('No he podido cargar la librería del Mundo: el preview no se moverá', 3);
+  await agRecargar();
+  if(!agDoc){ if(agLista.length) await agCargar(agLista[0].id); else agNuevo(); }
+  if(!agRAF){ agTPrev=0; agRAF=requestAnimationFrame(agLoop); }
+}
+function closeAgentes(){
+  $('#ag-modal').hidden=true;
+  if(agRAF){ cancelAnimationFrame(agRAF); agRAF=0; }
+}
+async function agRecargar(){
+  try{ agLista=await fetch('/api/agentes',{cache:'no-store'}).then(r=>r.json()); }catch(e){ agLista=[]; }
+  agRenderLista();
+}
+function agRenderLista(){
+  const el=$('#ag-list'); el.innerHTML='';
+  if(!agLista.length){ el.innerHTML='<p class="ag-empty">Sin agentes guardados.</p>'; }
+  for(const a of agLista){
+    const b=document.createElement('button');
+    b.className='ag-item'+(agDoc&&agDoc.id===a.id?' is-active':'');
+    b.innerHTML='<b></b><small></small>';
+    b.querySelector('b').textContent=a.nombre||a.id;
+    // Un agente escrito a mano no trae `savedAt`; sin el filtro quedaba un «·» suelto al final.
+    b.querySelector('small').textContent=[a.piezas+' piezas', (a.savedAt||'').replace('T',' ').slice(0,16)]
+      .filter(Boolean).join(' · ');
+    b.onclick=()=>agCargar(a.id);
+    el.appendChild(b);
+  }
+  $('#ag-del').hidden=!(agDoc && agDoc.id && agLista.some(a=>a.id===agDoc.id));
+}
+async function agCargar(id){
+  let d=null;
+  try{ d=await fetch('/api/agentes/'+id,{cache:'no-store'}).then(r=>r.json()); }catch(e){}
+  if(!d || d.error){ toast('No se pudo abrir el agente'); return; }
+  agDoc=d; agSel=0; agRenderLista(); agRefrescar();
+}
+function agNuevo(){
+  agDoc=JSON.parse(JSON.stringify(AG_PLANTILLA)); agSel=0; agRenderLista(); agRefrescar();
+  $('#ag-nombre').focus();
+}
+async function agGuardar(){
+  if(!agDoc) return;
+  agDoc.nombre=$('#ag-nombre').value.trim()||'agente';
+  let r=null;
+  try{ r=await fetch('/api/agentes',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(agDoc)}).then(x=>x.json()); }catch(e){}
+  if(!r || !r.id){ toast((r&&r.error)||'No se pudo guardar'); return; }
+  agDoc.id=r.id; await agRecargar(); toast('Agente guardado en data/agentes/'+r.id+'.json');
+}
+async function agBorrar(){
+  if(!agDoc || !agDoc.id) return;
+  if(!confirm('¿Borrar «'+(agDoc.nombre||agDoc.id)+'»? (va a la papelera del servidor)')) return;
+  let ok=false;
+  try{ ok=(await fetch('/api/agentes/'+agDoc.id,{method:'DELETE'})).ok; }catch(e){}
+  if(!ok){ toast('No se pudo borrar'); return; }
+  toast('Agente borrado'); agDoc=null; await agRecargar();
+  if(agLista.length) await agCargar(agLista[0].id); else agNuevo();
+}
+// Todas las piezas en una sola lista: la 0 es la raíz y las demás van en `piezas`. El resto del
+// panel trabaja con este índice y no con dos colecciones.
+function agPiezas(){ return agDoc? [agDoc.raiz].concat(agDoc.piezas||[]) : []; }
+function agRefrescar(){
+  if(!agDoc) return;
+  $('#ag-nombre').value=agDoc.nombre||'';
+  const ps=agPiezas();
+  if(agSel>=ps.length) agSel=0;
+  const ul=$('#ag-piezas'); ul.innerHTML='';
+  ps.forEach((p,i)=>{
+    const li=document.createElement('li'); li.className=(i===agSel?'is-active':'');
+    const nm=document.createElement('span'); nm.textContent=p.nombre||('pieza '+i);
+    const tag=document.createElement('span'); tag.className='ap-tag';
+    tag.textContent=i===0? 'raíz' : (p.articula? (p.articula.eje==='y'?'gira':'cabecea') : (p.mirar?'mira':'fija'));
+    li.appendChild(nm); li.appendChild(tag);
+    li.onclick=()=>{ agSel=i; agRefrescar(); };
+    ul.appendChild(li);
+  });
+  agForm();
+  agPreparar();
+}
+// Re-monta la plantilla del preview. Es asíncrono (los dibujos viajan por red, aunque la librería
+// los cachea), así que las respuestas que lleguen tarde se descartan por número de petición: sin
+// eso, teclear rápido en el formulario deja mandando a la plantilla de una versión anterior.
+function agPreparar(){
+  if(!agDoc || !window.game || !game.esqueletos) return;
+  const mio=++agPrepId;
+  Promise.resolve(game.esqueletos.preparar(JSON.parse(JSON.stringify(agDoc)))).then(pl=>{
+    if(mio!==agPrepId) return;
+    agPl=pl||null;
+    const el=$('#ag-caja');
+    if(el) el.textContent=agPl? ('alto '+(+(agPl.caja[4]-agPl.caja[1]).toFixed(4))+' · ancho '+
+      (+(agPl.caja[3]-agPl.caja[0]).toFixed(4))+' bloques · '+agPl.partes.length+' piezas') : '';
+  });
+}
+async function agCatalogo(){
+  if(agCat) return agCat;
+  const out=[];
+  try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
+    idx.filter(a=>a.type!=='textura').forEach(a=>out.push({key:'asset:'+a.file, name:a.name})); }catch(e){}
+  try{ (await apiHabitantes()).filter(h=>h.type!=='textura')
+    .forEach(h=>out.push({key:'hab:'+h.id, name:h.name+' (guardado)'})); }catch(e){}
+  agCat=out; return out;
+}
+// El formulario de la pieza elegida. Se reconstruye entero en cada cambio: son ~10 campos y así no
+// hay estado de UI que sincronizar con el documento — el documento es la única fuente de verdad.
+function agForm(){
+  const box=$('#ag-form'); box.innerHTML=''; if(!agDoc) return;
+  const ps=agPiezas(), p=ps[agSel]; if(!p) return;
+  const raiz=(agSel===0);
+  const h=document.createElement('h4');
+  h.textContent=raiz? 'Raíz · '+(p.nombre||'torso') : 'Pieza · '+(p.nombre||'');
+  box.appendChild(h);
+  const cambia=()=>{ agRefrescar(); };
+  box.appendChild(agCampoTexto('nombre', p.nombre||'', v=>{ p.nombre=v; cambia(); }));
+  const sel=agCampoSelect('dibujo', p.pieza||'', v=>{ p.pieza=v; cambia(); });
+  box.appendChild(sel);
+  agCatalogo().then(cat=>{
+    const s=sel.querySelector('select'); if(!s) return;
+    const val=p.pieza||'';
+    s.innerHTML='';
+    if(val && !cat.some(c=>c.key===val)) cat=[{key:val, name:val}].concat(cat);
+    for(const c of cat){ const o=document.createElement('option'); o.value=c.key; o.textContent=c.name; s.appendChild(o); }
+    s.value=val;
+  });
+  box.appendChild(agCampoNum('rot (¼ de vuelta)', p.rot|0, 1, v=>{ p.rot=((v|0)%4+4)%4; cambia(); }));
+  if(!raiz){
+    const en=p.en||[0,0,0];
+    box.appendChild(agTerna('en (x, alto, z)', en, v=>{ p.en=v; cambia(); }));
+  }
+  // Articulación: sin ella la pieza va soldada al cuerpo, que es lo que quiere una hombrera.
+  const art=p.articula||null;
+  const sw=document.createElement('label'); sw.className='ag-fld';
+  const chk=document.createElement('input'); chk.type='checkbox'; chk.checked=!!art;
+  chk.onchange=()=>{ if(chk.checked) p.articula={pivote:1, base:0, reposo:0, amplitud:30, fase:0, eje:'x'};
+                     else delete p.articula; cambia(); };
+  sw.appendChild(chk); sw.appendChild(document.createTextNode(' se articula'));
+  box.appendChild(sw);
+  if(art){
+    box.appendChild(agCampoSelect('eje', art.eje==='y'?'y':'x', v=>{ art.eje=v; cambia(); },
+      [{key:'x', name:'x · cabecea (brazo, pierna)'}, {key:'y', name:'y · gira (torreta)'}]));
+    box.appendChild(agCampoNum('pivote nº', art.pivote===undefined?1:art.pivote, 1, v=>{ art.pivote=v|0; cambia(); }));
+    box.appendChild(agCampoNum('base (te ve)', +art.base||0, 5, v=>{ art.base=v; cambia(); }));
+    box.appendChild(agCampoNum('reposo', +art.reposo||0, 5, v=>{ art.reposo=v; cambia(); }));
+    box.appendChild(agCampoNum('amplitud', +art.amplitud||0, 5, v=>{ art.amplitud=v; cambia(); }));
+    box.appendChild(agCampoNum('desfase (grados)', +art.fase||0, 15, v=>{ art.fase=v; cambia(); }));
+  }
+  if(!raiz){
+    const del=document.createElement('button'); del.className='btn sm danger'; del.textContent='Quitar esta pieza';
+    del.onclick=()=>{ agDoc.piezas.splice(agSel-1,1); agSel=0; agRefrescar(); };
+    box.appendChild(del);
+  }
+}
+function agCampo(etiqueta, ctrl){
+  const l=document.createElement('label'); l.className='ag-fld';
+  l.appendChild(document.createTextNode(etiqueta)); l.appendChild(ctrl); return l;
+}
+function agCampoTexto(etiqueta, val, set){
+  const i=document.createElement('input'); i.type='text'; i.value=val;
+  i.onchange=()=>set(i.value); return agCampo(etiqueta, i);
+}
+function agCampoNum(etiqueta, val, paso, set){
+  const i=document.createElement('input'); i.type='number'; i.step=paso; i.value=val;
+  i.onchange=()=>set(+i.value||0); return agCampo(etiqueta, i);
+}
+function agCampoSelect(etiqueta, val, set, opts){
+  const s=document.createElement('select');
+  for(const o of (opts||[])){ const e=document.createElement('option'); e.value=o.key; e.textContent=o.name; s.appendChild(e); }
+  s.value=val; s.onchange=()=>set(s.value); return agCampo(etiqueta, s);
+}
+// Los sitios van en BLOQUES, y un voxel del dibujo es 1/16: el paso del 0,0625 es lo que deja
+// colocar una pieza voxel a voxel sin escribir decimales a mano.
+function agTerna(etiqueta, val, set){
+  const l=document.createElement('label'); l.className='ag-fld';
+  l.appendChild(document.createTextNode(etiqueta));
+  const wrap=document.createElement('span'); wrap.className='ag-tern';
+  const ins=[0,1,2].map(i=>{
+    const n=document.createElement('input'); n.type='number'; n.step=0.0625; n.value=+val[i]||0;
+    n.onchange=()=>set(ins.map(x=>+x.value||0));
+    wrap.appendChild(n); return n;
+  });
+  l.appendChild(wrap); return l;
+}
+function agAnadirPieza(){
+  if(!agDoc) return;
+  if(!Array.isArray(agDoc.piezas)) agDoc.piezas=[];
+  agDoc.piezas.push({nombre:'pieza '+(agDoc.piezas.length+1), pieza:agDoc.raiz.pieza, en:[0,1,0]});
+  agSel=agDoc.piezas.length; agRefrescar();
+}
+// Plantarlo es cosa del Mundo: aquí solo se pide. Si no hay Mundo montado no hay dónde ponerlo.
+function agPlantar(){
+  if(!agDoc){ return; }
+  if(typeof mc==='undefined' || !mc || !mc.gl || !window.game || !game.esqueletos){
+    toast('Abre el Mundo (🌍) y vuelve: es ahí donde se planta'); return;
+  }
+  const yaw=mc.yaw||0, dx=-Math.sin(yaw)*3, dz=-Math.cos(yaw)*3;
+  Promise.resolve(game.esqueletos.crear(agDoc, mc.pos[0]+dx, mc.pos[1], mc.pos[2]+dz))
+    .then(h=>toast(h? 'Plantado en el Mundo' : 'No se pudo plantar (mira la consola)'));
+}
+$('#ag-close').onclick=closeAgentes;
+$('#ag-new').onclick=agNuevo;
+$('#ag-save').onclick=agGuardar;
+$('#ag-del').onclick=agBorrar;
+$('#ag-add').onclick=agAnadirPieza;
+$('#ag-plantar').onclick=agPlantar;
+$('#ag-nombre').onchange=e=>{ if(agDoc) agDoc.nombre=e.target.value; };
+$('#ag-modal').addEventListener('click',e=>{ if(e.target.id==='ag-modal') closeAgentes(); });
+(()=>{                                                          // orbitar y acercar el preview
+  const cv=$('#ag-canvas'); if(!cv) return;
+  let arr=null;
+  cv.addEventListener('pointerdown',e=>{ arr={x:e.clientX,y:e.clientY}; cv.classList.add('is-grab');
+    cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove',e=>{ if(!arr) return;
+    agVista.yaw+=(e.clientX-arr.x)*0.01;
+    agVista.pitch=Math.max(-1.2, Math.min(1.2, agVista.pitch+(e.clientY-arr.y)*0.008));
+    arr={x:e.clientX,y:e.clientY}; });
+  const suelta=()=>{ arr=null; cv.classList.remove('is-grab'); };
+  cv.addEventListener('pointerup',suelta); cv.addEventListener('pointercancel',suelta);
+  cv.addEventListener('wheel',e=>{ e.preventDefault();
+    agVista.zoom=Math.max(0.3, Math.min(4, agVista.zoom*(e.deltaY<0?1.1:1/1.1))); },{passive:false});
+})();
+
 function renderMapaGrid(){
   const grid=$('#mapa-grid'); const {cols,rows}=mapa;
   grid.style.gridTemplateColumns=`repeat(${cols}, 1fr)`;
