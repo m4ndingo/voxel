@@ -2788,6 +2788,93 @@ async function seccionEsqueletos() {
     t('y no deja ninguna colgada del rig', w.mc.structures.every((s) => !s._rig));
     t('lista() se queda vacía', w.game.esqueletos._vivos.length === 0);
   }
+
+  // ── La misma pose, sin Mundo: lo que va a dibujar el panel del editor ────────────────────────
+  // El preview del panel NO puede componer sus matrices por su cuenta. Si lo hiciera enseñaría un
+  // bicho que no es el que luego anda por el mapa, y esa diferencia se descubre tarde y en sitios
+  // raros (un brazo que en el preview cuelga bien y en el juego sale del codo). Por eso
+  // preparar()/pose() pasan por matrizPieza, la MISMA función que anima al vivo, y app.js solo
+  // dibuja. Esto es lo que fija ese trato: para el mismo estado, las dos poses tienen que dar
+  // matrices idénticas salvo por DÓNDE está plantado el bicho.
+  console.log('\nLa pose sin Mundo (la que dibujará el panel) es la del bicho de verdad');
+  {
+    const w = mundoZ();
+    // A 13,5 bloques: DENTRO de `deteccion` (14) y FUERA del `alcance` de la cabeza (12). Es la
+    // única ventana en la que el zombie ya anda hacia ti y la cabeza todavía no gira — y es lo que
+    // hace comparables las dos poses, porque un preview no tiene a quién mirar.
+    const rig = await crear(w, 12, 5, 20);
+    w.jugador(12, 6.5);
+    const nEst = w.mc.structures.length;
+    w.frames(12);
+    const est = { fase: rig.fase, giro: rig.giro, activo: rig.activo, andando: rig.andando };
+    t('el zombie ya anda y la cabeza todavía no gira',
+      rig.andando > 0.05 && Math.abs(rig.giro) > 1e-6 && rig.fase > 0.1
+      && rig.partes.every((P) => P.giroMira === 0),
+      'andando ' + rig.andando.toFixed(2) + ', giro ' + rig.giro.toFixed(1) + '°, fase ' + rig.fase.toFixed(2));
+
+    const pl = await w.game.esqueletos.preparar(ZOMBIE);
+    const piezas = w.game.esqueletos.pose(pl, est);
+    t('preparar() monta las 6 piezas del documento', !!pl && piezas.length === 6 && piezas === pl.partes);
+    // Los cuatro miembros piden `pivote: 1|2` y esos números salen de los 📍 del asset de verdad:
+    // si alguien regenera las piezas sin pivotes, el preview los haría girar por el centro y aquí
+    // se ve antes que en pantalla.
+    t('...con los pivotes del dibujo ya resueltos', piezas.slice(2).every((P) => !!P.piv));
+    t('preparar() no planta nada: es un dibujo, no un bicho',
+      w.mc.structures.length === nEst && w.game.esqueletos._vivos.length === 1);
+
+    // El bloque 3×3 de la matriz es SOLO rotación: no depende de dónde esté el bicho, así que tiene
+    // que salir idéntico bit a bit en las dos. Es la prueba de que no hay dos composiciones.
+    const LIN = [0, 1, 2, 4, 5, 6, 8, 9, 10];
+    let peor = 0;
+    for (let i = 0; i < 6; i++) {
+      const a = rig.partes[i].s.model, b = piezas[i].m;
+      for (const k of LIN) peor = Math.max(peor, Math.abs(a[k] - b[k]));
+    }
+    t('las dos poses giran exactamente igual', peor < 1e-6, 'peor ' + peor.toExponential(1));
+
+    // Y lo único que las separa es dónde está plantado: la MISMA traslación para las seis piezas.
+    // Si cada una tuviera la suya, el bicho del preview saldría descuartizado.
+    // Se compara un PUNTO de la pieza (su esquina), no la columna de traslación: esa columna sale de
+    // girar alrededor de un pivote y cambia con dónde esté el pivote, así que restarlas no dice nada.
+    const pt = (m, p) => [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12],
+                          m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13],
+                          m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]];
+    const dif = piezas.map((P, i) => {
+      const s = rig.partes[i].s, a = pt(s.model, s.aabb.slice(0, 3)), b = pt(P.m, P.aa.slice(0, 3));
+      return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    });
+    const disp = Math.max(...dif.map((d) => d3(d, dif[0])));
+    t('...y solo se diferencian en una traslación, la misma para las 6', disp < 1e-5, 'dispersión ' + disp.toExponential(1));
+    // La plantilla tiene la esquina de la raíz en el origen, así que la traslación es la celda de la
+    // raíz más lo que el bicho lleve andado. (baseY = y menos la pieza que más baja, las piernas a
+    // -0,75: plantado en y=5 la esquina cae en 5,75 y su celda es la 6.)
+    const g = rig.partes[0].s._sig;
+    t('...que es justo donde se le plantó, ya desplazado',
+      d3(dif[0], [12 + g.x, 6 + g.y, 20 + g.z]) < 1e-4,
+      dif[0].map((v) => v.toFixed(2)).join(','));
+
+    // La caja de la plantilla es para encuadrar el preview: mide lo mismo que el bicho estampado.
+    const alto = pl.caja[4] - pl.caja[1];
+    let lo = Infinity, hi = -Infinity;
+    rig.partes.forEach((P) => { lo = Math.min(lo, P.s.aabb[1] + P.o[1]); hi = Math.max(hi, P.s.aabb[4] + P.o[1]); });
+    t('la caja de la plantilla mide lo que el bicho', Math.abs(alto - (hi - lo)) < 1e-6,
+      alto.toFixed(4) + ' vs ' + (hi - lo).toFixed(4));
+    t('...y la raíz arranca en el origen', pl.partes[0].aa.slice(0, 3).every((v) => v === 0));
+
+    // Lo que hace que esto sirva en el EDITOR: ni una línea de aquí toca `mc`. La pestaña del
+    // editor no ha abierto el Mundo, así que ahí no hay `mc` ninguno y esto tiene que dar igual.
+    const mcGuardado = global.mc;
+    let pl2 = null, err = null;
+    try { global.mc = undefined; pl2 = await w.game.esqueletos.preparar(ZOMBIE); w.game.esqueletos.pose(pl2, est); }
+    catch (e) { err = e; }
+    finally { global.mc = mcGuardado; }
+    t('preparar()/pose() no necesitan Mundo (por eso valen en el editor)',
+      !err && !!pl2 && pl2.partes.length === 6, err ? String((err && err.message) || err) : '');
+    t('...y sin Mundo dan la misma pose', !!pl2 && pl2.partes.every((P, i) =>
+      P.m.every((v, k) => Math.abs(v - piezas[i].m[k]) < 1e-9)));
+
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
 }
 
 seccionPivotes().then(seccionPivoteAuto).then(seccionSeguir).then(seccionEsqueletos).then(() => {
