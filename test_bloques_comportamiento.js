@@ -2456,6 +2456,49 @@ async function seccionSeguir() {
     t('la etiqueta de rayos-X dice cuánto se ha ido y por qué está parada',
       /seguir: a 3 del ancla/.test(etiqueta) && /correa tensa/.test(etiqueta), etiqueta);
   }
+
+  // Hasta la v1.22 `chocaTerreno` solo miraba mc.grid, asi que un seguidor atravesaba una casa
+  // entera como si fuera humo: el terreno le paraba y el decorado no. El dueño lo reporto tal cual
+  // — «los agentes como el zombie atraviesan las estructuras, no los detienen como hacen los
+  // bloques, y deberian» — y son las dos mitades de la misma frase: PARAR con lo que es un muro y
+  // NO parar con lo que no lo es.
+  console.log('\nUna estructura para a un seguidor, igual que un bloque');
+  {
+    const MURO = 'hab:muro';
+    GEOM[MURO] = geomCubo();
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    // Ancho de sobra: no hay pathing, y con un muro corto lo que mediria el test es que lo rodea.
+    for (let z = 5; z <= 15; z++) for (let y = 5; y <= 6; y++)
+      w.mc.structures.push({ key: MURO, ox: 10, oy: y, oz: z, rot: 0, aabb: [10, y, z, 11, y + 1, z + 1] });
+    w.jugador(20, 10.5);
+    w.def(GUARDIAN, { seguir: cfg() });
+    w.frames(300);
+    const c = centro(s);
+    t('no atraviesa un muro de estructuras', c[0] < 10, 'x=' + c[0].toFixed(3));
+    t('...y llega hasta pegarse a él', c[0] > 9, 'x=' + c[0].toFixed(3));
+    // El seguidor ES una estructura, y con la misma geometria maciza que el muro: si el sondeo no
+    // se excluyera a si mismo, se encontraria su propio cubo en el primer paso y no arrancaria
+    // jamas. Este `ido > 1` es lo unico que separa «choca con el decorado» de «no se mueve».
+    t('...sin chocar consigo mismo: ha salido de su ancla', ido(s) > 1, ido(s).toFixed(3));
+  }
+
+  console.log('\n...pero una losa de 1/16 no es un muro: se la sube, como un bordillo');
+  {
+    const LOSA = 'hab:losa';
+    GEOM[LOSA] = geomLosa();               // la misma de la placa de presión: 1/16 de alto
+    const w = mundo();
+    const s = w.pieza(6, 10);
+    for (let x = 8; x <= 19; x++) for (let z = 9; z <= 12; z++)
+      w.mc.structures.push({ key: LOSA, ox: x, oy: 5, oz: z, rot: 0, aabb: [x, 5, z, x + 1, 5 + 1 / T, z + 1] });
+    w.jugador(20, 10.5);
+    w.def(GUARDIAN, { seguir: cfg() });
+    w.frames(300);
+    const c = centro(s);
+    t('cruza una losa fina en vez de estrellarse contra ella', c[0] > 16, 'x=' + c[0].toFixed(3));
+    t('...y va POR ENCIMA de ella, no por dentro', Math.abs(s._sig.y - 1 / T) < 1e-6,
+      'y=' + s._sig.y.toFixed(4));
+  }
 }
 
 // ── §17 Esqueletos: un agente articulado (y el primero es el zombie) ───────────────────────────
@@ -2670,6 +2713,29 @@ async function seccionEsqueletos() {
     t('...y los brazos siguen en alto (la pose no depende de andar)',
       Math.abs(Math.abs(cabeceo(rig, rig.partes[2]) - cabeceo(rig, rig.partes[4])) - 85) < 1,
       'brazo a ' + Math.abs(cabeceo(rig, rig.partes[2]) - cabeceo(rig, rig.partes[4])).toFixed(1) + '° de la pierna');
+  }
+
+  // El muro de arriba era de ROCA. Este es el mismo muro hecho de ESTRUCTURAS, que es lo que hay
+  // de verdad en el mapa del dueño (las casas, la Taberna, los muebles) y lo que hasta la v1.22
+  // atravesaba: «los agentes como el zombie atraviesan las estructuras». Para un esqueleto tiene un
+  // filo extra: la caja que se sondea es la del CUERPO ENTERO y el que la lleva es el torso, que es
+  // a su vez una estructura solida — si el sondeo no se excluyera a si mismo, el zombie chocaria
+  // contra su propio torso en el primer paso y no arrancaria jamas.
+  console.log('\nUn muro de ESTRUCTURAS le para igual que uno de roca');
+  {
+    const MURO = 'hab:muro-z';
+    GEOM[MURO] = geomCubo();
+    const w = mundoZ();
+    w.jugador(12, 6);                                   // alineado en x: el paso es puro -Z
+    const rig = await crear(w, 12, 5, 14);
+    const z0 = rig.eje[2] + rig.partes[0].s._sig.z;
+    for (let x = 8; x < 17; x++) for (let y = 5; y < 8; y++)
+      w.mc.structures.push({ key: MURO, ox: x, oy: y, oz: 10, rot: 0, aabb: [x, y, 10, x + 1, y + 1, 11] });
+    w.frames(240);
+    const z = rig.eje[2] + rig.partes[0].s._sig.z;
+    t('el zombie ha andado hacia el jugador', z < z0 - 1, 'z ' + z0.toFixed(2) + ' → ' + z.toFixed(2));
+    t('...pero NO atraviesa el muro de estructuras', z > 11, 'z=' + z.toFixed(3));
+    t('...y las piernas se paran solas contra él', rig.andando < 0.05, rig.andando.toFixed(3));
   }
 
   console.log('\nPiernas en oposición, y cada brazo en oposición a su pierna');
