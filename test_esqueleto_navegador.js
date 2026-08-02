@@ -187,6 +187,33 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     } finally { window.mcUpdate = orig; }
   });
 
+  // 4) La POSE que dibujará el panel del editor (fase 3). Aquí no se dibuja: lo que se comprueba es
+  //    lo único que el mundo de juguete no puede decir — que la caja que la librería le calcula a
+  //    cada pieza es la MISMA que le sale a app.js al mallarla, en las cuatro orientaciones.
+  //    No es cosmético: esa caja es el centro de giro por defecto y el encuadre del preview, así que
+  //    si no coincide el brazo del panel gira por un sitio y el del juego por otro.
+  //    El brazo del zombie vale de conejillo justo porque NO llena su celda (5×5×14 de 16³): girado
+  //    180° el contenido se va contra la otra pared de la celda y la caja pasa a medir un bloque
+  //    entero. Con el atajo de «intercambiar X y Z si rot es impar» esto daría mal en 3 de 4.
+  const medidas = await p.evaluate(async () => {
+    const CLAVE = 'asset:assets/brazo-zombie.vox.json';
+    const out = [];
+    for (let rot = 0; rot < 4; rot++) {
+      const pl = await game.esqueletos.preparar({
+        nombre: 'regla', raiz: { nombre: 'pieza', pieza: CLAVE, rot: rot }, piezas: []
+      });
+      const g = await mcStructGeom(CLAVE, rot);
+      out.push({
+        rot,
+        lib: pl && pl.partes[0] ? pl.partes[0].lados.slice() : null,
+        app: [g.fdim[0] / 16, g.fdim[1] / 16, g.fdim[2] / 16],
+        aa: pl && pl.partes[0] ? Array.from(pl.partes[0].aa) : null,
+        estructuras: mc.structures.length
+      });
+    }
+    return { out, vivos: game.esqueletos._vivos.length };
+  });
+
   const glsl = errores.filter(t => /shader|program|GLSL|compil/i.test(t));
 
   console.log('\n--- ' + URL + ' ---');
@@ -246,6 +273,23 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     assert(quitado.programados === 0, 'se programaron ' + quitado.programados + ' guardados');
     assert(quitado.guardados === 0, 'se llamó ' + quitado.guardados + ' veces a mcSaveWorld');
     assert(quitado.bloqueados === 0, 'la red intentó ' + quitado.bloqueados + ' escritura(s) (bloqueadas)');
+  });
+
+  test('la caja que la librería mide es la que app.js malla, en las 4 orientaciones', () => {
+    for (const m of medidas.out) {
+      assert(!!m.lib, 'rot ' + m.rot + ': preparar() no montó la pieza');
+      for (let k = 0; k < 3; k++) assert(Math.abs(m.lib[k] - m.app[k]) < 1e-9,
+        'rot ' + m.rot + ', eje ' + 'xyz'[k] + ': la librería dice ' + m.lib[k] + ' y app.js ' + m.app[k]);
+    }
+    // Y que el conejillo sirve de algo: si girarlo no cambiara la caja, esto pasaría sin probar nada.
+    const anchos = medidas.out.map((m) => m.lib[0]);
+    assert(new Set(anchos).size > 1, 'girar el brazo no cambia su caja (' + anchos.join(' ') + '): el test no prueba nada');
+  });
+  test('preparar() no planta nada ni deja agentes vivos', () => {
+    assert(medidas.vivos === 0, 'quedan ' + medidas.vivos + ' agentes vivos');
+    assert(medidas.out.every((m) => m.estructuras === quitado.estructuras),
+      'mc.structures cambió al preparar una plantilla');
+    assert(medidas.out[0].aa.slice(0, 3).every((v) => v === 0), 'la raíz no arranca en el origen');
   });
 
   console.log('\n' + (fallos ? fallos + ' fallo(s)' : ok + ' ok, 0 fallos'));
