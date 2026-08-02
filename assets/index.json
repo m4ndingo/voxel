@@ -378,5 +378,89 @@
     "group": "Bloques de construcción",
     "size": 16,
     "file": "assets/hielo-pista-de-patinaje.vox.json"
+  },
+  {
+    "id": "cabeza",
+    "name": "Cabeza",
+    "role": "Bloque básico 16³",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/cabeza.vox.json"
+  },
+  {
+    "id": "brazo",
+    "name": "brazo",
+    "role": "Bloque básico 16³",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 32
+    },
+    "file": "assets/brazo.vox.json"
+  },
+  {
+    "id": "cabeza-zombie",
+    "name": "Cabeza de zombie",
+    "role": "Pieza de agente · cabeza (15³, gira sobre el centro de su caja)",
+    "type": "textura",
+    "size": {
+      "x": 15,
+      "y": 15,
+      "z": 15
+    },
+    "file": "assets/cabeza-zombie.vox.json",
+    "icon": "🧟",
+    "group": "Agentes"
+  },
+  {
+    "id": "torso-zombie",
+    "name": "Torso de zombie",
+    "role": "Pieza de agente · raíz del esqueleto",
+    "type": "textura",
+    "size": {
+      "x": 12,
+      "y": 8,
+      "z": 14
+    },
+    "file": "assets/torso-zombie.vox.json",
+    "icon": "🧟",
+    "group": "Agentes"
+  },
+  {
+    "id": "brazo-zombie",
+    "name": "Brazo de zombie",
+    "role": "Pieza de agente · brazo (pivote 1 = hombro +X, 2 = hombro -X)",
+    "type": "textura",
+    "size": {
+      "x": 5,
+      "y": 5,
+      "z": 14
+    },
+    "file": "assets/brazo-zombie.vox.json",
+    "icon": "🧟",
+    "group": "Agentes"
+  },
+  {
+    "id": "pierna-zombie",
+    "name": "Pierna de zombie",
+    "role": "Pieza de agente · pierna (pivote 1 = cadera +X, 2 = cadera -X)",
+    "type": "textura",
+    "size": {
+      "x": 5,
+      "y": 5,
+      "z": 12
+    },
+    "file": "assets/pierna-zombie.vox.json",
+    "icon": "🧟",
+    "group": "Agentes"
   }
 ]

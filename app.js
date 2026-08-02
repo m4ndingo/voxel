@@ -5021,6 +5021,12 @@ function mcRemeshAround(x,z){
 // Re-hornea el shade de las estructuras cuyo AABB solapa el vecindario del edit (la luz se difunde ≤MC_MAXLIGHT bloques,
 // +1 de margen): reconstruye su instancia con mcBuildStructMesh, que vuelve a muestrear max(skylight, luz de bloque) por
 // cara. Acotado a las cercanas ⇒ ~1 estructura por edición. Fire-and-forget: el geom ya está cacheado (sin await de red).
+// Re-mallar una instancia crea un objeto NUEVO: lo que no se copie aquí se pierde en cada
+// reconstrucción. `efimera` tiene que sobrevivir o una pieza puesta por un snippet (un agente
+// articulado) se volvería permanente en cuanto alguien edite un bloque cerca. Lo demás NO se copia
+// a propósito: quien anima esas instancias las re-adquiere por (key,ox,oy,oz), que es lo único
+// estable entre reconstrucciones.
+function mcCarryEfimera(from,to){ if(from && from.efimera) to.efimera=true; return to; }
 async function mcRebakeStructsNear(x,z){
   const R=MC_MAXLIGHT+1;
   const affected=mc.structures.filter(s=>{ const a=s.aabb; return x>=a[0]-R&&x<=a[3]+R&&z>=a[2]-R&&z<=a[5]+R; });
@@ -5028,7 +5034,7 @@ async function mcRebakeStructsNear(x,z){
     if(mc.structures.indexOf(s)<0) continue;                 // se retiró mientras se reconstruía otra
     const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot);
     const j=mc.structures.indexOf(s);
-    if(j>=0){ mcFreeStruct(s); mc.structures[j]=rebuilt; } else mcFreeStruct(rebuilt);
+    if(j>=0){ mcFreeStruct(s); mc.structures[j]=mcCarryEfimera(s,rebuilt); } else mcFreeStruct(rebuilt);
   }
 }
 // --- F4 · física: colisión AABB + gravedad + WASD ---
@@ -5837,7 +5843,7 @@ async function mcRestampAll(){
   for(const s of insts){
     const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot);
     const j=mc.structures.indexOf(s);
-    if(j>=0){ mcFreeStruct(s); mc.structures[j]=rebuilt; } else mcFreeStruct(rebuilt);   // se retiró mientras se reconstruía
+    if(j>=0){ mcFreeStruct(s); mc.structures[j]=mcCarryEfimera(s,rebuilt); } else mcFreeStruct(rebuilt);   // se retiró mientras se reconstruía
   }
   if(luzCambio) mcMeshAll();   // el terreno vecino toma la luz de bloque de las estructuras (paredes encendidas)
 }
@@ -5909,7 +5915,11 @@ function mcBreak(){
   for(let t=step; t<=MAXD; t+=step){
     const px=o[0]+d[0]*t, py=o[1]+d[1]*t, pz=o[2]+d[2]*t;
     if(mc.structures.length && mcFineSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T))){
-      const s=mcStructAt(px,py,pz); if(s){ mcPushHist({t:'s-', sp:{key:s.key,ox:s.ox,oy:s.oy,oz:s.oz,rot:s.rot|0}}); mcRemoveStruct(s); return; }
+      const s=mcStructAt(px,py,pz);
+      // Una pieza efímera no es una edición del dueño: se va sin historial y sin guardar. Con
+      // historial, un Ctrl+Z la resucitaría como estructura de verdad y la metería en el mundo.
+      if(s && s.efimera){ mcRemoveStruct(s, true); toast('Pieza efímera retirada'); return; }
+      if(s){ mcPushHist({t:'s-', sp:{key:s.key,ox:s.ox,oy:s.oy,oz:s.oz,rot:s.rot|0}}); mcRemoveStruct(s); return; }
     }
     const bx=Math.floor(px), by=Math.floor(py), bz=Math.floor(pz);
     if(by>=0 && mcSolid(bx,by,bz)){ const before=mc.grid[mcIdx(bx,by,bz)]; mcSetBlock(bx,by,bz,0); mcPushHist({t:'b',x:bx,y:by,z:bz,before,after:0}); mcRemeshAround(bx,bz); mcScheduleSave(); return; }
@@ -6330,7 +6340,10 @@ function mcSerialize(){
     const id=g[mcIdx(x,y,z)]; if(!id) continue;
     vox[x+','+y+','+z]='tex:'+mc.blockKey[id];
   }
-  const structures=mc.structures.map(s=>({key:s.key, x:s.ox, y:s.oy, z:s.oz, rot:s.rot|0}));   // estructuras: sala + posición + giro (se re-mallan al cargar)
+  // Las EFÍMERAS no son del mundo: las pone un snippet en vivo (las piezas de un agente articulado),
+  // no el dueño con el editor, y desaparecen al recargar. Si entraran aquí, cualquier guardado — el
+  // autosave de un bloque puesto a diez metros — las dejaría clavadas en mundo.json.
+  const structures=mc.structures.filter(s=>!s.efimera).map(s=>({key:s.key, x:s.ox, y:s.oy, z:s.oz, rot:s.rot|0}));   // estructuras: sala + posición + giro (se re-mallan al cargar)
   return { format:'voxelworld-1', dim:{x:dim.x,y:dim.y,z:dim.z}, spawn:mc.spawn, voxels:vox, structures, notes:{...mc.notes} };   // t1 · notas post-it "x,y,z"→texto
 }
 function mcBake(doc){                          // hornea un mundo guardado a la rejilla densa + meshes

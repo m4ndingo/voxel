@@ -699,6 +699,62 @@ existe porque el juguete **calcaba mal el orden de `mcUpdate`** (gravedad despu�
 esa diferencia es exactamente el bug. Todo lo que dependa de la **secuencia** de `mcUpdate` (o de que un
 enganche corra en el sitio correcto) se prueba ahí, no en el juguete.
 
+### `game.esqueletos` — agentes articulados (v1.19)
+
+`seguir` cuelga del **material**: dos brazos de la misma clave perseguirían cada uno por su cuenta y
+acabarían amontonados en el mismo punto. Un muñeco necesita lo contrario — varias piezas que se mueven
+como **un solo cuerpo** —, así que un rig es **por instancia** y vive en un registro aparte
+(`esqueletos[]`), no en la tabla por material. El primero es un zombie
+(`data/snippets/agente-zombie.json`), pero la librería **no sabe qué es un zombie**: recibe un
+documento con piezas, articulaciones y guion.
+
+```js
+game.esqueletos.crear(doc, x, y, z)   // lo planta de pie ahí; promesa con su handle
+game.esqueletos.lista()               // quién hay vivo, dónde, y qué está haciendo
+game.esqueletos.quitar(id)            // o .quitar() para llevárselos a todos
+```
+
+**Sus piezas son efímeras.** `s.efimera` (la única marca del rig que vive en `app.js`, §0 aprobado) hace
+que `mcSerialize` las salte y que no entren en el historial de deshacer: el zombie existe mientras
+juegas y desaparece al recargar, y `mundo.json` queda byte a byte como estaba. Verificado en el Mundo del
+dueño: con el zombie plantado, `mcSerialize()` sigue devolviendo sus **269** estructuras de siempre.
+
+**Dos centros de giro, dos matrices.** El cuerpo gira sobre el eje vertical de su raíz y la extremidad
+cabecea sobre **su** hombro, así que `M = T(g) · Ryaw(cuerpo) · T(o) · Rart(articulación)`. Con un solo
+centro el hombro se despega del torso en cuanto el cuerpo gira 90°, que es justo lo que prueba §17.
+
+**El ciclo de andar avanza con la DISTANCIA recorrida, no con el reloj** (`fase += avance · cadencia`).
+Con el reloj, un zombie frenado contra una pared seguiría pedaleando en el sitio; así las piernas se
+paran solas cuando el cuerpo no avanza, sin ninguna condición especial.
+
+**`activo` y `andando` son dos interruptores distintos**, y confundirlos fue el bug v1.20: `activo` = *te
+ve* (los brazos suben a su `base`), `andando` = *se está moviendo* (el vaivén). Con el vaivén colgado de
+`activo`, al perderte y volver a su ancla el zombie se deslizaba de lado con las piernas rectas, como un
+mueble empujado. Por lo mismo, si no persigue pero anda, mira **hacia donde va**.
+
+**Tres costuras que no se pueden saltar** (las tres tienen su prueba en §17):
+
+1. `mirarObjetivos` le pondría `s.model = null` a cada pieza en cada frame: lleva una guarda `if (s._rig)
+   continue` — sobre una instancia del rig manda el rig.
+2. `mcRestampAll` **sustituye cada objeto** de `mc.structures`; el rig **re-adquiere** sus piezas por
+   `(key, ox, oy, oz)` en vez de animar objetos muertos.
+3. **La celda es entera y el cuerpo no**: el resto fraccionario del plantado viaja en la matriz, así que
+   una pieza del rig lleva `s.model` **siempre**, también parada. De ahí que `mcStructColl(raíz)` sea
+   siempre `null` y la solidez salga del envoltorio de `mcFineBoxHit` — donde se la dibuja, no donde
+   está su celda. Las extremidades van **sin colisión** a propósito: el rig las gira y los envoltorios
+   solo trasladan; una caja invisible que no acompaña al dibujo es peor que ninguna. **El zombie choca
+   por su torso.**
+
+⚠️ La cabeza es **15³ a propósito**: un asset de 1×1×1 bloque con ≥4096 voxels macizos es **terreno**
+(`blockLike`, `app.js:4126`) y el terreno no se puede animar. Con cualquier lado ≤15 el máximo posible es
+3375 < 4096, así que no puede volverse terreno por mucho que se rellene.
+
+Tests: `node test_bloques_comportamiento.js` **§17** (el motor, sobre el mundo de juguete: cuerpo rígido,
+hombro orbitando, fase por distancia contra un muro, piernas y brazos en oposición, vuelta a casa
+andando, `mcRestampAll`, solidez) y `node test_esqueleto_navegador.js` (Chromium + SwiftShader: que las 6
+piezas **se dibujan** —píxeles, no `mc.structures.length`—, que sus matrices llegan al shader, que
+`mcSerialize()` no las ve y que plantar un zombie **no dispara ningún guardado**).
+
 ## Convenciones
 
 - Cualquier cambio de `state` termina llamando a `render()` (= `drawEdit` + `drawIso` +

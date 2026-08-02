@@ -2026,6 +2026,10 @@ async function seccionPivoteAuto() {
 // que app.js sondea con base s.ox y no tiene ni idea de la matriz). Casi todo lo de aqui abajo mide
 // que las dos mitades siguen pegadas: que choca donde se la ve y NO donde estaba.
 const GUARDIAN = 'hab:guardian', GUARDIAN2 = 'hab:guardian2';
+// §17 necesita EXACTAMENTE el mismo mundo de juguete que §16 (las globales que 'seguir' envuelve,
+// mcCollides de verdad, suelo de roca en y=4): un esqueleto no es mas que varias piezas de 'seguir'
+// pegadas. En vez de duplicar el montaje, §16 lo deja aqui al empezar.
+let utilSeguir = null;
 function geomCubo() {                                     // 1x1x1 macizo en voxeles finos
   const fdim = [T, T, T], bits = new Uint8Array(T * T * T).fill(1);
   return { fdim, bits };
@@ -2122,6 +2126,7 @@ async function seccionSeguir() {
   // exponencial que hay que perseguir con margenes.
   const SIGO = { objetivo: 'jugador', deteccion: 20, distancia: 2.5, velocidad: 12, suavidad: 0, correa: 0 };
   const cfg = (extra) => Object.assign({}, SIGO, extra || {});
+  utilSeguir = { mundo, centro, planta, ido };   // §17 monta su mundo con esto mismo
 
   console.log('\nPersigue al jugador y se para a la distancia que se le pide');
   {
@@ -2453,7 +2458,336 @@ async function seccionSeguir() {
   }
 }
 
-seccionPivotes().then(seccionPivoteAuto).then(seccionSeguir).then(() => {
+// ── §17 Esqueletos: un agente articulado (y el primero es el zombie) ───────────────────────────
+// 'seguir' mueve UNA pieza; un esqueleto mueve SEIS y tiene que hacerlas parecer un solo bicho. Lo
+// que se prueba aqui no es que se dibuje (eso es cosa de test_esqueleto_navegador.js), sino las
+// cuatro cosas que se rompen sin que nadie las vea:
+//   · que las piezas sigan siendo un CUERPO RIGIDO (dos centros de giro mal compuestos y el brazo
+//     se despega del hombro en cuanto el cuerpo gira);
+//   · que el vaiven vaya con la DISTANCIA RECORRIDA y no con el reloj (pedalear contra una pared);
+//   · que `andando` (se mueve) y `activo` (te ve) sean DOS interruptores distintos — confundirlos es
+//     el zombie que se desliza de lado con las piernas rectas al volverse a su sitio (v1.20);
+//   · que sobrevivan a un mcRestampAll, que sustituye cada instancia por otra nueva.
+// Se prueba con el DOCUMENTO DE VERDAD (el de agente-zombie.json) y con los ASSETS DE VERDAD: si
+// alguien regenera las piezas con otras medidas o mueve un pivote, esto se entera.
+const CLAVE_Z = (n) => 'asset:assets/' + n + '-zombie.vox.json';
+const DOCS_Z = {};
+function cargarPiezasZombie() {
+  for (const n of ['torso', 'cabeza', 'brazo', 'pierna']) {
+    const clave = CLAVE_Z(n), doc = JSON.parse(fs.readFileSync('assets/' + n + '-zombie.vox.json', 'utf8'));
+    DOCS_Z[clave] = doc;
+    // El editor es Z-arriba y el Mundo Y-arriba: el `y` del dibujo es la PROFUNDIDAD (mcStructGeom).
+    // Aqui solo importan las MEDIDAS y que la caja este llena; la orientacion del dibujo no se prueba.
+    const s = doc.size, fdim = [s.x, s.z, s.y];
+    const bits = new Uint8Array(fdim[0] * fdim[1] * fdim[2]);
+    for (const k in doc.voxels) {
+      const q = k.split(','), ax = +q[0], ay = +q[1], az = +q[2];
+      bits[(az * fdim[2] + ay) * fdim[0] + ax] = 1;
+    }
+    GEOM[clave] = { fdim, bits };
+  }
+  global.getRoomData = (clave) => Promise.resolve(DOCS_Z[clave] || null);
+}
+// El documento del zombie sale del SNIPPET, no de una copia: una replica en el test daria verde con
+// el zombie de verdad roto. Se recorta el trozo que va de las constantes al cierre del literal.
+function docZombie() {
+  const codigo = JSON.parse(fs.readFileSync('data/snippets/agente-zombie.json', 'utf8')).code;
+  const i = codigo.indexOf('const CENTRO_X'), j = codigo.indexOf('\n};', codigo.indexOf('const ZOMBIE'));
+  if (i < 0 || j < 0) throw new Error('§17 no encuentra el documento ZOMBIE dentro de agente-zombie.json');
+  return new Function(codigo.slice(i, j + 3) + '\nreturn ZOMBIE;')();
+}
+
+async function seccionEsqueletos() {
+  cargarPiezasZombie();
+  const ZOMBIE = docZombie();
+  const GRADO = Math.PI / 180;
+  const wrap = (a) => { a %= 360; if (a > 180) a -= 360; if (a < -180) a += 360; return a; };
+
+  // El mundo de §16 mas lo unico que un esqueleto necesita de mas: estampar y retirar piezas.
+  const mundoZ = () => {
+    const w = utilSeguir.mundo();
+    global.mcStampStruct = (clave, x, y, z, rot) => {
+      const g = GEOM[clave];
+      if (!g) throw new Error('§17: no hay geometria de juguete para ' + clave);
+      const d = g.fdim;
+      w.mc.structures.push({ key: clave, ox: x, oy: y, oz: z, rot: (rot | 0) & 15,
+                             aabb: [x, y, z, x + d[0] / T, y + d[1] / T, z + d[2] / T] });
+      return Promise.resolve();          // como en app.js: no devuelve la instancia, hay que buscarla
+    };
+    global.mcRemoveStruct = (s) => {
+      const i = w.mc.structures.indexOf(s);
+      if (i >= 0) w.mc.structures.splice(i, 1);
+    };
+    return w;
+  };
+  const crear = async (w, x, y, z, def) => {
+    const l = console.log, n = console.warn;                 // crear() se presenta por consola
+    console.log = (...a) => w.avisosConsola.push(a.join(' '));
+    console.warn = (...a) => w.avisosConsola.push(a.join(' '));
+    try { return await w.game.esqueletos.crear(def || ZOMBIE, x, y, z); }
+    finally { console.log = l; console.warn = n; }
+  };
+  // mcRestampAll sustituye CADA instancia por otra nueva en el mismo indice, sin _rig, sin _sig, sin
+  // efimera y sin matriz. Es exactamente lo que pasa al terminar de cargar el mundo.
+  const restampar = (w) => {
+    const ests = w.mc.structures, viejas = ests.slice();
+    for (let i = 0; i < ests.length; i++) {
+      const v = ests[i];
+      ests[i] = { key: v.key, ox: v.ox, oy: v.oy, oz: v.oz, rot: v.rot, aabb: v.aabb.slice() };
+    }
+    return viejas;
+  };
+
+  // El punto FIJO de cada pieza: su pivote si articula (el hombro, la cadera) y si no el centro de
+  // su caja. Es el punto que su propio giro NO mueve, o sea por donde cuelga del cuerpo. Con rot=0
+  // puntoPivote(a,0,piv) es a[min]+piv, que es lo que se calcula aqui.
+  const anclaLocal = (P) => {
+    const a = P.s.aabb;
+    return P.piv ? [a[0] + P.piv[0], a[1] + P.piv[1], a[2] + P.piv[2]]
+                 : [(a[0] + a[3]) / 2, (a[1] + a[4]) / 2, (a[2] + a[5]) / 2];
+  };
+  const conMatriz = (P, p) => {
+    const m = P.s.model;
+    if (!m) return p.slice();
+    return [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12],
+            m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13],
+            m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]];
+  };
+  const armazon = (rig) => rig.partes.map((P) => conMatriz(P, anclaLocal(P)));
+  const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  // La direccion a la que apunta una pieza, medida sobre la matriz de verdad (dos puntos y una
+  // resta): asi el test no tiene que reproducir el convenio de columnas de matrizGiro.
+  const frente = (P) => {
+    const o = conMatriz(P, [0, 0, 0]), f = conMatriz(P, [0, 0, -1]);
+    return [f[0] - o[0], f[1] - o[1], f[2] - o[2]];
+  };
+  const rumbo = (v) => Math.atan2(v[0], -v[2]) / GRADO;
+  const bajo = (P) => { const a = P.s.aabb; return [(a[0] + a[3]) / 2, a[1], (a[2] + a[5]) / 2]; };
+  // Cuanto adelanta o atrasa una pieza su punta respecto de donde cuelga, en la direccion en que
+  // mira el cuerpo. Es el numero que hace visible el paso: un pie delante y el otro detras.
+  const zancada = (rig, P) => {
+    const f = frente(rig.partes[0]), n = Math.hypot(f[0], f[2]) || 1;
+    const punta = conMatriz(P, bajo(P)), colgado = conMatriz(P, anclaLocal(P));
+    return ((punta[0] - colgado[0]) * f[0] + (punta[2] - colgado[2]) * f[2]) / n;
+  };
+  // El angulo de la articulacion, leido de la matriz de verdad. La `zancada` de arriba vale para las
+  // piernas (que oscilan alrededor de 0) pero NO para los brazos: con `base:85` estan casi
+  // horizontales, donde el adelantamiento va con el seno y se APLANA — ±10° dejan la punta en el
+  // mismo sitio y el signo del balanceo se pierde. Un atan2 es monotono en todo el recorrido. El
+  // cero da igual: lo unico que se compara son sumas y diferencias entre piezas hermanas.
+  const cabeceo = (rig, P) => {
+    const f = frente(P), b = frente(rig.partes[0]), n = Math.hypot(b[0], b[2]) || 1;
+    return Math.atan2((f[0] * b[0] + f[2] * b[2]) / n, f[1]) / GRADO;
+  };
+
+  console.log('\nSe planta un agente articulado y sus piezas son efímeras');
+  {
+    const w = mundoZ();
+    w.jugador(12, 8);
+    const antes = w.mc.structures.length, celdas = w.mc.grid.filter((v) => v !== 0).length;
+    const rig = await crear(w, 12, 5, 14);
+    t('crear() devuelve el agente con sus 6 piezas', !!rig && rig.partes.length === 6);
+    t('las 6 están estampadas', w.mc.structures.length === antes + 6);
+    t('todas son efímeras (mcSerialize las salta ⇒ no entran en mundo.json)',
+      rig.partes.every((P) => P.s && P.s.efimera === true));
+    t('todas llevan su rig y sólo el torso es la raíz',
+      rig.partes.every((P) => P.s._rig === rig) && rig.partes.filter((P) => P.s._rigRaiz).length === 1);
+    t('ni un voxel entra en la rejilla del mundo', w.mc.grid.filter((v) => v !== 0).length === celdas);
+    // El pivote de los brazos y las piernas sale del DIBUJO (herramienta 📍), no de una constante.
+    t('los brazos y las piernas cuelgan del pivote dibujado, no del centro de su caja',
+      rig.partes.slice(2).every((P) => !!P.piv));
+    t('el pivote nº1 y el nº2 caen en caras opuestas (hombro izq / der)',
+      Math.abs(rig.partes[1 + 1].piv[0] - rig.partes[2 + 1].piv[0]) > 0.2);
+    t('lista() lo ve vivo', w.sinRuido(() => w.game.esqueletos.lista()).length === 1);
+  }
+
+  console.log('\nLas 6 piezas se mueven como UN SOLO CUERPO, y giran con él');
+  {
+    const w = mundoZ();
+    w.jugador(12, 8);
+    const rig = await crear(w, 12, 5, 14);
+    w.frames(30);
+    const A = armazon(rig);
+    w.frames(60);
+    const B = armazon(rig);
+    let peor = 0;
+    for (let i = 0; i < 6; i++) for (let j = i + 1; j < 6; j++)
+      peor = Math.max(peor, Math.abs(d3(A[i], A[j]) - d3(B[i], B[j])));
+    t('andando, las distancias entre piezas no cambian', peor < 1e-4, 'peor ' + peor.toExponential(1));
+    t('...y de verdad se ha movido', d3(A[0], B[0]) > 0.5);
+
+    // El cuerpo gira hacia el jugador y las extremidades ORBITAN con el: el hombro sigue pegado al
+    // torso despues de girar. Con un solo centro de giro esto es justo lo que se rompe.
+    const g0 = rig.giro, off0 = [B[3][0] - B[0][0], B[3][2] - B[0][2]];
+    w.jugador(3, 14);                                  // ahora el jugador esta a un lado
+    w.frames(240);
+    const C = armazon(rig);
+    const off1 = [C[3][0] - C[0][0], C[3][2] - C[0][2]];
+    const gj = rig.partes[0].s._sig;
+    const esperado = wrap(Math.atan2(w.mc.pos[0] - (rig.eje[0] + gj.x),
+                                     -(w.mc.pos[2] - (rig.eje[2] + gj.z))) / GRADO);
+    t('el cuerpo acaba mirando al jugador', Math.abs(wrap(rig.giro + rig.horneado - esperado)) < 5,
+      'giro ' + rig.giro.toFixed(1) + '° vs ' + esperado.toFixed(1) + '°');
+    t('la cara del torso apunta a donde dice el giro',
+      Math.abs(wrap(rumbo(frente(rig.partes[0])) - rig.giro - rig.horneado)) < 1);
+    const giroHombro = wrap(Math.atan2(off1[0], -off1[1]) / GRADO - Math.atan2(off0[0], -off0[1]) / GRADO);
+    t('el hombro orbita con el cuerpo (mismo ángulo que ha girado el torso)',
+      Math.abs(wrap(giroHombro - (rig.giro - g0))) < 2 && Math.abs(giroHombro) > 20,
+      'hombro ' + giroHombro.toFixed(1) + '° · torso ' + (rig.giro - g0).toFixed(1) + '°');
+    t('...sin despegarse: la distancia al torso es la misma',
+      Math.abs(Math.hypot(off1[0], off1[1]) - Math.hypot(off0[0], off0[1])) < 1e-4);
+  }
+
+  console.log('\nEl vaivén avanza con la DISTANCIA recorrida, no con el reloj');
+  {
+    const w = mundoZ();
+    w.jugador(12, 6);                                   // alineado en x: el paso es puro -Z
+    const rig = await crear(w, 12, 5, 14);
+    // Muro de 4 de alto: mcSurfaceNear solo le deja subir 1, asi que es un muro y no una rampa.
+    for (let x = 8; x < 17; x++) for (let y = 5; y < 9; y++) w.roca(x, y, 10);   // muro por medio
+    w.frames(240);                                      // choca contra el muro y se queda ahi
+    // Justo enfrente, en la x que ya ocupa: si el jugador queda de lado, la meta tiene componente
+    // lateral y el zombie sigue rascandose contra la pared — que es andar de verdad, no pedalear en
+    // el sitio, y lo que se prueba aqui es lo segundo.
+    w.jugador(rig.eje[0] + rig.partes[0].s._sig.x, 6);
+    w.frames(60);
+    const fase = rig.fase, andando = rig.andando, activo = rig.activo;
+    const p0 = armazon(rig)[0];
+    w.frames(120);                                      // dos segundos MAS de reloj, sin avanzar
+    t('contra el muro deja de avanzar', d3(p0, armazon(rig)[0]) < 1e-3);
+    t('la fase del paso no avanza con el reloj', Math.abs(rig.fase - fase) < 1e-9,
+      'Δfase ' + Math.abs(rig.fase - fase).toExponential(1));
+    t('...y las piernas se paran solas', andando < 0.01 && rig.andando < 0.01);
+    t('pero te sigue viendo (la pose de brazos en alto se queda)', activo > 0.9 && rig.activo > 0.9);
+    const zi = zancada(rig, rig.partes[4]), zd = zancada(rig, rig.partes[5]);
+    t('parado, los dos pies están a la par', Math.abs(zi) < 0.02 && Math.abs(zd) < 0.02,
+      'izq ' + zi.toFixed(3) + ' · der ' + zd.toFixed(3));
+    // `base:85` es la POSE de «te veo», y no depende de andar: con las piernas paradas los brazos
+    // tienen que seguir a 85° de ellas. Es el otro lado del bug de v1.20.
+    t('...y los brazos siguen en alto (la pose no depende de andar)',
+      Math.abs(Math.abs(cabeceo(rig, rig.partes[2]) - cabeceo(rig, rig.partes[4])) - 85) < 1,
+      'brazo a ' + Math.abs(cabeceo(rig, rig.partes[2]) - cabeceo(rig, rig.partes[4])).toFixed(1) + '° de la pierna');
+  }
+
+  console.log('\nPiernas en oposición, y cada brazo en oposición a su pierna');
+  {
+    const w = mundoZ();
+    w.jugador(12, 6);
+    const rig = await crear(w, 12, 5, 18);
+    w.frames(120);   // que `activo` acabe de subir: la POSE de los brazos va con el, y aun subiendo
+                     // desplaza los dos por igual y la suma no seria constante por un motivo tonto
+    // Dos piezas hermanas en oposicion oscilan alrededor de la MISMA base: su suma es constante y su
+    // diferencia es el balanceo. Asi no hace falta saber cuanto vale la base ni donde esta el cero.
+    let sumaP = null, sumaB = null, peorP = 0, peorB = 0, mayor = 0, juntos = 0, muestras = 0;
+    for (let k = 0; k < 60; k++) {
+      w.frames(3);
+      // partes = [torso, cabeza, brazo izq, brazo der, pierna izq, pierna der]
+      const bi = cabeceo(rig, rig.partes[2]), bd = cabeceo(rig, rig.partes[3]);
+      const pi = cabeceo(rig, rig.partes[4]), pd = cabeceo(rig, rig.partes[5]);
+      if (sumaP === null) { sumaP = pi + pd; sumaB = bi + bd; }
+      peorP = Math.max(peorP, Math.abs(pi + pd - sumaP));
+      peorB = Math.max(peorB, Math.abs(bi + bd - sumaB));
+      mayor = Math.max(mayor, Math.abs(pi - pd));
+      // El brazo izquierdo va con la pierna DERECHA (fases 180 y 180): si los dos pares se adelantan
+      // hacia el mismo lado, el zombie anda como un soldadito de plomo.
+      if (Math.abs(pi - pd) > 1) { muestras++; if ((bi - bd) * (pi - pd) > 0) juntos++; }
+    }
+    // El margen es ruido de coma flotante: el atan2 de los brazos se lee a ~85°, donde amplifica.
+    t('las piernas van en oposición', peorP < 1e-4, 'peor desvío ' + peorP.toExponential(1));
+    t('los brazos también', peorB < 1e-4, 'peor desvío ' + peorB.toExponential(1));
+    t('y de verdad dan zancadas', mayor > 40 && muestras > 20, 'apertura ' + mayor.toFixed(1) + '°');
+    t('cada brazo balancea al revés que su pierna', juntos === 0, juntos + '/' + muestras + ' a la par');
+  }
+
+  console.log('\nAl perderte vuelve a su sitio ANDANDO y mirando hacia donde va (v1.20)');
+  {
+    const w = mundoZ();
+    w.jugador(14, 14);
+    const rig = await crear(w, 20, 5, 20);
+    w.frames(360);
+    const g = rig.partes[0].s._sig;
+    t('primero te ha perseguido', Math.hypot(g.x, g.z) > 4, 'se ha ido ' + Math.hypot(g.x, g.z).toFixed(1));
+    w.jugador(2, 2);                                     // te pierde de vista (>14 de detección)
+    w.frames(60);
+    t('deja de verte', rig.activo < 0.05, 'activo ' + rig.activo.toFixed(3));
+    t('...pero sigue andando, de vuelta a su ancla', rig.andando > 0.9,
+      'andando ' + rig.andando.toFixed(2));
+    const p0 = armazon(rig)[0];
+    w.frames(30);
+    const p1 = armazon(rig)[0];
+    const marcha = rumbo([p1[0] - p0[0], 0, p1[2] - p0[2]]);
+    t('anda hacia su ancla, no de lado', Math.hypot(p1[0] - p0[0], p1[2] - p0[2]) > 0.1
+      && Math.abs(wrap(marcha - rumbo([rig.eje[0] + 0 - p1[0], 0, rig.eje[2] - p1[2]]))) < 90);
+    t('y MIRA hacia donde va (no se desliza de espaldas)',
+      Math.abs(wrap(rumbo(frente(rig.partes[0])) - marcha)) < 8,
+      'mira ' + rumbo(frente(rig.partes[0])).toFixed(1) + '° · va ' + marcha.toFixed(1) + '°');
+    t('las piernas se mueven mientras vuelve', Math.abs(zancada(rig, rig.partes[4])) > 0.05);
+    // Y los brazos, que son la POSE, ya no estan en alto: `activo` y `andando` son dos cosas.
+    w.frames(600);
+    t('al llegar a su ancla se para del todo', rig.andando < 0.01
+      && Math.hypot(rig.partes[0].s._sig.x, rig.partes[0].s._sig.z) < 0.2);
+    t('parado sigue teniendo matriz (el resto fraccionario vive en ella)',
+      rig.partes.every((P) => !!P.s.model));
+  }
+
+  console.log('\nSobrevive a mirarObjetivos y a que le sustituyan las instancias');
+  {
+    const w = mundoZ();
+    w.jugador(12, 8);
+    const rig = await crear(w, 12, 5, 14);
+    w.def(GUARDIAN, { mirar: { ejes: 'y', alcance: 30 } });   // enciende el bucle por material
+    w.pieza(3, 3, GUARDIAN);
+    w.frames(60);
+    t('mirarObjetivos no le quita la matriz a una pieza del rig',
+      rig.partes.every((P) => !!P.s.model));
+
+    const antes = armazon(rig)[0], viejas = restampar(w);
+    w.frames(2);
+    t('re-adquiere las instancias nuevas', rig.partes.every((P) =>
+      w.mc.structures.indexOf(P.s) >= 0 && P.s._rig === rig && P.s.efimera === true));
+    t('...y las anima (no se queda animando las muertas)', rig.partes.every((P) => !!P.s.model));
+    t('las viejas se sueltan', viejas.every((v) => !v._rig));
+    t('y no se teletransporta al ancla al hacerlo', d3(antes, armazon(rig)[0]) < 0.2,
+      'salto ' + d3(antes, armazon(rig)[0]).toFixed(3));
+  }
+
+  console.log('\nSólido donde se le ve, hueco en el ancla, y las extremidades no chocan');
+  {
+    const w = mundoZ();
+    w.jugador(12, 6);
+    const rig = await crear(w, 12, 5, 16);
+    const R = rig.partes[0], a0 = R.s.aabb.slice();
+    // Quieto en su ancla el reparto se ve limpio: el torso es solido y las extremidades no. Van sin
+    // colision a proposito — el rig las GIRA y los envoltorios de v1.18 solo trasladan, asi que una
+    // caja que no acompaña al dibujo es peor que ninguna. El zombie choca por su torso.
+    t('las extremidades no tienen colisión (giran, y el bitset no gira)',
+      rig.partes.slice(1).every((P) => global.mcStructColl(P.s) === null));
+    // La raiz tampoco es solida por mcStructColl, y no es un olvido: su `_sig` nace con el resto
+    // fraccionario del plantado, o sea que esta «desplazada» desde el primer frame y la solidez sale
+    // SIEMPRE del envoltorio de mcFineBoxHit — donde se la dibuja, no donde esta su celda.
+    const g0 = R.s._sig;
+    w.frames(1);   // los envoltorios tienen salida rapida por `nDesplazados`, que lo cuenta el tick
+    t('la raíz es sólida desde el primer frame, donde se la dibuja',
+      global.mcCollides((a0[0] + a0[3]) / 2 + g0.x, a0[1] + g0.y + 0.1, (a0[2] + a0[5]) / 2 + g0.z));
+    w.frames(300);
+    const g = R.s._sig;
+    t('se ha ido de su ancla', Math.hypot(g.x, g.z) > 3, 'se ha ido ' + Math.hypot(g.x, g.z).toFixed(1));
+    const y = a0[1] + g.y + 0.1;                        // dentro del torso y por encima del suelo
+    t('sólido donde se le ve', global.mcCollides((a0[0] + a0[3]) / 2 + g.x, y, (a0[2] + a0[5]) / 2 + g.z));
+    t('hueco en el ancla', !global.mcCollides((a0[0] + a0[3]) / 2, y, (a0[2] + a0[5]) / 2));
+    // Desplazada, la solidez ya no sale de mcStructColl (que se apaga para no dejar un muro
+    // invisible en el ancla) sino del envoltorio de mcFineBoxHit: por eso se mide con mcCollides.
+    t('desplazada, el ancla deja de ser sólida por sí misma', global.mcStructColl(R.s) === null);
+
+    const sueltas = w.mc.structures.length - 6;
+    const n = w.sinRuido(() => w.game.esqueletos.quitar(rig));
+    t('quitar() retira las 6 piezas', n === 6 && w.mc.structures.length === sueltas);
+    t('y no deja ninguna colgada del rig', w.mc.structures.every((s) => !s._rig));
+    t('lista() se queda vacía', w.game.esqueletos._vivos.length === 0);
+  }
+}
+
+seccionPivotes().then(seccionPivoteAuto).then(seccionSeguir).then(seccionEsqueletos).then(() => {
   console.log(fail ? '\n' + fail + ' fallo(s)' : '\n' + ok + ' ok, 0 fallos');
   process.exit(fail ? 1 : 0);
 }, (e) => { console.log('\nla sección se rompió: ' + (e && e.stack || e)); process.exit(1); });
