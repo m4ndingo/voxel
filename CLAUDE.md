@@ -705,14 +705,40 @@ enganche corra en el sitio correcto) se prueba ahí, no en el juguete.
 acabarían amontonados en el mismo punto. Un muñeco necesita lo contrario — varias piezas que se mueven
 como **un solo cuerpo** —, así que un rig es **por instancia** y vive en un registro aparte
 (`esqueletos[]`), no en la tabla por material. El primero es un zombie
-(`data/snippets/agente-zombie.json`), pero la librería **no sabe qué es un zombie**: recibe un
+(`data/agentes/zombie.json`), pero la librería **no sabe qué es un zombie**: recibe un
 documento con piezas, articulaciones y guion.
 
 ```js
 game.esqueletos.crear(doc, x, y, z)   // lo planta de pie ahí; promesa con su handle
+game.esqueletos.crear('zombie', ...)  // …o el id de uno guardado, que es lo normal
 game.esqueletos.lista()               // quién hay vivo, dónde, y qué está haciendo
 game.esqueletos.quitar(id)            // o .quitar() para llevárselos a todos
 ```
+
+**`game.agentes` y `game.esqueletos` no son sinónimos** (v1.21): `game.agentes` son los **documentos
+guardados** en `data/agentes/*.json` (qué bichos sabemos hacer) y `game.esqueletos` es lo **vivo en este
+mundo** (qué bichos hay ahora y dónde). Guardar no planta nada; plantar no guarda nada.
+
+```js
+game.agentes.lista()            // [{id, nombre, piezas, savedAt}] — GET /api/agentes
+game.agentes.cargar('zombie')   // el documento entero
+game.agentes.guardar(doc)       // POST; el id sale del slug de `nombre`
+```
+
+El almacén es el de habitantes clonado (`/api/agentes`, GET·POST·PATCH·DELETE, a papelera y nunca
+borrado real), con **una diferencia que importa**: al guardar, el documento se copia **entero** y el
+servidor solo le impone `id` y `savedAt`. Las claves que no conoce **viajan intactas**, para que ampliar
+el formato no vacíe los agentes ya guardados al reguardarlos desde una versión vieja del panel. Es lo
+único de esta parte que no se ve en pantalla y lo que más caro costaría descubrir tarde, así que tiene su
+prueba: `node test_agentes_api.js`.
+
+⚠️ **El bicho se edita en `data/agentes/zombie.json`**, no en el snippet. `agente-zombie.json` ya solo
+dice *dónde* y *cuándo* se planta (`game.esqueletos.crear('zombie', …)`); hasta la fase 2 llevaba dentro
+una segunda copia del documento y tocar una dejaba a la otra mandando en el test.
+
+⚠️ Después de tocar `server.py` **hay que reiniciarlo** (`python3 server.py 8500`): Python no recarga el
+fichero solo y los endpoints nuevos dan 404 hasta entonces — con el zombie eso se ve como «el snippet ya
+no planta nada», que no se parece en nada a la causa.
 
 **Sus piezas son efímeras.** `s.efimera` (la única marca del rig que vive en `app.js`, §0 aprobado) hace
 que `mcSerialize` las salte y que no entren en el historial de deshacer: el zombie existe mientras
@@ -753,7 +779,10 @@ Tests: `node test_bloques_comportamiento.js` **§17** (el motor, sobre el mundo 
 hombro orbitando, fase por distancia contra un muro, piernas y brazos en oposición, vuelta a casa
 andando, `mcRestampAll`, solidez) y `node test_esqueleto_navegador.js` (Chromium + SwiftShader: que las 6
 piezas **se dibujan** —píxeles, no `mc.structures.length`—, que sus matrices llegan al shader, que
-`mcSerialize()` no las ve y que plantar un zombie **no dispara ningún guardado**).
+`mcSerialize()` no las ve y que plantar un zombie **no dispara ningún guardado**). Los dos leen el
+**documento de verdad** (`data/agentes/zombie.json`) y las **piezas de verdad** (`assets/*-zombie.vox.json`):
+mover un pivote o regenerar un asset con otras medidas se entera aquí. El almacén, aparte:
+`node test_agentes_api.js` (necesita el servidor vivo).
 
 ## Convenciones
 
