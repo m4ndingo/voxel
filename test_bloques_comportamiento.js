@@ -2488,13 +2488,16 @@ function cargarPiezasZombie() {
   }
   global.getRoomData = (clave) => Promise.resolve(DOCS_Z[clave] || null);
 }
-// El documento del zombie sale del SNIPPET, no de una copia: una replica en el test daria verde con
-// el zombie de verdad roto. Se recorta el trozo que va de las constantes al cierre del literal.
+// El documento del zombie sale del ALMACEN, no de una copia: una replica en el test daria verde con
+// el zombie de verdad roto. Hasta la fase 2 se recortaba del snippet agente-zombie.json; ahora el
+// documento vive en data/agentes/zombie.json y el snippet solo lo invoca por su id, asi que esto es
+// exactamente lo que el servidor le sirve al motor.
 function docZombie() {
-  const codigo = JSON.parse(fs.readFileSync('data/snippets/agente-zombie.json', 'utf8')).code;
-  const i = codigo.indexOf('const CENTRO_X'), j = codigo.indexOf('\n};', codigo.indexOf('const ZOMBIE'));
-  if (i < 0 || j < 0) throw new Error('§17 no encuentra el documento ZOMBIE dentro de agente-zombie.json');
-  return new Function(codigo.slice(i, j + 3) + '\nreturn ZOMBIE;')();
+  const doc = JSON.parse(fs.readFileSync('data/agentes/zombie.json', 'utf8'));
+  if (!doc.raiz || !doc.raiz.pieza || !Array.isArray(doc.piezas)) {
+    throw new Error('§17 data/agentes/zombie.json no es un documento de agente (falta raiz.pieza o piezas[])');
+  }
+  return doc;
 }
 
 async function seccionEsqueletos() {

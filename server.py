@@ -12,6 +12,7 @@ MAPFILE = os.path.join(BASE, 'data', 'mapa.json')         # mapa del mundo (reji
 WORLDFILE = os.path.join(BASE, 'data', 'mundo.json')       # mundo sandbox 3D (REQ-MC) — fichero único "sagrado" (mapa «default»)
 WORLDS = os.path.join(BASE, 'data', 'worlds')             # mundos con nombre: /map/<nombre> -> data/worlds/<slug>.json (persistentes)
 SNIPS = os.path.join(BASE, 'data', 'snippets')             # gestor de snippets de código (data/snippets/<id>.json)
+AGENTS = os.path.join(BASE, 'data', 'agentes')             # agentes articulados (data/agentes/<id>.json) — el documento, no el motor
 # Snippets que NO se pueden borrar desde la UI. 'mundo-autoarranque' lo busca app.js POR ESE ID al
 # entrar al Mundo (openWorld), así que borrarlo no rompe nada visible al momento: simplemente el
 # Mundo deja de tener bloques con comportamiento y no hay ningún error que lo delate. Editarlo y
@@ -21,6 +22,7 @@ os.makedirs(STORE, exist_ok=True)
 os.makedirs(TRASH, exist_ok=True)
 os.makedirs(WORLDS, exist_ok=True)
 os.makedirs(SNIPS, exist_ok=True)
+os.makedirs(AGENTS, exist_ok=True)
 
 DEFAULT_MAP = {'cols': 8, 'rows': 8, 'cells': {}}
 # Mundo vacío por defecto: sin voxels => el cliente genera terreno plano (mcGenFlat)
@@ -96,17 +98,20 @@ def atomic_dump(d, path):
             try: os.remove(tmp)
             except OSError: pass
 
-# Elimina (a papelera) otros ficheros cuyo nombre coincide (mismo slug) => sin duplicados por nombre
-def dedup(idd):
-    for fn in os.listdir(STORE):
+# Elimina (a papelera) otros ficheros cuyo nombre coincide (mismo slug) => sin duplicados por nombre.
+# `store`/`name_of` porque la regla es la misma para habitantes y para agentes: solo cambia dónde
+# viven y de qué clave sale el nombre visible.
+def dedup(idd, store=STORE, name_of=lambda d: (d.get('meta') or {}).get('name')):
+    for fn in os.listdir(store):
         if not fn.endswith('.json') or fn[:-5] == idd:
             continue
         try:
-            m = json.load(open(os.path.join(STORE, fn), encoding='utf-8')).get('meta', {})
+            d = json.load(open(os.path.join(store, fn), encoding='utf-8'))
+            igual = slugify(name_of(d)) == idd
         except Exception:
-            continue
-        if slugify(m.get('name')) == idd:
-            to_trash(os.path.join(STORE, fn))
+            continue                                  # un .json roto o que no es un objeto: ni se toca
+        if igual:
+            to_trash(os.path.join(store, fn))
 
 def list_snips():
     out = []
@@ -122,6 +127,24 @@ def list_snips():
                     'savedAt': d.get('savedAt', ''),
                     'protegido': fn[:-5] in SNIPS_PROTEGIDOS})    # la UI esconde el botón; el DELETE lo corta el servidor
     out.sort(key=lambda s: s.get('savedAt', ''), reverse=True)   # más recientes primero
+    return out
+
+# Un agente es un DOCUMENTO (qué piezas, dónde van, cómo articulan), no código: el motor vive en el
+# snippet «mundo-autoarranque» y lo único que se guarda aquí es la descripción del bicho. El listado
+# enseña solo lo que necesita un selector; para animarlo hace falta el fichero entero.
+def list_agentes():
+    out = []
+    for fn in sorted(os.listdir(AGENTS)):
+        if not fn.endswith('.json'):
+            continue
+        try:
+            d = json.load(open(os.path.join(AGENTS, fn), encoding='utf-8'))
+            piezas = 1 + len(d.get('piezas') or [])       # la raíz cuenta: es la pieza 0
+        except Exception:
+            continue
+        out.append({'id': fn[:-5], 'nombre': d.get('nombre', '(sin nombre)'),
+                    'piezas': piezas, 'savedAt': d.get('savedAt', '')})
+    out.sort(key=lambda a: a.get('savedAt', ''), reverse=True)   # más recientes primero
     return out
 
 def list_all():
@@ -170,6 +193,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return m.group(1) if m else None
     def _snip_path(self, idd):
         return os.path.join(SNIPS, idd + '.json')
+    def _agente_id(self):
+        m = re.match(r'^/api/agentes/([A-Za-z0-9_-]+)$', self.path)
+        return m.group(1) if m else None
+    def _agente_path(self, idd):
+        return os.path.join(AGENTS, idd + '.json')
     def _asset_id(self):
         m = re.match(r'^/api/assets/([A-Za-z0-9_.-]+)$', self.path)
         if not m:
@@ -239,6 +267,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if os.path.exists(fp):
                 return self._send(200, json.load(open(fp, encoding='utf-8')))
             return self._send(404, {'error': 'no existe'})
+        if self.path == '/api/agentes':                          # agentes articulados: lista
+            return self._send(200, list_agentes())
+        gid = self._agente_id()
+        if gid:
+            fp = self._agente_path(gid)
+            if os.path.exists(fp):
+                return self._send(200, json.load(open(fp, encoding='utf-8')))
+            return self._send(404, {'error': 'no existe agente'})
         if path_only == '/api/assets':
             idx_path = os.path.join(BASE, 'assets', 'index.json')
             if os.path.exists(idx_path):
@@ -295,6 +331,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             to_trash(self._snip_path(sid), move=False)           # respaldo de la versión anterior
             atomic_dump(rec, self._snip_path(sid))
             return self._send(200, {'id': sid, 'savedAt': rec['savedAt']})
+        if self.path == '/api/agentes':                          # agentes articulados: crear/guardar
+            d = self._read()
+            if (not isinstance(d, dict) or not isinstance(d.get('raiz'), dict)
+                    or not d['raiz'].get('pieza') or not isinstance(d.get('piezas'), list)):
+                return self._send(400, {'error': 'agente inválido: hace falta raiz.pieza y piezas[]'})
+            gid = slugify(d.get('id') or d.get('nombre'))
+            # `rec` es una COPIA del documento entero, no una lista de campos conocidos: el formato va
+            # a crecer (fase 3 le pondrá pose de reposo, sonidos, lo que sea) y un guardado desde una
+            # versión vieja del editor no puede tirar a la basura las claves que esa versión no
+            # entiende. Solo se imponen `id` y `savedAt`, que son del almacén y no del bicho.
+            rec = dict(d)
+            rec['id'] = gid
+            rec['savedAt'] = now_iso()
+            to_trash(self._agente_path(gid), move=False)         # respaldo de la versión anterior
+            atomic_dump(rec, self._agente_path(gid))
+            dedup(gid, AGENTS, lambda a: a.get('nombre'))        # consolida otros con el mismo nombre
+            return self._send(200, {'id': gid, 'savedAt': rec['savedAt']})
         if self.path == '/api/assets':
             d = self._read()
             if not isinstance(d, dict) or 'voxels' not in d:
@@ -375,6 +428,26 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 except Exception:
                     pass
             return self._send(200, {'ok': True, 'id': aid, 'name': name})
+        gid = self._agente_id()
+        if gid and os.path.exists(self._agente_path(gid)):
+            d = json.load(open(self._agente_path(gid), encoding='utf-8'))
+            body = self._read()
+            nombre = (body.get('nombre') or '').strip()
+            if nombre:
+                # Aquí el fichero SÍ se mueve (al revés que en assets): a un agente se le invoca por
+                # su id y no hay nada guardado en el mundo que lo apunte — los agentes son efímeros y
+                # no entran en mundo.json, así que renombrar no deja huérfano a nadie.
+                d['nombre'] = nombre
+                new_id = slugify(nombre)
+                if new_id != gid:
+                    d['id'] = new_id
+                    to_trash(self._agente_path(new_id), move=False)
+                    atomic_dump(d, self._agente_path(new_id))
+                    to_trash(self._agente_path(gid)); gid = new_id     # el viejo va a papelera
+                    dedup(gid, AGENTS, lambda a: a.get('nombre'))
+                else:
+                    atomic_dump(d, self._agente_path(gid))
+            return self._send(200, {'ok': True, 'id': gid, 'nombre': d.get('nombre', '')})
         idd = self._id()
         if idd and os.path.exists(self._path(idd)):
             d = json.load(open(self._path(idd), encoding='utf-8'))
@@ -401,6 +474,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if os.path.exists(self._snip_path(sid)):
                 to_trash(self._snip_path(sid)); return self._send(200, {'ok': True})   # a papelera, no borrado real
             return self._send(404, {'error': 'no existe'})
+        gid = self._agente_id()
+        if gid:
+            if os.path.exists(self._agente_path(gid)):
+                to_trash(self._agente_path(gid)); return self._send(200, {'ok': True})   # a papelera, no borrado real
+            return self._send(404, {'error': 'no existe agente'})
         aid = self._asset_id()
         if aid and os.path.exists(self._asset_path(aid)):
             to_trash(self._asset_path(aid))

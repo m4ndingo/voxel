@@ -1,6 +1,9 @@
 # Estado de runtime (no versionar): papelera, habitantes guardados, mundos temporales y logs
 data/*
 !data/snippets/
+# Los documentos de los agentes articulados SÍ se versionan: son autoría, no runtime.
+# (Un comentario al final de la línea NO vale aquí: pasaría a formar parte del patrón.)
+!data/agentes/
 data/habitantes/
 data/habitantes_trash/
 data/worlds/
