@@ -703,6 +703,49 @@ de más de un bloque sigue parando, porque ninguna de las 16 alturas queda libre
 daba igual porque se atravesaba, y ahora no. Se ve en `game.esqueletos.lista()` como `por: 3`
 (`estado: "bloqueada"`) sin haberse movido nunca. Si pasa, plantar el bicho en otro sitio.
 
+#### El clic izquierdo sobre un agente es un GOLPE, no un roto (v1.25)
+
+Un agente **no se rompe a clics**. Antes sí: `mcBreak` (`app.js:6414`) marcha el rayo fino desde el
+ojo y **retira entera** la primera estructura que toca, y si es `efimera` se va además **sin historial
+y sin guardar** (`app.js:6426`) — que es exactamente lo que son sus piezas. Y como la única pieza
+**sólida** de un rig es su **raíz** (las extremidades no tienen colisión), lo que el rayo encontraba
+era el torso: el clic se llevaba *el cuerpo* y quedaban cinco miembros congelados en el aire.
+
+Ahora ese clic **empuja**, como pegarle a un mob de Minecraft: el bicho sale despedido hacia atrás,
+**pega un brinco** y vuelve andando. Se hace envolviendo `mcBreak` desde la librería (**ni una línea
+de `app.js`**, §0), repitiendo **su mismo rayo** — mismo ojo, mismo paso de 1/16, mismo alcance — para
+saber qué gana: si lo primero que toca es una pieza de agente, el clic **se come ahí**, así que
+tampoco se rompe el terreno de detrás. Cualquier otra cosa va al original y se rompe como siempre.
+**Para retirar un agente está `game.esqueletos.quitar(id)`**, no el pico.
+
+```js
+game.esqueletos.empujar(rig)              // el golpe a mano: lo aleja del jugador (lo que hace el clic)
+game.esqueletos.empujar(rig, 20)          // ...con la fuerza que se diga (0 = la del documento)
+game.esqueletos.empujar(rig, 8, 1, 0)     // ...o en la dirección que se diga (en planta)
+```
+
+En el documento del agente, opcional: `empuje: { fuerza: 8, freno: 0.15, salto: 4.5 }` (u/s, τ del
+frenado en s, y velocidad vertical del brinco). Sin ponerlo, todos los bichos ya golpean igual.
+
+**Dos cosas que no son detalles:**
+
+1. **El empujón es una velocidad que se frena sola, no un teletransporte.** De ahí salen gratis que
+   se pare contra una pared (mueve la raíz por `moverRaiz` → `asentar`, la misma colisión que un
+   paso) y que el bicho **vuelva solo**, porque el que persigue sigue persiguiendo mientras vuela.
+2. **El brinco no puede vivir en `g.y`.** Con `ejes:'xz'`, `asentar()` **reescribe** la Y de la raíz
+   desde el suelo cada vez que la pieza se mueve — pero *solo* cuando se mueve. Va aparte (`alto`,
+   altura sobre el suelo), se **descuenta antes de andar** y se vuelve a sumar después; dejándolo
+   puesto se acumula en los frames en que el bicho está quieto y el zombie acaba en el cielo.
+
+Y el efecto colateral que faltaba: si a un rig le desaparece la raíz por cualquier otro camino (un
+script, una versión vieja), **se retiran sus piezas sueltas y el agente se da de baja** en vez de
+quedarse a medias. La condición distingue eso de un `mcRestampAll`, donde faltan **todas** a la vez y
+lo correcto es esperar a que vuelvan.
+
+**Límites, a propósito:** el empujón avanza **eje a eje y sin sub-paso**, igual que andar, así que un
+golpe fuerte contra una pared muy cerca lo deja quieto en vez de pegarlo a ella; el golpe **no hace
+daño** (no hay vida ni combate) y **no hay animación de dolor**.
+
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
 se autoejecutan (solo a mano desde Alt+C), así que la escalera dejaba de ser escalera en cada recarga.
 `mcAutoarranque()` (final de `openWorld`) ejecuta ese snippet si existe: `app.js` **no sabe qué hace**,

@@ -2566,6 +2566,27 @@ async function seccionEsqueletos() {
     };
     return w;
   };
+  // El clic de romper, reducido a lo que hay que medir: si el envoltorio deja pasar el clic, `veces`
+  // sube. Se monta ANTES de mundoZ() porque el snippet envuelve lo que encuentra AL ARRANCAR, igual
+  // que con mcSolid o mcFineBoxHit. mcFineSolidAt es de una línea en app.js y se calca igual.
+  const conClic = () => {
+    const reg = { veces: 0 };
+    global.mcFineSolidAt = (fx, fy, fz) => global.mcFineBoxHit(fx, fy, fz, fx, fy, fz);
+    global.mcReach = () => 12;
+    global.mcBreak = () => { reg.veces++; };
+    return reg;
+  };
+  // Apuntar el ojo del jugador a un punto, en el convenio de app.js:
+  // d = [-sen(yaw)·cos(pitch), sen(pitch), -cos(yaw)·cos(pitch)]
+  const apuntarA = (w, p) => {
+    const v = [p[0] - w.mc.pos[0], p[1] - (w.mc.pos[1] + 1.62), p[2] - w.mc.pos[2]];
+    w.mc.yaw = Math.atan2(-v[0], -v[2]);
+    w.mc.pitch = Math.atan2(v[1], Math.hypot(v[0], v[2]));
+  };
+  const centroRaiz = (rig) => {
+    const a = rig.partes[0].s.aabb, g = rig.partes[0].s._sig || { x: 0, y: 0, z: 0 };
+    return [(a[0] + a[3]) / 2 + g.x, (a[1] + a[4]) / 2 + g.y, (a[2] + a[5]) / 2 + g.z];
+  };
   const crear = async (w, x, y, z, def) => {
     const l = console.log, n = console.warn;                 // crear() se presenta por consola
     console.log = (...a) => w.avisosConsola.push(a.join(' '));
@@ -2939,6 +2960,117 @@ async function seccionEsqueletos() {
     t('...y sin Mundo dan la misma pose', !!pl2 && pl2.partes.every((P, i) =>
       P.m.every((v, k) => Math.abs(v - piezas[i].m[k]) < 1e-9)));
 
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
+
+  // ── El golpe (v1.25) ──────────────────────────────────────────────────────────────────────────
+  // El dueño: «algo raro pasa si hago clic sobre el zombie en su cuerpo, el bloque desaparece y deja
+  // de funcionar el zombie», y luego qué quería en su lugar: «que sea darle un empujón... el npc
+  // salta hacia atrás desplazándose», como pegarle a un mob de Minecraft. Las dos mitades son la
+  // misma prueba: lo que ANTES rompía la pieza ahora tiene que empujar al bicho y no romper nada.
+  // Ojo con lo de «en su cuerpo»: la única pieza SÓLIDA de un rig es la raíz (las extremidades no
+  // tienen colisión), así que el torso es justo lo que el rayo encuentra... y lo que se llevaba.
+  console.log('\nUn clic sobre el agente ya no rompe nada: le pega y sale despedido');
+
+  {
+    const clic = conClic();
+    const w = mundoZ();
+    w.jugador(12, 14);
+    const rig = await crear(w, 12, 5, 10);
+    w.frames(120);                                 // que se acerque y se plante a su distancia
+    const dist = () => Math.hypot(centroRaiz(rig)[0] - w.mc.pos[0], centroRaiz(rig)[2] - w.mc.pos[2]);
+    const nEst = w.mc.structures.length, dPre = dist(), yPre = rig.partes[0].s._sig.y;
+
+    apuntarA(w, centroRaiz(rig));                  // al cuerpo, que es lo que el dueño clicó
+    w.sinRuido(() => global.mcBreak());
+    t('el clic NO llega al rompedor de app.js', clic.veces === 0);
+    t('...no se lleva ninguna pieza', w.mc.structures.length === nEst,
+      w.mc.structures.length + ' vs ' + nEst);
+    t('...y el agente sigue entero y vivo', rig.partes.every((P) => !!P.s)
+      && w.game.esqueletos._vivos.length === 1);
+
+    let dMax = dPre, altoMax = 0;
+    for (let i = 0; i < 60; i++) { w.frames(1); dMax = Math.max(dMax, dist()); altoMax = Math.max(altoMax, rig.partes[0].s._sig.y - yPre); }
+    t('sale despedido: se aleja del jugador', dMax - dPre > 0.4, '+' + (dMax - dPre).toFixed(3));
+    // El brinco no puede ir en g.y a secas: asentar() reescribe la Y desde el suelo en cuanto la
+    // pieza se mueve, así que se lleva aparte y se vuelve a sumar. Si eso se rompe, o no salta o
+    // sale volando; medir el máximo pilla las dos cosas junto con el `< 1.5` de abajo.
+    t('...y pega un brinco, no se desliza', altoMax > 0.1 && altoMax < 1.5, 'alto=' + altoMax.toFixed(3));
+    w.frames(240);
+    t('...y vuelve andando a su sitio', Math.abs(dist() - dPre) < 0.2,
+      dist().toFixed(3) + ' vs ' + dPre.toFixed(3));
+    t('el empujón se acaba solo (no queda velocidad puesta)', rig.emp === null);
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
+
+  {
+    // Y lo de siempre sigue igual: un clic que NO da al agente rompe lo que rompía. Si el envoltorio
+    // se comiera todos los clics, el mundo entero se volvería irrompible sin que nadie lo notase.
+    const clic = conClic();
+    const w = mundoZ();
+    w.jugador(12, 14);
+    const rig = await crear(w, 12, 5, 10);
+    w.frames(120);
+    apuntarA(w, [12, 4.5, 14]);                    // a los pies del jugador: el suelo, no el bicho
+    w.sinRuido(() => global.mcBreak());
+    t('un clic al suelo pasa de largo y rompe como siempre', clic.veces === 1, 'veces=' + clic.veces);
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
+
+  {
+    // El empujón mueve la raíz con la MISMA colisión que un paso (moverRaiz → asentar), así que un
+    // muro a su espalda lo para. Sin esto, un golpe metería al bicho dentro de una casa. Se pega con
+    // fuerza 40 a propósito: al aire libre eso son metros, así que si el muro no contase el zombie
+    // acabaría al otro lado y no a un pelo de él.
+    const MURO = 'hab:muro-golpe';
+    GEOM[MURO] = geomCubo();
+    const w = mundoZ();
+    w.jugador(12, 14);
+    const rig = await crear(w, 12, 5, 10);
+    w.frames(120);
+    for (let x = 8; x <= 16; x++) for (let y = 5; y <= 7; y++) {
+      w.mc.structures.push({ key: MURO, ox: x, oy: y, oz: 11, rot: 0, aabb: [x, y, 11, x + 1, y + 1, 12] });
+    }
+    const zPre = centroRaiz(rig)[2];
+    t('empujar() dice que sí ha empujado', w.sinRuido(() => w.game.esqueletos.empujar(rig, 40)) === true);
+    w.sinRuido(() => w.frames(60));
+    const atras = rig.cuerpo[2] + rig.partes[0].s._sig.z;      // borde trasero de la caja del bicho
+    t('el empujón se para contra un muro, no lo atraviesa', atras > 12 - 1e-3,
+      'borde=' + atras.toFixed(3) + ' · muro hasta z=12 · centro ' + zPre.toFixed(2) + '→' + centroRaiz(rig)[2].toFixed(2));
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
+
+  // Y la otra mitad del fallo: aunque alguien se lleve el cuerpo por otro camino (un script, una
+  // versión vieja del clic), lo que NO puede quedar es medio zombie congelado en el aire.
+  console.log('\nSin cuerpo no hay agente: ni se queda a medias ni se suicida en un re-estampado');
+
+  {
+    const w = mundoZ();
+    w.jugador(12, 14);
+    const rig = await crear(w, 12, 5, 10);
+    w.frames(30);
+    const nEst = w.mc.structures.length;
+    global.mcRemoveStruct(rig.partes[0].s);        // alguien se lleva el torso por su cuenta
+    w.sinRuido(() => w.frames(1));
+    t('se retiran las piezas sueltas que quedaban', w.mc.structures.length === nEst - 6,
+      w.mc.structures.length + ' vs ' + (nEst - 6));
+    t('...y el agente se da de baja', w.game.esqueletos._vivos.length === 0);
+  }
+
+  {
+    // La condición tiene que distinguir «le han quitado el cuerpo» de «están re-estampando el mundo»:
+    // en un mcRestampAll faltan TODAS a la vez y ahí lo correcto es esperar, no autodestruirse.
+    const w = mundoZ();
+    w.jugador(12, 14);
+    const rig = await crear(w, 12, 5, 10);
+    w.frames(30);
+    const copia = w.mc.structures.slice();
+    w.mc.structures.length = 0;
+    w.sinRuido(() => w.frames(1));
+    t('con TODAS las piezas fuera, el agente espera', w.game.esqueletos._vivos.length === 1);
+    copia.forEach((s) => w.mc.structures.push(s));
+    w.sinRuido(() => w.frames(1));
+    t('...y las re-adquiere en cuanto vuelven', rig.partes.every((P) => !!P.s));
     w.sinRuido(() => w.game.esqueletos.quitar());
   }
 }
