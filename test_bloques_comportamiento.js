@@ -2999,7 +2999,7 @@ async function seccionEsqueletos() {
     w.frames(240);
     t('...y vuelve andando a su sitio', Math.abs(dist() - dPre) < 0.2,
       dist().toFixed(3) + ' vs ' + dPre.toFixed(3));
-    t('el empujón se acaba solo (no queda velocidad puesta)', rig.emp === null);
+    t('el empujón se acaba solo (no queda velocidad puesta)', rig.mov === null);
     w.sinRuido(() => w.game.esqueletos.quitar());
   }
 
@@ -3071,6 +3071,168 @@ async function seccionEsqueletos() {
     copia.forEach((s) => w.mc.structures.push(s));
     w.sinRuido(() => w.frames(1));
     t('...y las re-adquiere en cuanto vuelven', rig.partes.every((P) => !!P.s));
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
+
+  // ── La física de los bloques, para el agente (v1.26) ──────────────────────────────────────────
+  // El dueño: «hace falta también que los agentes articulados respeten las físicas de los bloques,
+  // ya sean de salto, velocidad, etc.». Toda esa física (game.bloques.define) estaba escrita SOLO
+  // para el jugador: vive en los envoltorios de mcPlayerStep y toca mc.speed / mc.vel[1]. Un agente
+  // no pasa por ahí, así que sobre hielo iba igual de lento y un trampolín no le hacía nada.
+  //
+  // Las cuatro pruebas de abajo son las cuatro cosas que el suelo le puede hacer a un cuerpo, y la
+  // quinta es la que tiene que seguir SIN pasar: disparar el alPisar de una placa.
+  const ROCA = 'asset:assets/roca.vox.json';
+  const HIELO = 'hab:placa';                       // en el mundo de juguete la placa es un bloque macizo
+  const suelo = (w, clave, x0, x1, z0, z1) => {    // repinta el suelo (y=4) de otro material
+    const id = clave === HIELO ? 4 : 1;
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) w.mc.grid[global.mcIdx(x, 4, z)] = id;
+  };
+  const gDe = (rig) => rig.partes[0].s._sig;
+
+  console.log('\nEl agente pisa como el jugador: el suelo le cambia la marcha');
+  {
+    // Dos mundos idénticos y la misma persecución; en el segundo el suelo acelera ×2. Se mide lo
+    // ANDADO, no dónde acaba: el zombie se para a 1,2 del jugador, así que en cuanto llega los dos
+    // están en el mismo sitio y la diferencia se borra. Con el jugador lejos va a marcha de crucero.
+    const anda = async (factor) => {
+      const w = mundoZ();
+      w.jugador(12, 18);                           // dentro de su detección (14) y lejos de su parada (1.2)
+      if (factor !== 1) w.def(ROCA, { velocidad: factor });
+      const rig = await crear(w, 12, 5, 6);
+      const z0 = centroRaiz(rig)[2];
+      w.sinRuido(() => w.frames(60));              // 1 s de crucero, lejos de su distancia de parada
+      const dz = centroRaiz(rig)[2] - z0;
+      w.sinRuido(() => w.game.esqueletos.quitar());
+      return dz;
+    };
+    const normal = await anda(1), rapido = await anda(2), lento = await anda(0.5);
+    t('a marcha normal anda ≈ velocidad(2.2) × 1 s', Math.abs(normal - 2.2) < 0.25, normal.toFixed(2) + ' bloques');
+    t('sobre un suelo ×2 anda el doble', Math.abs(rapido - normal * 2) < 0.3,
+      rapido.toFixed(2) + ' vs ' + (normal * 2).toFixed(2));
+    t('sobre un suelo ×0.5 anda la mitad', Math.abs(lento - normal * 0.5) < 0.2,
+      lento.toFixed(2) + ' vs ' + (normal * 0.5).toFixed(2));
+  }
+
+  console.log('\nSe cae por los bordes en vez de quedarse clavado en ellos');
+  {
+    // Un foso de 4 bloques de hondo: MÁS de los 3 que mcSurfaceNear busca por defecto, que es justo
+    // lo que antes convertía el borde en un muro invisible. El jugador espera al otro lado.
+    const w = mundoZ();
+    w.jugador(12, 18);
+    const rig = await crear(w, 12, 5, 8);
+    for (let x = 8; x <= 16; x++) for (let z = 10; z <= 16; z++) {
+      w.mc.grid[global.mcIdx(x, 4, z)] = 0;        // se quita el suelo...
+      w.mc.grid[global.mcIdx(x, 0, z)] = 1;        // ...y el fondo queda 4 bloques más abajo
+    }
+    const yAlto = gDe(rig).y;
+    let enElAire = 0, saltoMax = 0, yPrev = gDe(rig).y;
+    for (let i = 0; i < 300; i++) {
+      w.sinRuido(() => w.frames(1));
+      if (rig.mov && rig.mov.alto > 1e-3) enElAire++;
+      // Ojo: `g.y` es ya la Y que SE VE — el motor descuenta el `alto` al empezar el paso y lo
+      // vuelve a sumar al acabarlo. Sumárselo aquí otra vez contaría la caída dos veces.
+      saltoMax = Math.max(saltoMax, Math.abs(gDe(rig).y - yPrev));
+      yPrev = gDe(rig).y;
+    }
+    const bajo = yAlto - gDe(rig).y;
+    t('cruza el borde y baja los 4 bloques del foso', bajo > 3.5 && bajo < 4.5, 'bajó ' + bajo.toFixed(2));
+    // Lo que separa «caerse» de «teletransportarse al fondo»: que haya frames intermedios en el
+    // aire y que ninguno dé un salto de golpe. Sin el canal vertical, `enElAire` sería 0.
+    t('...cayéndose, no teletransportándose', enElAire > 5, enElAire + ' frames en el aire');
+    t('...y sin ningún salto de golpe', saltoMax < 0.6, 'salto máx ' + saltoMax.toFixed(3));
+    t('...y acaba en el suelo, sin quedarse volando', !rig.mov || rig.mov.alto < 1e-3);
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
+
+  console.log('\nEl trampolín lo lanza (y el hielo lo hace patinar)');
+  {
+    const w = mundoZ();
+    w.jugador(12, 18);
+    suelo(w, HIELO, 8, 16, 12, 13);                // una franja de trampolín cruzando su camino
+    w.def(HIELO, { impulso: 12 });
+    const rig = await crear(w, 12, 5, 6);
+    let altoMax = 0, veces = 0, arriba = false;
+    for (let i = 0; i < 240; i++) {
+      w.sinRuido(() => w.frames(1));
+      const alto = rig.mov ? rig.mov.alto : 0;
+      altoMax = Math.max(altoMax, alto);
+      if (alto > 0.5 && !arriba) { veces++; arriba = true; }
+      if (alto <= 1e-3) arriba = false;
+    }
+    // impulso 12 con gravedad 22 son 12²/(2·22) ≈ 3,3 bloques: la misma altura que alcanzarías tú.
+    t('el trampolín lo lanza al aire', altoMax > 2.5 && altoMax < 4, 'subió ' + altoMax.toFixed(2));
+    t('...una vez por celda, no en bucle', veces >= 1 && veces <= 3, veces + ' botes');
+    t('...y vuelve al suelo', !rig.mov || rig.mov.alto < 1e-3);
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
+
+  {
+    // Patinar, en un bicho, NO se ve como «al soltar sigue rodando» (eso es el enunciado del
+    // jugador, que va a teclazos): su persecución ya frena sola y suavemente. Se ve en que NO PUEDE
+    // parar donde quiere — se pasa de largo de su distancia y luego vuelve. Eso es lo que se mide:
+    // cuánto se acerca de más (el zombie se para a 1,2) y cuánto camino de más recorre por ello.
+    const persigue = async (deslizamiento) => {
+      const w = mundoZ();
+      w.jugador(12, 18);
+      if (deslizamiento) w.def(ROCA, { deslizamiento: deslizamiento });
+      const rig = await crear(w, 12, 5, 10);
+      let recorrido = 0, zPrev = centroRaiz(rig)[2], cerca = 99;
+      // 1200 frames = 20 s: sobre hielo el resbalón se paga y se vuelve, pero con τ=1,2 s tarda
+      // ~15 s en asentarse del todo. Con menos, la última medida pilla la vuelta a medias.
+      for (let i = 0; i < 1200; i++) {
+        w.sinRuido(() => w.frames(1));
+        const z = centroRaiz(rig)[2];
+        recorrido += Math.abs(z - zPrev); zPrev = z;
+        cerca = Math.min(cerca, Math.abs(w.mc.pos[2] - z));
+      }
+      const fin = Math.abs(w.mc.pos[2] - centroRaiz(rig)[2]);
+      w.sinRuido(() => w.game.esqueletos.quitar());
+      return { cerca, recorrido, fin };
+    };
+    const seco = await persigue(0), hielo = await persigue(1.2);
+    t('en suelo normal se para justo en su distancia (1.2)', Math.abs(seco.cerca - 1.2) < 0.05,
+      seco.cerca.toFixed(3));
+    t('...y va derecho, sin camino de más', Math.abs(seco.recorrido - 6.6) < 0.3, seco.recorrido.toFixed(2) + ' bloques');
+    // Sobre hielo la marcha real persigue con retardo a la pedida: no puede frenar a tiempo.
+    t('sobre hielo se pasa de largo de su distancia', hielo.cerca < seco.cerca - 0.3,
+      hielo.cerca.toFixed(3) + ' vs ' + seco.cerca.toFixed(3));
+    t('...y por eso recorre más camino del que hay', hielo.recorrido > seco.recorrido + 1,
+      hielo.recorrido.toFixed(2) + ' vs ' + seco.recorrido.toFixed(2));
+    // Y no se queda oscilando para siempre: el resbalón se paga una vez y acaba en su sitio.
+    t('...pero acaba parado en su distancia igual', Math.abs(hielo.fin - 1.2) < 0.15, hielo.fin.toFixed(3));
+  }
+
+  console.log('\nLo que el agente NO hace: disparar las placas del jugador');
+  {
+    // El alPisar de una placa está escrito pensando en el jugador (el del mundo del dueño hace
+    // game.tp): si lo disparase un zombie al pisarla, el teletransportado serías TÚ. Va apagado
+    // salvo que se encienda a sabiendas con fisica:{placas:true}.
+    const w = mundoZ();
+    w.jugador(12, 18);
+    suelo(w, HIELO, 8, 16, 12, 13);
+    let pisadas = 0;
+    w.def(HIELO, { alPisar: () => { pisadas++; } });
+    const rig = await crear(w, 12, 5, 6);
+    w.sinRuido(() => w.frames(240));
+    t('el agente cruza la placa...', centroRaiz(rig)[2] > 14, 'z=' + centroRaiz(rig)[2].toFixed(1));
+    t('...y NO dispara su alPisar', pisadas === 0, pisadas + ' veces');
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
+
+  {
+    // Y el interruptor de pánico: fisica:false devuelve al agente a la conducta de v1.25 (marcha
+    // fija, pegado al suelo). Es lo que hay que poder hacer si esto se le atraganta a un bicho.
+    const w = mundoZ();
+    w.jugador(12, 18);
+    w.def(ROCA, { velocidad: 3 });
+    const doc = JSON.parse(JSON.stringify(ZOMBIE)); doc.fisica = false;
+    const rig = await crear(w, 12, 5, 6, doc);
+    const z0 = centroRaiz(rig)[2];
+    w.sinRuido(() => w.frames(60));
+    t('fisica:false ignora el suelo y anda a lo suyo',
+      Math.abs((centroRaiz(rig)[2] - z0) - 2.2) < 0.25, (centroRaiz(rig)[2] - z0).toFixed(2) + ' bloques');
+    t('...y no tiene física normalizada', rig.fis === null);
     w.sinRuido(() => w.game.esqueletos.quitar());
   }
 }
