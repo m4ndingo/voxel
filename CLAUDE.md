@@ -746,6 +746,50 @@ lo correcto es esperar a que vuelvan.
 golpe fuerte contra una pared muy cerca lo deja quieto en vez de pegarlo a ella; el golpe **no hace
 daño** (no hay vida ni combate) y **no hay animación de dolor**.
 
+#### Los agentes pisan el mismo suelo que tú (v1.26)
+
+Las conductas de `game.bloques.define` (`velocidad`, `altura`, `deslizamiento`, `impulso`) estaban
+escritas **solo para el jugador**: son envoltorios de `mcPlayerStep` que tocan `mc.speed`,
+`mc.vel[1]` y `mc._deslizVel`. Un agente articulado andaba por encima de todo eso: sobre hielo iba
+igual de lento, el trampolín no le hacía nada y un borde no le hacía caer.
+
+v1.26 lee **esa misma tabla** desde los pies del bicho, con `sueloDe(aabb, g)`: medio voxel **bajo**
+su caja, en el centro de la huella y con la **misma identidad de flanco** (celda + clave de
+material) que usa `pieEn` para el jugador. Va **encendida por defecto** — un agente que ignora el
+suelo que pisa es el fallo, no la conducta normal. En el documento del agente:
+
+```js
+fisica: { marcha:true, desliza:true, impulso:true, cae:true, placas:false, peso:1, caida:12 }
+fisica: false   // apagada entera
+```
+
+- **`marcha`** — el `velocidad` del bloque multiplica su paso (hielo ×2, barro ×0.5).
+- **`cae`** — `asentar()` pega la raíz al suelo de su nueva columna **de golpe**; ese salto hacia
+  abajo se convierte en altura sobre el suelo (`mov.alto`) y **cae**, con la misma `GRAVEDAD` (22)
+  que tú. `caida` son los bloques que **se atreve a bajar**: más que eso y no da el paso.
+- **`impulso`** — el trampolín lo lanza, dividido por `peso` (un bicho pesado bota menos). Dispara
+  **una vez por flanco**, con la misma clave `pisada` que evita el rebote infinito del jugador.
+- **`desliza`** — al dejar de andar sigue rodando; el `deslizamiento` del material es la τ del
+  frenado exponencial, no una distancia.
+
+**Tres decisiones que no son detalles:**
+
+1. **`alPisar` NO se dispara** (`placas:false` por defecto). Los `alPisar` ya escritos están
+   pensados para el jugador y llaman a `game.tp(...)`: un zombie pisando una placa **te
+   teletransportaría a ti**. Se enciende a sabiendas, con un `alPisar` que mire quién pisa.
+2. **El brinco y la caída viven en `mov.alto`, no en `g.y`**, por lo mismo que el golpe de v1.25: en
+   `xz` la Y de la raíz la **reescribe** `asentar()` desde el suelo cada vez que la pieza se mueve.
+3. **El camino del jugador queda byte a byte igual**: la física del agente entra por un parámetro
+   opcional al final (`F`) que solo pasan los esqueletos, así que `seguir` por material no cambia de
+   comportamiento.
+
+**Trepar (escaleras) se queda fuera a propósito**: `trepableEnColumna()` está atado a las claves de
+`mc.pos` y hay que extraerlo para que acepte una caja cualquiera. Es un trabajo aparte, no un olvido.
+
+Test: `§18` de `node test_bloques_comportamiento.js` — velocidad ×1/×2/×0.5, caída de 4 bloques,
+`impulso:12` subiendo los 3,17 bloques que predice `v²/2g`, y el patinazo de hielo pasándose de largo
+(1,199 frente a 0,716 en seco).
+
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
 se autoejecutan (solo a mano desde Alt+C), así que la escalera dejaba de ser escalera en cada recarga.
 `mcAutoarranque()` (final de `openWorld`) ejecuta ese snippet si existe: `app.js` **no sabe qué hace**,
