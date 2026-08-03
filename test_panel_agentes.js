@@ -36,7 +36,7 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
 
   await p.goto(URL, { timeout: 60000 });
   await p.click('[data-tab="agentes"]');
-  await p.waitForFunction('window.game && game.esqueletos && !document.querySelector("#ag-modal").hidden',
+  await p.waitForFunction('window.game && game.esqueletos && typeof agDoc !== "undefined" && agDoc && !document.querySelector("#ag-modal").hidden',
     null, { timeout: 60000 });
 
   const r = await p.evaluate(async () => {
@@ -57,8 +57,13 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     async function terna(t, v) { const l = fld(t); if (!l) { avisos.push(t); return; }
       const ins = [...l.querySelectorAll('input')]; ins.forEach((i, k) => i.value = v[k]);
       ins[2].dispatchEvent(new Event('change', { bubbles: true })); await pausa(); }
-    async function conmutar(t, on) { const l = marca(t); if (!l) { avisos.push(t); return; }
-      const c = l.querySelector('input');
+    const tarjeta = c => document.querySelector('#ag-form .ag-cap[data-cap="' + c + '"]');
+    const resumen = c => { const d = tarjeta(c); return d ? d.querySelector('.resumen').textContent : null; };
+    const gris = t => { const l = fld(t); return !!(l && l.querySelector('input.def')); };
+    // Una capacidad se enciende por su tarjeta (`empuje`, `fisica`…) y una casilla suelta por su
+    // etiqueta; el interruptor de la tarjeta es el PRIMER input, que está en la cabecera.
+    async function conmutar(t, on) { const l = marca(t) || tarjeta(t); if (!l) { avisos.push(t); return; }
+      const c = l.querySelector('input[type=checkbox]');
       if (!!c.checked !== !!on) { c.checked = !!on; c.dispatchEvent(new Event('change', { bubbles: true })); await pausa(); } }
     const clave = n => 'asset:assets/' + n + '.vox.json';
 
@@ -81,14 +86,14 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     await num('se para a (bloques)', 3.5);
     await num('velocidad (bloques/s)', 2.4);
     await num('pasos por bloque', 1.8);
-    await conmutar('caja de choque a medida', true);
+    await conmutar('cuerpo', true);
     await num('ancho', 0.5); await num('fondo', 1); await num('alto', 1.25);
 
     document.querySelector('#ag-add').click(); await pausa();
     await num('nombre', 'cabeza');
     await opcion('dibujo', clave('cabeza-perro'));
     await terna('en (x, alto, z)', [0, 0.1875, -0.5]);
-    await conmutar(' te mira', true);
+    await conmutar('mirar', true);
     await num('alcance (bloques)', 9);
     await num('tope del cuello (±°)', 55);
 
@@ -96,7 +101,7 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     await num('nombre', 'pata');
     await opcion('dibujo', clave('pata-perro'));
     await terna('en (x, alto, z)', [0, -0.5625, 0.0625]);
-    await conmutar(' se articula', true);
+    await conmutar('articula', true);
     await opcion('eje', 'x');
     await num('pivote nº', 1); await num('base (te ve)', 0); await num('reposo', 0);
     await num('amplitud', 32); await num('desfase (grados)', 180);
@@ -104,7 +109,44 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     await new Promise(r => setTimeout(r, 500));            // que `preparar` (va por red) acabe
     const doc = JSON.parse(JSON.stringify(agDoc));
 
-    // 3) El preview lo dibuja, y con «anda» la imagen cambia.
+    document.querySelector('#ag-piezas li').click(); await pausa();   // las capacidades cuelgan de la RAÍZ
+
+    // 3) Las capacidades que hasta ahora no tenían campo: `empuje` (v1.25) y `fisica` (v1.26).
+    //    Abrir el panel NO debe escribirlas: los valores por defecto viven en la librería.
+    const sinTocar = { empuje: agDoc.empuje === undefined, fisica: agDoc.fisica === undefined };
+    const porDefecto = { fuerza: leer('fuerza (bloques/s)'), freno: leer('freno (s)'),
+                         brinco: leer('brinco (bloques/s)'), peso: leer('peso (÷ impulso, 1 = como tú)'),
+                         caida: leer('caída máxima (bloques)'),
+                         gris: gris('fuerza (bloques/s)') && gris('caída máxima (bloques)') };
+    await num('fuerza (bloques/s)', 3);                    // tocarlo SÍ la escribe, y solo esa clave
+    const trasTocar = JSON.parse(JSON.stringify(agDoc.empuje || null));
+    await conmutar('empuje', false);                       // apagado = aguanta el golpe sin moverse
+    const empApagado = JSON.parse(JSON.stringify(agDoc.empuje || null));
+    await conmutar('empuje', true);                        // y encenderlo vuelve a borrar la clave
+    const empEncendido = agDoc.empuje === undefined;
+    await conmutar('el trampolín lo lanza (impulso)', false);
+    const fisParcial = JSON.parse(JSON.stringify(agDoc.fisica || null));
+    await conmutar('fisica', false);
+    const fisApagada = agDoc.fisica;
+    await conmutar('fisica', true);
+    const fisEncendida = agDoc.fisica === undefined;
+    const trepa = (() => { const l = marca('trepa por las escaleras (todavía no)');
+                           return l ? l.querySelector('input').disabled : null; })();
+    // El objetivo: para un RIG solo valen el jugador y un punto fijo (seguir a otra CLAVE busca la
+    // instancia más cercana con ese material, y un esqueleto no es una instancia).
+    const objetivos = [...fld('objetivo').querySelectorAll('option')].map(o => o.value);
+    await opcion('objetivo', 'punto');
+    const objPunto = Array.isArray(agDoc.seguir.objetivo);
+    await terna('punto (x, alto, z)', [5, 6, 7]);
+    const objTerna = JSON.stringify(agDoc.seguir.objetivo);
+    await opcion('objetivo', 'jugador');
+    const objBorrado = agDoc.seguir.objetivo === undefined;
+
+    const resumenes = { seguir: resumen('seguir'), andar: resumen('andar'),
+                        empuje: resumen('empuje'), cuerpo: resumen('cuerpo') };
+    const chips = [...document.querySelectorAll('#ag-chips .ag-chip')].map(e => e.textContent);
+
+    // 4) El preview lo dibuja, y con «anda» la imagen cambia.
     const cv = document.querySelector('#ag-canvas'), g = cv.getContext('2d', { willReadFrequently: true });
     const pintados = () => { const d = g.getImageData(0, 0, cv.width, cv.height).data; let n = 0;
       for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 8) n++; return n; };
@@ -117,6 +159,9 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     const anima = cv.toDataURL() !== foto;
 
     return { avisos, doc, delZombie, quieto, anima, partes: agPl ? agPl.partes.length : 0,
+             objetivos, objPunto, objTerna, objBorrado,
+             sinTocar, porDefecto, trasTocar, empApagado, empEncendido, fisParcial, fisApagada,
+             fisEncendida, trepa, resumenes, chips,
              ofrece: { torso: ofrece('torso-perro'), pata: ofrece('pata-perro'),
                        brazoZombie: ofrece('brazo-zombie'), habitantes: cat.some(c => c.key.slice(0, 4) === 'hab:') },
              tags: [...document.querySelectorAll('#ag-piezas .ap-tag')].map(e => e.textContent) };
@@ -163,6 +208,50 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     cerca(r.delZombie.deteccion, 14, 1e-6, 'detección del zombie');
   });
   test('…y el alto de su caja de choque (2.5625)', () => cerca(r.delZombie.alto, 2.5625, 1e-6, 'alto del zombie'));
+
+  console.log('\n  las capacidades del bicho entero');
+  test('un agente nuevo no lleva escritas `empuje` ni `fisica`…', () =>
+    assert(r.sinTocar.empuje && r.sinTocar.fisica, JSON.stringify(r.sinTocar)));
+  test('…pero el panel enseña los valores que va a usar la librería, en gris', () => {
+    cerca(r.porDefecto.fuerza, 8, 1e-6, 'fuerza');
+    cerca(r.porDefecto.freno, 0.15, 1e-6, 'freno');
+    cerca(r.porDefecto.brinco, 4.5, 1e-6, 'brinco');
+    cerca(r.porDefecto.peso, 1, 1e-6, 'peso');
+    cerca(r.porDefecto.caida, 12, 1e-6, 'caída máxima');
+    assert(r.porDefecto.gris, 'los valores por defecto no salen marcados como tales (.def)');
+  });
+  test('tocar un campo escribe la clave, y solo esa', () =>
+    assert(r.trasTocar && r.trasTocar.fuerza === 3 && Object.keys(r.trasTocar).length === 1,
+      JSON.stringify(r.trasTocar)));
+  test('apagar «empujable» es fuerza 0 y brinco 0 (aguanta el golpe)', () =>
+    assert(r.empApagado && r.empApagado.fuerza === 0 && r.empApagado.salto === 0,
+      JSON.stringify(r.empApagado)));
+  test('volver a encenderla borra la clave (el defecto vive en la librería)', () =>
+    assert(r.empEncendido, 'la clave `empuje` se quedó escrita'));
+  test('una casilla suelta de física escribe solo su clave', () =>
+    assert(r.fisParcial && r.fisParcial.impulso === false && Object.keys(r.fisParcial).length === 1,
+      JSON.stringify(r.fisParcial)));
+  test('apagar la física entera es `fisica:false`, y encenderla la borra', () =>
+    assert(r.fisApagada === false && r.fisEncendida, 'fisica = ' + JSON.stringify(r.fisApagada)));
+  test('«trepa por las escaleras» sale apagada y BLOQUEADA (aún no existe)', () =>
+    assert(r.trepa === true, 'la casilla de trepar no está deshabilitada: ' + r.trepa));
+  test('el objetivo ofrece jugador y punto fijo, y NO «otro material» (un rig no es una instancia)', () =>
+    assert(r.objetivos.join(',') === 'jugador,punto', r.objetivos.join(',')));
+  test('elegir «un punto fijo» escribe unas coordenadas editables, y volver al jugador las borra', () => {
+    assert(r.objPunto, 'el objetivo no se volvió un punto');
+    assert(r.objTerna === '[5,6,7]', r.objTerna);
+    assert(r.objBorrado, 'la clave `objetivo` se quedó escrita al volver al jugador');
+  });
+  test('el resumen de la tarjeta plegada dice la verdad', () => {
+    assert(/11/.test(r.resumenes.seguir) && /3\.5/.test(r.resumenes.seguir), r.resumenes.seguir);
+    assert(/1\.8/.test(r.resumenes.andar), r.resumenes.andar);
+    assert(/0\.5/.test(r.resumenes.cuerpo) && /1\.25/.test(r.resumenes.cuerpo), r.resumenes.cuerpo);
+  });
+  test('los chips del preview cuentan las 6 capacidades', () => {
+    assert(r.chips.length === 6, r.chips.join(' | '));
+    assert(r.chips.some(c => /te ve a 11/.test(c)), r.chips.join(' | '));
+    assert(r.chips.some(c => /pisa como tú/.test(c)), r.chips.join(' | '));
+  });
 
   console.log('\n  el preview');
   test('dibuja las 3 piezas del agente recién montado', () => assert(r.partes === 3, 'partes = ' + r.partes));

@@ -3009,7 +3009,9 @@ function cargarLibMundo(){
   return libMundoP;
 }
 
-let agLista=[], agDoc=null, agSel=0, agPl=null, agRAF=0, agFase=0, agTPrev=0, agCat=null, agPrepId=0;
+let agLista=[], agDoc=null, agSel=0, agPl=null, agRAF=0, agFase=0, agTPrev=0, agCat=null, agPrepId=0, agCargaId=0;
+// Qué tarjetas de capacidad quedan desplegadas (el formulario se reconstruye entero en cada cambio).
+const agAbiertas={seguir:true};
 const agVista={yaw:0.6, pitch:0.32, zoom:1};
 const agGeomCache=new Map();                                   // clave|rot -> caras ya fusionadas
 // Las 6 caras del cubo unidad: normal y las 4 esquinas. El orden de los vértices da igual (se rellena,
@@ -3238,13 +3240,18 @@ function agRenderLista(){
   }
   $('#ag-del').hidden=!(agDoc && agDoc.id && agLista.some(a=>a.id===agDoc.id));
 }
+// Dos agentes seguidos (o abrir el panel y elegir otro antes de que llegue el primero): la carga
+// vieja NO puede pisar la nueva. Mismo billete que usa agPreparar() con agPrepId.
 async function agCargar(id){
+  const mio=++agCargaId;
   let d=null;
   try{ d=await fetch('/api/agentes/'+id,{cache:'no-store'}).then(r=>r.json()); }catch(e){}
+  if(mio!==agCargaId) return;
   if(!d || d.error){ toast('No se pudo abrir el agente'); return; }
   agDoc=d; agSel=0; agRenderLista(); agRefrescar();
 }
 function agNuevo(){
+  agCargaId++;                       // una carga en vuelo no debe pisar el agente recién creado
   agDoc=JSON.parse(JSON.stringify(AG_PLANTILLA)); agSel=0; agRenderLista(); agRefrescar();
   $('#ag-nombre').focus();
 }
@@ -3285,6 +3292,7 @@ function agRefrescar(){
     ul.appendChild(li);
   });
   agForm();
+  agChips();
   agPreparar();
 }
 // Re-monta la plantilla del preview. Es asíncrono (los dibujos viajan por red, aunque la librería
@@ -3342,84 +3350,255 @@ function agForm(){
   }
   // Articulación: sin ella la pieza va soldada al cuerpo, que es lo que quiere una hombrera.
   const art=p.articula||null;
-  const sw=document.createElement('label'); sw.className='ag-fld';
-  const chk=document.createElement('input'); chk.type='checkbox'; chk.checked=!!art;
-  chk.onchange=()=>{ if(chk.checked) p.articula={pivote:1, base:0, reposo:0, amplitud:30, fase:0, eje:'x'};
-                     else delete p.articula; cambia(); };
-  sw.appendChild(chk); sw.appendChild(document.createTextNode(' se articula'));
-  box.appendChild(sw);
+  const bArt=agTarjeta(box, 'articula', '🔩', 'Se articula', !!art,
+    art? ((art.eje==='y'?'gira':'cabecea')+' ±'+(+art.amplitud||0)+'° desde '+(+art.base||0)+'°')
+       : 'soldada al cuerpo',
+    v=>{ if(v) p.articula={pivote:1, base:0, reposo:0, amplitud:30, fase:0, eje:'x'};
+         else delete p.articula; cambia(); });
   if(art){
-    box.appendChild(agCampoSelect('eje', art.eje==='y'?'y':'x', v=>{ art.eje=v; cambia(); },
+    bArt.appendChild(agCampoSelect('eje', art.eje==='y'?'y':'x', v=>{ art.eje=v; cambia(); },
       [{key:'x', name:'x · cabecea (brazo, pierna)'}, {key:'y', name:'y · gira (torreta)'}]));
-    box.appendChild(agCampoNum('pivote nº', art.pivote===undefined?1:art.pivote, 1, v=>{ art.pivote=v|0; cambia(); }));
-    box.appendChild(agCampoNum('base (te ve)', +art.base||0, 5, v=>{ art.base=v; cambia(); }));
-    box.appendChild(agCampoNum('reposo', +art.reposo||0, 5, v=>{ art.reposo=v; cambia(); }));
-    box.appendChild(agCampoNum('amplitud', +art.amplitud||0, 5, v=>{ art.amplitud=v; cambia(); }));
-    box.appendChild(agCampoNum('desfase (grados)', +art.fase||0, 15, v=>{ art.fase=v; cambia(); }));
+    bArt.appendChild(agCampoNum('pivote nº', art.pivote===undefined?1:art.pivote, 1, v=>{ art.pivote=v|0; cambia(); }));
+    bArt.appendChild(agCampoNum('base (te ve)', +art.base||0, 5, v=>{ art.base=v; cambia(); }));
+    bArt.appendChild(agCampoNum('reposo', +art.reposo||0, 5, v=>{ art.reposo=v; cambia(); }));
+    bArt.appendChild(agCampoNum('amplitud', +art.amplitud||0, 5, v=>{ art.amplitud=v; cambia(); }));
+    bArt.appendChild(agCampoNum('desfase (grados)', +art.fase||0, 15, v=>{ art.fase=v; cambia(); }));
+    agNota(bArt, 'El ciclo avanza con la DISTANCIA recorrida, no con el reloj: parado deja de pedalear '+
+                 'solo. Dos piezas iguales con desfase 0 y 180 son la pierna izquierda y la derecha.');
   }
   // `mirar` va aparte de la articulación y no es lo mismo: una articulación es un CICLO (fase,
   // amplitud) y esto lo manda el jugador — es la cabeza girándose hacia ti. La raíz no lo lleva
   // nunca: hacia dónde encara el cuerpo lo decide la persecución.
   if(!raiz){
     const mir=(p.mirar&&typeof p.mirar==='object')? p.mirar : null;
-    const sm=document.createElement('label'); sm.className='ag-fld';
-    const cm=document.createElement('input'); cm.type='checkbox'; cm.checked=!!mir;
-    cm.onchange=()=>{ if(cm.checked) p.mirar={alcance:12, limites:{y:[-70,70]}}; else delete p.mirar; cambia(); };
-    sm.appendChild(cm); sm.appendChild(document.createTextNode(' te mira'));
-    box.appendChild(sm);
+    const lim=(mir&&mir.limites&&mir.limites.y)||[-70,70];
+    const bMir=agTarjeta(box, 'mirar', '👀', 'Te mira', !!mir,
+      mir? ('alcance '+(+mir.alcance||12)+' · ±'+Math.abs(+lim[1]||70)+'°') : 'la pieza no gira',
+      v=>{ if(v) p.mirar={alcance:12, limites:{y:[-70,70]}}; else delete p.mirar; cambia(); });
     if(mir){
-      box.appendChild(agCampoNum('alcance (bloques)', +mir.alcance||12, 1, v=>{ mir.alcance=v; cambia(); }));
-      const lim=(mir.limites&&mir.limites.y)||[-70,70];
-      box.appendChild(agCampoNum('tope del cuello (±°)', Math.abs(+lim[1]||70), 5,
+      bMir.appendChild(agCampoNum('alcance (bloques)', +mir.alcance||12, 1, v=>{ mir.alcance=v; cambia(); }));
+      bMir.appendChild(agCampoNum('tope del cuello (±°)', Math.abs(+lim[1]||70), 5,
         v=>{ mir.limites={y:[-Math.abs(v), Math.abs(v)]}; cambia(); }));
+      bMir.appendChild(agCampoNum('suavidad del cuello (s)', mir.suavidad!==undefined? +mir.suavidad : 0.12, 0.02,
+        v=>{ mir.suavidad=v; cambia(); }, mir.suavidad===undefined));
+      agNota(bMir, 'Gira RELATIVO al cuerpo: cuando la persecución ya te encara, el cuello no lo suma '+
+                   'dos veces.');
     }
   }
-  if(raiz) agConducta(box, cambia);
+  if(raiz) agCapacidades(box, cambia);
   if(!raiz){
     const del=document.createElement('button'); del.className='btn sm danger'; del.textContent='Quitar esta pieza';
     del.onclick=()=>{ agDoc.piezas.splice(agSel-1,1); agSel=0; agRefrescar(); };
     box.appendChild(del);
   }
 }
-// Lo que NO es el esqueleto: a qué distancia te sigue, con qué caja choca y a qué ritmo mueve las
-// patas. Cuelga del formulario de la RAÍZ porque no es de ninguna pieza, es del bicho entero.
-// ⚠️ Los números que salen cuando el documento no trae la clave son los que de verdad va a usar la
-// librería (normalizarSeguir / crearEsqueleto), no ceros ni blancos: un 0 en «distancia» diría que
-// se te echa encima, y es justo lo contrario de lo que hace un agente sin `seguir`.
-function agConducta(box, cambia){
-  const h=document.createElement('h4'); h.className='ag-h2'; h.textContent='El bicho entero';
+// Lo que NO es el esqueleto: qué sabe hacer el bicho entero. Cuelga del formulario de la RAÍZ
+// porque no es de ninguna pieza. Va en TARJETAS, una por capacidad: plegada dice si está encendida
+// y con qué valores, abierta enseña TODOS sus parámetros. Antes era una lista plana con 4 de los
+// 20 parámetros, y `empuje` y `fisica` no aparecían por ninguna parte aunque el bicho las tuviera:
+// un agente podía tener cosas encendidas que el panel no enseñaba.
+//
+// ⚠️ Dos reglas que no son cosméticas:
+// · Los números que salen cuando el documento no trae la clave son los que de verdad va a usar la
+//   librería (normalizarSeguir / crearEsqueleto / normalizarFisica), no ceros ni blancos: un 0 en
+//   «distancia» diría que se te echa encima, y es justo lo contrario de lo que hace un agente sin
+//   `seguir`. Van en gris cursiva (.def) para que no se lean como una decisión de nadie.
+// · Abrir el panel NO debe engordar el documento: una capacidad encendida en su valor por defecto
+//   se guarda sin la clave, y apagar una vuelve a borrarla. Los defectos viven en un solo sitio,
+//   que es la librería; duplicarlos aquí es cómo se acaba con dos verdades distintas.
+function agCapacidades(box, cambia){
+  const h=document.createElement('h4'); h.className='ag-h2'; h.textContent='El bicho entero · capacidades';
   box.appendChild(h);
+  agCapSeguir(box, cambia);
+  agCapAndar(box, cambia);
+  agCapEmpuje(box, cambia);
+  agCapFisica(box, cambia);
+  agCapCuerpo(box, cambia);
+}
+// 👁 seguir. Apagarlo no es un matiz: la librería SE NIEGA a plantar un agente sin `seguir` (sin
+// nada que perseguir no haría falta ningún rig), así que la tarjeta lo dice antes de guardar.
+function agCapSeguir(box, cambia){
+  const on=!(agDoc.seguir===false || agDoc.seguir===null);
   const seg=(agDoc.seguir&&typeof agDoc.seguir==='object')? agDoc.seguir : null;
   const S=(k,d)=>(seg&&seg[k]!==undefined)? +seg[k] : d;
+  const hay=k=>!!(seg && seg[k]!==undefined);
   const ponS=(k,v)=>{ if(!agDoc.seguir||typeof agDoc.seguir!=='object') agDoc.seguir={}; agDoc.seguir[k]=v; cambia(); };
-  box.appendChild(agCampoNum('detección (bloques)', S('deteccion',16), 1, v=>ponS('deteccion',v)));
-  // No es un mínimo, es un SITIO donde estar: si te acercas más, retrocede (pasoSeguir).
-  box.appendChild(agCampoNum('se para a (bloques)', S('distancia',2.5), 0.5, v=>ponS('distancia',v)));
-  box.appendChild(agCampoNum('velocidad (bloques/s)', S('velocidad',3), 0.2, v=>ponS('velocidad',v)));
-
+  const b=agTarjeta(box, 'seguir', '👁', 'Te persigue', on,
+    on? ('te ve a '+S('deteccion',16)+' · se para a '+S('distancia',2.5)+' · '+S('velocidad',3)+' b/s')
+      : 'plantado para siempre',
+    v=>{ if(v) delete agDoc.seguir; else agDoc.seguir=false; cambia(); });
+  if(!on){ agNota(b, 'La librería se niega a plantarlo y avisa. Para un bicho que espera quieto, baja '+
+                     'la detección en vez de apagar esto.', true); return; }
+  // La librería admite tres objetivos, pero para un RIG solo dos: seguir a OTRA CLAVE de material
+  // busca la instancia más cercana con esa clave, y un esqueleto no es una instancia. No se ofrece
+  // lo que la librería va a rechazar.
+  const obj=seg? seg.objetivo : undefined, punto=Array.isArray(obj);
+  b.appendChild(agCampoSelect('objetivo', punto?'punto':'jugador',
+    v=>{ if(v!=='punto'){ if(seg) delete seg.objetivo; cambia(); }
+         else ponS('objetivo', (window.mc&&mc.pos)? mc.pos.map(n=>Math.round(n)) : [0,0,0]); },
+    [{key:'jugador', name:'el jugador'}, {key:'punto', name:'un punto fijo'}]));
+  if(punto) b.appendChild(agTerna('punto (x, alto, z)', obj, v=>ponS('objetivo',v)));
+  b.appendChild(agCampoNum('detección (bloques)', S('deteccion',16), 1, v=>ponS('deteccion',v), !hay('deteccion')));
+  b.appendChild(agCampoNum('se para a (bloques)', S('distancia',2.5), 0.5, v=>ponS('distancia',v), !hay('distancia')));
+  b.appendChild(agCampoNum('velocidad (bloques/s)', S('velocidad',3), 0.2, v=>ponS('velocidad',v), !hay('velocidad')));
+  b.appendChild(agCampoNum('correa (bloques, 0 = suelto)', S('correa',24), 1, v=>ponS('correa',v), !hay('correa')));
+  b.appendChild(agCampoBool('vuelve a su sitio si te pierde', seg? seg.volver!==false : true, v=>ponS('volver',v)));
+  b.appendChild(agCampoSelect('se mueve', (seg&&String(seg.ejes||'').toLowerCase()==='xyz')?'xyz':'xz',
+    v=>ponS('ejes',v), [{key:'xz', name:'xz · pegado al suelo'}, {key:'xyz', name:'xyz · vuela'}]));
+  b.appendChild(agCampoNum('suavidad del giro (s)', S('suavidad',0.12), 0.02, v=>ponS('suavidad',v), !hay('suavidad')));
+  agNota(b, 'La distancia no es un mínimo, es un SITIO donde estar: si te acercas más, retrocede.');
+}
+// 🚶 andar. El interruptor es la cadencia: 0 ciclos por bloque = las patas no se mueven, que es lo
+// que quiere un objeto mecánico que se desliza entero.
+function agCapAndar(box, cambia){
   const and=(agDoc.andar&&typeof agDoc.andar==='object')? agDoc.andar : null;
+  const cad=(and&&and.cadencia!==undefined)? +and.cadencia : 0.7, on=cad>0;
   const ponA=(k,v)=>{ if(!agDoc.andar||typeof agDoc.andar!=='object') agDoc.andar={}; agDoc.andar[k]=v; cambia(); };
+  const b=agTarjeta(box, 'andar', '🚶', 'Anda', on, on? (cad+' pasos/bloque') : 'no mueve las patas',
+    v=>{ if(v){ if(and){ delete and.cadencia; if(!Object.keys(and).length) delete agDoc.andar; } }
+         else { if(!agDoc.andar||typeof agDoc.andar!=='object') agDoc.andar={}; agDoc.andar.cadencia=0; }
+         cambia(); });
   // Ciclos de paso por BLOQUE recorrido (no por segundo): un bicho de patas cortas necesita más, y
   // con el número del zombie parece que va en patines.
-  box.appendChild(agCampoNum('pasos por bloque', (and&&and.cadencia!==undefined)? +and.cadencia : 0.7, 0.1, v=>ponA('cadencia',v)));
-
+  b.appendChild(agCampoNum('pasos por bloque', cad, 0.1, v=>ponA('cadencia',v), !(and&&and.cadencia!==undefined)));
+  b.appendChild(agCampoNum('suavidad de la pose (s)', (and&&and.suavidad!==undefined)? +and.suavidad : 0.12, 0.02,
+    v=>ponA('suavidad',v), !(and&&and.suavidad!==undefined)));
+  agNota(b, 'Por bloque RECORRIDO, no por segundo: frenado contra un muro deja de pedalear solo.');
+}
+// 👊 empuje (v1.25). El clic izquierdo sobre el bicho es un golpe, no un roto: sale despedido y pega
+// un brinco. No hay clave para apagarlo entero, así que apagado es fuerza 0 y brinco 0 — aguanta el
+// golpe sin moverse, que es lo que quiere una estatua.
+function agCapEmpuje(box, cambia){
+  const e=(agDoc.empuje&&typeof agDoc.empuje==='object')? agDoc.empuje : null;
+  const E=(k,d)=>(e&&e[k]!==undefined)? +e[k] : d;
+  const hay=k=>!!(e && e[k]!==undefined);
+  const on=!(E('fuerza',8)===0 && E('salto',4.5)===0);
+  const ponE=(k,v)=>{ if(!agDoc.empuje||typeof agDoc.empuje!=='object') agDoc.empuje={}; agDoc.empuje[k]=v; cambia(); };
+  const b=agTarjeta(box, 'empuje', '👊', 'Empujable', on,
+    on? ('fuerza '+E('fuerza',8)+' · brinco '+E('salto',4.5)) : 'aguanta el golpe',
+    v=>{ if(v) delete agDoc.empuje; else agDoc.empuje={fuerza:0, salto:0}; cambia(); }, true);
+  b.appendChild(agCampoNum('fuerza (bloques/s)', E('fuerza',8), 1, v=>ponE('fuerza',v), !hay('fuerza')));
+  b.appendChild(agCampoNum('freno (s)', E('freno',0.15), 0.05, v=>ponE('freno',v), !hay('freno')));
+  b.appendChild(agCampoNum('brinco (bloques/s)', E('salto',4.5), 0.5, v=>ponE('salto',v), !hay('salto')));
+  agNota(b, 'El brinco solo sale desde el suelo: pegarle en el aire no lo encadena. Mientras sale '+
+            'despedido sigue persiguiéndote, y por eso vuelve solo.');
+}
+// 🧊 fisica (v1.26). Lee la MISMA tabla de materiales que el jugador desde los pies del bicho:
+// hielo, barro, trampolín, bordes. Encendida por defecto — un agente que ignora el suelo que pisa
+// es el fallo, no la conducta normal.
+function agCapFisica(box, cambia){
+  const on=!(agDoc.fisica===false || agDoc.fisica===null);
+  const f=(agDoc.fisica&&typeof agDoc.fisica==='object')? agDoc.fisica : null;
+  const B=(k,d)=>(f&&f[k]!==undefined)? !!f[k] : d;
+  const N=(k,d)=>(f&&f[k]!==undefined)? +f[k] : d;
+  const hay=k=>!!(f && f[k]!==undefined);
+  const ponF=(k,v)=>{ if(!agDoc.fisica||typeof agDoc.fisica!=='object') agDoc.fisica={}; agDoc.fisica[k]=v; cambia(); };
+  const activas=[B('marcha',true)&&'hielo', B('desliza',true)&&'patina', B('impulso',true)&&'trampolín',
+                 B('cae',true)&&'bordes', B('placas',false)&&'placas'].filter(Boolean);
+  const comoTu=B('marcha',true)&&B('desliza',true)&&B('impulso',true)&&B('cae',true)&&!B('placas',false);
+  const b=agTarjeta(box, 'fisica', '🧊', 'Pisa como tú', on,
+    !on? 'ignora el suelo' : (comoTu? 'como el jugador' : (activas.join(' · ')||'nada encendido')),
+    v=>{ if(v) delete agDoc.fisica; else agDoc.fisica=false; cambia(); }, true);
+  if(!on){ agNota(b, 'Anda a su bola: ni el hielo le cambia el paso, ni el trampolín lo lanza, ni se '+
+                     'cae por un borde.'); return; }
+  b.appendChild(agCampoBool('el suelo le cambia la marcha (hielo ×2, barro ×0.5)', B('marcha',true), v=>ponF('marcha',v)));
+  b.appendChild(agCampoBool('patina al parar (deslizamiento)', B('desliza',true), v=>ponF('desliza',v)));
+  b.appendChild(agCampoBool('el trampolín lo lanza (impulso)', B('impulso',true), v=>ponF('impulso',v)));
+  b.appendChild(agCampoBool('se cae por los bordes', B('cae',true), v=>ponF('cae',v)));
+  b.appendChild(agCampoBool('dispara las placas (alPisar)', B('placas',false), v=>ponF('placas',v)));
+  // El único interruptor que no se puede encender: trepar todavía no existe para un agente. Sale
+  // en gris y apagado a propósito — dejarlo fuera de la lista haría pensar que se ha olvidado.
+  const trepa=agCampoBool('trepa por las escaleras (todavía no)', false, ()=>{});
+  trepa.querySelector('input').disabled=true; b.appendChild(trepa);
+  b.appendChild(agCampoNum('peso (÷ impulso, 1 = como tú)', N('peso',1), 0.5, v=>ponF('peso',v), !hay('peso')));
+  b.appendChild(agCampoNum('caída máxima (bloques)', N('caida',12), 1, v=>ponF('caida',v), !hay('caida')));
+  agNota(b, 'Las placas van apagadas a propósito: el alPisar escrito hoy hace game.tp(...), o sea que '+
+            'un zombie pisando una placa TE teletransportaría a ti. Trepar escaleras aún no está: '+
+            'trepableEnColumna() está atada a las claves de mc.pos.');
+}
+// 🧱 cuerpo. Sin la clave, la caja de choque es la unión de las piezas.
+function agCapCuerpo(box, cambia){
   const cue=(agDoc.cuerpo&&typeof agDoc.cuerpo==='object')? agDoc.cuerpo : null;
-  const sc=document.createElement('label'); sc.className='ag-fld';
-  const cc=document.createElement('input'); cc.type='checkbox'; cc.checked=!!cue;
   const caja=agPl&&agPl.caja;
-  cc.onchange=()=>{ if(cc.checked) agDoc.cuerpo={ancho:caja? +(caja[3]-caja[0]).toFixed(4):0.6,
-                                                 fondo:caja? +(caja[5]-caja[2]).toFixed(4):0.6,
-                                                 alto: caja? +(caja[4]-caja[1]).toFixed(4):1.8};
-                    else delete agDoc.cuerpo; cambia(); };
-  sc.appendChild(cc); sc.appendChild(document.createTextNode(' caja de choque a medida'));
-  box.appendChild(sc);
-  if(cue){
-    const ponC=(k,v)=>{ agDoc.cuerpo[k]=v; cambia(); };
-    box.appendChild(agCampoNum('ancho', +cue.ancho||0.6, 0.0625, v=>ponC('ancho',v)));
-    box.appendChild(agCampoNum('fondo', cue.fondo!==undefined? +cue.fondo : (+cue.ancho||0.6), 0.0625, v=>ponC('fondo',v)));
-    box.appendChild(agCampoNum('alto', +cue.alto||1.8, 0.0625, v=>ponC('alto',v)));
+  const b=agTarjeta(box, 'cuerpo', '🧱', 'Caja de choque a medida', !!cue,
+    cue? ((+cue.ancho||0.6)+' × '+(cue.fondo!==undefined? +cue.fondo : (+cue.ancho||0.6))+' × '+(+cue.alto||1.8))
+       : 'la unión de las piezas',
+    v=>{ if(v) agDoc.cuerpo={ancho:caja? +(caja[3]-caja[0]).toFixed(4):0.6,
+                             fondo:caja? +(caja[5]-caja[2]).toFixed(4):0.6,
+                             alto: caja? +(caja[4]-caja[1]).toFixed(4):1.8};
+         else delete agDoc.cuerpo; cambia(); });
+  if(!cue){ agNota(b, 'Un zombie con los brazos en cruz mide 1.4 de ancho y no cabe por una puerta.'); return; }
+  const ponC=(k,v)=>{ agDoc.cuerpo[k]=v; cambia(); };
+  b.appendChild(agCampoNum('ancho', +cue.ancho||0.6, 0.0625, v=>ponC('ancho',v)));
+  b.appendChild(agCampoNum('fondo', cue.fondo!==undefined? +cue.fondo : (+cue.ancho||0.6), 0.0625, v=>ponC('fondo',v)));
+  b.appendChild(agCampoNum('alto', +cue.alto||1.8, 0.0625, v=>ponC('alto',v)));
+}
+// La tarjeta. El interruptor vive en la CABECERA para que se vea encendido sin desplegar nada, y por
+// eso su clic tiene que parar la burbuja: si no, encender una capacidad la plegaría en el mismo acto.
+// Qué tarjetas quedan abiertas se guarda en `agAbiertas` y NO en el DOM: el formulario se reconstruye
+// entero en cada tecla, así que cualquier estado que viva en el nodo se pierde al primer cambio.
+function agTarjeta(box, clave, em, titulo, on, resumen, alConmutar, nuevo){
+  const c=document.createElement('div');
+  c.className='ag-cap '+(on?'on':'off')+(agAbiertas[clave]?' abierta':'');
+  c.dataset.cap=clave;
+  const h=document.createElement('div'); h.className='ag-cap-h';
+  const fl=document.createElement('span'); fl.className='flecha'; fl.textContent=agAbiertas[clave]?'▾':'▸';
+  const e=document.createElement('span'); e.className='em'; e.textContent=em;
+  const t=document.createElement('b'); t.textContent=titulo;
+  h.appendChild(fl); h.appendChild(e); h.appendChild(t);
+  if(nuevo){ const n=document.createElement('span'); n.className='ag-nuevo'; n.textContent='NUEVO'; h.appendChild(n); }
+  const chk=document.createElement('input'); chk.type='checkbox'; chk.checked=!!on;
+  chk.onclick=ev=>ev.stopPropagation();
+  chk.onchange=()=>{ if(chk.checked) agAbiertas[clave]=true; alConmutar(chk.checked); };
+  h.appendChild(chk);
+  const r=document.createElement('span'); r.className='resumen'; r.textContent=resumen;
+  h.appendChild(r);
+  h.onclick=()=>{ agAbiertas[clave]=!agAbiertas[clave];
+                  c.classList.toggle('abierta', !!agAbiertas[clave]);
+                  fl.textContent=agAbiertas[clave]?'▾':'▸'; };
+  const cuerpo=document.createElement('div'); cuerpo.className='ag-cap-b';
+  c.appendChild(h); c.appendChild(cuerpo); box.appendChild(c);
+  return cuerpo;
+}
+function agNota(box, texto, aviso){
+  const p=document.createElement('p'); p.className='ag-cap-nota'+(aviso?' aviso':'');
+  p.textContent=texto; box.appendChild(p); return p;
+}
+// Los chips del preview: lo que sabe hacer el bicho de un vistazo, sin abrir ninguna tarjeta. Leen
+// el MISMO documento que las tarjetas y con los mismos valores por defecto, o sea que el chip y el
+// formulario no pueden decir cosas distintas.
+function agChips(){
+  const el=$('#ag-chips'); if(!el) return;
+  el.innerHTML=''; if(!agDoc) return;
+  const seg=(agDoc.seguir&&typeof agDoc.seguir==='object')? agDoc.seguir : null;
+  const sigue=!(agDoc.seguir===false || agDoc.seguir===null);
+  const and=(agDoc.andar&&typeof agDoc.andar==='object')? agDoc.andar : null;
+  const cad=(and&&and.cadencia!==undefined)? +and.cadencia : 0.7;
+  const emp=(agDoc.empuje&&typeof agDoc.empuje==='object')? agDoc.empuje : null;
+  const fue=(emp&&emp.fuerza!==undefined)? +emp.fuerza : 8;
+  const sal=(emp&&emp.salto!==undefined)? +emp.salto : 4.5;
+  const fis=!(agDoc.fisica===false || agDoc.fisica===null);
+  const cue=!!(agDoc.cuerpo&&typeof agDoc.cuerpo==='object');
+  const mira=(agDoc.piezas||[]).some(q=>q&&q.mirar);
+  const chips=[[sigue, sigue? '👁 te ve a '+((seg&&seg.deteccion!==undefined)? +seg.deteccion : 16) : '👁 plantado'],
+               [cad>0, cad>0? '🚶 '+cad+' pasos/bloque' : '🚶 sin patas'],
+               [!(fue===0&&sal===0), !(fue===0&&sal===0)? '👊 empujable' : '👊 aguanta el golpe'],
+               [fis, fis? '🧊 pisa como tú' : '🧊 ignora el suelo'],
+               [cue, cue? '🧱 caja a medida' : '🧱 caja de las piezas'],
+               [mira, mira? '👀 te mira' : '👀 sin cuello']];
+  for(const [on,txt] of chips){
+    const s=document.createElement('span'); s.className='ag-chip'+(on?' on':''); s.textContent=txt;
+    el.appendChild(s);
   }
 }
+function agCampoBool(etiqueta, val, set){
+  const l=document.createElement('label'); l.className='ag-fld';
+  const i=document.createElement('input'); i.type='checkbox'; i.checked=!!val;
+  i.onchange=()=>set(i.checked);
+  l.appendChild(i); l.appendChild(document.createTextNode(' '+etiqueta));
+  return l;
+}
+
 function agCampo(etiqueta, ctrl){
   const l=document.createElement('label'); l.className='ag-fld';
   l.appendChild(document.createTextNode(etiqueta)); l.appendChild(ctrl); return l;
@@ -3428,8 +3607,11 @@ function agCampoTexto(etiqueta, val, set){
   const i=document.createElement('input'); i.type='text'; i.value=val;
   i.onchange=()=>set(i.value); return agCampo(etiqueta, i);
 }
-function agCampoNum(etiqueta, val, paso, set){
+// `esDef` = este número lo va a usar la librería pero el documento NO lo trae escrito. Se pinta en
+// gris cursiva para que no se lea como un valor elegido por alguien; al tocarlo se escribe la clave.
+function agCampoNum(etiqueta, val, paso, set, esDef){
   const i=document.createElement('input'); i.type='number'; i.step=paso; i.value=val;
+  if(esDef) i.className='def';
   i.onchange=()=>set(+i.value||0); return agCampo(etiqueta, i);
 }
 function agCampoSelect(etiqueta, val, set, opts){

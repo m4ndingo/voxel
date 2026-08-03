@@ -790,6 +790,41 @@ Test: `§18` de `node test_bloques_comportamiento.js` — velocidad ×1/×2/×0.
 `impulso:12` subiendo los 3,17 bloques que predice `v²/2g`, y el patinazo de hielo pasándose de largo
 (1,199 frente a 0,716 en seco).
 
+#### El panel enseña TODAS las capacidades, una tarjeta cada una
+
+El formulario del panel de Agentes enseñaba 4 de los ~20 parámetros del bicho entero, y `empuje`
+(v1.25) y `fisica` (v1.26) **no aparecían por ninguna parte** aunque el agente las tuviera: se podía
+tener encendido algo que el panel no sabía contar. Ahora el bloque «El bicho entero» son **tarjetas
+plegables**, una por capacidad (`seguir` 👁, `andar` 🚶, `empuje` 👊, `fisica` 🧊, `cuerpo` 🧱), más las
+dos por pieza que ya existían (`articula` 🔩, `mirar` 👀). Plegada, la tarjeta dice si está encendida y
+con qué valores; abierta, saca **todos** sus parámetros. Bajo el preview hay una fila de **chips** con
+lo mismo resumido, para leerlo sin abrir nada.
+
+**Tres reglas que no son cosméticas:**
+
+1. **Los valores por defecto son los de la librería, y salen en gris (`.def`).** Un campo vacío o a 0
+   mentiría: `distancia:0` significa «se te echa encima» y es lo contrario de «no lo he tocado». Los
+   números que ves cuando el documento no trae la clave son los que `normalizarSeguir`/`crearEsqueleto`
+   /`normalizarFisica` van a usar de verdad.
+2. **Abrir el panel no engorda el documento.** Una capacidad encendida en su valor por defecto se
+   guarda **sin la clave**; tocar un campo escribe solo esa clave; apagar y volver a encender la borra.
+   Los defectos viven en un sitio (la librería), no duplicados en el panel.
+3. **El panel no ofrece lo que la librería va a rechazar.** `seguir.objetivo` solo da «el jugador» y «un
+   punto fijo»: seguir a **otra clave de material** busca la instancia más cercana con ese material y un
+   rig no es una instancia. Y «trepa por las escaleras» sale **deshabilitada** — todavía no existe para
+   un agente; quitarla de la lista haría pensar que se olvidó.
+
+Apagar una capacidad que no tiene clave de apagado se escribe con sus valores neutros: `empuje` off es
+`{fuerza:0, salto:0}` (aguanta el golpe sin moverse) y `andar` off es `{cadencia:0}` (no mueve las
+patas). `seguir` off sí es `false`, y la tarjeta avisa de que **la librería se niega a plantarlo**.
+
+Qué tarjetas quedan abiertas vive en `agAbiertas`, **no en el DOM**: el formulario se reconstruye
+entero en cada cambio y cualquier estado guardado en el nodo se perdería a la primera tecla. Y
+`agCargar` lleva billete (`agCargaId`, como el `agPrepId` de `agPreparar`): elegir dos agentes seguidos
+no puede dejar que la respuesta vieja pise a la nueva.
+
+Test: `node test_panel_agentes.js` (Chromium real, 30 casos).
+
 **Punto de extensión `mundo-autoarranque` (excepción al §0, aprobada por el dueño).** Los snippets no
 se autoejecutan (solo a mano desde Alt+C), así que la escalera dejaba de ser escalera en cada recarga.
 `mcAutoarranque()` (final de `openWorld`) ejecuta ese snippet si existe: `app.js` **no sabe qué hace**,
