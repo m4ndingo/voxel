@@ -208,7 +208,7 @@ punto de partida para nuevos assets y el ejemplo de cómo se construye geometrí
 **Assets del servidor** (`assets/`, requiere servir por HTTP): la app hace `fetch('assets/index.json')`
 (`loadServerAssets`) y carga cada `.vox.json` por URL (`loadFromUrl`). Para añadir un NPC/objeto:
 escribe su `.vox.json` (formato export, con `meta.role`/`meta.description`/`meta.icon` opcionales) y
-añádelo a `index.json` (`{id,name,role,type,icon,file}`). Ejemplo reproducible: `node make_alis.js`
+añádelo a `index.json` (`{id,name,role,type,icon,file}` + `alias`/`description` opcionales). Ejemplo reproducible: `node make_alis.js`
 construye el NPC «Alis la Duplicadora» con helpers `box()/set()` y regenera el índice — patrón a copiar.
 `loadServerAssets` reparte el índice por `type`: los personajes/objetos van a **Assets del servidor** y
 los `type:'bloque'` a **Habitaciones** (`loadRooms`); ambos cargan con `loadFromUrl` al hacer clic.
@@ -218,6 +218,27 @@ galería/roster de **Habitantes** filtra `type!=='bloque'` y **Habitaciones** mu
 sirve ambas galerías (`habKind` recuerda cuál); `refreshRosters()` refresca los dos tras guardar/
 renombrar/borrar. Al guardar respeta el `meta.type` del desplegable, así un objeto marcado «Bloque de
 habitación» aparece en Habitaciones, no en Habitantes.
+
+**Ficha de un asset (botón 📋 en la tarjeta) — cómo se llama esa textura desde un script.** Un asset
+responde a **cuatro** claves, todas registradas por `mcIndexAssets` en `mcAssetsRegistry` (lo que mira
+`game.addMaterial`) **y** en `MC_MAT_ALIAS` (lo que mira `setVoxel`/`mcResolveMat`): su `id`, su rótulo
+en minúsculas, el basename del fichero y su **`meta.alias`** (nombre corto). Desde la UI solo se veía el
+rótulo, así que el nombre bueno había que adivinarlo — la ficha (`openFicha`, `#ficha-modal`) lista las
+cuatro, enseña la clave exacta `asset:assets/<id>.vox.json` y deja editar `alias`/`icon`/`description`.
+- **El alias NO puede pisar un alias de fábrica** (`MC_MAT_ALIAS_FIJOS`, foto de `MC_MAT_ALIAS` antes de
+  indexar): `stone` sigue siendo roca pase lo que pase. Se valida en **los dos lados** — `ALIAS_FIJOS` +
+  `validar_alias` en `server.py` (409 con motivo legible) y otra vez al indexar en el cliente. **Si
+  añades un alias de fábrica, tócalo en los dos sitios.**
+- Forma obligatoria `^[a-z0-9_]{2,40}$`: el sentido es poder teclearlo en un script.
+- `mcAliasPrevio` borra la clave anterior al cambiar el alias: los dos mapas son de **solo-acumular**, y
+  sin eso el nombre viejo seguiría funcionando para siempre.
+- ⚠️ `POST /api/assets` vuelca el `.vox.json` **entero** y el editor no conoce `alias`/`icon`/
+  `description` (no hay campos para ellos): el POST los **hereda del fichero existente** antes de
+  volcar. Sin eso, guardar el dibujo borraba el nombre corto. Para quitar un alias se usa la ficha
+  (PATCH con `alias:''`), no guardar.
+- La identidad de un asset sigue siendo **su fichero**: ni renombrar ni poner alias mueven nada, porque
+  cada voxel del mundo guarda `asset:assets/<id>.vox.json`.
+- Solo assets del juego. Las piezas de `data/habitantes/` (`hab:<id>`) no tienen alias.
 Las 3 **habitaciones** (Taberna/Herrería/Mazmorra) están **a escala de personaje**: `make_rooms.js`
 dibuja en unidades gruesas (geometría 28×28×13) pero escribe bloques finos S=4 → assets
 **112×112×52** con paredes de 40 frente a personajes 32³; solo guarda la **cáscara** (superficie,
@@ -936,6 +957,20 @@ Lista de agentes guardados, formulario por pieza (dibujo, `rot`, pivote / eje / 
 amplitud / fase) y **preview 3D animado** con los dos interruptores de verdad (*te ve* / *anda*), un
 mando de giro y un botón **Plantar** que lo suelta delante del jugador.
 
+**Cada campo se explica solo.** `base` / `reposo` / `amplitud` / `desfase` no se adivinan mirándolos
+(«en edición de agentes articulados no queda claro qué es cada una de estas opciones»), así que la
+etiqueta de un campo puede ser `'amplitud'` o **`{t:'amplitud', ayuda:'…'}`**. Va como objeto y no
+como un argumento más porque en `agCampoNum` el último ya lo tiene pillado `esDef`: así cualquier
+campo se explica sin tocar ninguna firma. La ayuda sale por **dos vías** — el `title` del `<label>`
+(el globo de siempre) y un **«?» que la despliega debajo**, porque en el móvil no hay hover ni globo —
+y se abre con **`:focus` y no con `:hover`** para que las dos no se pisen. Nada de estado en el DOM:
+el formulario se reconstruye entero en cada tecla (por eso `agAbiertas` vive fuera), y el foco se
+pierde solo, que es justo lo que se quiere. ⚠️ El «?» es un `<button>` **dentro del `<label>`**: se
+salva de robarle el clic al campo porque es *contenido interactivo* y la activación del label lo
+salta — lo prueba `test_panel_agentes.js`. Efecto lateral querido: `.ag-fld.con-ayuda` lleva
+`flex-wrap:wrap`, así que en el móvil una terna como `en (x, alto, z)` cae a su propia fila entera en
+vez de partir el rótulo por la mitad.
+
 **El preview NO calcula la pose: se la pide a la librería.** `app.js` llama a
 
 ```js
@@ -980,8 +1015,8 @@ genéricos (ni una línea de `app.js` sabe qué es un perro):
    `type!=='textura'` — un filtro que está para no listar los 34 azulejos de 1×1 como piezas de un
    muñeco — y las piezas del zombie **son** `type:'textura'`, así que se las llevaba por delante. Y
    tienen que serlo: ese tipo es lo que enruta el guardado del editor a `/api/assets`, que es lo
-   único que deja **reponer un pivote** con 📍 y guardar la pieza de vuelta. Se salva el `group`:
-   `a.type!=='textura' || a.group==='Agentes'`.
+   único que deja **reponer un pivote** con 📍 y guardar la pieza de vuelta. Se salvó el `group`:
+   `a.type!=='textura' || a.group==='Agentes'`. ⚠️ **Ese filtro ya no está** — ver abajo por qué.
 2. **Faltaba la mitad del documento.** El formulario cubría las piezas pero no la **conducta**, que
    no es de ninguna pieza sino del bicho entero: `seguir` (detección / se para a / velocidad),
    `andar.cadencia`, `cuerpo` (caja de choque) y el `mirar` de la cabeza. Sin eso, un agente nuevo
@@ -1007,10 +1042,284 @@ ningún campo — construye un bicho de usar y tirar entero por la UI, comprueba
 campo a campo, comprueba que esos campos también **leen** un agente guardado (el zombie) y **no
 hace ni un POST**.
 
+#### «Guardar como…» — el `id` manda sobre el nombre
+
+`POST /api/agentes` deriva el fichero de **`d.id || d.nombre`** (`server.py:437`), así que **el `id`
+gana**: cargar el zombie, renombrarlo y darle a **Guardar** reescribía `data/agentes/zombie.json` con
+otro nombre dentro. No había forma de sacar una copia ni de partir de un bicho que ya funciona para
+hacerle una variante. `agGuardarComo()` **le quita el `id` al documento** — eso, y solo eso, es lo
+que convierte el guardado en un «como…».
+
+- El aviso de «ya existe» usa `slug()` (`app.js:1680`), que es **el mismo** que `slugify` de
+  `server.py:33-35`; calculado de otra forma mentiría justo en los casos raros (acentos, símbolos) y
+  la copia pisaría un agente en silencio. Sobrescribir se confirma, y la versión anterior va a la
+  papelera igual (`to_trash`).
+- **Si el POST falla se deshace el cambio** (`id` y `nombre` vuelven a los de antes, y el campo
+  también): si no, el panel se quedaría apuntando a un fichero que no existe y el siguiente
+  **Guardar** escribiría en el sitio equivocado.
+- El nombre propuesto es el primero libre (`zombie 2`, `zombie 3`…), comprobado contra `agLista`.
+
+⚠️ **Renombrar sigue sin estar cableado.** `PATCH /api/agentes/<id>` sabe mover el fichero
+(`server.py:539-545`) pero **nada en `app.js` lo llama**: cambiar el nombre y pulsar Guardar deja el
+fichero con el id viejo y el nombre nuevo dentro. El toast lo dice (`guardado en
+data/agentes/<id>.json`), y con «Guardar como…» ya hay una salida, pero es un cabo suelto.
+
+#### El desplegable «dibujo» no esconde nada, y el catálogo no se cachea de por vida
+
+El filtro de v1.23 (`a.type!=='textura' || a.group==='Agentes'`) tenía una consecuencia que solo se ve
+al **crear una pieza nueva**: `POST /api/assets` guarda todo como `type:'textura'` +
+`group:'Bloques de construcción'` (`server.py:484-485`) y **no hay UI para elegir el grupo**, así que
+copiar la cabeza, llamarla «Cabeza de Personaje» y guardarla la dejaba **invisible para siempre** en
+el desplegable. Les pasaba también a `cabeza` y `brazo`, las dos piezas del zombie original. Ahora
+`agCatalogo()` ofrece **todo**, repartido en `<optgroup>` con **Agentes primero** (`AG_GRUPOS`): eso
+resuelve lo que el filtro resolvía de verdad — que los azulejos no tapen los brazos — sin ocultar
+nada. `sort` es estable, así que dentro de cada grupo manda el orden del índice, o sea el orden en
+que se fueron guardando.
+
+(Que exista una «Cabeza de Personaje» aparte de la del zombie es la otra mitad del mismo defecto: el
+guardado deducía el id del rótulo y bifurcaba. Ver **«Retocar una pieza y que el bicho vivo se
+entere»**, más abajo.)
+
+Y `agCat` se **invalida al abrir el panel** (`openAgentes`). Se cacheaba una sola vez por carga de
+página: guardabas una pieza en el editor, volvías al panel y seguía sin estar. Refrescarlo cuesta un
+`fetch` del índice por apertura.
+
+⚠️ La pieza que el documento ya trae se antepone al catálogo aunque este no la conozca (grupo «En el
+documento»): si no, elegir otra pieza y volver dejaría el `<select>` apuntando a un dibujo distinto
+del que dice el JSON.
+
+Test: `node test_panel_agentes.js` (**40 ok**) — que el catálogo ofrece un `textura` fuera del grupo
+Agentes (`adoquin`), que el primer `<optgroup>` es «Agentes» y que cada grupo sale ordenado. El
+«Guardar como…» se prueba **sin escribir nada**: los `POST` van abortados y se inspecciona el
+documento que *habría* salido (sin `id`, con el nombre nuevo) más la marcha atrás al fallar. Las
+ayudas se comprueban por las dos vías a la vez (que el `title` y la nota digan **lo mismo**) y con un
+**clic de verdad** de Playwright, no solo con un `focus()` a mano: lo que se quiere saber es que un
+dedo llega a ellas.
+
+#### Retocar una pieza y que el bicho vivo se entere — el asset se identifica por su FICHERO
+
+La queja: «los cambios que se realizan en el bloque/estructura una vez guardado no se reflejan en el
+personaje». **No era el refresco**: `mcRefreshSavedKey()` funcionaba (una sonda le cambió a un rig
+vivo el `colCount` de 1578 a 8472 en caliente). Era **dónde aterrizaba el dibujo**.
+
+Un agente guarda sus piezas como `asset:assets/<id>.vox.json`. Pero al guardar, el id se deducía del
+**rótulo**: `POST /api/assets` hacía `idd = slugify(meta.name)`. Retocar «Torso de zombie» escribía
+en `torso-de-zombie.vox.json` — **un asset nuevo que no usaba nadie** — mientras el agente seguía
+leyendo `torso-zombie.vox.json`, y el refresco se mandaba con la clave del fichero nuevo, así que
+tampoco había forma de que se notara. **17 de los 49 assets** tenían `id != slug(nombre)`,
+**incluidas las 8 piezas de agente**: ninguna se podía retocar. Los `assets/*-de-personaje.vox.json`
+del dueño son las esquirlas de esto.
+
+Es **el mismo defecto que ya se arregló para los agentes** («Guardar como…», arriba): el `id` manda
+sobre el nombre. Ahora:
+
+- **`POST /api/assets` respeta `d.id`** si viene (acotado a `[A-Za-z0-9_.-]`, así que un
+  `../../data/habitantes/diana` se queda en `assets/`); sin `id`, alta nueva y ahí sí manda el nombre
+  — que es justo lo que hace **«Guardar como…»**, y por eso sigue bifurcando.
+- **Cargar un asset de la galería se queda con su id** (`loadFromUrl(url, id)`). Antes lo ponía a
+  `null` a propósito («punto de partida»), y eso era lo que forzaba la bifurcación.
+- **El id viaja en la copia local** (`localSnap`/`restore`): sin eso, recargar la página perdía el
+  origen y el siguiente Guardar volvía a bifurcar.
+- **Se respalda antes de pisar** (`to_trash(..., move=False)`): ahora que Guardar reescribe assets,
+  perder la versión anterior sería un roto de verdad. Y el índice refresca también el `size` (el
+  dibujo pudo cambiar de tamaño), pero **nunca el `group`**: no hay UI para elegirlo y machacarlo
+  mandaría una pieza de «Agentes» a «Bloques de construcción».
+- El toast dice **el fichero**, no solo el rótulo: es lo que enseña de un vistazo que el dibujo fue
+  donde lo buscan los agentes.
+
+⚠️ **Renombrar y darle a Guardar pregunta.** Es el otro camino que usa el dueño (cargar una pieza del
+zombie, llamarla «de personaje» y guardar) y las dos lecturas son razonables: *retoco esta* o *parto
+de ella para hacer otra*. Manda el id, así que sin el aviso ese «hazme una variante» se habría
+convertido en **pisar el original**. Sin cambio de nombre no se pregunta nada.
+
+**Y una segunda mitad, la del panel** («en el Mundo al guardar se ven los cambios, es en el editor de
+agentes donde no»): el preview del panel **no pasa por el Mundo** y tiene sus propias cachés —
+`agGeomCache` (caras ya fusionadas, por `clave|rot`) en `app.js` y `docsCache` (el doc del dibujo)
+dentro de la librería de esqueletos, en el snippet. `mcRefreshSaved` las suelta ahora **antes** del
+corte por `mc.gl` (el panel tira con el Mundo sin abrir, si no no se llegaría nunca) y le pide al
+snippet que olvide lo suyo con **`game.esqueletos.olvidarDibujo(clave)`** — se le pide, no se le
+hurga dentro.
+
+⚠️ Y el sitio donde se vacía `agGeomCache` importa: tiene que ser **justo cuando entra el plan nuevo**
+(dentro del `.then` de `agPreparar`), no al guardar. Entre la petición y la respuesta el bucle de
+dibujo sigue pintando el plan viejo y **vuelve a llenar la caché con el dibujo de antes**; limpiando
+solo al guardar, el torso viejo sobrevivía igual. La sonda lo enseñó sin ambigüedad: el doc ya traía
+el dibujo nuevo (1320 → 660 voxels) y las caras dibujadas seguían clavadas en 803.
+
+Test: `node test_guardar_pieza.js` (**13 ok**) — se crea **su propia** pieza con `id != slug(nombre)`
+(y la borra en el `finally`, comprobando que los 49 assets del dueño siguen enteros), la carga desde
+la galería con un clic de verdad, la retoca, guarda, y mira **el fichero en disco**: que cambió el de
+siempre, que **no** apareció el bifurcado, y que la clave que se manda refrescar es exactamente la
+que usa un agente. Más el F5, y las dos ramas del aviso al renombrar.
+
+### 🧗 Parkour: agarrarse al canto y trepar (v1.27, agarre sin tirón en v1.28)
+
+Lo único de la librería que es **del jugador** y no de un material. Hasta v1.26 un bloque a **3 de
+altura** era inalcanzable: el salto de Minecraft sube `h = v²/2g = (8√s)²/44 = 1,4545·s` y el
+auto-escalón llega a `MC_STEP=0.6`. Ahora, si el salto se queda corto y **el espacio sigue pulsado**,
+el jugador se queda **colgado del canto** (el apoyo de brazos que no se ven es el congelado) y desde
+ahí **`W` lo sube en una curva suave** hasta dejarlo de pie encima. Colgado, **`A`/`D` desplazan por
+el borde**. Encendido por defecto y sobre **cualquier canto sólido** — terreno y estructuras.
+
+`libre → colgado → subiendo → libre`, con veda de `0,25 s` al coronar. El estado vive en
+`mc._parkour` (**nunca en un closure**, igual que `mc._pasoDesfase`: reejecutar el snippet a media
+escalada no puede dejar al jugador congelado en el aire) y todo va **dentro del `envuelto` que ya
+existe**, no en un segundo envoltorio.
+
+```js
+game.parkour.activo      // on/off (por defecto ON)
+game.parkour.alturaMin   // 1.5 · altura mínima del canto sobre los pies, en unidades de jugador
+game.parkour.alturaMax   // 2.2 · hasta dónde llega el brazo (el jugador mide 1,8)
+game.parkour.caida       // 0   · velocidad de caída mínima para permitir el agarre
+game.parkour.velLateral  // 1.6 · shimmy con A/D, u/s a escala 1
+game.parkour.duracion    // 0.45 s de subida
+game.parkour.alcance     // 0.45 · cuánto se asoma el sondeo más allá del cuerpo
+game.parkour.calado      // 1.2 · v1.28 · cuánto cuerpo queda SIEMPRE por debajo del canto
+game.parkour.acomodo     // 0.06 s · v1.28 · constante de tiempo del acercamiento al canto (0 = seco)
+game.parkour.estado()    // ← el diagnóstico: en qué estado está y POR QUÉ no engancha
+```
+
+`estado()` **vuelve a sondear desde donde estás saltándose las condiciones de entrada**, para poder
+plantarse delante de un saliente rebelde y preguntar: `'el canto ya no está ahí'` / `'hay pared
+encima del canto'` / `'sin apoyo bajo la huella'` / `'no cabe de pie arriba'` / `'la pose de colgado
+no cabe'` / `'de pie en el suelo'` / `'enfriando'`. Sin eso la única forma de depurar un canto que no
+engancha es a ciegas, y el dueño juega en el móvil. Tunables al estilo `window.room` (objeto plano
+con accesores enumerables — **no un Proxy**, BUG-RM1), persistidos en `localStorage` (`vf_pk_*`) y
+con avisos por **`toast()`**.
+
+**Tres consecuencias del orden de `mcUpdate` que dictan el diseño** — leídas, no supuestas:
+
+- **(A) `mcUnstick` corre al PRINCIPIO de `mcUpdate`** (`app.js:5841`, llamado en `app.js:5898`):
+  busca hacia arriba en pasos de 1/16 la primera `y` libre y pone `onGround=true`. Una pose de
+  colgado que solape la pared **aunque sea 1e-9** se convierte al frame siguiente en un trepado
+  instantáneo falso. Por eso la pose se **valida con `mcCollides`** y se **retrae por la normal**
+  hasta `PK_RETRAE = 8` pasos de 1/16; si nunca cabe, **se rechaza el agarre**.
+- **(B) Colgado y subiendo, `orig(dt)` NO se llama.** El plan decía «correr la física y restaurar la
+  posición»; no vale, precisamente por (A) — `mcUnstick` va antes de que podamos restaurar nada.
+  Saltarse `orig(dt)` entero es estrictamente más fuerte. El mundo no se congela porque el envoltorio
+  sigue llamando a `seguirObjetivos` / `mirarObjetivos` / `esqueletosPaso`.
+- **(C) El envoltorio recibe el `dt` CRUDO**: el tope de 0,05 está **dentro** de `mcUpdate`
+  (`app.js:5894`), y el parkour se salta `mcUpdate`. Sin un tope propio (`dtp`), una pestaña en
+  segundo plano corona el canto de un tirón. Tiene su prueba.
+
+**El sondeo, por qué así:**
+
+- **Dirección encajada al eje** (la de mayor componente de `mc.yaw`): así está hecho el mundo y evita
+  agarres en diagonal contra una esquina.
+- **La cara de la pared no se adivina**: se barre de **cerca a lejos** en pasos de 1/16, y el borde
+  interior de la primera columna sólida **es** la cara.
+- **Suelo de altura `max(alturaMin·esc, MC_STEP·esc + inc)`**, con el mismo `inc` del auto-escalón
+  (`app.js:5754`). Sin ese margen el parkour y el escalón automático se pelearían por el mismo
+  bloque y un bordillo daría un agarre en vez de una zancada; y `alturaMin = 1.5` va justo por encima
+  de `1,4545·s`, así que **un bloque de 1 se sigue subiendo de un salto**.
+- **Apoyo bajo las CUATRO esquinas** de la huella: un labio de 1/16 pasa el test del canto y te
+  dejaría de pie sobre el aire.
+- **Ayuda de puntería**: si en la vertical exacta del jugador la huella no apoya, se prueban 1/16 a
+  cada lado hasta medio cuerpo — lo mismo que haría el shimmy, sin obligar al dueño a pelearse con
+  `A`/`D`.
+- **Se miran los dos sitios donde vive el mundo** (`mcSolid` + `mcFineSolidAt`): la rejilla sola es
+  medio mundo.
+
+**La subida es una L** (Bézier cuadrática con `smoothstep`, `P1.xz = P0.xz`): a mitad de camino se ha
+subido el 75 % y avanzado el 25 %. Es la curva que pidió el dueño («sube y avanza en una curva
+suave») y de paso impide atravesar una pared de 1 de grosor y aparecer **dentro de una habitación
+sellada**.
+
+**v1.28 · te cuelgas A LA ALTURA A LA QUE ESTÁS, no en una pose fija.** Hasta v1.27 `pkPose` clavaba
+`y = canto − 1.8·esc`; como el agarre se permite desde `alturaMin = 1.5`, engancharse cerca del punto
+alto del salto **te bajaba hasta 0,3 de golpe en un frame**, un tirón muy visible. Ahora la altura de
+colgado es `min(p[1], canto − calado·esc)`: tu propia `y`, con el único tope de que quede `calado`
+(1,2) de cuerpo por debajo del canto — si no, con un `alturaMin` bajo te «colgarías de las rodillas».
+Por abajo no hace falta tope porque el sondeo ya acota a `alturaMax`. Si esa altura no cabe
+(la retracción de (A) la rechaza) **se reintenta la pose canónica** antes de descartar el canto, así
+que no se pierde ningún agarre que funcionara antes. El shimmy y el arranque de `W` usan **esa misma
+`pk.y`**, no la canónica: desplazarse por el canto no sube ni baja.
+
+Y el resto del encaje (el ajuste en **XZ** contra la pared, que sigue siendo instantáneo por
+definición) se suaviza con un **desfase que decae exponencialmente**: al agarrarte se guarda
+`des = posición_real − pose` y cada frame se multiplica por `exp(−dt/acomodo)`, el mismo patrón
+frame-rate-independiente de `pasoSuave`. Con `acomodo = 0` el agarre vuelve a ser seco. Ojo al leer
+el código: en el caso normal `pk.y === p[1]`, así que **`des[1]` es 0** y el acomodo solo trabaja en
+XZ; la prueba de «60 frames sin deriva» sigue pasando porque el desfase muere por debajo de
+`1/(16·MC_T)` en unos pocos frames.
+
+**Se suelta el agarre en cuanto alguien de fuera mueve al jugador**: se compara `mc.pos` con la
+posición que escribimos (`pk.esp`, ±1e-6, el mismo truco de `restaurarPaso`), lo que cubre `game.tp`,
+respawn, `mcUnstick`, `alPisar`, salir del Mundo y el cambio de `mc.scale`. Y **coordenada no finita
+⇒ abortar**: un `NaN` hace que `Math.floor(NaN)` se salte los bucles de `mcCollides` («no hay
+colisión en ninguna parte») y la caída sería infinita.
+
+**El signo de `A`/`D` se FIJA al agarrarse** y solo se reevalúa si `|dot(right, tangente)| > 0.5`:
+reevaluarlo por frame da bandazos justo cuando miras a lo largo de la pared, porque ahí el producto
+escalar cruza el cero. El desplazamiento avanza en **sub-pasos de 1/16 revalidando el test de agarre
+entero**, así que se para solo en el final del canto, en una esquina o en un hueco.
+
+**Límites, a propósito:** (1) solo **cantos encajados al eje**, nada de diagonales ni superficies
+inclinadas; (2) **sin animación visible de brazos** — es primera persona, el «apoyo» es el congelado
+más la curva; (3) **el shimmy no dobla esquinas**, se para donde acaba el canto; (4) **nada de esto
+entra en `mundo.json`**: es comportamiento del snippet, no geometría.
+
+Test: `node test_parkour_navegador.js` (Chromium + SwiftShader, 18 ok) — monta su propio patio con un
+muro de 3, y cubre que sin parkour el salto no llega, que el espacio deja colgado sin deriva 60
+frames, que soltarlo cae, que `W` acaba de pie encima, que la trayectoria es una L, la veda, el
+shimmy y su parada, que un escalón de 1 **no** dispara parkour, que un vano de 1 de alto se rechaza,
+que un `dt` gigante no corona de un tirón, y que el mundo del dueño queda como estaba. Desde v1.28 el
+agarre **no se comprueba contra una `y` fija** (sería clavar el bug): se exige que caiga en la banda
+`[canto − alturaMax, canto − calado]` y que **el salto en `y` del frame del agarre no sea mayor que
+la caída que ya llevabas**. ⚠️ La altura
+hay que leerla **antes** de `suavizarPaso` (`yFisica()` en el test): `mc.pos[1]` lleva el desfase del
+ojo y medir ahí da `31.996` donde el canto está en `32`.
+
+### 💡 Poner un bloque no puede costar el mundo entero (skylight incremental)
+
+Hasta aquí, **cada bloque puesto o roto recalculaba la luz del mundo entero**: `mcRemeshAround` llamaba
+a `mcComputeLight()`, que barre las `NX·NY·NZ` celdas. Medido con SwiftShader, una sola edición:
+
+| mundo | celdas | skylight global | edición entera (hoy) |
+|---|---|---|---|
+| 96×40×96 | 368 640 | 42 ms | **7,2 ms** |
+| 256×40×256 | 2 621 440 | 199 ms | **6,0 ms** |
+| 512×40×512 | 10 485 760 | **680 ms** | **8,5 ms** |
+
+O sea que el coste **crecía con el volumen del mundo aunque el bloque tocado fuera uno**, y en un mundo
+grande se comía 40 frames de golpe. Ahora `mcRelightBox(x,z)` recalcula solo **una caja**: `±17` en X/Z y
+la **columna entera** en Y. Esa forma no es arbitraria — la luz pierde 1 nivel por paso, así que una
+edición no llega a más de `MC_MAXLIGHT`=15 pasos por aire, **salvo hacia abajo**, donde abrir o tapar una
+columna le cambia el cielo de arriba abajo de una vez.
+
+**Es exacto, no una aproximación.** Las celdas de fuera de la caja no han podido cambiar, así que valen
+de condición de contorno: se siembran hacia dentro con su nivel actual −1. Cualquier camino de luz que
+salga y vuelva pasa por el borde, y el borde ya trae su mejor valor. Eso no se cree, **se comprueba**:
+`node test_luz_incremental_navegador.js` compara `mc.light` **celda a celda** contra `mcComputeLight()`
+tras 120 ediciones al azar más los casos que duelen (abrir el techo de una cueva y taparlo, las caras del
+mundo, la frontera de un chunk, el fondo).
+
+Dos cosas más que iban en el mismo frame:
+
+- **Se re-malla lo que cambió, no un 3×3 fijo.** `mcRelightBox` devuelve el AABB de las celdas que
+  *realmente* cambiaron de luz; normalmente es **1 chunk en vez de 9**. El `±1` en bloques que se le une
+  es la **geometría**: si la celda tocada está en el borde del chunk, la cara que se ve es la del vecino.
+  ⚠️ Si esa caja se quedara corta el síntoma no sería un error sino **sombras viejas pegadas** en
+  pantalla, así que tiene aserción propia.
+- **`mcComputeBlockLight` ya no pone a cero lo que ya estaba a cero.** Sin emisivos hacía un `fill(0)` de
+  N bytes por edición (3 ms en 512²) para no cambiar ni un byte; lo corta la bandera `mc._blCero`, que
+  vive junto al único sitio que escribe `BL`.
+
+**El tope de `game.resizeWorld` sigue en 512×256×512, y es de memoria, no de capricho.** Las cuatro
+rejillas densas son `grid` Uint16 + `light` Uint8 + `blockLight` Uint8 + `blockLightDir` Int8×3 = **7
+bytes por celda**: 512×40×512 son 73 MB, pero un `1000×40×1000` serían **280 MB** solo en arrays, antes
+de las mallas de 3 844 chunks. Subir el tope es una decisión de presupuesto de memoria, aparte de esta.
+
 ## Convenciones
 
 - Cualquier cambio de `state` termina llamando a `render()` (= `drawEdit` + `drawIso` +
-  `updateInfo`). Las sincronizaciones de UI puntuales usan `syncLayer` / `syncColor`.
+  `updateInfo` + `drawEdit3d` si `mode==='3d'`). Las sincronizaciones de UI puntuales usan
+  `syncLayer` / `syncColor`.
+  ⚠️ **`render()` no pinta: encola un rAF** (y coalesce con `_renderPending`). `setMode()`, en cambio,
+  pinta **síncrono**. Llamar a los dos seguidos rasteriza el modelo **dos veces enteras**, y la segunda
+  cae un frame más tarde: en un escritorio rápido ni se nota, pero con la CPU lenta y un modelo grande
+  es un congelado de segundos que aparece *después* de que la página ya pareciera lista. Si hace falta
+  pintar y además fijar el modo, llama solo a `setMode()`.
 - El formato de export es `{format:"voxelforge-1", size, meta, voxels:{...}}`; import acepta ese
   objeto (`voxels` como mapa `"x,y,z" -> hex`).
 - Idioma de UI y comentarios: **español**.

@@ -3,7 +3,9 @@
    Uso: python3 server.py [puerto]   (por defecto 8500)
    Almacén: data/habitantes/<id>.json  (formato vox export)."""
 import http.server, socketserver, json, os, re, sys, datetime, shutil, time, urllib.parse
+import gzip, threading
 import mundos                                              # listado de /map/: estadísticas + miniatura cenital
+import voxfmt                                              # formato de mundo voxelworld-2 (cabecera + .vox denso)
 
 BASE  = os.path.dirname(os.path.abspath(__file__))
 STORE = os.path.join(BASE, 'data', 'habitantes')
@@ -32,6 +34,52 @@ PORT  = int(sys.argv[1]) if len(sys.argv) > 1 else 8500
 def slugify(s):
     s = re.sub(r'[^a-z0-9]+', '-', (s or 'objeto').lower()).strip('-')
     return s or 'objeto'
+
+# ---- Nombre corto de un asset (meta.alias): como se le llama desde un script ----
+# Un asset ya responde hoy a su id, a su rotulo y al basename de su fichero (mcIndexAssets,
+# app.js:1413). El alias es una cuarta puerta, la unica que elige el dueno: la textura que otro
+# programa genero como «green_concrete» se referencia asi en vez de por «hormig-n-verde-hojas».
+#
+# ALIAS_FIJOS es el espejo de MC_MAT_ALIAS (app.js:7452). Un alias de la ficha NO puede pisarlos:
+# un script que dice 'stone' tiene que seguir poniendo roca para siempre. Si anades uno alli,
+# anadelo aqui. El cliente vuelve a comprobarlo al indexar, asi que un servidor desactualizado
+# como mucho deja pasar algo que el cliente ignora — no puede corromper un alias de fabrica.
+ALIAS_FIJOS = {
+    'stone', 'smooth_stone', 'cobblestone', 'mossy_cobblestone', 'stone_bricks', 'bricks',
+    'sandstone', 'dirt', 'grass', 'wood', 'planks', 'sand', 'log', 'obsidian',
+    'red_concrete', 'red_concrete_block',
+}
+# Sin espacios ni acentos: el sentido de todo esto es poder teclearlo en un script.
+ALIAS_RE = re.compile(r'^[a-z0-9_]{2,40}$')
+
+def claves_de_asset(item):
+    """Todo lo que YA resuelve a este asset desde un script (espejo de mcIndexAssets)."""
+    claves = set()
+    for v in (item.get('id'), item.get('name'), item.get('alias')):
+        if v:
+            claves.add(str(v).strip().lower())
+    if item.get('name'):
+        claves.add(slugify(item['name']))
+    rel = item.get('file') or ''
+    if rel:
+        claves.add(rel.split('/')[-1].replace('.vox.json', '').lower())
+    return claves
+
+def validar_alias(alias, aid, idx):
+    """(alias_normalizado, motivo_legible_o_None). Cadena vacia = borrar el alias."""
+    a = (alias or '').strip().lower()
+    if not a:
+        return '', None
+    if not ALIAS_RE.match(a):
+        return a, 'usa solo minusculas, numeros y _ (entre 2 y 40 caracteres)'
+    if a in ALIAS_FIJOS:
+        return a, f'«{a}» ya es un material de fabrica — elige otro'
+    for item in idx:
+        if item.get('id') == aid:
+            continue                     # las claves propias no chocan consigo mismas
+        if a in claves_de_asset(item):
+            return a, f'«{a}» ya apunta a «{item.get("name") or item.get("id")}» — elige otro'
+    return a, None
 
 # Nombre de mapa (de /map/<nombre> o ?map=) -> fichero de mundo persistente.
 # «default» (o vacío/ausente) = el mundo sagrado mundo.json; cualquier otro = data/worlds/<slug>.json.
@@ -164,9 +212,97 @@ def list_all():
     out.sort(key=lambda h: h.get('savedAt', ''), reverse=True)   # más recientes primero
     return out
 
+# ---------------------------------------------------------------------------------------------
+# Compresión. `data/mundo.json` son 5,3 MB de JSON con la misma clave repetida 81.000 veces: gzip lo
+# deja en 262 KB (×20). Medido desde un móvil (20 Mbps, 40 ms de ida y vuelta) eso son ~2,1 s de la
+# apertura del Mundo. Los assets de bloque comprimen ×4.
+#
+# Nivel 1 y NO 6 a propósito: en este JSON tan repetitivo la diferencia de tamaño es de un pelo y la
+# de CPU no, y el servidor está en el camino crítico de abrir el Mundo.
+#
+# Se memoriza por (ruta, mtime, tamaño) porque son siempre los mismos bytes: comprimir 5 MB en cada
+# petición metería en el camino crítico justo lo que venimos a quitar. El parseo de validación
+# también se hace una sola vez por versión del fichero.
+GZ_NIVEL = 1
+GZ_MIN   = 1400          # por debajo de un paquete de red, comprimir es trabajo para nada
+_gz_cache = {}           # (ruta, mtime_ns, tam) -> (crudo, gzip)
+_gz_lock  = threading.Lock()
+
+def json_file_body(path):
+    """(bytes crudos, bytes gzip) de un .json del disco, o None si no existe o no parsea.
+
+    Devolver None es la señal de «sigue por el camino de siempre»: un mundo corrupto tiene que
+    acabar en el respaldo de toda la vida, no servirse tal cual porque sea más rápido."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    clave = (path, st.st_mtime_ns, st.st_size)
+    with _gz_lock:
+        hit = _gz_cache.get(clave)
+    if hit is not None:
+        return hit
+    try:
+        with open(path, 'rb') as f:
+            crudo = f.read()
+        json.loads(crudo)                      # validar UNA vez por versión, no en cada petición
+    except Exception:
+        return None
+    par = (crudo, gzip.compress(crudo, GZ_NIVEL))
+    with _gz_lock:
+        if len(_gz_cache) > 64:                # los mundos y los assets son pocos; esto es un tope, no una política
+            _gz_cache.clear()
+        _gz_cache[clave] = par
+    return par
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
+    # Keep-alive. Con HTTP/1.0 el servidor cerraba la conexión en CADA respuesta: abrir el Mundo son
+    # ~40 peticiones, o sea ~40 apretones de manos TCP, que a 40 ms de ida y vuelta se notan más que
+    # los bytes. Exige Content-Length exacto en todas las respuestas (lo ponen `_send_bytes`,
+    # SimpleHTTPRequestHandler y `send_error`) y vaciar el cuerpo de las peticiones que no se leen
+    # (ver `_drenar`): un byte suelto en el socket se interpretaría como la petición siguiente.
+    protocol_version = 'HTTP/1.1'
+
     def __init__(self, *a, **k):
         super().__init__(*a, directory=BASE, **k)
+
+    def handle_one_request(self):
+        self._cuerpo_leido = False
+        super().handle_one_request()
+
+    def _acepta_gzip(self):
+        return 'gzip' in (self.headers.get('Accept-Encoding') or '')
+
+    def _drenar(self):
+        """Se traga el cuerpo que este handler no llegó a leer (p.ej. un POST a una ruta que no existe).
+        Sin esto, con keep-alive, ese cuerpo sería lo primero que se lee de la petición siguiente."""
+        if getattr(self, '_cuerpo_leido', False):
+            return
+        self._cuerpo_leido = True
+        n = int(self.headers.get('Content-Length', 0) or 0)
+        while n > 0:
+            trozo = self.rfile.read(min(n, 65536))
+            if not trozo:
+                break
+            n -= len(trozo)
+
+    def _send_bytes(self, code, ctype, crudo, gz=None, extra=()):
+        self._drenar()
+        cuerpo, comprimido = crudo, False
+        if gz is not None and len(gz) < len(crudo) and self._acepta_gzip():
+            cuerpo, comprimido = gz, True
+        self.send_response(code)
+        self.send_header('Content-Type', ctype)
+        for k, v in extra:
+            self.send_header(k, v)
+        if comprimido:
+            self.send_header('Content-Encoding', 'gzip')
+            self.send_header('Vary', 'Accept-Encoding')
+        self.send_header('Content-Length', str(len(cuerpo)))
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(cuerpo)
     def log_message(self, *a):
         pass
     def end_headers(self):
@@ -176,12 +312,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
     def _send(self, code, obj):
         body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers(); self.wfile.write(body)
+        gz = gzip.compress(body, GZ_NIVEL) if len(body) >= GZ_MIN and self._acepta_gzip() else None
+        self._send_bytes(code, 'application/json; charset=utf-8', body, gz)
     def _read(self):
         n = int(self.headers.get('Content-Length', 0) or 0)
+        self._cuerpo_leido = True
         return json.loads(self.rfile.read(n) or b'{}')
     def _id(self):
         m = re.match(r'^/api/habitantes/([A-Za-z0-9_-]+)$', self.path)
@@ -251,13 +386,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 except Exception:
                     pass
             return self._send(200, DEFAULT_MAP)
+        if path_only == '/api/mundo/vox':                         # rejilla densa del mundo (voxelworld-2)
+            wf = world_file_for(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('map', [''])[0])
+            trio = voxfmt.cuerpo_vox(wf)
+            if not trio:
+                return self._send(404, {'error': 'sin rejilla'})   # el cliente cae al camino v1
+            crudo, gz, etag = trio
+            # 21 MB que no cambian mientras no toques el mundo: reabrirlo tiene que salir gratis.
+            if self.headers.get('If-None-Match') == etag:
+                self.send_response(304); self.send_header('ETag', etag); self.end_headers()
+                return
+            return self._send_bytes(200, 'application/octet-stream', crudo,
+                                    gz if self._acepta_gzip() else None, extra=[('ETag', etag)])
         if path_only == '/api/mundo':                             # mundo sandbox 3D (REQ-MC); ?map=<nombre> elige el mundo
             wf = world_file_for(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('map', [''])[0])
             if os.path.exists(wf):
-                try:
-                    return self._send(200, json.load(open(wf, encoding='utf-8')))
-                except Exception:
-                    pass
+                # Un mundo que sigue en v1 se convierte la PRIMERA vez que se abre (una sola vez por
+                # mundo; fps tarda lo que tardaba antes y nunca más). El v1 se va a la papelera.
+                if not voxfmt.completo(wf):
+                    voxfmt.convertir(wf, atomic_dump, to_trash)
+                # Se sirven los BYTES DEL DISCO, sin parsear ni re-serializar en cada apertura.
+                # json_file_body ya valida (y devuelve None si el fichero está corrupto), así que un
+                # mundo roto sigue cayendo al terreno de recién nacido como toda la vida.
+                par = json_file_body(wf)
+                if par:
+                    return self._send_bytes(200, 'application/json; charset=utf-8', par[0], par[1])
             return self._send(200, {**DEFAULT_WORLD, 'fresh': True})   # sin fichero = mundo recién nacido → terreno plano (un vacío guardado NO lleva fresh)
         if self.path == '/api/snippets':                         # gestor de snippets: lista
             return self._send(200, list_snips())
@@ -302,6 +455,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if os.path.exists(fp):
                 return self._send(200, json.load(open(fp, encoding='utf-8')))
             return self._send(404, {'error': 'no existe'})
+        # Estáticos .json — sobre todo los assets/*.vox.json de la paleta, que son 1,4 MB por apertura
+        # del Mundo y comprimen ×4. translate_path confina la ruta al directorio servido.
+        # (Se pierde el Last-Modified/304 que daba SimpleHTTPRequestHandler, pero hoy el cliente los
+        # pide con cache:'no-store', así que no había revalidación que perder. Al tocar la política de
+        # caché habrá que devolverlo.)
+        fp = self.translate_path(self.path)
+        if fp.endswith('.json') and os.path.isfile(fp):
+            par = json_file_body(fp)
+            if par:
+                return self._send_bytes(200, 'application/json; charset=utf-8', par[0], par[1])
         return super().do_GET()
 
     def do_POST(self):
@@ -313,13 +476,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             to_trash(MAPFILE, move=False)                         # respaldo del mapa anterior (sagrado)
             atomic_dump(d, MAPFILE)
             return self._send(200, {'ok': True})
-        if urllib.parse.urlparse(self.path).path == '/api/mundo':  # mundo sandbox 3D (REQ-MC); ?map=<nombre> elige el mundo
+        ruta_post = urllib.parse.urlparse(self.path).path
+        if ruta_post == '/api/mundo/edits':                       # poner/quitar bloques: seek + 2 bytes por celda
+            # Este es el camino que arregla la congelación. NO se lee ni se reescribe el mundo entero:
+            # el cuerpo son las celdas que han cambiado, [[x,y,z,'asset:assets/roca.vox.json'], ...],
+            # con '' o null para el aire. Poner un bloque pasa de un POST de 257 MB a uno de ~1 KB.
+            wf = world_file_for(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('map', [''])[0])
+            d = self._read()
+            if not isinstance(d, dict) or not isinstance(d.get('edits'), list):
+                return self._send(400, {'error': 'edits inválidos'})
+            if not voxfmt.completo(wf):
+                # El cliente reintenta con el POST completo: así una edición no se pierde nunca porque
+                # el mundo esté todavía en v1 (o porque el .vox se haya quedado a medias).
+                return self._send(409, {'error': 'el mundo no está en voxelworld-2', 'reintenta': 'completo'})
+            n, err = voxfmt.aplicar_edits(wf, d['edits'], atomic_dump, to_trash)
+            if err:
+                return self._send(400, {'error': err})
+            return self._send(200, {'ok': True, 'aplicadas': n})
+        if ruta_post == '/api/mundo/cabecera':                    # spawn / estructuras / notas (kilobytes)
+            wf = world_file_for(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('map', [''])[0])
+            d = self._read()
+            if not isinstance(d, dict):
+                return self._send(400, {'error': 'cabecera inválida'})
+            if not voxfmt.guardar_cabecera(wf, d, atomic_dump, to_trash):
+                return self._send(409, {'error': 'el mundo no está en voxelworld-2', 'reintenta': 'completo'})
+            return self._send(200, {'ok': True})
+        if ruta_post == '/api/mundo':                             # mundo sandbox 3D (REQ-MC); ?map=<nombre> elige el mundo
             wf = world_file_for(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('map', [''])[0])
             d = self._read()
             if not isinstance(d, dict) or 'voxels' not in d or 'dim' not in d:   # validación mínima
                 return self._send(400, {'error': 'mundo inválido'})
-            to_trash(wf, move=False)                              # respaldo del mundo anterior (a la papelera, nunca se pierde)
-            atomic_dump(d, wf)
+            # De puertas afuera sigue aceptando el doc v1 completo de siempre (sondas, tests, wipeMap,
+            # importaciones); por dentro aterriza ya en voxelworld-2.
+            if voxfmt.guardar_v1(wf, d, atomic_dump, to_trash) is None:
+                return self._send(400, {'error': 'mundo inválido'})
             return self._send(200, {'ok': True})
         if self.path == '/api/snippets':                         # gestor de snippets: crear/guardar
             d = self._read()
@@ -354,9 +544,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._send(400, {'error': 'asset inválido'})
             meta = d.get('meta', {})
             name = meta.get('name') or d.get('name') or 'asset'
-            idd = slugify(name)
+            # La identidad de un asset es su FICHERO, no su rótulo: el mundo y los agentes guardan
+            # 'asset:assets/<id>.vox.json'. Si el editor dice de qué asset viene lo que está guardando,
+            # se reescribe ESE; deducir el id del nombre bifurcaba en silencio (guardar «Torso de zombie»
+            # escribía torso-de-zombie.vox.json y el bicho vivo seguía con torso-zombie.vox.json).
+            # Sin id => alta nueva, y ahí sí manda el nombre.
+            idd = re.sub(r'[^A-Za-z0-9_.-]', '', str(d.get('id') or '')) or slugify(name)
             filename = f'{idd}.vox.json'
             asset_path = os.path.join(BASE, 'assets', filename)
+            # El editor no conoce alias/icon/description (no hay campos para ellos en el panel «Objeto»), y
+            # este POST vuelca el .vox.json ENTERO con lo que manda: sin esto, guardar una textura desde
+            # el editor le borraría el nombre corto del fichero. El índice lo conservaría, pero a la
+            # siguiente reindexación se perdería. Borrar un alias se hace desde la ficha (PATCH), no
+            # guardando el dibujo.
+            if os.path.exists(asset_path):
+                try:
+                    with open(asset_path, 'r', encoding='utf-8') as f:
+                        previo = (json.load(f) or {}).get('meta') or {}
+                except Exception:
+                    previo = {}
+                heredado = {k: previo[k] for k in ('alias', 'icon', 'description')
+                            if previo.get(k) and not meta.get(k)}
+                if heredado:
+                    meta = dict(meta, **heredado)
+                    d['meta'] = meta
+            to_trash(asset_path, move=False)          # respaldo de la versión anterior, como en habitantes
             atomic_dump(d, asset_path)
 
             idx_path = os.path.join(BASE, 'assets', 'index.json')
@@ -374,11 +586,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if item.get('id') == idd or item.get('file') == rel_file:
                     item['name'] = meta.get('name', item.get('name', idd))
                     item['file'] = rel_file
+                    item['size'] = d.get('size', item.get('size', 16))   # el dibujo pudo cambiar de tamaño
+                    # role/icon/alias/description solo si el editor los trae: 'group' NO se toca (no hay
+                    # UI para elegirlo y machacarlo mandaría una pieza de «Agentes» a «Bloques de
+                    # construcción»). alias/description vienen heredados del fichero de arriba.
+                    for k in ('role', 'icon', 'alias', 'description'):
+                        if meta.get(k):
+                            item[k] = meta[k]
                     found = True
                     break
 
             if not found:
-                idx.append({
+                nuevo = {
                     'id': idd,
                     'name': meta.get('name', idd),
                     'role': meta.get('role', f'Bloque · {idd}'),
@@ -387,7 +606,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     'group': meta.get('group', 'Bloques de construcción'),
                     'size': d.get('size', 16),
                     'file': rel_file
-                })
+                }
+                # Solo si los hay: una entrada con 'alias':'' es ruido en el índice y además el cliente
+                # registraría la cadena vacía como clave de material.
+                for k in ('alias', 'description'):
+                    if meta.get(k):
+                        nuevo[k] = meta[k]
+                idx.append(nuevo)
 
             atomic_dump(idx, idx_path)
             return self._send(200, {'ok': True, 'id': idd, 'file': rel_file})
@@ -407,27 +632,70 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if aid and os.path.exists(self._asset_path(aid)):
             body = self._read()
             name = (body.get('name') or '').strip()
-            if not name:
+            # «Renombrar» manda solo name; la ficha manda alias/icon/description. Cada campo es
+            # opcional POR SEPARADO, y por eso se mira `in body` y no si el valor es verdadero:
+            # alias:'' significa «borra el alias», no «este campo no viene».
+            if not any(k in body for k in ('name', 'alias', 'icon', 'description')):
+                return self._send(400, {'error': 'nada que cambiar'})
+            if 'name' in body and not name:
                 return self._send(400, {'error': 'falta el nombre'})
-            # Renombrar un asset cambia SOLO el rotulo: el id y el fichero se quedan. Los voxels del
-            # mundo guardan la clave del material como 'asset:assets/<fichero>.vox.json', asi que mover
-            # el fichero (como si hace el rename de habitantes) dejaria sin textura cada bloque pintado
-            # con el en cada mundo. El nombre es de la vitrina; el fichero es la identidad.
-            d = json.load(open(self._asset_path(aid), encoding='utf-8'))
-            d.setdefault('meta', {})['name'] = name
-            atomic_dump(d, self._asset_path(aid))
+
             idx_path = os.path.join(BASE, 'assets', 'index.json')
+            idx = []
             if os.path.exists(idx_path):
                 try:
                     with open(idx_path, 'r', encoding='utf-8') as f:
                         idx = json.load(f)
-                    for item in idx:
-                        if item.get('id') == aid or item.get('file') == f'assets/{aid}.vox.json':
-                            item['name'] = name
+                except Exception:
+                    idx = []
+
+            alias = None
+            if 'alias' in body:
+                alias, motivo = validar_alias(body.get('alias'), aid, idx)
+                if motivo:
+                    # 409 y no 400: el nombre corto esta bien escrito, lo que pasa es que ya esta
+                    # cogido. El cliente pinta `motivo` tal cual debajo del campo.
+                    return self._send(409, {'error': motivo, 'alias': alias})
+
+            # Renombrar un asset cambia SOLO el rotulo: el id y el fichero se quedan. Los voxels del
+            # mundo guardan la clave del material como 'asset:assets/<fichero>.vox.json', asi que mover
+            # el fichero (como si hace el rename de habitantes) dejaria sin textura cada bloque pintado
+            # con el en cada mundo. El nombre es de la vitrina; el fichero es la identidad. El alias
+            # tampoco mueve nada: es otra puerta de entrada al mismo fichero.
+            d = json.load(open(self._asset_path(aid), encoding='utf-8'))
+            meta = d.setdefault('meta', {})
+            if 'name' in body:
+                meta['name'] = name
+            if 'icon' in body:
+                meta['icon'] = str(body.get('icon') or '').strip()
+            if 'description' in body:
+                meta['description'] = str(body.get('description') or '').strip()
+            if alias:
+                meta['alias'] = alias
+            elif alias is not None:
+                meta.pop('alias', None)
+            atomic_dump(d, self._asset_path(aid))
+
+            # El indice es el espejo del que se alimenta el cliente (mcIndexAssets solo lee de aqui:
+            # sin esto habria que bajar los ~79 .vox.json en cada arranque para saber los alias).
+            for item in idx:
+                if item.get('id') == aid or item.get('file') == f'assets/{aid}.vox.json':
+                    for k in ('name', 'icon', 'description'):
+                        if k in body:
+                            item[k] = meta.get(k, '')
+                    if alias:
+                        item['alias'] = alias
+                    elif alias is not None:
+                        item.pop('alias', None)
+            if idx:
+                try:
                     atomic_dump(idx, idx_path)
                 except Exception:
                     pass
-            return self._send(200, {'ok': True, 'id': aid, 'name': name})
+            return self._send(200, {'ok': True, 'id': aid, 'name': meta.get('name', ''),
+                                    'alias': meta.get('alias', ''),
+                                    'icon': meta.get('icon', ''),
+                                    'description': meta.get('description', '')})
         gid = self._agente_id()
         if gid and os.path.exists(self._agente_path(gid)):
             d = json.load(open(self._agente_path(gid), encoding='utf-8'))

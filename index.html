@@ -28,7 +28,7 @@
       <button class="tab tab-play" data-tab="jugar" title="Jugar ya · habitación y personaje al azar">▶ Jugar</button>
       <button class="tab tab-mundo" data-tab="mundo" title="Mundo · sandbox 3D en primera persona (WebGL)">🌍 Mundo</button>
       <button class="tab tab-snip" data-tab="codigo" title="Snippets de código · guardar, editar y ejecutar contra el Mundo (Alt+C)">🧩 Código</button>
-      <button class="tab tab-agente" data-tab="agentes" title="Agentes articulados · compón piezas y articulaciones y míralas moverse">🦴 Agentes</button>
+      <button class="tab tab-agente" data-tab="agentes" title="Agentes articulados · compón piezas y articulaciones y míralas moverse (Alt+A)">🦴 Agentes</button>
     </nav>
 
     <div class="actions">
@@ -75,14 +75,8 @@
             <button class="btn sm" id="size-apply">Aplicar</button>
           </div>
         </label>
-        <label class="field">
-          <span>Girar objeto 90°</span>
-          <div class="rotobj-row">
-            <button class="btn sm" id="rotobj-x" title="Volcar adelante/atrás (plano YZ) — tumba el personaje">↧ X</button>
-            <button class="btn sm" id="rotobj-y" title="Girar en horizontal (plano XZ)">↻ Y</button>
-            <button class="btn sm" id="rotobj-z" title="Girar de frente (plano XY)">⟳ Z</button>
-          </div>
-        </label>
+        <!-- Girar el objeto 90° vive ahora en la columna flotante del lienzo (#stage-side), pegado a
+             subir/bajar capa: se gira mirando el dibujo, no el formulario. -->
         <p class="dims" id="dims">— · 0 voxels</p>
       </section>
 
@@ -182,10 +176,20 @@
           <button class="btn sm" id="e3-cam" title="Proyección ortogonal frontal (vista de frente)">Frontal</button>
           <button class="btn sm" id="e3-persp" title="Perspectiva cónica (3D lineal): fuga por profundidad">◭ Cónica</button>
         </div>
-        <div class="layer-float" id="layer-float">
-          <button class="btn sm" id="lf-up" title="Subir capa (])">▲</button>
-          <span id="lf-label">1/16</span>
-          <button class="btn sm" id="lf-down" title="Bajar capa ([)">▼</button>
+        <!-- Columna flotante del borde derecho: capa arriba, girar objeto debajo. Van en la misma
+             columna (no cada una por su lado) para que queden alineadas aunque una se oculte. -->
+        <div class="stage-side" id="stage-side">
+          <div class="layer-float" id="layer-float">
+            <button class="btn sm" id="lf-up" title="Subir capa (])">▲</button>
+            <span id="lf-label">1/16</span>
+            <button class="btn sm" id="lf-down" title="Bajar capa ([)">▼</button>
+          </div>
+          <div class="rotobj-float" id="rotobj-float">
+            <span class="rotobj-cap">girar</span>
+            <button class="btn sm" id="rotobj-x" title="Girar objeto 90° · volcar adelante/atrás (plano YZ) — tumba el personaje">↧ X</button>
+            <button class="btn sm" id="rotobj-y" title="Girar objeto 90° · en horizontal (plano XZ)">↻ Y</button>
+            <button class="btn sm" id="rotobj-z" title="Girar objeto 90° · de frente (plano XY)">⟳ Z</button>
+          </div>
         </div>
       </div>
     </section>
@@ -246,6 +250,56 @@
       </div>
     </div>
     <div class="hab-stage"><div class="hab-grid" id="hab-grid"></div></div>
+  </div>
+
+  <!-- ===================== Ficha de un asset: cómo se llama desde un script ===================== -->
+  <div class="modal" id="ficha-modal" hidden>
+    <div class="modal-head">
+      <div><strong id="ficha-title">Ficha</strong> <span class="muted">nombres y metadatos de la pieza</span></div>
+      <div class="modal-actions">
+        <button class="btn sm" id="ficha-save" title="Guardar los cambios">💾 Guardar</button>
+        <button class="btn sm" id="ficha-close" title="Cerrar (Esc)">✕ Cerrar</button>
+      </div>
+    </div>
+    <div class="hab-stage">
+      <div class="ficha">
+        <div class="ficha-top">
+          <canvas class="ficha-thumb" id="ficha-thumb" width="96" height="96"></canvas>
+          <dl class="ficha-datos" id="ficha-datos"></dl>
+        </div>
+
+        <section class="ficha-sec">
+          <h3>Clave para scripting</h3>
+          <div class="ficha-copy">
+            <input type="text" id="ficha-clave" readonly>
+            <button class="btn sm" data-copy="ficha-clave" title="Copiar al portapapeles">⧉</button>
+          </div>
+          <p class="ficha-hint">Nombres que ya funcionan hoy para esta pieza:</p>
+          <ul class="ficha-claves" id="ficha-claves"></ul>
+        </section>
+
+        <section class="ficha-sec">
+          <h3>Nombre corto</h3>
+          <div class="ficha-copy">
+            <input type="text" id="ficha-alias" placeholder="green_concrete" autocapitalize="off" autocorrect="off" spellcheck="false">
+          </div>
+          <p class="ficha-hint">Minúsculas, números y <code>_</code>. Déjalo vacío para quitarlo.</p>
+          <p class="ficha-error" id="ficha-error" hidden></p>
+          <div class="ficha-copy">
+            <input type="text" id="ficha-ejemplo" readonly>
+            <button class="btn sm" data-copy="ficha-ejemplo" title="Copiar al portapapeles">⧉</button>
+          </div>
+        </section>
+
+        <section class="ficha-sec">
+          <h3>Icono y descripción</h3>
+          <div class="ficha-copy">
+            <input type="text" id="ficha-icon" maxlength="4" placeholder="🟩">
+          </div>
+          <textarea id="ficha-desc" rows="3" placeholder="Hormigón verde mate 16³ (ideal para estructuras sólidas o follaje)."></textarea>
+        </section>
+      </div>
+    </div>
   </div>
 
   <!-- ===================== Modal vista 3D grande ===================== -->
@@ -362,6 +416,7 @@
       <div class="modal-actions">
         <button class="btn sm" id="ag-plantar" title="Plantarlo en el Mundo, delante del jugador">🌍 Plantar</button>
         <button class="btn sm ag-save-btn" id="ag-save" title="Guardar en data/agentes/">💾 Guardar</button>
+        <button class="btn sm" id="ag-save-as" title="Guardar una COPIA con otro nombre, sin tocar la original">💾 Guardar como…</button>
         <button class="btn sm" id="ag-close" title="Cerrar (Esc)">✕ Cerrar</button>
       </div>
     </div>

@@ -93,12 +93,17 @@ const nuevo = (nombre) => ({
     && JSON.stringify(leido.d.seguir) === JSON.stringify(doc.seguir));
 
   // Volver a guardar respalda la version anterior en vez de perderla.
-  const antes = fs.readdirSync('data/habitantes_trash').length;
+  // Se mira la marca de tiempo del respaldo MAS NUEVO de este fichero, no cuantos hay en total: la
+  // papelera esta acotada a MAX_TRASH_FILES=30 POR ORIGEN, asi que a partir de la trigesima vez que
+  // se corre este test entra uno y sale otro, el total no sube y el test fallaba sin que nada
+  // estuviera roto (el respaldo se hacia igual).
+  const suyos = () => fs.readdirSync('data/habitantes_trash')
+    .filter(f => f.endsWith('__test-agente-uno.json')).sort();
+  const antes = suyos().pop() || '';
   await pide('POST', '/api/agentes', { ...doc, cuerpo: { ancho: 0.9, alto: 2.5 } });
   const rel = await pide('GET', '/api/agentes/test-agente-uno');
   ok('re-guardar pisa el documento', rel.d.cuerpo.ancho === 0.9);
-  ok('...pero respalda el anterior en la papelera',
-    fs.readdirSync('data/habitantes_trash').length > antes);
+  ok('...pero respalda el anterior en la papelera', (suyos().pop() || '') > antes);
 
   // ── Lo invalido se rechaza (y no deja fichero) ──────────────────────────────────────────────
   ok('sin raiz: 400', (await pide('POST', '/api/agentes', { nombre: 'test malo', piezas: [] })).code === 400);

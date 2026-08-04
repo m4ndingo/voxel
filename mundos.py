@@ -10,7 +10,9 @@ y se pinta con el color REAL de su material (la media de la cara superior de su 
 en color_de_material). El relieve se marca con luz rasante del noroeste — bajar el brillo con la
 altura apagaba todos los colores (las setas rojas de «lab» salian grises).
 """
-import base64, collections, json, os, re, struct, time, zlib
+import array, base64, collections, json, os, re, struct, sys, time, zlib
+
+import voxfmt                                # voxelworld-2: la rejilla vive en el .vox, no en el .json
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 WORLDS = os.path.join(BASE, 'data', 'worlds')
@@ -113,11 +115,8 @@ def _png(w, h, filas):
 # ---------------------------------------------------------------- un mundo
 
 
-def _analizar(mundo, nombre, archivo, mb, mtime):
-    dim = mundo.get('dim') or {'x': 96, 'y': 40, 'z': 96}
-    W, H = int(dim.get('x', 96)), int(dim.get('z', 96))
-    vox = mundo.get('voxels') or {}
-
+def _superficie_v1(vox, W, H):
+    """Recorre el mapa disperso {"x,y,z": "tex:..."} de voxelworld-1."""
     alto = [[-1] * W for _ in range(H)]      # y del voxel mas alto de cada columna
     mat = [[None] * W for _ in range(H)]     # y su material
     cuenta = collections.Counter()
@@ -133,6 +132,63 @@ def _analizar(mundo, nombre, archivo, mb, mtime):
         if 0 <= x < W and 0 <= z < H and y > alto[z][x]:
             alto[z][x] = y
             mat[z][x] = v
+    return alto, mat, cuenta, ymax, len(vox)
+
+
+def _superficie_v2(ruta, cab, W, DY, H):
+    """Lo mismo desde la rejilla densa de voxelworld-2 (el .vox hermano del .json).
+
+    Sale mas barato que el camino v1 —que parseaba 290 MB de texto para esto— porque las filas
+    vacias se descartan con un memcmp en vez de una por una: fps es 74% aire."""
+    datos = voxfmt.leer_rejilla(ruta)
+    if datos is None or len(datos) != 2 * W * DY * H:
+        return None
+    paleta = cab.get('palette') or [None]
+    g = array.array('H')
+    g.frombytes(datos)
+    if sys.byteorder == 'big':
+        g.byteswap()
+    ceros = bytes(2 * W)
+
+    alto = [[-1] * W for _ in range(H)]
+    mat = [[None] * W for _ in range(H)]
+    cuenta = collections.Counter()
+    ymax = nvox = 0
+    for z in range(H):
+        fz, mz = alto[z], mat[z]
+        for y in range(DY):                  # ascendente: la ultima que escribe es la mas alta
+            base = y * W + z * W * DY
+            fila = g[base:base + W]
+            if fila.tobytes() == ceros:
+                continue
+            for x in range(W):
+                pid = fila[x]
+                if not pid:
+                    continue
+                clave = paleta[pid] if pid < len(paleta) else None
+                if not clave:
+                    continue
+                v = 'tex:' + clave           # color_de_material/nombre_material esperan el valor v1
+                cuenta[v] += 1
+                nvox += 1
+                fz[x] = y
+                mz[x] = v
+                if y > ymax:
+                    ymax = y
+    return alto, mat, cuenta, ymax, nvox
+
+
+def _analizar(mundo, nombre, archivo, mb, mtime, ruta=None):
+    dim = mundo.get('dim') or {'x': 96, 'y': 40, 'z': 96}
+    W, H = int(dim.get('x', 96)), int(dim.get('z', 96))
+    DY = int(dim.get('y', 40))
+
+    sup = None
+    if voxfmt.es_v2(mundo) and ruta:
+        sup = _superficie_v2(ruta, mundo, W, DY, H)
+    if sup is None:                          # v1, o un .vox que no cuadra: se mira el mapa disperso
+        sup = _superficie_v1(mundo.get('voxels') or {}, W, H)
+    alto, mat, cuenta, ymax, nvox = sup
 
     tope = max((max(f) for f in alto), default=0) or 1
     filas, columnas = [], 0
@@ -162,7 +218,7 @@ def _analizar(mundo, nombre, archivo, mb, mtime):
         'nombre': nombre,
         'archivo': archivo,
         'dim': f"{W}x{int(dim.get('y', 40))}x{H}",
-        'voxels': len(vox),
+        'voxels': nvox,
         'estructuras': len(ests),
         'tiposEstructura': len({s.get('key') for s in ests if isinstance(s, dict)}),
         'notas': len(mundo.get('notes') or {}),
@@ -181,7 +237,15 @@ def _analizar(mundo, nombre, archivo, mb, mtime):
 
 def _de_cache(ruta, nombre, archivo):
     st = os.stat(ruta)
-    sello = f'{int(st.st_mtime)}:{st.st_size}'
+    # En voxelworld-2 el .json es de kilobytes y los bloques estan en el .vox hermano: el sello y el
+    # tamano tienen que mirar los DOS, o poner un bloque no invalidaria la miniatura.
+    try:
+        sv = os.stat(voxfmt.vox_path(ruta))
+        sello = f'{int(st.st_mtime)}:{st.st_size}:{int(sv.st_mtime)}:{sv.st_size}'
+        tam = st.st_size + sv.st_size
+    except OSError:
+        sello = f'{int(st.st_mtime)}:{st.st_size}'
+        tam = st.st_size
     fp = os.path.join(CACHE, (nombre or 'default') + '.json')
     guardado = _cargar(fp)
     if guardado and guardado.get('sello') == sello:
@@ -189,8 +253,8 @@ def _de_cache(ruta, nombre, archivo):
     mundo = _cargar(ruta)
     if not isinstance(mundo, dict):
         return None
-    fila = _analizar(mundo, nombre, archivo, st.st_size / 1048576,
-                     time.strftime('%Y-%m-%dT%H:%M', time.localtime(st.st_mtime)))
+    fila = _analizar(mundo, nombre, archivo, tam / 1048576,
+                     time.strftime('%Y-%m-%dT%H:%M', time.localtime(st.st_mtime)), ruta)
     try:
         os.makedirs(CACHE, exist_ok=True)
         tmp = f'{fp}.tmp.{os.getpid()}'
