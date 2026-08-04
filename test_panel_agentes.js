@@ -32,7 +32,15 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
   p.on('pageerror', e => errores.push('EXCEPCION ' + e.message));
   await p.route('**/api/mundo', r => r.request().method() === 'GET' ? r.continue() : r.abort());
   await p.route('**/api/habitantes*', r => r.request().method() === 'GET' ? r.continue() : r.abort());
-  await p.route('**/api/agentes*', r => r.request().method() === 'GET' ? r.continue() : r.abort());
+  // Los guardados siguen abortados (este fichero no escribe en data/agentes/), pero se anota lo que
+  // el panel HABRÍA mandado: es la única forma de comprobar «Guardar como…» sin crear un agente.
+  const enviados = [];
+  await p.route('**/api/agentes*', r => {
+    if (r.request().method() === 'GET') return r.continue();
+    let d = null; try { d = JSON.parse(r.request().postData() || 'null'); } catch (e) {}
+    enviados.push({ metodo: r.request().method(), doc: d });
+    return r.abort();
+  });
 
   await p.goto(URL, { timeout: 60000 });
   await p.click('[data-tab="agentes"]');
@@ -73,6 +81,31 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
                         velocidad: leer('velocidad (bloques/s)'), cadencia: leer('pasos por bloque'),
                         alto: leer('alto') };
 
+    // 0 bis) «Guardar como…» sobre el zombie. Los POST van abortados en este fichero, así que aquí
+    // NO se escribe nada en data/agentes/: lo que se comprueba es el documento que SALE hacia el
+    // servidor (sin `id`, con el nombre nuevo — que es lo que hace que el fichero sea otro) y que al
+    // fallar el guardado el panel deshace el cambio en vez de quedarse apuntando al fichero que no es.
+    const guardarComo = { nombreOriginal: agDoc.nombre, idOriginal: agDoc.id };
+    const promptOrig = window.prompt, confirmOrig = window.confirm;
+    let sugerido = null;
+    window.prompt = (msg, def) => { sugerido = def; return 'ZZ copia de prueba'; };
+    window.confirm = () => true;
+    document.querySelector('#ag-save-as').click();
+    await new Promise(r => setTimeout(r, 500));
+    guardarComo.sugerido = sugerido;
+    guardarComo.idTrasFallo = agDoc.id;
+    guardarComo.nombreTrasFallo = agDoc.nombre;
+    guardarComo.campoTrasFallo = document.querySelector('#ag-nombre').value;
+    // …y un nombre que ya existe se PREGUNTA antes de pisarlo; decir que no lo deja todo igual.
+    let preguntado = false;
+    window.prompt = () => 'Zombie';
+    window.confirm = () => { preguntado = true; return false; };
+    document.querySelector('#ag-save-as').click();
+    await new Promise(r => setTimeout(r, 300));
+    guardarComo.preguntaAntesDePisar = preguntado;
+    guardarComo.idTrasCancelar = agDoc.id;
+    window.prompt = promptOrig; window.confirm = confirmOrig;
+
     // 1) El catálogo tiene que ofrecer PIEZAS DE AGENTE, o no hay nada que montar.
     const cat = await agCatalogo();
     const ofrece = n => cat.some(c => c.key === clave(n));
@@ -105,6 +138,34 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     await opcion('eje', 'x');
     await num('pivote nº', 1); await num('base (te ve)', 0); await num('reposo', 0);
     await num('amplitud', 32); await num('desfase (grados)', 180);
+
+    // 2 bis) La ayuda de cada campo (el dueño: «no queda claro qué es cada una de estas opciones»).
+    // Se mira con la tarjeta de `articula` ABIERTA, que es la que la pedía.
+    const conAyuda = ['eje', 'pivote nº', 'base (te ve)', 'reposo', 'amplitud', 'desfase (grados)',
+                      'nombre', 'dibujo', 'rot (¼ de vuelta)', 'en (x, alto, z)'];
+    const ayudas = conAyuda.map(t => {
+      const l = fld(t);
+      if (!l) return { t, falta: true };
+      const b = l.querySelector('.ag-i'), n = l.querySelector('.ag-tip');
+      return { t, titulo: (l.title || '').length, boton: !!b, nota: !!n,
+               // Las dos vías dicen LO MISMO: el globo del navegador y el desplegable del móvil no
+               // pueden divergir, o el que edite en el móvil leerá otra cosa.
+               iguales: !!(b && n) && l.title === n.textContent,
+               // El rótulo de verdad sigue siendo el primer nodo: el «?» va detrás, no lo ensucia.
+               rotulo: l.firstChild && l.firstChild.nodeValue && l.firstChild.nodeValue.trim() === t };
+    });
+    // El mecanismo: la nota está oculta y la abre el FOCO del «?» (en el móvil no hay hover), sin
+    // tocar el valor del campo — el botón vive dentro del <label> y podría robarle el clic.
+    const lAmp = fld('amplitud');
+    const vis = l => getComputedStyle(l.querySelector('.ag-tip')).display !== 'none';
+    const pista = { cerrada: !vis(lAmp) };
+    lAmp.querySelector('.ag-i').focus();
+    pista.abre = vis(lAmp);
+    lAmp.querySelector('.ag-i').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await pausa();
+    pista.valorIntacto = leer('amplitud') === 32;
+    lAmp.querySelector('.ag-i').blur();
+    pista.cierra = !vis(fld('amplitud'));
 
     await new Promise(r => setTimeout(r, 500));            // que `preparar` (va por red) acabe
     const doc = JSON.parse(JSON.stringify(agDoc));
@@ -158,14 +219,34 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     await new Promise(r => setTimeout(r, 500));
     const anima = cv.toDataURL() !== foto;
 
-    return { avisos, doc, delZombie, quieto, anima, partes: agPl ? agPl.partes.length : 0,
+    return { avisos, doc, delZombie, quieto, anima, guardarComo, partes: agPl ? agPl.partes.length : 0,
              objetivos, objPunto, objTerna, objBorrado,
              sinTocar, porDefecto, trasTocar, empApagado, empEncendido, fisParcial, fisApagada,
-             fisEncendida, trepa, resumenes, chips,
+             fisEncendida, trepa, resumenes, chips, ayudas, pista,
              ofrece: { torso: ofrece('torso-perro'), pata: ofrece('pata-perro'),
-                       brazoZombie: ofrece('brazo-zombie'), habitantes: cat.some(c => c.key.slice(0, 4) === 'hab:') },
+                       brazoZombie: ofrece('brazo-zombie'), habitantes: cat.some(c => c.key.slice(0, 4) === 'hab:'),
+                       // Un `type:'textura'` que NO está en el grupo Agentes: es lo que guarda el
+                       // editor al copiar una pieza, y justo lo que el filtro viejo escondía.
+                       bloqueDeConstruccion: ofrece('adoquin') },
+             grupos: (() => { const l = fld('dibujo'); if (!l) return [];
+                              return [...l.querySelectorAll('select > optgroup')].map(g => g.label); })(),
+             // Cada grupo, con sus nombres tal cual salen: el test los reordena por su cuenta y
+             // compara, que es la unica forma de ver si el desplegable llega ya ordenado.
+             porGrupo: (() => { const l = fld('dibujo'); if (!l) return {}; const o = {};
+                                for (const g of l.querySelectorAll('select > optgroup'))
+                                  o[g.label] = [...g.children].map(e => e.textContent);
+                                return o; })(),
              tags: [...document.querySelectorAll('#ag-piezas .ap-tag')].map(e => e.textContent) };
   });
+
+  // El foco a mano de ahí arriba prueba la regla de CSS; esto prueba que un DEDO llega a ella, que es
+  // como se usa: un clic de verdad sobre un <button> dentro de un <label> tiene que quedarse el foco
+  // y no rebotar al control del campo. Vale cualquier campo con ayuda de los que haya en pantalla.
+  const unaAyuda = p.locator('#ag-form .ag-i').first();
+  const suNota = p.locator('#ag-form label.ag-fld:has(.ag-i)').first().locator('.ag-tip');
+  const notaAntesDelClic = await suNota.isVisible();
+  await unaAyuda.click();
+  const notaTrasElClic = await suNota.isVisible();
 
   console.log('\n  el formulario del panel');
   test('ofrece las piezas del perro en el desplegable de dibujos', () =>
@@ -173,6 +254,40 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
   test('ofrece TAMBIÉN las del zombie (eran invisibles por ser type:textura)', () =>
     assert(r.ofrece.brazoZombie, 'el catálogo no ofrece brazo-zombie'));
   test('no se ha comido el resto del catálogo', () => assert(r.ofrece.habitantes, 'no hay habitantes en el catálogo'));
+  test('ofrece también un bloque de construcción (una pieza copiada y guardada NO se esconde)', () =>
+    assert(r.ofrece.bloqueDeConstruccion, 'el catálogo no ofrece adoquin: el desplegable vuelve a esconder piezas'));
+  test('el desplegable reparte en grupos y Agentes va el primero', () =>
+    assert(r.grupos.length > 1 && r.grupos[0] === 'Agentes', 'grupos = ' + JSON.stringify(r.grupos)));
+  console.log('\n  guardar como…');
+  const g = r.guardarComo;
+  test('propone un nombre que NO pisa a nadie', () =>
+    assert(g.sugerido && g.sugerido !== 'zombie', 'sugirió ' + JSON.stringify(g.sugerido)));
+  test('lo que sale hacia el servidor va SIN `id` y con el nombre nuevo (por eso el fichero es otro)', () => {
+    const env = enviados.filter(e => e.doc && e.doc.nombre === 'ZZ copia de prueba');
+    assert(env.length === 1, 'guardados con el nombre nuevo: ' + env.length);
+    assert(!('id' in env[0].doc), 'llevaba id=' + JSON.stringify(env[0].doc.id) + ': habría pisado el original');
+    assert(env[0].doc.raiz && env[0].doc.raiz.pieza, 'la copia va sin raíz: no es el mismo bicho');
+  });
+  test('si el guardado falla, el panel vuelve al agente original (no se queda apuntando a otro fichero)', () =>
+    assert(g.idTrasFallo === g.idOriginal && g.nombreTrasFallo === g.nombreOriginal &&
+           g.campoTrasFallo === g.nombreOriginal,
+           'quedó id=' + g.idTrasFallo + ' nombre=' + g.nombreTrasFallo + ' campo=' + g.campoTrasFallo));
+  test('avisa antes de pisar un agente que ya existe, y cancelar no toca nada', () =>
+    assert(g.preguntaAntesDePisar && g.idTrasCancelar === g.idOriginal,
+           'preguntó=' + g.preguntaAntesDePisar + ' id=' + g.idTrasCancelar));
+  test('cancelar el aviso no manda NADA al servidor', () =>
+    assert(!enviados.some(e => e.doc && e.doc.nombre === 'Zombie'), 'se mandó la copia cancelada'));
+
+  test('dentro de cada grupo los nombres salen ordenados', () => {
+    const cmp = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
+    for (const g of Object.keys(r.porGrupo)) {
+      const hay = r.porGrupo[g], debe = hay.slice().sort(cmp.compare);
+      assert(hay.join('|') === debe.join('|'),
+             'el grupo «' + g + '» no está ordenado:\n        es  ' + hay.join(', ') +
+             '\n        debe ' + debe.join(', '));
+    }
+    assert(Object.keys(r.porGrupo).length > 1, 'no se han leído los grupos del desplegable');
+  });
   test('no le falta ningún campo de los que pide un agente completo', () =>
     assert(!r.avisos.length, 'campos que el formulario no tiene: ' + r.avisos.join(', ')));
 
@@ -195,6 +310,18 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
   test('articula: eje, pivote y desfase', () => {
     const a = r.doc.piezas[1].articula;
     assert(a && a.eje === 'x' && a.pivote === 1 && a.amplitud === 32 && a.fase === 180, JSON.stringify(a));
+  });
+  test('cada campo del formulario explica QUÉ ES, y lo dice igual por las dos vías', () => {
+    const mal = r.ayudas.filter(a => a.falta || !a.titulo || !a.boton || !a.nota || !a.iguales || !a.rotulo);
+    assert(!mal.length, 'campos sin ayuda o con ayuda a medias: ' + JSON.stringify(mal));
+  });
+  test('la ayuda está plegada, la abre el «?» y no le toca el valor al campo', () => {
+    assert(r.pista.cerrada, 'la ayuda ya salía desplegada y tapa el formulario entero');
+    assert(r.pista.abre, 'el foco del «?» no despliega la ayuda (en el móvil no hay hover: es la única vía)');
+    assert(r.pista.valorIntacto, 'pulsar el «?» cambió el valor del campo: el <label> le robó el clic');
+    assert(r.pista.cierra, 'la ayuda no se cierra al salir el foco');
+    assert(!notaAntesDelClic && notaTrasElClic,
+      'con un clic de verdad la ayuda no se abre (antes ' + notaAntesDelClic + ', después ' + notaTrasElClic + ')');
   });
   test('el `en` de cada pieza, en bloques', () =>
     assert(JSON.stringify(r.doc.piezas[0].en) === '[0,0.1875,-0.5]', JSON.stringify(r.doc.piezas[0].en)));

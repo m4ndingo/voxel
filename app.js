@@ -867,10 +867,13 @@ function fillPoly3d(pts){
 // ===== Texturas en 3D: proyección ortográfica de cada cara =====
 // Cada cara fi de un voxel texturizado se rellena con la vista del objeto-textura desde su normal:
 // el voxel MÁS EXTERNO en esa dirección da el color de cada píxel (verde arriba, tierra a los lados…).
-const texFaceCache=new Map();   // clave -> {faces:[canvas×6], avg:[hex×6]}
+const texFaceCache=new Map();   // clave -> {faces:[canvas×6], avg:[hex×6], hueco:bool}
 function buildTexFaces(def){
   const N=texSize(def.size), vox=def.voxels||{};   // size puede venir como {x,y,z}; texSize lo normaliza a un entero cúbico
   const faces=[], avg=[];
+  // `hueco` = alguna cara dejó texels transparentes. Se sabe AQUÍ gratis (ya se cuentan los opacos en
+  // `ns` para el color medio); mirarlo luego releyendo el atlas con getImageData costaba hasta 144 ms.
+  let hueco=false;
   for(let fi=0; fi<6; fi++){
     const f=CUBE_FACES[fi], c=f.c, n=f.n;
     const du=[c[1][0]-c[0][0], c[1][1]-c[0][1], c[1][2]-c[0][2]];   // eje imagen-col (p1-p0)
@@ -899,10 +902,11 @@ function buildTexFaces(def){
       else d[o+3]=0;
     }
     cx.putImageData(img,0,0);
+    if(ns<N*N) hueco=true;      // quedó algún texel a alpha 0 → esta textura tiene agujeros
     faces.push(cv);
     avg.push(ns ? '#'+((1<<24)+((Rs/ns&255)<<16)+((Gs/ns&255)<<8)+(Bs/ns&255)).toString(16).slice(1) : '#8a8f94');
   }
-  return {faces, avg};
+  return {faces, avg, hueco};
 }
 function getTexFaces(key){
   let fc=texFaceCache.get(key);
@@ -1288,13 +1292,10 @@ function updateInfo(){
   const n=state.voxels.size;
   $('#voxel-count').textContent=n+' vox';
   if(n===0){ $('#dims').textContent='— · 0 voxels'; return; }
-  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9,minz=1e9,maxz=-1e9;
-  for(const k of state.voxels.keys()){
-    const [x,y,z]=k.split(',').map(Number);
-    minx=Math.min(minx,x);maxx=Math.max(maxx,x);
-    miny=Math.min(miny,y);maxy=Math.max(maxy,y);
-    minz=Math.min(minz,z);maxz=Math.max(maxz,z);
-  }
+  // La bbox se pide a voxParsed(), que ya la calcula y la CACHEA por voxKey(). Antes esto volvía a
+  // partir las claves de los N voxels por su cuenta: con un modelo grande era un segundo barrido
+  // completo por cada repintado, tirando un trabajo que estaba hecho a un `if` de distancia.
+  const {minx,maxx,miny,maxy,minz,maxz}=voxParsed().box;
   $('#dims').textContent=`${maxx-minx+1}×${maxy-miny+1}×${maxz-minz+1} · ${n} voxels`;
 }
 
@@ -1395,7 +1396,7 @@ function load(map,meta,size,pivotes){
   state.voxels=map;
   state.pivotes=normPivotes(pivotes);
   if(meta){ state.meta={...meta}; }
-  state.layer=0; state.rot=0; hover3d=null; selection.clear(); serverId=null;
+  state.layer=0; state.rot=0; hover3d=null; selection.clear(); serverId=null; loadedName=null;
   view3d.zoom=1; view3d.panX=0; view3d.panY=0;
   view.zoom=1; view.panX=0; view.panY=0; updateZoomLabel();
   clearHistory();                       // documento nuevo: sin historial que cruzar
@@ -1409,11 +1410,29 @@ function load(map,meta,size,pivotes){
 
 // ---- Assets servidos por HTTP (assets/index.json) ----
 let mcAssetsRegistry = {};
+// Último alias registrado por fichero. Los dos mapas de materiales son de solo-acumular, así que sin
+// esto cambiar el nombre corto de green_concrete a hormigon_verde dejaría 'green_concrete' apuntando
+// para siempre al fichero: el dueño creería que lo ha quitado y seguiría funcionando.
+const mcAliasPrevio = {};
 function mcIndexAssets(idx){
   if(!Array.isArray(idx)) return;
   for(const a of idx){
     if(!a || !a.file) continue;
     const fileKey = 'asset:' + a.file;
+    // Nombre corto elegido por el dueño desde la ficha (meta.alias, espejado en el índice). Es la
+    // cuarta puerta de entrada, además del id, el rótulo y el basename de abajo, y la única que NO
+    // puede pisar un alias de fábrica: 'stone' tiene que seguir siendo roca pase lo que pase.
+    const alias = a.alias ? String(a.alias).trim().toLowerCase() : '';
+    const viejo = mcAliasPrevio[a.file];
+    if(viejo && viejo !== alias && !MC_MAT_ALIAS_FIJOS.has(viejo)){
+      delete mcAssetsRegistry[viejo];
+      delete MC_MAT_ALIAS[viejo];
+    }
+    mcAliasPrevio[a.file] = alias;
+    if(alias && !MC_MAT_ALIAS_FIJOS.has(alias)){
+      mcAssetsRegistry[alias] = a.file;
+      MC_MAT_ALIAS[alias] = fileKey;
+    }
     if(a.id){
       const k1 = String(a.id).trim().toLowerCase();
       mcAssetsRegistry[k1] = a.file;
@@ -1443,7 +1462,7 @@ async function loadServerAssets(){
       li.innerHTML=`<span class="ic">${a.icon||'🗡️'}</span><div><span>${a.name}</span>`+
                    `<span class="badge" style="margin:0">${a.role||a.type||''}</span></div>`;
       li.title='Cargar '+a.name;
-      li.onclick=()=>loadFromUrl(a.file);
+      li.onclick=()=>loadFromUrl(a.file, a.id);
       ul.appendChild(li);
     });
     loadRooms(idx);   // reutiliza el mismo índice para poblar Habitaciones
@@ -1452,11 +1471,16 @@ async function loadServerAssets(){
     ul.innerHTML='<li class="muted">Sirve por HTTP para cargar assets</li>';
   }
 }
-async function loadFromUrl(url){
+// `id` = el asset del que viene esto, para que Guardar reescriba ESE fichero. Sin él, el id se deducía
+// del rótulo al guardar y «Torso de zombie» aterrizaba en torso-de-zombie.vox.json: un asset nuevo que
+// no usaba nadie, mientras el agente seguía con torso-zombie.vox.json (ver save()).
+async function loadFromUrl(url, id){
   try{
     const d=await fetch(url,{cache:'no-store'}).then(r=>r.json());
     ingestTextures(d);
     load(new Map(Object.entries(d.voxels||{})), d.meta||{name:url,type:'objeto'}, d.size, d.pivotes);
+    serverId = id || d.id || null;   // load() lo deja a null: se pone DESPUÉS
+    loadedName = state.meta.name;
     toast('Cargado «'+((d.meta&&d.meta.name)||url)+'»');
   }catch(e){ toast('No se pudo cargar '+url); }
 }
@@ -1481,7 +1505,7 @@ async function loadHabitante(id){
     const d=await fetch('/api/habitantes/'+id,{cache:'no-store'}).then(r=>r.json());
     ingestTextures(d);
     load(new Map(Object.entries(d.voxels||{})), d.meta||{name:id,type:'personaje'}, d.size, d.pivotes);
-    serverId=id; closeHabitantes();
+    serverId=id; loadedName=state.meta.name; closeHabitantes();
     document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-active',x.dataset.tab==='objeto'));
     toast('Cargado «'+((d.meta&&d.meta.name)||id)+'»');
   }catch(e){ toast('No se pudo cargar'); }
@@ -1531,11 +1555,13 @@ async function openHabitantes(kind){
   try{ list=await apiHabitantes(); }
   catch(e){ grid.innerHTML='<p class="hab-empty">No se pudo conectar con el servidor.</p>'; return; }
   list=list.filter(h=> habBucket(h.type)===habKind);   // enruta por tipo
-  // Assets del juego del mismo tipo (assets/index.json): también se pueden CARGAR desde la galería (como punto
-  // de partida); cargarlos limpia serverId para que Guardar cree un habitante nuevo en vez de intentar
-  // sobrescribir el asset. También se RENOMBRAN y se BORRAN: ya no son "de solo lectura" de hecho, porque
-  // guardar una textura la manda a /api/assets (ver save(), isTex), así que todo lo que el dueño importa
-  // aterriza aquí. Sin estos botones, cada textura nueva era para siempre.
+  // Assets del juego del mismo tipo (assets/index.json): también se pueden CARGAR desde la galería, y
+  // cargarlos se queda con su id, así que Guardar REESCRIBE ese asset (para bifurcar está «Guardar
+  // como…»). Es la única forma de que retocar una pieza se note en los agentes que la usan: ellos
+  // guardan 'asset:assets/<id>.vox.json', y antes el id se deducía del rótulo al guardar y el dibujo
+  // acababa en un fichero nuevo que no miraba nadie. También se RENOMBRAN y se BORRAN: ya no son "de
+  // solo lectura" de hecho, porque guardar una textura la manda a /api/assets (ver save(), isTex), así
+  // que todo lo que el dueño importa aterriza aquí. Sin estos botones, cada textura nueva era para siempre.
   let assets=[];
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
        assets=idx.filter(a=> habBucket(a.type)===habKind); }catch(e){}
@@ -1549,13 +1575,15 @@ async function openHabitantes(kind){
       <p class="hab-date">🎮 Asset del juego</p>
       <div class="hab-acts">
         <button class="btn sm" data-a="load">Cargar</button>
+        <button class="btn sm" data-a="ficha">📋 Ficha</button>
         <button class="btn sm" data-a="ren">Renombrar</button>
         <button class="btn sm danger" data-a="del">Borrar</button>
       </div>`;
     grid.appendChild(card);
     getRoomData('asset:'+a.file).then(d=>drawThumb(card.querySelector('canvas'),d)).catch(()=>{});
+    card.querySelector('[data-a=ficha]').onclick=()=>openFicha(a);
     card.querySelector('[data-a=load]').onclick=async()=>{
-      await loadFromUrl(a.file); serverId=null;   // asset = punto de partida, no un guardado que se sobrescriba
+      await loadFromUrl(a.file, a.id);   // se recuerda de qué asset viene: Guardar reescribe ESE fichero
       closeHabitantes();
       document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-active',x.dataset.tab==='objeto'));
     };
@@ -1581,6 +1609,85 @@ async function openHabitantes(kind){
   }
 }
 function closeHabitantes(){ $('#hab-modal').hidden=true; }
+
+// ── Ficha de un asset ──────────────────────────────────────────────────────────────────────────────
+// Desde el editor y la galería solo se ve el ROTULO («Hormigón Verde / Hojas»), y desde un script hace
+// falta otra cosa. La ficha enseña las claves que ya funcionan hoy (id, rótulo, basename) y deja
+// declarar un NOMBRE CORTO propio: la textura que otro programa generó como «green_concrete» se
+// referencia así en vez de por «hormig-n-verde-hojas». El alias no mueve el fichero ni el id: la
+// identidad de un asset es su fichero, porque cada voxel del mundo guarda 'asset:assets/<id>.vox.json'.
+let fichaAsset=null;
+// Espejo de mcIndexAssets: si cambias las claves que se registran allí, cámbialas aquí — esta lista es
+// justo lo que el dueño va a copiar al script, y mentirle es peor que no enseñar nada.
+function fichaClaves(a){
+  const cl=[];
+  if(a.alias) cl.push({k:String(a.alias).trim().toLowerCase(), nota:'nombre corto', alias:true});
+  if(a.id) cl.push({k:String(a.id).trim().toLowerCase(), nota:'id'});
+  if(a.name) cl.push({k:String(a.name).trim().toLowerCase(), nota:'rótulo'});
+  const base=a.file.split('/').pop().replace(/\.vox\.json$/,'').toLowerCase();
+  if(!cl.some(c=>c.k===base)) cl.push({k:base, nota:'fichero'});
+  return cl;
+}
+function fichaEjemplo(){
+  const cl=fichaClaves(fichaAsset||{file:''});
+  return "await game.addMaterial('"+(cl.length?cl[0].k:'')+"')";
+}
+function fichaPinta(){
+  const a=fichaAsset; if(!a) return;
+  $('#ficha-title').textContent=(a.icon?a.icon+' ':'')+(a.name||a.id);
+  $('#ficha-clave').value='asset:'+a.file;
+  $('#ficha-ejemplo').value=fichaEjemplo();
+  const sz=a.size&&typeof a.size==='object' ? `${a.size.x}×${a.size.y}×${a.size.z}` : (a.size||16)+'³';
+  $('#ficha-datos').innerHTML=[
+    ['Tipo', a.type||'—'], ['Grupo', a.group||'—'], ['Rol', a.role||'—'],
+    ['Tamaño', sz], ['Fichero', a.file]
+  ].map(([k,v])=>`<dt>${esc(k)}</dt><dd title="${esc(String(v))}">${esc(String(v))}</dd>`).join('');
+  $('#ficha-claves').innerHTML=fichaClaves(a)
+    .map(c=>`<li class="${c.alias?'es-alias':''}">${esc(c.k)} <span class="hab-sub">· ${esc(c.nota)}</span></li>`).join('');
+  getRoomData('asset:'+a.file).then(d=>drawThumb($('#ficha-thumb'),d)).catch(()=>{});
+}
+function openFicha(a){
+  fichaAsset=a;
+  $('#ficha-alias').value=a.alias||'';
+  $('#ficha-icon').value=a.icon||'';
+  $('#ficha-desc').value=a.description||'';
+  $('#ficha-error').hidden=true;
+  fichaPinta();
+  $('#ficha-modal').hidden=false;
+}
+function closeFicha(){ $('#ficha-modal').hidden=true; fichaAsset=null; }
+async function guardarFicha(){
+  const a=fichaAsset; if(!a) return;
+  const err=$('#ficha-error');
+  const body={ alias:$('#ficha-alias').value.trim().toLowerCase(),
+               icon:$('#ficha-icon').value.trim(),
+               description:$('#ficha-desc').value.trim() };
+  let r;
+  try{
+    r=await fetch('/api/assets/'+a.id,{method:'PATCH',headers:{'Content-Type':'application/json'},
+                                       body:JSON.stringify(body)});
+  }catch(e){ toast('No se pudo guardar la ficha'); return; }
+  const res=await r.json().catch(()=>({}));
+  if(!r.ok){
+    // 409 = el nombre corto está bien escrito pero ya está cogido. Se deja el campo como está para
+    // corregirlo, y el motivo del servidor se pinta tal cual: es el único sitio que sabe por quién.
+    err.textContent=res.error||'No se pudo guardar'; err.hidden=false;
+    toast(res.error||'No se pudo guardar la ficha');
+    return;
+  }
+  err.hidden=true;
+  Object.assign(a,{alias:res.alias||'', icon:res.icon||'', description:res.description||''});
+  // Reindexar en caliente: sin esto el alias nuevo no resolvería hasta recargar la página, y el dueño
+  // está a un paso de probarlo en la consola.
+  try{
+    const idx=await fetch('assets/index.json',{cache:'no-store'}).then(x=>x.json());
+    mcIndexAssets(idx);
+    if(typeof refreshTexturas==='function') refreshTexturas(idx);
+  }catch(e){}
+  fichaPinta();
+  openHabitantes();
+  toast(res.alias ? 'Ficha guardada · usa «'+res.alias+'»' : 'Ficha guardada');
+}
 // Lista lateral de habitantes (carga rápida)
 async function refreshHabitantesList(){
   const ul=$('#roster-habitantes'); if(!ul) return;
@@ -1605,6 +1712,7 @@ function refreshRosters(){ refreshHabitantesList(); loadRooms(); refreshTexturas
 // ===================== Persistencia =====================
 const LS='voxelforge:current';
 let serverId=null;                 // id del habitante en el servidor (si el objeto viene/va allí)
+let loadedName=null;               // el rótulo que tenía al cargarlo: si cambia, Guardar pregunta (ver save())
 // Defs de las texturas realmente usadas => se embeben para un modelo autocontenido (render offline)
 function embeddedTextures(){
   const used=new Set(); for(const v of state.voxels.values()) if(isTex(v)) used.add(texKeyOf(v));
@@ -1617,11 +1725,25 @@ function currentVox(){
   if(state.pivotes.length) doc.pivotes=state.pivotes.map(p=>p.slice());   // clave de 1er nivel: el server guarda el doc tal cual
   return doc;
 }
-function localSnap(){ const s={size:{x:SX,y:SY,z:SZ}, meta:state.meta, voxels:[...state.voxels], pivotes:state.pivotes}; const t=embeddedTextures(); if(t) s.textures=t; return JSON.stringify(s); }
+// El id viaja en la copia local: si no, recargar la página perdía de qué asset venía el dibujo y el
+// siguiente Guardar lo bifurcaba a un fichero nuevo (justo lo que se vino a arreglar).
+function localSnap(){ const s={size:{x:SX,y:SY,z:SZ}, meta:state.meta, voxels:[...state.voxels], pivotes:state.pivotes, serverId, loadedName}; const t=embeddedTextures(); if(t) s.textures=t; return JSON.stringify(s); }
 async function save(){
   // copia local siempre (para recuperar al recargar)
   localStorage.setItem(LS, localSnap());
   if(state.voxels.size===0){ toast('Nada que guardar'); return; }
+  // Renombrar y darle a Guardar es ambiguo, y las dos lecturas son razonables: «retoco la pieza del
+  // zombie» (reescribir, que es lo que hace que el bicho vivo se entere) o «parto de ella para hacer
+  // otra» (bifurcar). Manda el id, como en el panel de agentes, pero SOLO aquí se pregunta: es el
+  // único caso en que el rótulo y el fichero dicen cosas distintas, y equivocarse pisa un dibujo que
+  // puede estar usando media galería. Sin cambio de nombre no se pregunta nada.
+  if(serverId && loadedName && state.meta.name!==loadedName){
+    const seguir=confirm('Le has cambiado el nombre a «'+loadedName+'» → «'+state.meta.name+'».\n\n'+
+      'Aceptar: reescribe el mismo dibujo ('+serverId+'). Se enteran los agentes y los bloques que lo usan.\n'+
+      'Cancelar: lo guarda aparte como una pieza nueva, y «'+loadedName+'» se queda como estaba.');
+    if(!seguir) serverId=null;
+    loadedName=state.meta.name;
+  }
   const body=currentVox(); if(serverId) body.id=serverId;
   try{
     const isTex = state.meta && state.meta.type === 'textura';
@@ -1630,11 +1752,13 @@ async function save(){
     if (!r.ok) throw new Error('HTTP ' + r.status + ' - El servidor API no soporta ' + endpoint);
     const j=await r.json();
     if (!j || !j.id) throw new Error('Respuesta inválida del servidor');
-    serverId=j.id;
+    serverId=j.id; loadedName=state.meta.name;
     if(isTex && typeof refreshTexturas === 'function') refreshTexturas();
     // Refresca todo lo que ya esté usando este objeto en el Mundo: galería, ranura y lo estampado en el mapa.
     await mcRefreshSavedKey(isTex ? 'asset:assets/' + j.id + '.vox.json' : 'hab:' + j.id);
-    toast('Guardado en el servidor: «'+state.meta.name+'»');
+    // Se dice el FICHERO, no solo el rótulo: es lo que enseña de un vistazo que el dibujo ha ido a
+    // parar donde lo buscan los agentes y el mundo, que es justo lo que antes fallaba en silencio.
+    toast('Guardado en '+(isTex ? 'assets/'+j.id+'.vox.json' : 'habitantes/'+j.id)+' · «'+state.meta.name+'»');
     refreshRosters();
   }catch(e){ toast('Guardado local (servidor API no disponible en esta versión git/estática)'); }
 }
@@ -1652,7 +1776,7 @@ async function saveAs(){
     if (!r.ok) throw new Error('HTTP ' + r.status + ' - El servidor API no soporta ' + endpoint);
     const j=await r.json();
     if (!j || !j.id) throw new Error('Respuesta inválida del servidor');
-    serverId=j.id;
+    serverId=j.id; loadedName=state.meta.name;
     localStorage.setItem(LS, localSnap());
     if(isTex && typeof refreshTexturas === 'function') refreshTexturas();
     // Es un objeto NUEVO: nadie lo usa todavía, pero tiene que salir ya en la galería del Mundo.
@@ -1670,6 +1794,8 @@ function restore(){
     state.meta=d.meta||state.meta;
     state.voxels=new Map(d.voxels||[]);
     state.pivotes=normPivotes(d.pivotes);
+    serverId=d.serverId||null;         // de qué asset/habitante venía, para no bifurcarlo al guardar
+    loadedName=d.loadedName||state.meta.name;
     return true;
   }catch(e){ return false; }
 }
@@ -2561,13 +2687,28 @@ $('#btn-habitaciones').onclick=()=>openHabitantes('habitacion');
 $('#btn-texturas').onclick=()=>openHabitantes('textura');
 $('#hab-close').onclick=closeHabitantes;
 $('#hab-refresh').onclick=()=>openHabitantes();   // reusa el tipo actual
+$('#ficha-close').onclick=closeFicha;
+$('#ficha-save').onclick=guardarFicha;
+// Copiar la clave / el ejemplo. La confirmación va por toast: el dueño mira desde el móvil y un
+// botón que no dice nada parece que no ha hecho nada.
+document.querySelectorAll('#ficha-modal [data-copy]').forEach(b=>{
+  b.onclick=()=>{
+    const inp=$('#'+b.dataset.copy);
+    inp.select();
+    const ok = navigator.clipboard
+      ? (navigator.clipboard.writeText(inp.value), true)
+      : document.execCommand('copy');
+    toast(ok ? 'Copiado' : 'No se pudo copiar — está seleccionado');
+  };
+});
 $('#hab-modal').addEventListener('click',e=>{ if(e.target.id==='hab-modal') closeHabitantes(); });
 
 // atajos
 window.addEventListener('keydown',e=>{
   if(e.key==='Escape' && !$('#mc-modal').hidden){                               // Mundo (REQ-MC): Esc de 2 pasos
     if(!$('#snip-modal').hidden){ closeSnips(); return; }                         // 1º si el modal de código está abierto → cerrarlo
-    if(!$('#mc-note').hidden){ mcCloseNote(); return; }                         // 1º si el editor de nota está abierto → cerrarlo
+    if(!$('#ag-modal').hidden){ closeAgentes(); return; }                         // 1º ídem el panel de agentes (Alt+A)
+    if(!$('#mc-note').hidden){ mcCloseNote(); return; }                          // 1º si el editor de nota está abierto → cerrarlo
     if(!$('#mc-picker').hidden){ mcClosePicker(); return; }                     // 1º si el selector está abierto → cerrarlo
     if(mc.active && (document.pointerLockElement===mc.canvas || performance.now()-mc.unlockedAt<350)){ document.exitPointerLock(); return; } // 1º Esc: suelta el ratón, NO cierra
     closeWorld(); return;                                                       // 2º Esc (ratón ya libre): cierra el Mundo
@@ -2582,6 +2723,18 @@ window.addEventListener('keydown',e=>{
     if(document.pointerLockElement===mc.canvas) document.exitPointerLock();      // en el Mundo el ratón está capturado
     openSnips(); return;
   }
+  // Alt+A = lo mismo para el panel de agentes: hasta ahora solo se llegaba por la pestaña del editor,
+  // así que retocar un bicho obligaba a salir del Mundo. Mismas cautelas que Alt+C (e.code, sin Ctrl/⌘
+  // para no pisar el Ctrl+A de seleccionar todo) y va antes del corte de Mundo por la misma razón.
+  if(e.code==='KeyA' && e.altKey && !e.ctrlKey && !e.metaKey){
+    // ⚠️ stopImmediatePropagation, que Alt+C no necesita: al CERRAR el panel el handler del Mundo
+    // (más abajo, mismo window) ya lo ve oculto, y su `a` es andar hacia la izquierda — cerrarías el
+    // panel dando un paso de lado. La `c` de Alt+C no significa nada allí, por eso se libraba.
+    e.preventDefault(); e.stopImmediatePropagation();
+    if(!$('#ag-modal').hidden){ closeAgentes(); return; }
+    if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
+    openAgentes(); return;
+  }
   if(!$('#mc-modal').hidden) return;                                            // en Mundo, los atajos del editor no aplican
   if(e.key==='Escape' && !$('#play-modal').hidden){ closePlay(); return; }
   if(e.key==='Escape' && !$('#room-modal').hidden){ closeRoom(); return; }
@@ -2592,6 +2745,7 @@ window.addEventListener('keydown',e=>{
   if(e.key==='Escape' && !$('#snip-modal').hidden){ closeSnips(); return; }
   if(e.key==='Escape' && !$('#ag-modal').hidden){ closeAgentes(); return; }
   if(e.key==='Escape' && !$('#mapa-modal').hidden){ closeMapa(); return; }
+  if(e.key==='Escape' && !$('#ficha-modal').hidden){ closeFicha(); return; }   // antes que la galería: va encima
   if(e.key==='Escape' && !$('#hab-modal').hidden){ closeHabitantes(); return; }
   if(e.key==='Escape' && modalOpen){ closeModal(); return; }
   if(e.key==='Escape' && cancelPaste()) return;      // Esc cancela la colocación de un pegado
@@ -2692,7 +2846,7 @@ async function loadRooms(idx){
       const li=document.createElement('li');
       li.innerHTML=`<span class="ic">${a.icon||'🏠'}</span>${a.name}<span class="badge">asset</span>`;
       li.title='Cargar «'+a.name+'»';
-      li.onclick=()=>loadFromUrl(a.file);
+      li.onclick=()=>loadFromUrl(a.file, a.id);
       ul.appendChild(li);
     });
     saved.forEach(h=>{
@@ -3211,6 +3365,9 @@ function agLoop(t){
 // ── Documento, lista y formulario ───────────────────────────────────────────────────────────────
 async function openAgentes(){
   $('#ag-modal').hidden=false;
+  agCat=null;                      // el catálogo se cacheaba de por vida: una pieza guardada en el
+                                   // editor no salía en el desplegable hasta recargar la página
+
   if(!await cargarLibMundo()) toast('No he podido cargar la librería del Mundo: el preview no se moverá', 3);
   await agRecargar();
   if(!agDoc){ if(agLista.length) await agCargar(agLista[0].id); else agNuevo(); }
@@ -3256,13 +3413,42 @@ function agNuevo(){
   $('#ag-nombre').focus();
 }
 async function agGuardar(){
-  if(!agDoc) return;
+  if(!agDoc) return false;
   agDoc.nombre=$('#ag-nombre').value.trim()||'agente';
   let r=null;
   try{ r=await fetch('/api/agentes',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(agDoc)}).then(x=>x.json()); }catch(e){}
-  if(!r || !r.id){ toast((r&&r.error)||'No se pudo guardar'); return; }
+  if(!r || !r.id){ toast((r&&r.error)||'No se pudo guardar'); return false; }
   agDoc.id=r.id; await agRecargar(); toast('Agente guardado en data/agentes/'+r.id+'.json');
+  return true;
+}
+// «Guardar como…» no es comodidad, es la única forma de sacar una copia: `POST /api/agentes` deriva
+// el fichero de `d.id || d.nombre` (`server.py:437`), o sea que **el `id` manda sobre el nombre**.
+// Cargar el zombie, renombrarlo y darle a Guardar reescribía `data/agentes/zombie.json` con otro
+// nombre dentro; partir de un bicho que ya funciona para hacer una variante era imposible sin
+// pisarlo. Quitarle el `id` al documento es justamente lo que convierte el guardado en un «como…».
+function agNombreLibre(base){
+  const hay=n=>agLista.some(a=>a.id===slug(n));
+  if(!hay(base)) return base;
+  for(let i=2;i<1000;i++){ const n=base+' '+i; if(!hay(n)) return n; }
+  return base+' copia';
+}
+async function agGuardarComo(){
+  if(!agDoc) return;
+  const base=$('#ag-nombre').value.trim()||agDoc.nombre||'agente';
+  const nom=(prompt('Guardar una copia como…', agNombreLibre(base))||'').trim();
+  if(!nom) return;
+  // El MISMO slug que `server.py:33-35`: si aquí se calculara de otra forma, el aviso de «ya existe»
+  // mentiría justo en los casos raros (acentos, símbolos) y la copia pisaría un agente en silencio.
+  const id=slug(nom), choca=agLista.find(a=>a.id===id);
+  if(choca && !confirm('Ya hay un agente en «'+id+'.json» ('+(choca.nombre||id)+').\n'+
+                       '¿Sobrescribirlo? La versión anterior se respalda en la papelera.')) return;
+  const idAntes=agDoc.id, nomAntes=agDoc.nombre;
+  agDoc.nombre=nom; delete agDoc.id;
+  $('#ag-nombre').value=nom;
+  if(await agGuardar()) return;
+  agDoc.id=idAntes; agDoc.nombre=nomAntes;              // el POST falló: el panel vuelve al original
+  $('#ag-nombre').value=nomAntes||'';                    // o el siguiente Guardar escribiría el fichero equivocado
 }
 async function agBorrar(){
   if(!agDoc || !agDoc.id) return;
@@ -3303,23 +3489,42 @@ function agPreparar(){
   const mio=++agPrepId;
   Promise.resolve(game.esqueletos.preparar(JSON.parse(JSON.stringify(agDoc)))).then(pl=>{
     if(mio!==agPrepId) return;
+    // La geometría fusionada se cachea por `clave|rot`, así que hay que soltarla JUSTO cuando entra el
+    // plan nuevo, no antes: entre la petición y la respuesta el bucle de dibujo sigue pintando el plan
+    // viejo y volvería a llenar la caché con el dibujo de antes. Ese era el «guardo la pieza y en el
+    // editor de agentes sigo viendo el torso antiguo» que sobrevivía incluso limpiando al guardar.
+    agGeomCache.clear();
     agPl=pl||null;
     const el=$('#ag-caja');
     if(el) el.textContent=agPl? ('alto '+(+(agPl.caja[4]-agPl.caja[1]).toFixed(4))+' · ancho '+
       (+(agPl.caja[3]-agPl.caja[0]).toFixed(4))+' bloques · '+agPl.partes.length+' piezas') : '';
   });
 }
+// Las piezas de agente son `type:'textura'` (así se editan y se guardan de vuelta en assets/, que
+// es lo que deja reponer un pivote con 📍). Aquí NO SE ESCONDE NADA, y es a propósito: el filtro de
+// antes (`type!=='textura' || group==='Agentes'`) dejaba fuera cualquier pieza nueva, porque el
+// editor guarda todo como `textura` + `Bloques de construcción` (`server.py`, POST /api/assets) y
+// **no hay UI para elegir el grupo** — copiar la cabeza, llamarla «Cabeza de Personaje» y guardarla
+// la hacía invisible para siempre en este desplegable (también le pasaba a `cabeza`/`brazo`, las dos
+// del zombie original). Lo que aquel filtro resolvía de verdad — que los azulejos de 1×1 no tapen
+// los brazos — lo hace ahora el reparto en <optgroup> con **Agentes primero**.
+const AG_GRUPOS=['Agentes','Piezas y objetos','Mis guardados','Bloques de construcción','Básicas','Mis texturas','Otros'];
 async function agCatalogo(){
   if(agCat) return agCat;
   const out=[];
-  // Las piezas de agente son `type:'textura'` (así se editan y se guardan de vuelta en assets/, que
-  // es lo que deja reponer un pivote con 📍), y el filtro de texturas — que está para no ofrecer los
-  // 34 azulejos de 1×1 como piezas de un muñeco — se las llevaba por delante: en el desplegable no
-  // había ni un brazo del zombie, o sea que el panel no podía montar ningún bicho nuevo.
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
-    idx.filter(a=>a.type!=='textura' || a.group==='Agentes').forEach(a=>out.push({key:'asset:'+a.file, name:a.name})); }catch(e){}
-  try{ (await apiHabitantes()).filter(h=>h.type!=='textura')
-    .forEach(h=>out.push({key:'hab:'+h.id, name:h.name+' (guardado)'})); }catch(e){}
+    idx.forEach(a=>out.push({key:'asset:'+a.file, name:a.name,
+      grupo: a.group==='Agentes' ? 'Agentes' : (a.type!=='textura' ? 'Piezas y objetos' : (a.group||'Otros'))})); }catch(e){}
+  try{ (await apiHabitantes()).forEach(h=>out.push({key:'hab:'+h.id, name:h.name+' (guardado)',
+    grupo: h.type==='textura' ? 'Mis texturas' : 'Mis guardados'})); }catch(e){}
+  // Los grupos van en el orden de AG_GRUPOS (Agentes primero), y DENTRO de cada grupo por nombre:
+  // el índice los trae en el orden en que se fueron guardando, que para buscar «la cabeza» no sirve
+  // de nada. `localeCompare` con 'es' y `sensitivity:'base'` para que ni las mayúsculas ni los
+  // acentos partan la lista (Ñ después de N, «Árbol» junto a «Arena»), y `numeric` para que
+  // «grass 128x128» no se ordene por dígitos sueltos.
+  const peso=g=>{ const i=AG_GRUPOS.indexOf(g); return i<0? AG_GRUPOS.length : i; };
+  const cmp=new Intl.Collator('es',{sensitivity:'base', numeric:true});
+  out.sort((a,b)=>peso(a.grupo)-peso(b.grupo) || cmp.compare(a.name, b.name));
   agCat=out; return out;
 }
 // El formulario de la pieza elegida. Se reconstruye entero en cada cambio: son ~10 campos y así no
@@ -3332,21 +3537,41 @@ function agForm(){
   h.textContent=raiz? 'Raíz · '+(p.nombre||'torso') : 'Pieza · '+(p.nombre||'');
   box.appendChild(h);
   const cambia=()=>{ agRefrescar(); };
-  box.appendChild(agCampoTexto('nombre', p.nombre||'', v=>{ p.nombre=v; cambia(); }));
-  const sel=agCampoSelect('dibujo', p.pieza||'', v=>{ p.pieza=v; cambia(); });
+  box.appendChild(agCampoTexto({t:'nombre', ayuda:
+    'Cómo llamas TÚ a esta pieza, para reconocerla en la lista de arriba. El Mundo no lo mira: puedes '+
+    'tener dos «brazo» sin que pase nada.'},
+    p.nombre||'', v=>{ p.nombre=v; cambia(); }));
+  const sel=agCampoSelect({t:'dibujo', ayuda:
+    'Qué bloque se dibuja aquí. Vale cualquiera del catálogo, no solo los del grupo «Agentes». '+
+    '⚠️ Un bloque de 16×16×16 macizo cuenta como TERRENO y el terreno no se puede animar: por eso las '+
+    'piezas de un bicho se dibujan de 15 o menos.'},
+    p.pieza||'', v=>{ p.pieza=v; cambia(); });
   box.appendChild(sel);
   agCatalogo().then(cat=>{
     const s=sel.querySelector('select'); if(!s) return;
     const val=p.pieza||'';
     s.innerHTML='';
-    if(val && !cat.some(c=>c.key===val)) cat=[{key:val, name:val}].concat(cat);
-    for(const c of cat){ const o=document.createElement('option'); o.value=c.key; o.textContent=c.name; s.appendChild(o); }
+    // Lo que el documento ya trae va SIEMPRE primero aunque el catálogo no lo conozca: si no, elegir
+    // otra pieza y volver dejaría el <select> apuntando a un dibujo distinto del que dice el JSON.
+    if(val && !cat.some(c=>c.key===val)) cat=[{key:val, name:val, grupo:'En el documento'}].concat(cat);
+    let gr, cont=s;
+    for(const c of cat){
+      if(c.grupo!==gr){ gr=c.grupo; cont=document.createElement('optgroup'); cont.label=gr||'Otros'; s.appendChild(cont); }
+      const o=document.createElement('option'); o.value=c.key; o.textContent=c.name; cont.appendChild(o);
+    }
     s.value=val;
   });
-  box.appendChild(agCampoNum('rot (¼ de vuelta)', p.rot|0, 1, v=>{ p.rot=((v|0)%4+4)%4; cambia(); }));
+  box.appendChild(agCampoNum({t:'rot (¼ de vuelta)', ayuda:
+    'Cuántos cuartos de vuelta (0-3, o sea 0°, 90°, 180°, 270°) se gira el DIBUJO antes de nada, para '+
+    'orientarlo sin tener que repintarlo. Ojo: los límites de «mira» se cuentan desde esta pose, así '+
+    'que dos piezas iguales con rot distinto miran hacia lados opuestos.'},
+    p.rot|0, 1, v=>{ p.rot=((v|0)%4+4)%4; cambia(); }));
   if(!raiz){
     const en=p.en||[0,0,0];
-    box.appendChild(agTerna('en (x, alto, z)', en, v=>{ p.en=v; cambia(); }));
+    box.appendChild(agTerna({t:'en (x, alto, z)', ayuda:
+      'Dónde va la pieza respecto a la RAÍZ, en bloques (el alto es el del medio, y sube). Se puede '+
+      'afinar por dieciseisavos: 0,0625 es un voxel.'},
+      en, v=>{ p.en=v; cambia(); }));
   }
   // Articulación: sin ella la pieza va soldada al cuerpo, que es lo que quiere una hombrera.
   const art=p.articula||null;
@@ -3356,13 +3581,34 @@ function agForm(){
     v=>{ if(v) p.articula={pivote:1, base:0, reposo:0, amplitud:30, fase:0, eje:'x'};
          else delete p.articula; cambia(); });
   if(art){
-    bArt.appendChild(agCampoSelect('eje', art.eje==='y'?'y':'x', v=>{ art.eje=v; cambia(); },
+    bArt.appendChild(agCampoSelect({t:'eje', ayuda:
+      'Sobre qué eje gira la pieza. «x» la hace cabecear adelante y atrás, que es lo de un brazo o '+
+      'una pierna; «y» la hace girar sobre sí misma como una torreta. No hay más: son los dos que '+
+      'sabe componer la matriz de una pieza.'},
+      art.eje==='y'?'y':'x', v=>{ art.eje=v; cambia(); },
       [{key:'x', name:'x · cabecea (brazo, pierna)'}, {key:'y', name:'y · gira (torreta)'}]));
-    bArt.appendChild(agCampoNum('pivote nº', art.pivote===undefined?1:art.pivote, 1, v=>{ art.pivote=v|0; cambia(); }));
-    bArt.appendChild(agCampoNum('base (te ve)', +art.base||0, 5, v=>{ art.base=v; cambia(); }));
-    bArt.appendChild(agCampoNum('reposo', +art.reposo||0, 5, v=>{ art.reposo=v; cambia(); }));
-    bArt.appendChild(agCampoNum('amplitud', +art.amplitud||0, 5, v=>{ art.amplitud=v; cambia(); }));
-    bArt.appendChild(agCampoNum('desfase (grados)', +art.fase||0, 15, v=>{ art.fase=v; cambia(); }));
+    bArt.appendChild(agCampoNum({t:'pivote nº', ayuda:
+      'Por qué punto engancha la pieza, o sea el centro del giro: es uno de los pivotes que dibujaste '+
+      'en ella con la herramienta 📍, por su orden (el 1º dibujado es el nº 1). Un brazo tiene que '+
+      'llevarlo en el hombro; si el dibujo no trae ninguno, la pieza gira por el centro de su caja y '+
+      'se ve como aspas de molino.'},
+      art.pivote===undefined?1:art.pivote, 1, v=>{ art.pivote=v|0; cambia(); }));
+    bArt.appendChild(agCampoNum({t:'base (te ve)', ayuda:
+      'Los grados en los que se queda la pieza MIENTRAS te ve y va a por ti; el vaivén se suma a este '+
+      'ángulo. Los brazos del zombie en alto son esto: base 90.'},
+      +art.base||0, 5, v=>{ art.base=v; cambia(); }));
+    bArt.appendChild(agCampoNum({t:'reposo', ayuda:
+      'Los grados en los que se queda cuando NO te ve, y a los que vuelve al perderte. Con reposo y '+
+      'base iguales la pieza no cambia de pose al verte.'},
+      +art.reposo||0, 5, v=>{ art.reposo=v; cambia(); }));
+    bArt.appendChild(agCampoNum({t:'amplitud', ayuda:
+      'Cuántos grados se balancea a cada lado mientras ANDA (±, sobre la pose que toque). A 0 la pieza '+
+      'no se mueve aunque el bicho corra: queda rígida en su ángulo.'},
+      +art.amplitud||0, 5, v=>{ art.amplitud=v; cambia(); }));
+    bArt.appendChild(agCampoNum({t:'desfase (grados)', ayuda:
+      'Por dónde del vaivén empieza esta pieza, para que no se muevan todas a la vez. 0 y 180 son el '+
+      'paso contrario: pierna izquierda y pierna derecha. Un brazo va a 180 de su pierna del mismo lado.'},
+      +art.fase||0, 15, v=>{ art.fase=v; cambia(); }));
     agNota(bArt, 'El ciclo avanza con la DISTANCIA recorrida, no con el reloj: parado deja de pedalear '+
                  'solo. Dos piezas iguales con desfase 0 y 180 son la pierna izquierda y la derecha.');
   }
@@ -3376,10 +3622,19 @@ function agForm(){
       mir? ('alcance '+(+mir.alcance||12)+' · ±'+Math.abs(+lim[1]||70)+'°') : 'la pieza no gira',
       v=>{ if(v) p.mirar={alcance:12, limites:{y:[-70,70]}}; else delete p.mirar; cambia(); });
     if(mir){
-      bMir.appendChild(agCampoNum('alcance (bloques)', +mir.alcance||12, 1, v=>{ mir.alcance=v; cambia(); }));
-      bMir.appendChild(agCampoNum('tope del cuello (±°)', Math.abs(+lim[1]||70), 5,
+      bMir.appendChild(agCampoNum({t:'alcance (bloques)', ayuda:
+        'A qué distancia deja de seguirte con la vista y vuelve a mirar al frente. Si la pieza no gira, '+
+        'lo primero que hay que mirar es esto: los rayos X dicen «en reposo (a 14 bloques, alcance 12)».'},
+        +mir.alcance||12, 1, v=>{ mir.alcance=v; cambia(); }));
+      bMir.appendChild(agCampoNum({t:'tope del cuello (±°)', ayuda:
+        'Hasta dónde puede torcerse a cada lado. Pasado el cono se queda quieta en vez de darse la '+
+        'vuelta entera: es lo que evita la cabeza del exorcista. Se cuenta desde la pose que le deja «rot».'},
+        Math.abs(+lim[1]||70), 5,
         v=>{ mir.limites={y:[-Math.abs(v), Math.abs(v)]}; cambia(); }));
-      bMir.appendChild(agCampoNum('suavidad del cuello (s)', mir.suavidad!==undefined? +mir.suavidad : 0.12, 0.02,
+      bMir.appendChild(agCampoNum({t:'suavidad del cuello (s)', ayuda:
+        'Cuánto tarda en alcanzarte con la vista. 0 la clava en ti como un radar; subirlo hace el giro '+
+        'más perezoso y más vivo. En gris significa que está en su valor por defecto.'},
+        mir.suavidad!==undefined? +mir.suavidad : 0.12, 0.02,
         v=>{ mir.suavidad=v; cambia(); }, mir.suavidad===undefined));
       agNota(bMir, 'Gira RELATIVO al cuerpo: cuando la persecución ya te encara, el cuello no lo suma '+
                    'dos veces.');
@@ -3592,16 +3847,39 @@ function agChips(){
   }
 }
 function agCampoBool(etiqueta, val, set){
-  const l=document.createElement('label'); l.className='ag-fld';
+  const e=agRotulo(etiqueta), l=document.createElement('label'); l.className='ag-fld';
   const i=document.createElement('input'); i.type='checkbox'; i.checked=!!val;
   i.onchange=()=>set(i.checked);
-  l.appendChild(i); l.appendChild(document.createTextNode(' '+etiqueta));
+  l.appendChild(i); l.appendChild(document.createTextNode(' '+e.t));
+  const pis=agPista(l, e); if(pis){ l.appendChild(pis[0]); l.appendChild(pis[1]); }
   return l;
 }
-
+// Una etiqueta puede ser 'amplitud' o {t:'amplitud', ayuda:'…'}. Va así, y no como un argumento más,
+// porque en agCampoNum el último ya lo tiene pillado `esDef`: con un objeto cualquier campo puede
+// explicarse sin tocar ninguna firma ni el orden de los que ya existen.
+function agRotulo(etiqueta){ return (etiqueta&&typeof etiqueta==='object')? etiqueta : {t:etiqueta}; }
+// La ayuda sale por DOS vías a propósito: el `title` de siempre (el globo del navegador, escritorio)
+// y un «?» que la despliega debajo del campo, porque en el móvil no hay hover y el globo no existe.
+// Se abre con :focus y no con :hover para que las dos no se pisen, y así no hay que recordar cuál
+// estaba abierta: el formulario se reconstruye entero en cada tecla y cualquier estado en el DOM se
+// perdería (por eso `agAbiertas` vive fuera). Devuelve [botón, nota] SIN meterlos: el orden tiene que
+// ser rótulo · ? · control · nota, porque la nota ocupa la fila entera y en medio partiría el campo.
+function agPista(l, e){
+  if(!e.ayuda) return null;
+  l.classList.add('con-ayuda'); l.title=e.ayuda;
+  const b=document.createElement('button');
+  b.type='button'; b.className='ag-i'; b.textContent='?';
+  b.setAttribute('aria-label', 'Qué es «'+e.t+'»');
+  const n=document.createElement('small'); n.className='ag-tip'; n.textContent=e.ayuda;
+  return [b, n];
+}
 function agCampo(etiqueta, ctrl){
-  const l=document.createElement('label'); l.className='ag-fld';
-  l.appendChild(document.createTextNode(etiqueta)); l.appendChild(ctrl); return l;
+  const e=agRotulo(etiqueta), l=document.createElement('label'); l.className='ag-fld';
+  l.appendChild(document.createTextNode(e.t));
+  const pis=agPista(l, e); if(pis) l.appendChild(pis[0]);
+  l.appendChild(ctrl);
+  if(pis) l.appendChild(pis[1]);
+  return l;
 }
 function agCampoTexto(etiqueta, val, set){
   const i=document.createElement('input'); i.type='text'; i.value=val;
@@ -3622,15 +3900,13 @@ function agCampoSelect(etiqueta, val, set, opts){
 // Los sitios van en BLOQUES, y un voxel del dibujo es 1/16: el paso del 0,0625 es lo que deja
 // colocar una pieza voxel a voxel sin escribir decimales a mano.
 function agTerna(etiqueta, val, set){
-  const l=document.createElement('label'); l.className='ag-fld';
-  l.appendChild(document.createTextNode(etiqueta));
   const wrap=document.createElement('span'); wrap.className='ag-tern';
   const ins=[0,1,2].map(i=>{
     const n=document.createElement('input'); n.type='number'; n.step=0.0625; n.value=+val[i]||0;
     n.onchange=()=>set(ins.map(x=>+x.value||0));
     wrap.appendChild(n); return n;
   });
-  l.appendChild(wrap); return l;
+  return agCampo(etiqueta, wrap);
 }
 function agAnadirPieza(){
   if(!agDoc) return;
@@ -3639,18 +3915,23 @@ function agAnadirPieza(){
   agSel=agDoc.piezas.length; agRefrescar();
 }
 // Plantarlo es cosa del Mundo: aquí solo se pide. Si no hay Mundo montado no hay dónde ponerlo.
-function agPlantar(){
+// Plantar es IRSE al Mundo: se cierra el panel y, si veníamos del editor, se abre el Mundo — antes
+// de crear el bicho, porque openWorld() reanuda los agentes y relanza el autoarranque.
+async function agPlantar(){
   if(!agDoc){ return; }
   if(typeof mc==='undefined' || !mc || !mc.gl || !window.game || !game.esqueletos){
     toast('Abre el Mundo (🌍) y vuelve: es ahí donde se planta'); return;
   }
+  closeAgentes();
+  if($('#mc-modal').hidden) await openWorld();
   const yaw=mc.yaw||0, dx=-Math.sin(yaw)*3, dz=-Math.cos(yaw)*3;
-  Promise.resolve(game.esqueletos.crear(agDoc, mc.pos[0]+dx, mc.pos[1], mc.pos[2]+dz))
-    .then(h=>toast(h? 'Plantado en el Mundo' : 'No se pudo plantar (mira la consola)'));
+  const h=await game.esqueletos.crear(agDoc, mc.pos[0]+dx, mc.pos[1], mc.pos[2]+dz);
+  toast(h? 'Plantado ahí delante' : 'No se pudo plantar (mira la consola)');
 }
 $('#ag-close').onclick=closeAgentes;
 $('#ag-new').onclick=agNuevo;
 $('#ag-save').onclick=agGuardar;
+$('#ag-save-as').onclick=agGuardarComo;
 $('#ag-del').onclick=agBorrar;
 $('#ag-add').onclick=agAnadirPieza;
 $('#ag-plantar').onclick=agPlantar;
@@ -4614,6 +4895,8 @@ const mc={
   gl:null, canvas:null,
   fps:0, fpsN:0, fpsT:0,          // medidor de FPS reales (calca play.fps*)
   grid:null, dim:{x:0,y:0,z:0},   // rejilla densa Uint16Array (0=aire, >0=id de bloque); Y es vertical
+  v2:false,                       // el mundo está en voxelworld-2 en el servidor → se puede guardar por trozos
+  pend:{vox:new Set(), header:false, full:true},   // qué falta por guardar (ver mcDirty): celdas sueltas, cabecera, o todo
   spawn:{x:0,y:0,z:0},
   blocks:[],                      // lista MUTABLE de bloques {name,key} (arranca = MC_BLOCKS; crece desde la galería)
   palette:[], blockKey:[], name2id:{}, // paleta: por id, sus 6 rects UV; blockKey[id]=clave para serializar
@@ -4693,7 +4976,20 @@ function mcIdx(x,y,z){ return x + y*mc.dim.x + z*mc.dim.x*mc.dim.y; }
 function mcInside(x,y,z){ return x>=0&&y>=0&&z>=0&&x<mc.dim.x&&y<mc.dim.y&&z<mc.dim.z; }
 function mcSolid(x,y,z){ if(y<0) return true;   // suelo del mundo: sólido hacia abajo (no mesha la cara inferior, nunca se ve)
   return mcInside(x,y,z) ? mc.grid[mcIdx(x,y,z)]!==0 : false; }
-function mcSetBlock(x,y,z,id){ if(mcInside(x,y,z)) mc.grid[mcIdx(x,y,z)]=id; }
+function mcSetBlock(x,y,z,id){ if(mcInside(x,y,z)){ mc.grid[mcIdx(x,y,z)]=id; mcDirty(x,y,z); } }
+
+// Guardado incremental. Se apunta QUÉ celdas han cambiado, no el mundo entero: serializar fps
+// (512×40×512) cuesta 18 s y un POST de 257 MB, y eso era el precio de poner UN bloque.
+// Se guarda solo la coordenada, nunca el material: éste se lee de mc.grid al vaciar, así una celda
+// tocada varias veces (pintar → deshacer → repintar) pesa una sola vez y siempre gana el estado real.
+const MC_PEND_MAX=200000;         // por encima, reescribir el mundo entero sale más barato que enumerar
+function mcDirty(x,y,z){
+  const p=mc.pend; if(!p || p.full) return;
+  if(p.vox.size>=MC_PEND_MAX){ mcDirtyAll(); return; }
+  p.vox.add(x+','+y+','+z);
+}
+function mcDirtyHeader(){ if(mc.pend) mc.pend.header=true; }   // spawn, estructuras, notas: van en la cabecera
+function mcDirtyAll(){ const p=mc.pend; if(p){ p.full=true; p.vox.clear(); } }
 
 // --- Helpers mat4 (column-major, como GL) e infra de shaders. Sin deps, ~40 líneas; los usan F3+. ---
 const mat4={
@@ -4776,6 +5072,7 @@ function mcGenFlat(){
   for(let z=0;z<dim.z;z++) for(let x=0;x<dim.x;x++) for(let y=0;y<=GH;y++){
     mc.grid[mcIdx(x,y,z)] = (y===GH) ? idH : (y>=GH-3 ? idT : idR);
   }
+  mcDirtyAll();                   // mundo recien nacido: el primer guardado va entero (y lo deja en v2)
   mc.spawn={x:dim.x>>1, y:GH+1, z:dim.z>>1};      // de pie sobre la hierba (pies en y=GH+1)
   mc.pos=[mc.spawn.x+0.5, mc.spawn.y, mc.spawn.z+0.5]; mc.vel=[0,0,0]; mc.onGround=false;
 }
@@ -5122,10 +5419,12 @@ async function mcBuildPalette(onProgress){
   const AW=6*MC_TILE, AH=Math.max(1,mc.blocks.length)*MC_TILE;
   const cv=document.createElement('canvas'); cv.width=AW; cv.height=AH;
   const ctx=cv.getContext('2d'); ctx.imageSmoothingEnabled=false;
+  let hueco=false;                          // ¿alguna textura trae agujeros? (ver el final de la función)
   for(let bi=0; bi<mc.blocks.length; bi++){
     const b=mc.blocks[bi], id=bi+1; let faces=null;
     const _tB=performance.now(), _cached=texDefs.has(b.key);   // ¿ya estaba en caché o toca descargarla?
-    try{ faces=buildTexFaces(await getTexDef(b.key)).faces; }catch(e){}
+    // Una textura que falla se pinta fucsia MACIZO, así que no cuenta como hueco.
+    try{ const tf=buildTexFaces(await getTexDef(b.key)); faces=tf.faces; if(tf.hueco) hueco=true; }catch(e){}
     if(onProgress) onProgress(bi+1, mc.blocks.length, b.name, b.key, performance.now()-_tB, _cached);
     mc.name2id[b.name]=id; mc.blockKey[id]=b.key;
     const rects=[];
@@ -5140,14 +5439,13 @@ async function mcBuildPalette(onProgress){
   }
   mc.atlas=cv;
   // ¿algún texel translúcido (alpha<0.5)? Si NO, el terreno usa el shader sin `discard` (early-z activo → menos
-  // overdraw). Si SÍ (o el canvas está contaminado y no se puede leer), alpha-test para no rellenar los huecos.
-  mc.atlasHasAlpha=false;
-  const _tA=performance.now();
-  try{ const d=ctx.getImageData(0,0,AW,AH).data;
-       for(let i=3;i<d.length;i+=4){ if(d[i]<128){ mc.atlasHasAlpha=true; break; } } }
-  catch(e){ mc.atlasHasAlpha=true; }
-  mcLoadNote('Escaneo de alpha del atlas ('+AW+'x'+AH+'): '+(performance.now()-_tA).toFixed(1)
-    +' ms → atlasHasAlpha='+mc.atlasHasAlpha+(mc.atlasHasAlpha?' (shader con discard)':' (shader opaco, early-z)'));
+  // overdraw). Si SÍ, alpha-test para no rellenar los huecos.
+  // Antes esto releía el atlas entero con getImageData (hasta 144 ms medidos, y por un sí/no). Ahora lo
+  // dice buildTexFaces mientras rasteriza, que es quien escribe los alpha 0. De regalo se cae el
+  // `catch` de canvas contaminado: ya no se lee ningún píxel, así que no hay nada que contaminar.
+  mc.atlasHasAlpha=hueco;
+  mcLoadNote('Atlas '+AW+'x'+AH+': atlasHasAlpha='+mc.atlasHasAlpha
+    +(mc.atlasHasAlpha?' (shader con discard)':' (shader opaco, early-z)'));
 }
 function mcUploadAtlas(){
   const gl=mc.gl;
@@ -5570,15 +5868,87 @@ function mcComputeLight(){
     }
   }
 }
+// t7b · SKYLIGHT INCREMENTAL. mcComputeLight barre el MUNDO ENTERO, y llamarla en cada bloque puesto o roto es lo que
+// hundía los fps: medido con SwiftShader, una sola edición costaba 36 ms en 96×40×96 y **684 ms en 512×40×512** — el
+// 98 % del frame, y creciendo con el volumen del mundo aunque el bloque tocado sea uno. Esta recalcula mc.light SOLO
+// en una caja alrededor de (bx,bz) y devuelve `[x0,z0,x1,z1]` con las celdas que REALMENTE cambiaron (o null).
+//
+// **Por qué una caja basta y por qué tiene ESTA forma.** La luz pierde 1 nivel por paso, así que una edición no puede
+// alterar ninguna celda a más de MC_MAXLIGHT pasos por aire… salvo hacia ABAJO: abrir o tapar una columna le cambia el
+// cielo de arriba abajo de una vez. De ahí ±MC_RELIGHT_R en X/Z y la COLUMNA ENTERA en Y, que es barata (40 bloques de
+// alto típicos). Con radio 15 bastaría; van 17 de margen.
+//
+// **Y por qué el resultado es EXACTO, no una aproximación.** Las celdas de fuera de la caja no han podido cambiar, así
+// que sirven de condición de contorno: se siembran hacia dentro con su nivel actual −1. Cualquier camino de luz que
+// salga de la caja y vuelva a entrar pasa por el borde, y el borde ya trae su mejor valor. Esto NO es un acto de fe:
+// `test_luz_incremental_navegador.js` compara mc.light celda a celda contra mcComputeLight() tras cientos de ediciones.
+const MC_RELIGHT_R=MC_MAXLIGHT+2;
+let mcRelightPrev=null;                 // scratch reusado (el mc.light de antes en la caja): sin basura por edición
+function mcRelightBox(bx,bz){
+  const dim=mc.dim, g=mc.grid, NX=dim.x, NY=dim.y, NZ=dim.z, sxy=NX*NY, N=NX*NY*NZ;
+  const L=(mc.light&&mc.light.length===N)?mc.light:(mc.light=new Uint8Array(N));
+  if(mc.interiorDark>=1) return null;   // desactivada: mcMeshChunk no muestrea la luz, no hace falta calcularla
+  const x0=Math.max(0,bx-MC_RELIGHT_R), x1=Math.min(NX-1,bx+MC_RELIGHT_R);
+  const z0=Math.max(0,bz-MC_RELIGHT_R), z1=Math.min(NZ-1,bz+MC_RELIGHT_R);
+  const w=x1-x0+1, wy=w*NY, nb=wy*(z1-z0+1);
+  if(!mcRelightPrev || mcRelightPrev.length<nb) mcRelightPrev=new Uint8Array(nb);
+  const prev=mcRelightPrev;
+  for(let z=z0;z<=z1;z++) for(let y=0;y<NY;y++) for(let x=x0;x<=x1;x++){   // guardar lo de antes y vaciar la caja
+    const i=x+y*NX+z*sxy; prev[(x-x0)+y*w+(z-z0)*wy]=L[i]; L[i]=0;
+  }
+  const buckets=[]; for(let i=0;i<=MC_MAXLIGHT;i++) buckets.push([]);
+  const sembrar=(i,lv)=>{ if(g[i]===0 && L[i]<lv){ L[i]=lv; buckets[lv].push(i); } };
+  for(let z=z0;z<=z1;z++) for(let x=x0;x<=x1;x++)     // cielo por arriba, columna a columna (igual que el global)
+    for(let y=NY-1;y>=0;y--){ const i=x+y*NX+z*sxy; if(g[i]!==0) break; sembrar(i,MC_MAXLIGHT); }
+  for(let y=0;y<NY;y++){                              // las 4 caras del MUNDO, solo si la caja llega hasta ellas
+    if(x0===0)    for(let z=z0;z<=z1;z++) sembrar(y*NX+z*sxy, MC_MAXLIGHT);
+    if(x1===NX-1) for(let z=z0;z<=z1;z++) sembrar((NX-1)+y*NX+z*sxy, MC_MAXLIGHT);
+    if(z0===0)    for(let x=x0;x<=x1;x++) sembrar(x+y*NX, MC_MAXLIGHT);
+    if(z1===NZ-1) for(let x=x0;x<=x1;x++) sembrar(x+y*NX+(NZ-1)*sxy, MC_MAXLIGHT);
+    // …y el CONTORNO: lo de fuera no ha cambiado, así que alumbra hacia dentro con su nivel −1. En Y no hace falta,
+    // porque la caja ya va del suelo al techo del mundo.
+    if(x0>0)      for(let z=z0;z<=z1;z++){ const i=x0+y*NX+z*sxy, o=i-1;   if(g[o]===0&&L[o]>1) sembrar(i,L[o]-1); }
+    if(x1<NX-1)   for(let z=z0;z<=z1;z++){ const i=x1+y*NX+z*sxy, o=i+1;   if(g[o]===0&&L[o]>1) sembrar(i,L[o]-1); }
+    if(z0>0)      for(let x=x0;x<=x1;x++){ const i=x+y*NX+z0*sxy, o=i-sxy; if(g[o]===0&&L[o]>1) sembrar(i,L[o]-1); }
+    if(z1<NZ-1)   for(let x=x0;x<=x1;x++){ const i=x+y*NX+z1*sxy, o=i+sxy; if(g[o]===0&&L[o]>1) sembrar(i,L[o]-1); }
+  }
+  for(let lvl=MC_MAXLIGHT; lvl>=1; lvl--){            // la misma difusión por buckets, pero SIN salirse de la caja
+    const b=buckets[lvl], nl=lvl-1;
+    for(let bi=0;bi<b.length;bi++){
+      const i=b[bi]; if(L[i]!==lvl) continue;         // fijada a un nivel mayor por otra ruta → obsoleta
+      const x=i%NX, y=((i/NX)|0)%NY, z=(i/sxy)|0;
+      if(x>x0){   const j=i-1;   if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(x<x1){   const j=i+1;   if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(y>0){    const j=i-NX;  if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(y<NY-1){ const j=i+NX;  if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(z>z0){   const j=i-sxy; if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(z<z1){   const j=i+sxy; if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+    }
+  }
+  let cx0=NX,cz0=NZ,cx1=-1,cz1=-1;                    // qué cambió DE VERDAD: casi siempre un puñado de celdas
+  for(let z=z0;z<=z1;z++) for(let y=0;y<NY;y++) for(let x=x0;x<=x1;x++)
+    if(prev[(x-x0)+y*w+(z-z0)*wy]!==L[x+y*NX+z*sxy]){
+      if(x<cx0)cx0=x; if(x>cx1)cx1=x; if(z<cz0)cz0=z; if(z>cz1)cz1=z;
+    }
+  return cx1<0? null : [cx0,cz0,cx1,cz1];
+}
+
 // Luz de BLOQUE emisiva (Parte B), gemela de mcComputeLight: los voxeles *#hex (isGlow) siembran luz que se difunde
 // por el AIRE (−1/paso, buckets), a RESOLUCIÓN DE BLOQUE (16³) desde las celdas que contienen ≥1 voxel emisivo. Escalar/
 // neutra (no tiñe). Sin brillo (mc.hasGlow=false) o glowLevel<=0 → BL.fill(0) y return: coste 0 cuando no hay emisivos.
 function mcComputeBlockLight(){
   const dim=mc.dim, g=mc.grid, NX=dim.x, NY=dim.y, NZ=dim.z, sxy=NX*NY, N=NX*NY*NZ;
-  const BL=(mc.blockLight&&mc.blockLight.length===N)?mc.blockLight:(mc.blockLight=new Uint8Array(N));
-  BL.fill(0);
+  const nueva=!(mc.blockLight&&mc.blockLight.length===N);
+  const BL=nueva? (mc.blockLight=new Uint8Array(N)) : mc.blockLight;
+  if(nueva) mc._blCero=true;          // recién creada: los typed arrays nacen a cero
   const lv0=Math.min(MC_MAXLIGHT, mc.glowLevel|0);
-  if(!mc.hasGlow || lv0<=0) return;   // sin emisivos: BL en 0, mcMeshChunk lo trata como sin luz de bloque
+  if(!mc.hasGlow || lv0<=0){          // sin emisivos: BL en 0, mcMeshChunk lo trata como sin luz de bloque
+    // …pero sin re-poner a cero lo que YA está a cero. Es un fill de N bytes en cada bloque puesto o roto: 3 ms en
+    // 512×40×512 para no cambiar ni un byte. La bandera vive aquí porque este es el único sitio que escribe BL.
+    if(!mc._blCero){ BL.fill(0); mc._blCero=true; }
+    return;
+  }
+  BL.fill(0); mc._blCero=false;
   const focus=Math.max(0, Math.min(1, mc.glowFocus));   // 0=omnidireccional (antorcha), 1=haz estrecho
   const NARROW=Math.round(focus*5);   // penalización de paso PERPENDICULAR al haz: 0=isótropo (diamante ancho), 5=haz fino
   // Dirección del haz POR CELDA (Int8 ×3, componentes de la normal neta ×100): se propaga célula a célula para que el
@@ -5686,20 +6056,23 @@ function mcResizeWorld(nx,ny,nz){
   mcMeshAll();
   if(mc.structures.length) mcRestampAll().then(()=>{ if(mc.active) mcUnstick(); });   // re-malla las estructuras en sus nuevas coords
   else if(mc.active) mcUnstick();
+  mcDirtyAll();                   // cambia la dim: la rejilla entera se remapea, no vale enumerar celdas
   mcScheduleSave();
   return mc.dim;
 }
 // Re-mesha el chunk que contiene (x,z) y, si la celda toca borde, el vecino (para que las caras del borde cuadren).
 function mcRemeshAround(x,z){
-  mcComputeLight();        // un bloque puesto/roto reabre o tapa el paso de luz → recalcular el skylight del mundo
-  mcComputeBlockLight();   // …e igual para la luz de bloque emisiva (el hueco reabierto puede dejarla pasar/taparla)
-  // La luz se difunde hasta MC_MAXLIGHT bloques (~1 chunk); re-mallar el vecindario 3×3 evita costuras de sombra en los bordes.
-  const cx=Math.floor(x/MC_CHUNK), cz=Math.floor(z/MC_CHUNK);
+  const luz=mcRelightBox(x,z);   // el skylight, SOLO alrededor: el barrido global costaba 684 ms en 512×40×512
+  mcComputeBlockLight();         // …e igual para la luz de bloque emisiva (el hueco reabierto puede dejarla pasar/taparla)
+  // Antes se re-mallaba un 3×3 fijo «por si acaso». Ahora se sabe qué celdas cambiaron de luz, así que se re-malla
+  // exactamente eso: normalmente 1 chunk en vez de 9. El ±1 en bloques es la GEOMETRÍA — si la celda tocada está en el
+  // borde del chunk, la cara que se ve es la del vecino y hay que rehacerlo también.
+  let ax0=x-1, az0=z-1, ax1=x+1, az1=z+1;
+  if(luz){ if(luz[0]<ax0)ax0=luz[0]; if(luz[1]<az0)az0=luz[1]; if(luz[2]>ax1)ax1=luz[2]; if(luz[3]>az1)az1=luz[3]; }
   const ncx=Math.ceil(mc.dim.x/MC_CHUNK), ncz=Math.ceil(mc.dim.z/MC_CHUNK);
-  for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
-    const nx=cx+dx, nz=cz+dz;
-    if(nx>=0&&nz>=0&&nx<ncx&&nz<ncz) mcMeshChunk(nx,nz);
-  }
+  const cx0=Math.max(0,Math.floor(ax0/MC_CHUNK)), cx1=Math.min(ncx-1,Math.floor(ax1/MC_CHUNK));
+  const cz0=Math.max(0,Math.floor(az0/MC_CHUNK)), cz1=Math.min(ncz-1,Math.floor(az1/MC_CHUNK));
+  for(let nz=cz0;nz<=cz1;nz++) for(let nx=cx0;nx<=cx1;nx++) mcMeshChunk(nx,nz);
   // Las estructuras hornean su shade al construir la instancia (posición-independiente): una edición del terreno que
   // reabre/tapa el paso de luz re-oscurece/aclara el terreno vecino pero NO la estructura por sí sola. Re-hornean
   // las cercanas re-muestreando la luz fresca (skylight + luz de bloque) → abrir el techo aclara también la figura.
@@ -6545,6 +6918,14 @@ async function mcRefreshSavedKey(key){
 }
 async function mcRefreshSaved(key){
   invalidateTex(key);                        // texDefs / texFaceCache / texReprCache / roomDataCache + caché del editor 3D
+  // El panel de Agentes NO pasa por el Mundo y tiene sus propias cachés: la geometría ya fusionada
+  // (agGeomCache, aquí) y el doc del dibujo que se quedó la librería de esqueletos (docsCache, en el
+  // snippet — por eso se le PIDE a ella que lo suelte en vez de hurgarle dentro). Sin esto, retocar
+  // una pieza y volver al panel seguía enseñando el dibujo viejo aunque el fichero ya estuviera bien.
+  // Va ANTES del corte por `mc.gl`: el preview del panel tira sin abrir el Mundo, y ahí no se llegaría.
+  agGeomCache.clear();                       // se rehace sola al dibujar: son 6 caras fusionadas por pieza
+  try{ if(window.game && game.esqueletos && game.esqueletos.olvidarDibujo) game.esqueletos.olvidarDibujo(key); }catch(e){}
+  if(agDoc) agPreparar();                    // el panel está abierto ahora mismo: que se re-monte
   delete mc.structs[key];                    // huella gruesa (mcStructCells) y meshRot ya horneado
   mc.catalog=null; try{ await mcBuildCatalog(); }catch(e){}   // el selector lee mc.catalog una sola vez y lo cachea
   if(!mc.gl) return;                          // el Mundo no se ha abierto en esta sesión: no hay nada horneado que tocar
@@ -6567,7 +6948,7 @@ function mcRemoveStruct(s, quiet){
   mcFreeStruct(s);
   const i=mc.structures.indexOf(s); if(i>=0) mc.structures.splice(i,1);
   if(hadGlow){ mcRecomputeHasGlow(); mcComputeBlockLight(); mcMeshAll(); }   // se fue una fuente: apagar paredes que encendía (terreno) y re-oscurecer estructuras vecinas requiere restamp aparte
-  if(!quiet){ mcScheduleSave(); toast('Estructura retirada'); }
+  if(!quiet){ mcDirtyHeader(); mcScheduleSave(); toast('Estructura retirada'); }
 }
 // --- Historial de edición (z=deshacer / Z=rehacer) ---
 // Entradas: {t:'b',x,y,z,before,after} (bloque) · {t:'bb',edits:[{x,y,z,before,after}]} (pegado en bloque) · {t:'s+'|'s-', sp:{key,ox,oy,oz,rot}} (estampar/retirar estructura).
@@ -6585,6 +6966,7 @@ async function mcApplyHist(en, forward){
       else { const s=mcFindStruct(en.sp); if(s) mcRemoveStruct(s, true); }
     }
   } finally { mc.histLock=false; }
+  if(en.t==='s+' || en.t==='s-') mcDirtyHeader();
   mcScheduleSave();
 }
 async function mcUndo(){ if(mc.histBusy) return; if(!mc.hist.length){ toast('Nada que deshacer'); return; }
@@ -6734,7 +7116,7 @@ function mcRotateSelBox(){
         const after=rotated.get(x+','+y+','+z)||0;
         const before=mc.grid[mcIdx(x,y,z)];
         if(before===after) continue;
-        mc.grid[mcIdx(x,y,z)]=after; edits.push({x,y,z,before,after});
+        mc.grid[mcIdx(x,y,z)]=after; mcDirty(x,y,z); edits.push({x,y,z,before,after});
       }
   if(!edits.length){ toast('Nada que rotar'); return false; }
   mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave();
@@ -6764,7 +7146,7 @@ async function mcPasteWorld(){
     if(wx<minx)minx=wx; if(wy<miny)miny=wy; if(wz<minz)minz=wz;                // caja de lo pegado, para dejarlo seleccionado
     if(wx>maxx)maxx=wx; if(wy>maxy)maxy=wy; if(wz>maxz)maxz=wz;
     const before=mc.grid[mcIdx(wx,wy,wz)]; if(before===id) continue;
-    mc.grid[mcIdx(wx,wy,wz)]=id; edits.push({x:wx,y:wy,z:wz,before,after:id});
+    mc.grid[mcIdx(wx,wy,wz)]=id; mcDirty(wx,wy,wz); edits.push({x:wx,y:wy,z:wz,before,after:id});
     if(isColor) fellBack++;
   }
   if(minx===Infinity){ toast('Nada colocado (fuera del mapa o sin material)'); return; }
@@ -6797,11 +7179,12 @@ function mcSaveNote(){
   if(mc.noteCell){ const k=mcNoteKey(mc.noteCell), txt=$('#mc-note-text').value.trim();
     if(txt){ mc.notes[k]=txt.slice(0,MC_NOTE_MAX); toast('Nota guardada'); }
     else if(mc.notes[k]){ delete mc.notes[k]; toast('Nota borrada'); }   // guardar en blanco = borrar
+    mcDirtyHeader();
     mcScheduleSave();
   }
   mcCloseNote();
 }
-function mcDeleteNote(){ if(mc.noteCell){ delete mc.notes[mcNoteKey(mc.noteCell)]; mcScheduleSave(); toast('Nota borrada'); } mcCloseNote(); }
+function mcDeleteNote(){ if(mc.noteCell){ delete mc.notes[mcNoteKey(mc.noteCell)]; mcDirtyHeader(); mcScheduleSave(); toast('Nota borrada'); } mcCloseNote(); }
 
 function mcShowTraceModal(){
   if(!mc.noteCell) return;
@@ -6910,7 +7293,7 @@ async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet){
     }
   }
   const rec=await mcStructCells(srcKey);
-  if(!quiet){ mcPushHist({t:'s+', sp:{key:srcKey,ox,oy,oz,rot}}); mcUnstick(); mcScheduleSave(); toast('Estructura colocada · '+rec.count+' celdas'); }
+  if(!quiet){ mcPushHist({t:'s+', sp:{key:srcKey,ox,oy,oz,rot}}); mcUnstick(); mcDirtyHeader(); mcScheduleSave(); toast('Estructura colocada · '+rec.count+' celdas'); }
 }
 const MC_SLOTS=9;                                     // ranuras de la hotbar (teclas 1-9)
 // Pinta las 9 ranuras desde mc.hotbar (id de bloque, 0=vacía). Clic izq: vacía→selector, llena→seleccionar;
@@ -7018,7 +7401,33 @@ function mcRelock(){ mcLockPointer(); }                // elegir un bloque/estru
 // Mapa elegido por URL: /map/<nombre> selecciona un mundo persistente propio; sin /map/ (o /map/default) = el
 // mundo «sagrado» de siempre. mcWorldUrl() añade ?map=<nombre> a /api/mundo para cargar/guardar ESE mundo.
 function mcMapName(){ const m=location.pathname.match(/^\/map\/([^\/?#]+)/); return m ? decodeURIComponent(m[1]) : 'default'; }
-function mcWorldUrl(){ const n=mcMapName(); return (n && n.toLowerCase()!=='default') ? '/api/mundo?map='+encodeURIComponent(n) : '/api/mundo'; }
+function mcMundoUrl(sufijo){                    // '' | '/vox' | '/edits' | '/cabecera'
+  const n=mcMapName();
+  return '/api/mundo'+(sufijo||'') + ((n && n.toLowerCase()!=='default') ? '?map='+encodeURIComponent(n) : '');
+}
+function mcWorldUrl(){ return mcMundoUrl(''); }
+function mcVoxUrl(){ return mcMundoUrl('/vox'); }
+// Trae el mundo: cabecera (kilobytes) + rejilla densa (21 MB crudos, ~0,35 MB gzipeados por la red).
+// Un mundo v1, o un servidor que todavía no sirve /api/mundo/vox, cae solo al camino de siempre.
+async function mcFetchWorld(){
+  let doc=null;
+  try{ doc=await fetch(mcWorldUrl(),{cache:'no-store'}).then(r=>r.json()); }catch(e){ return null; }
+  if(!doc || doc.format!=='voxelworld-2') return doc;
+  // Aquí SIN cache:'no-store', a propósito: el .vox lleva ETag y reabrir un mundo sin tocar es un 304.
+  try{
+    const r=await fetch(mcVoxUrl());
+    if(r.ok) doc.voxBuf=await r.arrayBuffer();
+  }catch(e){}
+  if(!doc.voxBuf) toast('No se pudo bajar la rejilla del mundo');
+  return doc;
+}
+// Solo para el informe de carga. En v2 hay que contar celdas no vacías (una pasada sobre tipados,
+// milisegundos); en v1 el número es el tamaño del diccionario.
+function mcCuentaVoxels(doc){
+  if(!doc) return 0;
+  if(doc.voxBuf){ const a=new Uint16Array(doc.voxBuf); let n=0; for(let i=0;i<a.length;i++) if(a[i]) n++; return n; }
+  return doc.voxels ? Object.keys(doc.voxels).length : 0;
+}
 // Serializa la rejilla densa a mapa disperso autocontenido (como el editor). Los bloques son todos assets
 // servidos (asset:…) → no hace falta embeber texturas.
 function mcSerialize(){
@@ -7027,24 +7436,43 @@ function mcSerialize(){
     const id=g[mcIdx(x,y,z)]; if(!id) continue;
     vox[x+','+y+','+z]='tex:'+mc.blockKey[id];
   }
-  // Las EFÍMERAS no son del mundo: las pone un snippet en vivo (las piezas de un agente articulado),
-  // no el dueño con el editor, y desaparecen al recargar. Si entraran aquí, cualquier guardado — el
-  // autosave de un bloque puesto a diez metros — las dejaría clavadas en mundo.json.
-  const structures=mc.structures.filter(s=>!s.efimera).map(s=>({key:s.key, x:s.ox, y:s.oy, z:s.oz, rot:s.rot|0}));   // estructuras: sala + posición + giro (se re-mallan al cargar)
-  return { format:'voxelworld-1', dim:{x:dim.x,y:dim.y,z:dim.z}, spawn:mc.spawn, voxels:vox, structures, notes:{...mc.notes} };   // t1 · notas post-it "x,y,z"→texto
+  return { format:'voxelworld-1', dim:{x:dim.x,y:dim.y,z:dim.z}, spawn:mc.spawn, voxels:vox, structures:mcStructuresDoc(), notes:{...mc.notes} };   // t1 · notas post-it "x,y,z"→texto
+}
+// Estructuras: sala + posición + giro (se re-mallan al cargar). Lo usan el doc completo y la
+// cabecera del guardado incremental, así que vive en un solo sitio.
+// Las EFÍMERAS no son del mundo: las pone un snippet en vivo (las piezas de un agente articulado),
+// no el dueño con el editor, y desaparecen al recargar. Si entraran aquí, cualquier guardado — el
+// autosave de un bloque puesto a diez metros — las dejaría clavadas en el mundo.
+function mcStructuresDoc(){
+  return mc.structures.filter(s=>!s.efimera).map(s=>({key:s.key, x:s.ox, y:s.oy, z:s.oz, rot:s.rot|0}));
 }
 function mcBake(doc){                          // hornea un mundo guardado a la rejilla densa + meshes
   if(mc.agents.size){ mcStopAgents('mapa recargado'); for(const a of mc.agents.values()) mcAgentFreeMesh(a); mc.agents.clear(); }   // otro mundo = otra rejilla
   const d=doc.dim||{}; mc.dim={x:(d.x|0)||96, y:(d.y|0)||40, z:(d.z|0)||96};
   mcClearStructures();
   mc.grid=new Uint16Array(mc.dim.x*mc.dim.y*mc.dim.z);
+  // Este mundo se puede guardar por trozos solo si el servidor ya lo tiene en voxelworld-2. Si no
+  // (servidor viejo, mundo todavía en v1), el primer guardado va entero — y aterriza en v2.
+  mc.v2 = !!doc.voxBuf;
+  mc.pend={vox:new Set(), header:false, full:!mc.v2};
   const key2id={}; for(let id=1;id<mc.blockKey.length;id++) key2id[mc.blockKey[id]]=id;
-  const vox=doc.voxels||{};
-  for(const k in vox){
-    const val=vox[k]; if(typeof val!=='string' || val.slice(0,4)!=='tex:') continue;
-    const id=key2id[val.slice(4)]; if(!id) continue;             // bloque fuera de la paleta actual → se ignora
-    const p=k.split(','), x=+p[0], y=+p[1], z=+p[2];
-    if(mcInside(x,y,z)) mc.grid[mcIdx(x,y,z)]=id;
+  if(doc.voxBuf){
+    // voxelworld-2: la rejilla llega como bytes con el MISMO layout que mcIdx, así que esto es
+    // volcar y remapear la paleta del fichero a la de esta sesión (mc.blockKey se reconstruye en
+    // cada arranque, sus ids no son estables). Una pasada sobre tipados, sin JSON.parse de 290 MB.
+    const src=new Uint16Array(doc.voxBuf), pal=doc.palette||[null];
+    const remap=new Uint16Array(pal.length);
+    for(let i=1;i<pal.length;i++) remap[i]=key2id[pal[i]]|0;      // fuera de la paleta actual → 0 (aire)
+    const g=mc.grid, n=Math.min(g.length, src.length);
+    for(let i=0;i<n;i++){ const p=src[i]; if(p) g[i]=remap[p]; }
+  }else{
+    const vox=doc.voxels||{};
+    for(const k in vox){
+      const val=vox[k]; if(typeof val!=='string' || val.slice(0,4)!=='tex:') continue;
+      const id=key2id[val.slice(4)]; if(!id) continue;             // bloque fuera de la paleta actual → se ignora
+      const p=k.split(','), x=+p[0], y=+p[1], z=+p[2];
+      if(mcInside(x,y,z)) mc.grid[mcIdx(x,y,z)]=id;
+    }
   }
   const s=doc.spawn||{x:mc.dim.x>>1, y:15, z:mc.dim.z>>1};
   mc.spawn=s; mc.pos=[s.x+0.5, s.y, s.z+0.5]; mc.vel=[0,0,0]; mc.onGround=false;
@@ -7063,9 +7491,8 @@ function mcBake(doc){                          // hornea un mundo guardado a la 
 // otra pestaña) sin volver al spawn. mcBake reubica al spawn, así que guardamos y restauramos tu sitio.
 async function mcReloadWorld(){
   if(!mc.active){ toast('Abre el Mundo primero'); return; }
-  let doc=null;
-  try{ doc=await fetch(mcWorldUrl(),{cache:'no-store'}).then(r=>r.json()); }catch(e){}
-  if(!doc || !doc.voxels){ toast('No se pudo recargar el mundo'); return; }
+  const doc=await mcFetchWorld();
+  if(!doc || !(doc.voxBuf || doc.voxels)){ toast('No se pudo recargar el mundo'); return; }
   // claves nuevas en el guardado ⇒ amplía la lista de bloques y recompón paleta/atlas (si no, mcBake las ignora)
   let grew=false;
   for(const v of Object.values(doc.voxels)){ const k=String(v).replace(/^tex:/,'');
@@ -7139,6 +7566,7 @@ game.buildTerrain=function(opts){
     if(cajas.length && enEstructura(x,y,z)){ saltados++; continue; }
     mc.grid[i] = (y===GH) ? idH : (y>=GH-3 ? idT : idR); puestos++;
   }
+  mcDirtyAll();          // se toca medio mundo: reescribirlo entero sale mas barato que enumerarlo
   mcMeshAll();                                                       // recalcula luz + malla todos los chunks
   if(typeof mcScheduleSave==='function') mcScheduleSave();
   toast('🌱 Terreno rellenado: '+puestos+' bloques');
@@ -7207,6 +7635,10 @@ const MC_MAT_ALIAS={ stone:'asset:assets/roca.vox.json', smooth_stone:'asset:ass
   planks:'asset:assets/tablones.vox.json', sand:'asset:assets/arena.vox.json',
   log:'asset:assets/tronco.vox.json', obsidian:'asset:assets/obsidiana.vox.json',
   red_concrete:'asset:assets/red_concrete.vox.json', red_concrete_block:'asset:assets/red_concrete.vox.json' };
+// Foto de los alias de fábrica ANTES de que mcIndexAssets añada los del índice. Un nombre corto de la
+// ficha no puede pisar ninguno de estos: un script que dice 'stone' tiene que seguir poniendo roca.
+// El servidor comprueba lo mismo al guardar (ALIAS_FIJOS, server.py) — si añades uno aquí, allí también.
+const MC_MAT_ALIAS_FIJOS = new Set(Object.keys(MC_MAT_ALIAS));
 let mcMat2id={}, mcWarnedMat={};                    // caché material→id de la ráfaga + avisos ya dados
 
 function mcResolveMat(material){
@@ -7222,7 +7654,10 @@ function mcResolveMat(material){
   if(!key) key = m;
   let id = mc.blockKey.indexOf(key); if(id<1) id = mc.name2id[m] || mc.name2id[mLow] || -1;
   if(id<1){                                          // desconocido (p.ej. '#hex' no aplica al terreno) → roca + aviso 1 vez
-    if(!mcWarnedMat[m]){ console.warn('setVoxel: material desconocido "'+m+'" → uso roca. Precarga texturas con game.addMaterial("'+m+'") o usa un nombre de la paleta.'); mcWarnedMat[m]=true; }
+    // El aviso va TAMBIÉN por toast: el dueño construye desde el móvil, y ahí un console.warn es
+    // indistinguible de «el script no hace nada» — que es justo cómo se ve un muro entero de roca
+    // cuando el nombre del material estaba mal. La ficha de la galería dice cuál es el bueno.
+    if(!mcWarnedMat[m]){ console.warn('setVoxel: material desconocido "'+m+'" → uso roca. Precarga texturas con game.addMaterial("'+m+'") o usa un nombre de la paleta.'); toast('Material desconocido «'+m+'» → uso roca (mira la ficha en la galería)'); mcWarnedMat[m]=true; }
     id=mc.name2id['roca']||1;
   }
   mcMat2id[m]=id; return id;
@@ -7276,12 +7711,88 @@ game.addMaterial=async function(key,name){
   return id;
 };
 let mcSaveT=0;
-function mcScheduleSave(){ clearTimeout(mcSaveT); mcSaveT=setTimeout(mcSaveWorld, 900); }   // debounce (serializa dentro)
+// Interruptor del autoguardado. En un mundo grande (fps: 512×40×512) serializar entero cuesta segundos,
+// asi que hace falta poder apagarlo y guardar a mano. Es un tunable de consola, no UI:
+//   game.autosave(false)   game.autosave()  → estado    game.saveWorld()  → guarda YA
+let mcAutosave = localStorage.getItem('vf_mcAutosave') !== '0';
+function mcScheduleSave(){ if(!mcAutosave) return; clearTimeout(mcSaveT); mcSaveT=setTimeout(mcSaveWorld, 900); }   // debounce (serializa dentro)
+// Manda SOLO lo que ha cambiado. Poner un bloque pasa de 18,5 s de congelacion y un POST de 257 MB
+// a un POST de ~1 KB: el servidor hace un seek y escribe 2 bytes en el .vox.
+// El pendiente se vacia unicamente al confirmar el 200; si el guardado falla se reintenta en el
+// siguiente ciclo con lo que se haya acumulado entre medias.
+let mcSaveBusy=null;                                             // un guardado en vuelo: los demas esperan a ese
 async function mcSaveWorld(){
-  if(!mc.grid) return;
-  try{ await fetch(mcWorldUrl(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(mcSerialize())}); }
-  catch(e){ toast('No se pudo guardar el mundo'); }
+  if(!mc.grid) return false;
+  if(mcSaveBusy) return mcSaveBusy.then(()=>mcSaveWorld());      // encadenar, no solapar POSTs sobre el mismo fichero
+  mcSaveBusy = mcSaveWorldAhora().finally(()=>{ mcSaveBusy=null; });
+  return mcSaveBusy;
 }
+async function mcSaveWorldAhora(){
+  const p=mc.pend;
+  if(!p || p.full || !mc.v2) return mcSaveWorldFull();
+  // Se saca el pendiente ANTES del await y se pone uno nuevo en su sitio: lo que se construya
+  // mientras el POST viaja se acumula aparte en vez de perderse al vaciar.
+  const cells=p.vox, header=p.header;
+  p.vox=new Set(); p.header=false;
+  const devolver=()=>{ for(const k of cells) p.vox.add(k); if(header) p.header=true; };
+
+  const edits=[];
+  for(const k of cells){
+    const c=k.split(','), x=+c[0], y=+c[1], z=+c[2];
+    if(!mcInside(x,y,z)) continue;
+    const id=mc.grid[mcIdx(x,y,z)];
+    edits.push([x,y,z, id ? mc.blockKey[id] : '']);              // '' = aire
+  }
+  if(!edits.length && !header) return true;                      // nada que guardar
+  try{
+    if(edits.length){
+      const r=await fetch(mcMundoUrl('/edits'),
+        {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({edits})});
+      // 409 = el servidor no tiene este mundo en v2 (o el .vox se quedo a medias): se reescribe
+      // entero, que ademas lo deja en v2. Asi una edicion no se pierde nunca por el formato.
+      if(r.status===409){ mc.v2=false; mcDirtyAll(); return mcSaveWorldFull(); }
+      if(!r.ok) throw new Error('edits '+r.status);
+    }
+    if(header){
+      const r=await fetch(mcMundoUrl('/cabecera'),
+        {method:'POST',headers:{'Content-Type':'application/json'},
+         body:JSON.stringify({spawn:mc.spawn, structures:mcStructuresDoc(), notes:{...mc.notes}})});
+      if(r.status===409){ mc.v2=false; mcDirtyAll(); return mcSaveWorldFull(); }
+      if(!r.ok) throw new Error('cabecera '+r.status);
+    }
+  }catch(e){
+    devolver();                                                  // se reintenta en el siguiente ciclo
+    toast('No se pudo guardar el mundo');
+    return false;
+  }
+  return true;
+}
+// El camino de siempre: el mundo entero como doc voxelworld-1. Sigue haciendo falta para un mundo
+// recien nacido, para un servidor que aun no entiende v2, y cuando se ha tocado tanto que enumerar
+// celdas sale mas caro que reescribir (game.buildTerrain, wipeMap).
+async function mcSaveWorldFull(){
+  try{ await fetch(mcWorldUrl(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(mcSerialize())}); }
+  catch(e){ toast('No se pudo guardar el mundo'); return false; }
+  mc.v2=true;                                                    // el servidor siempre lo escribe en v2
+  if(mc.pend){ mc.pend.full=false; mc.pend.header=false; mc.pend.vox.clear(); }
+  return true;
+}
+game.autosave=function(on){
+  if(on===undefined) return mcAutosave;
+  mcAutosave=!!on; localStorage.setItem('vf_mcAutosave', mcAutosave?'1':'0');
+  if(!mcAutosave) clearTimeout(mcSaveT);                       // el que estuviera armado ya no dispara
+  toast(mcAutosave ? '💾 Autoguardado ON' : '⏸️ Autoguardado OFF · usa game.saveWorld()');
+  return mcAutosave;
+};
+// Guarda AHORA aunque el autoguardado este apagado (no pasa por mcScheduleSave a proposito).
+game.saveWorld=async function(){
+  if(!mc.grid){ toast('El Mundo no esta abierto'); return false; }
+  clearTimeout(mcSaveT);
+  toast('Guardando el mundo…');
+  const ok = await mcSaveWorld();
+  if(ok) toast('💾 Mundo guardado');                           // el fallo ya lo avisa mcSaveWorld
+  return ok;
+};
 function mcTick(now){
   if(!mc.active) return;
   const dt=mc.last ? (now-mc.last)/1000 : 0;
@@ -7357,11 +7868,10 @@ async function openWorld(){
   mcLoadStop();
   if(!mc.grid){                       // primera entrada: paleta+atlas, hotbar y mundo (guardado o terreno plano)
     mcShowLoading('Descargando el mundo…'); await mcYield();   // pinta el overlay antes del trabajo pesado (evita el «solo cielo»)
-    mcLoadPhase('Red: descargar mundo.json');
-    let doc=null;
-    try{ doc=await fetch(mcWorldUrl(),{cache:'no-store'}).then(r=>r.json()); }catch(e){}
+    mcLoadPhase('Red: descargar mundo');
+    let doc=await mcFetchWorld();
     mcLoadStop();
-    mcLoadNote('Mundo: '+(doc&&doc.voxels?Object.keys(doc.voxels).length:0)+' voxels guardados, '
+    mcLoadNote('Mundo: '+mcCuentaVoxels(doc)+' voxels guardados, '
       +(doc&&doc.structures?Object.keys(doc.structures).length:0)+' estructuras, '
       +(doc&&doc.notes?Object.keys(doc.notes).length:0)+' notas.');
     // Lista de bloques = defaults ∪ keys del loadout ∪ keys presentes en el mundo guardado (así todo
@@ -7371,7 +7881,11 @@ async function openWorld(){
     const addKey=(k,n)=>{ if(k && !mc.blocks.some(b=>b.key===k)) mc.blocks.push({name:n||k, key:k}); };
     const loadout=mcLoadoutKeys();
     if(loadout) loadout.forEach(k=>addKey(k));
-    if(doc && doc.voxels) for(const v of Object.values(doc.voxels)) addKey(String(v).replace(/^tex:/,''));
+    // Los materiales que el mundo usa de verdad: en v2 son la paleta de la cabecera (ya deduplicada),
+    // en v1 hay que barrer el diccionario entero. Sin esto, mcBake no encontraría su clave y el mundo
+    // se abriría lleno de agujeros.
+    if(doc && doc.palette) for(const k of doc.palette) addKey(k);
+    else if(doc && doc.voxels) for(const v of Object.values(doc.voxels)) addKey(String(v).replace(/^tex:/,''));
     mcLoadStop();
     mcLoadNote('Paleta: '+mc.blocks.length+' bloques ('+MC_BLOCKS.length+' por defecto + los de la hotbar'
       +' + los presentes en el mundo guardado).');
@@ -7688,7 +8202,7 @@ document.addEventListener('mousemove',e=>{
   // Reemerge la hotbar si el jugador está PARADO y mueve el ratón (gesto de «volver a mirar el inventario»).
   if(mc.hbTarget===0 && Math.hypot(mc.vel[0],mc.vel[2])<0.6 && (Math.abs(e.movementX)+Math.abs(e.movementY))>1) mcRevealHotbar();
 });
-window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || !$('#mc-note').hidden || !$('#snip-modal').hidden || (e.target && e.target.matches && e.target.matches('input,select,textarea'))) return;   // selector/editor de nota/código abierto ⇒ no mover/seleccionar
+window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || !$('#mc-note').hidden || !$('#snip-modal').hidden || !$('#ag-modal').hidden || (e.target && e.target.matches && e.target.matches('input,select,textarea'))) return;   // selector/editor de nota/código/agentes abierto ⇒ no mover/seleccionar
   if(/^[1-9]$/.test(e.key)){ const i=+e.key-1;
     // Alt+número: abre el selector de esa ranura (sin Esc+clic derecho); si no, selecciona la ranura.
     if(i<mc.hotbar.length){ if(e.altKey) mcOpenPicker(i); else { mc.sel=i; mcSelectSlot(); } }
@@ -7718,7 +8232,7 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     if(document.pointerLockElement!==mc.canvas){ mcLockPointer(); }
   }
 });
-window.addEventListener('keyup',e=>{ if(!mc.active || !$('#snip-modal').hidden) return; mc.keys[e.key.toLowerCase()]=false; });
+window.addEventListener('keyup',e=>{ if(!mc.active || !$('#snip-modal').hidden || !$('#ag-modal').hidden) return; mc.keys[e.key.toLowerCase()]=false; });
 
 // --- F4b · controles táctiles: sin teclado no se puede andar por el Mundo ---
 // Una pantalla táctil no tiene ni pointer-lock ni WASD, así que desde un móvil el Mundo se veía pero
@@ -7854,7 +8368,7 @@ function mcAgentSetBlock(x,y,z,id){
   if(!mc.grid || !mcInside(x,y,z)) return false;
   const i=mcIdx(x,y,z), prev=mc.grid[i];
   if(prev===id) return false;
-  mc.grid[i]=id;
+  mc.grid[i]=id; mcDirty(x,y,z);
   mcAgentSaveDirty=true;
   if(prev===0 || id===0) mcRemeshAround(x,z);   // cambia la luz: recomputar + re-mallar 3×3 (raro: los agentes pintan)
   else mcAgentDirty.add(Math.floor(x/MC_CHUNK)+','+Math.floor(z/MC_CHUNK));
@@ -7961,7 +8475,7 @@ function mcAgentNoteForce(a, texto, celda){
     const j=mc.notes[k]+' | '+txt;
     mc.notes[k] = j.length<=MC_NOTE_MAX ? j : txt;
   } else mc.notes[k]=txt;
-  a.stats.notes++; a._noteAt=performance.now(); mcAgentSaveDirty=true;
+  a.stats.notes++; a._noteAt=performance.now(); mcAgentSaveDirty=true; mcDirtyHeader();
   return true;
 }
 function mcAgentNote(a, texto, celda){              // con cuota antiinundación (noteMax / noteMinMs)
@@ -8350,7 +8864,7 @@ window.stopAgents=game.agents.stopAll;
 game.pruneAgentNotes=function(id){
   const pre='['+String(id)+'] '; let n=0;
   for(const k of Object.keys(mc.notes)) if(String(mc.notes[k]).startsWith(pre)){ delete mc.notes[k]; n++; }
-  if(n){ mcScheduleSave(); mcUpdateNoteView(); }
+  if(n){ mcDirtyHeader(); mcScheduleSave(); mcUpdateNoteView(); }
   console.log(n+' nota(s) de "'+id+'" borradas'); return n;
 };
 // game.agentSpeed = multiplicador global de VELOCIDAD: divide el tickMs de cada agente, así que 2 = el doble de
@@ -8392,7 +8906,14 @@ $('#meta-role').textContent=state.meta.role||'';
 $('#meta-role').hidden=!state.meta.role;
 setTool(state.tool);
 isoCv.style.cursor='ns-resize';
-syncLayer(); syncColor(); updateZoomLabel(); updateUndoUI(); render(); resizeEdit();
+syncLayer(); syncColor(); updateZoomLabel(); updateUndoUI(); updateInfo();
+// Aquí NO se llama a render() ni a resizeEdit(): setMode('3d') (la línea de abajo) ya hace
+// resizeEdit3d + drawEdit3d + drawIso, y resizeEdit dibuja un lienzo 2D que se oculta acto seguido.
+// Dejarlos duplicaba el arranque: render() encola un rAF que repite drawIso y drawEdit3d DESPUÉS de
+// que setMode ya los hubiera pintado, así que el dibujo entero se rasterizaba dos veces. Con un modelo
+// grande eso es el congelado de varios segundos que aparecía ~1 s después de refrescar (el primer
+// segundo la página va fina porque el rAF todavía no ha entrado). Si se vuelve a Capas, setMode llama
+// a resizeEdit() por su rama, así que el lienzo 2D se dimensiona y se pinta cuando de verdad se ve.
 setMode('3d');   // arrancar en Edición 3D (no en Capas)
 // URL /map/<nombre>: entrar directo a ese mundo (persistente y propio). Sin /map/ arranca en el editor como siempre.
 if(/^\/map\//.test(location.pathname)) openWorld();

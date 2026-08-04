@@ -105,9 +105,9 @@ const entrada = () => leerIdx().find(a => a.id === ID);
 
   console.log('\n--- ' + URL + ' (galeria de Texturas) ---\n');
 
-  test('la tarjeta de un asset ofrece Cargar, Renombrar y Borrar', () => {
+  test('la tarjeta de un asset ofrece Cargar, Ficha, Renombrar y Borrar', () => {
     assert(botones, 'no aparecio la tarjeta del asset de prueba en la galeria');
-    assert(botones.join(',') === 'Cargar,Renombrar,Borrar', 'los botones eran: ' + botones.join(','));
+    assert(botones.join(',') === 'Cargar,📋 Ficha,Renombrar,Borrar', 'los botones eran: ' + botones.join(','));
   });
 
   test('Renombrar cambia el rotulo en assets/index.json', () => {

@@ -107,8 +107,6 @@ body{
 .size-row input:focus{outline:0; border-color:var(--accent)}
 .size-row span{color:var(--muted); font-size:11px}
 .size-row .btn{margin-left:auto}
-.rotobj-row{display:flex; gap:6px}
-.rotobj-row .btn{flex:1; justify-content:center; font-size:12px}
 .dims{margin:2px 0 0; color:var(--muted); font-size:12px}
 .roster li > div{display:flex; flex-direction:column; gap:1px; min-width:0}
 .roster li > div span:first-child{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
@@ -222,16 +220,29 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .rot-float[hidden]{display:none}
 .rot-float .btn{font-size:15px; padding:6px 11px}
 .rot-float .btn.on{background:var(--accent); border-color:var(--accent); color:#141821; font-weight:600}
-/* subir/bajar capa flotante (vista 2D, arriba-derecha) */
-.layer-float{
+/* Columna flotante del borde derecho del lienzo: capa arriba, girar objeto debajo. Las dos cajas
+   comparten esta columna en vez de posicionarse cada una por su cuenta, así se alinean solas y al
+   ocultarse una la otra sube sin dejar un hueco. */
+.stage-side{
   position:absolute; right:12px; top:12px; z-index:5;
-  display:flex; flex-direction:column; align-items:center; gap:4px;
+  display:flex; flex-direction:column; align-items:stretch; gap:8px;
+}
+/* En 3D la paleta de herramientas ocupa esa misma esquina (.tool-float, 78 px de ancho) y el giro le
+   caía encima. Se aparta a su izquierda mientras la paleta esté a la vista; en 2D vuelve al borde.
+   Va por hermano posterior y no por una clase de modo para que dependa de lo que SE VE, no de un
+   estado que haya que acordarse de sincronizar. */
+#tool-float:not([hidden]) ~ .stage-side{ right:98px }
+.layer-float, .rotobj-float{
+  display:flex; flex-direction:column; align-items:stretch; gap:4px;
   background:rgba(14,17,25,.82); border:1px solid var(--line);
   border-radius:10px; padding:6px; backdrop-filter:blur(3px);
 }
-.layer-float[hidden]{display:none}
-.layer-float .btn{padding:4px 12px; font-size:14px}
-.layer-float #lf-label{font-size:11px; color:var(--muted); font-family:ui-monospace,monospace}
+.layer-float[hidden], .rotobj-float[hidden]{display:none}
+.layer-float .btn, .rotobj-float .btn{padding:4px 12px; font-size:14px; justify-content:center}
+.layer-float #lf-label{font-size:11px; color:var(--muted); font-family:ui-monospace,monospace; text-align:center}
+/* compacto: los tres giros ocupan lo mismo que ▲ 1/16 ▼ */
+.rotobj-float .btn{padding:3px 12px; font-size:12px; letter-spacing:.5px}
+.rotobj-cap{font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; text-align:center}
 .tool-float .tool{
   width:64px; background:var(--panel-2); border:1px solid var(--line); color:var(--ink);
   border-radius:8px; padding:7px 4px; cursor:pointer; font-size:17px;
@@ -349,8 +360,43 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .hab-name{font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .hab-sub{color:var(--muted); font-size:11px; margin:0}
 .hab-date{color:var(--muted); font-size:10px; margin:0; opacity:.85}
-.hab-acts{display:flex; gap:5px; margin-top:2px}
-.hab-acts .btn{flex:1; padding:5px 4px; font-size:11px; justify-content:center}
+/* wrap: con el cuarto botón («Ficha») cuatro no caben en una tarjeta a 390px */
+.hab-acts{display:flex; gap:5px; margin-top:2px; flex-wrap:wrap}
+.hab-acts .btn{flex:1 1 45%; padding:5px 4px; font-size:11px; justify-content:center}
+
+/* ---------- Ficha de un asset ---------- */
+.ficha{max-width:640px; margin:0 auto; display:flex; flex-direction:column; gap:16px}
+.ficha-top{display:flex; gap:14px; align-items:flex-start}
+.ficha-thumb{
+  width:96px; height:96px; flex:none; border-radius:8px; border:1px solid var(--line);
+  background:radial-gradient(120% 90% at 50% 20%,#1a2030,#0d0f16);
+}
+.ficha-datos{margin:0; flex:1; min-width:0; display:grid; grid-template-columns:auto 1fr;
+  gap:3px 10px; font-size:12px; align-content:start}
+.ficha-datos dt{color:var(--muted)}
+.ficha-datos dd{margin:0; overflow:hidden; text-overflow:ellipsis}
+.ficha-sec{border-top:1px solid var(--line); padding-top:12px}
+.ficha-sec h3{margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--accent); font-weight:600}
+.ficha-copy{display:flex; gap:6px; align-items:center; margin-bottom:6px}
+.ficha-copy input{
+  flex:1; min-width:0; padding:7px 9px; border-radius:8px;
+  border:1px solid var(--line); background:#0d1018; color:var(--fg);
+  font-family:ui-monospace,monospace; font-size:12px;
+}
+.ficha-copy input[readonly]{color:var(--muted)}
+.ficha-copy .btn{flex:none; padding:7px 10px}
+.ficha textarea{
+  width:100%; box-sizing:border-box; padding:7px 9px; border-radius:8px; resize:vertical;
+  border:1px solid var(--line); background:#0d1018; color:var(--fg); font:inherit; font-size:12px;
+}
+.ficha-hint{margin:0 0 6px; color:var(--muted); font-size:11px}
+.ficha-hint code{font-family:ui-monospace,monospace}
+.ficha-error{margin:0 0 8px; color:#ff9a8b; font-size:12px}
+.ficha-error[hidden]{display:none}
+.ficha-claves{margin:0; padding-left:18px; font-size:12px; font-family:ui-monospace,monospace}
+.ficha-claves li{color:var(--muted)}
+.ficha-claves li.es-alias{color:var(--accent)}
 #btn-habitantes{font-size:11px; padding:3px 8px; text-transform:none; letter-spacing:0}
 .modal-stage{
   flex:1; min-height:0; display:flex; align-items:center; justify-content:center;
@@ -433,7 +479,10 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 /* ---------- Agentes articulados (fase 3) ---------- */
 .tab-agente{color:#d9a03a; font-weight:600; border:1px solid color-mix(in srgb, #d9a03a 45%, transparent)}
 .tab-agente:hover{color:#141821; background:#d9a03a}
-#ag-modal{background:#0a0c12}
+/* Con Alt+A el panel se abre SOBRE el Mundo, y #mc-modal va después en el HTML: a igual z-index (40)
+   ganaba el Mundo y el panel no se veía. Se cuela entre medias — Mundo(40) < agentes(45) < código(50),
+   que es el orden en que se abren unos sobre otros. */
+#ag-modal{background:#0a0c12; z-index:45}
 .ag-body{flex:1; min-height:0; display:flex}
 .ag-list-pane{width:200px; flex:0 0 200px; display:flex; flex-direction:column; gap:8px;
   padding:12px; background:#12151d; border-right:1px solid var(--line); overflow:auto}
@@ -499,6 +548,15 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
    que no se lea como un número elegido por alguien. Al tocarlo se escribe y deja de ser gris. */
 .ag-fld input.def{color:var(--muted); font-style:italic}
 .ag-fld small{color:var(--muted); font-size:10px}
+/* La ayuda de un campo. El texto vive en el `title` del <label> (el globo de siempre al pasar por
+   encima) y además en un «?» que lo despliega debajo. Se abre con :focus y NO con :hover para que
+   las dos vías no se pisen, y sobre todo porque en el móvil no hay ni hover ni globo. */
+.ag-fld.con-ayuda{flex-wrap:wrap}
+.ag-i{flex:0 0 auto; width:15px; height:15px; padding:0; border-radius:50%; border:1px solid var(--line);
+      background:transparent; color:var(--muted); font:700 9px/1 inherit; cursor:help}
+.ag-i:hover,.ag-i:focus{color:#d9a03a; border-color:#d9a03a; outline:none}
+.ag-tip{flex:0 0 100%; display:none; margin:3px 0 1px; font-size:10.5px; line-height:1.45}
+.ag-i:focus~.ag-tip{display:block}
 .ag-nuevo{display:inline-block; font-size:9px; font-weight:700; letter-spacing:.05em; color:#0a0c12;
   background:#d9a03a; border-radius:4px; padding:1px 5px}
 /* Los chips del preview: qué sabe hacer el bicho, sin abrir ninguna tarjeta. */

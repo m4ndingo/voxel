@@ -518,5 +518,77 @@
     "file": "assets/cola-perro.vox.json",
     "icon": "🐕",
     "group": "Agentes"
+  },
+  {
+    "id": "cabeza-de-personaje",
+    "name": "Cabeza de Personaje",
+    "role": "Pieza de agente · cabeza (15³, gira sobre el centro de su caja)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 15,
+      "y": 15,
+      "z": 15
+    },
+    "file": "assets/cabeza-de-personaje.vox.json"
+  },
+  {
+    "id": "brazo-de-personaje",
+    "name": "Brazo de personaje",
+    "role": "Pieza de agente · brazo (pivote 1 = hombro +X, 2 = hombro -X)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 5,
+      "y": 5,
+      "z": 14
+    },
+    "file": "assets/brazo-de-personaje.vox.json"
+  },
+  {
+    "id": "pierna-de-personaje",
+    "name": "Pierna de personaje",
+    "role": "Pieza de agente · pierna (pivote 1 = cadera +X, 2 = cadera -X)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 5,
+      "y": 5,
+      "z": 12
+    },
+    "file": "assets/pierna-de-personaje.vox.json"
+  },
+  {
+    "id": "torso-de-personaje",
+    "name": "Torso de personaje",
+    "role": "Pieza de agente · raíz del esqueleto",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 12,
+      "y": 8,
+      "z": 14
+    },
+    "file": "assets/torso-de-personaje.vox.json"
+  },
+  {
+    "id": "hormig-n-verde-hojas",
+    "name": "Hormigón Verde / Hojas",
+    "role": "Bloque · green_concrete / oak_leaves",
+    "icon": "🟩",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hormig-n-verde-hojas.vox.json",
+    "description": "",
+    "alias": "green_concrete"
   }
 ]
