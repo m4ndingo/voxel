@@ -20,6 +20,16 @@ const state = {
   // se pinta en el editor (el 1º dibujado es el nº 1). Viajan en el JSON como `pivotes`
   // (clave de primer nivel) y el snippet elige cuál usar; por defecto, el primero.
   pivotes: [],
+  // Caras: máscara POR VOXEL de qué caras se pintan, "x,y,z" -> entero 0..63 (bit i = CUBE_FACES[i]).
+  // Solo entran los voxels que NO llevan las 6 (63 se omite), así que un Map vacío = todo como siempre.
+  // Sirve para convertir un voxel en un plano (mata de hierba, bandera, cartel). Viaja en el JSON
+  // como `caras`, clave de primer nivel hermana de `pivotes`.
+  caras: new Map(),
+  // Atravesable: el jugador cruza la pieza sin frenarse. Se ve, da sombra, se apunta, se rompe y sale en
+  // rayos-X — lo único que pierde es la colisión. NO se deduce de `caras`, y los dos casos reales dicen
+  // por qué: el tallo de la mata es un voxel normal de seis caras y también hay que atravesarlo, mientras
+  // que una vidriera enmascarada tiene que seguir chocando. Viaja en el JSON como `atravesable`.
+  atravesable: false,
 };
 
 // Paletas temáticas conmutables. Cada color es [hex, nombre]; la elegida se
@@ -154,13 +164,19 @@ function resizeGrid(x,y,z){
   const before = snapshot();
   for(const k of [...state.voxels.keys()]){
     const [vx,vy,vz]=k.split(',').map(Number);
-    if(vx>=x||vy>=y||vz>=z){ state.voxels.delete(k); mutated=true; voxRev++; }
+    if(vx>=x||vy>=y||vz>=z){ state.voxels.delete(k); state.caras.delete(k); mutated=true; voxRev++; }
+  }
+  // Las máscaras se barren aparte y no con los voxels: una máscara puede quedarse huérfana (su voxel
+  // ya no está) y seguiría fuera de la rejilla, lista para reaparecer si alguien vuelve a agrandar.
+  for(const k of [...state.caras.keys()]){
+    const [vx,vy,vz]=k.split(',').map(Number);
+    if(vx>=x||vy>=y||vz>=z){ state.caras.delete(k); mutated=true; voxRev++; }
   }
   const pv=state.pivotes.filter(p=>p[0]<x&&p[1]<y&&p[2]<z);   // pivotes fuera de la nueva rejilla: fuera
   if(pv.length!==state.pivotes.length){ state.pivotes=pv; mutated=true; }
   if(changed||mutated) commit(before);
   setSize(x,y,z);
-  view.zoom=1; view.panX=0; view.panY=0; updateZoomLabel(); hover3d=null; selection.clear();
+  view.zoom=1; view.panX=0; view.panY=0; updateZoomLabel(); hover3d=null; hoverCara3d=null; selection.clear();
   view3d.zoom=1; view3d.panX=0; view3d.panY=0;
   syncLayer(); render();
 }
@@ -180,8 +196,11 @@ function rotateModel(ax, dir){
   for(const [k,c] of state.voxels){ const [x,y,z]=k.split(',').map(Number); const [a,b,cc]=fn(x,y,z); nv.set(a+','+b+','+cc,c); }
   state.voxels=nv; setSize(nx,ny,nz);
   state.pivotes=state.pivotes.map(p=>fn(p[0],p[1],p[2]));   // los pivotes giran con el dibujo
+  // Las caras también: además de cambiar de celda, la cara +Z de un voxel pasa a ser otra cara. La
+  // permutación sale de `fn` (permCaras), no de una tabla aparte, para que no puedan desincronizarse.
+  if(state.caras.size) state.caras=permCaras(state.caras,fn);
   if(state.layer>nz-1) state.layer=nz-1;
-  hover3d=null; selection.clear();
+  hover3d=null; hoverCara3d=null; selection.clear();
   view.zoom=1; view.panX=0; view.panY=0; updateZoomLabel();
   view3d.zoom=1; view3d.panX=0; view3d.panY=0;
   commit(before); syncLayer(); render();
@@ -225,6 +244,7 @@ function setVoxel(x,y,z,c){
   // obligaba a re-parsear TODO el modelo (~50k split de strings + Set nuevo) en el frame siguiente.
   const kNow=voxKey(), vlFresh=(_vlKey===kNow && _vlIdx), occFresh=(_occKey===kNow && _occSet);
   if(c) state.voxels.set(k,c); else state.voxels.delete(k);
+  if(!c) state.caras.delete(k);   // borrar el voxel se lleva su máscara; repintarlo la conserva
   mutated=true; voxRev++;
   const kNew=voxKey();
   if(vlFresh){
@@ -280,6 +300,50 @@ function togglePivote(x,y,z){ // clic pone; clic encima quita (y los siguientes 
   if(i>=0) state.pivotes.splice(i,1); else state.pivotes.push([x,y,z]);
   mutated=true;
 }
+// Consulta de la máscara de caras. El atajo por `size` importa: `caraOn` está en el bucle de
+// visibilidad de los tres renders, y en un dibujo sin caras (que son casi todos) no debe costar nada.
+// Marcar es del OBJETO, no del voxel: en cuanto el dibujo tiene UNA marca, lo que no esté marcado
+// se considera oculto en TODO el dibujo. La otra lectura (cada voxel se defiende solo, sin marcas =
+// entero) es la que tuvo esto hasta ahora y no sirve para lo que se dibuja de verdad: una mata de
+// hierba son 4 planos entre 1500 voxels, y con ella había que marcar a mano las seis caras de los
+// 1392 restantes para que no siguieran saliendo como cubos («pongo ocultar y en vez de quedar solo
+// lo rojo se ve entero»). Así que la ausencia de entrada vale 0 = ninguna, y el 63 SÍ se guarda.
+const hayMarcas = () => state.caras.size>0;
+// La máscara CRUDA: lo que hay guardado y nada más. `caraMask` contesta a «¿qué caras se ven?», que
+// en un dibujo intacto son las seis; para EDITAR hace falta la otra pregunta, «¿qué hay marcado?»,
+// que ahí son cero. Con la primera se lee para pintar, con la segunda se marca: usar `caraMask` para
+// editar hacía que la primera marca de un dibujo intacto calculase 63|bit = 63 y no marcase nada.
+const caraMaskRaw = (x,y,z) => state.caras.get(x+','+y+','+z) || 0;
+function caraMask(x,y,z){
+  if(!state.caras.size) return MASK_ALL;
+  const m=state.caras.get(x+','+y+','+z);
+  return m===undefined ? 0 : m;
+}
+function caraOn(x,y,z,fi){
+  if(!state.caras.size) return true;
+  const m=state.caras.get(x+','+y+','+z);
+  return m===undefined ? false : !!(m&(1<<fi));
+}
+function setCaraMask(x,y,z,m){   // el 0 es el que no se guarda: la ausencia YA significa "ninguna"
+  const k=x+','+y+','+z;
+  // Y borrar la última marca vacía el Map, o sea que el dibujo vuelve a ser un dibujo normal: el
+  // interruptor de arriba (`state.caras.size`) es lo que separa los dos mundos, no un flag aparte.
+  if(m===0) state.caras.delete(k); else state.caras.set(k,m);
+  mutated=true; voxRev++;        // el render cachea por voxKey(); sin esto la cara apagada no se ve
+}
+// Cómo se enseña una cara apagada MIENTRAS SE DIBUJA. No pintarla es lo que va a pasar de verdad en
+// el Mundo, pero en el editor es indistinguible de un agujero: mirando la pieza desde el lado apagado
+// se le ve el interior y el dibujo entero parece haberse vuelto transparente. Por defecto se MARCAN
+// en rojo, y el interruptor de la barra las oculta para comprobar el resultado real. Es estado de
+// VISTA: no toca el documento, no viaja en él y no cambia nada del Mundo.
+const CARA_APAGADA='#c0392b';
+let carasMarcar = localStorage.getItem('vf_caras_marcar')!=='0';
+function setCarasMarcar(v){
+  carasMarcar=!!v;
+  try{ localStorage.setItem('vf_caras_marcar', carasMarcar?'1':'0'); }catch(e){}
+  syncCarasVer(); render();
+  return carasMarcar;
+}
 function applyTool(cx,cy){
   if(cx<0||cy<0||cx>=SX||cy>=SY) return;
   const z = state.layer;
@@ -290,6 +354,9 @@ function applyTool(cx,cy){
     case 'erase': setVoxel(cx,cy,z,null); break;
     case 'pick':  { const c=getVoxel(cx,cy,z); if(c) pickColorTool(c); break; }
     case 'fill':  floodFill(cx,cy,z); break;
+    // «Caras» no pasa por aquí: necesita el punto exacto DENTRO de la celda para saber a qué cara
+    // apuntas, y `applyTool` solo recibe la celda. Lo resuelve `pointerdown`/`pointermove` de editCv.
+    case 'caras': break;
   }
   render();
 }
@@ -313,12 +380,13 @@ function floodFill(sx,sy,z){
 // Snapshot = {voxels, size}. Se registra una entrada por "gesto" (trazo, borrado,
 // relleno, redimensionado…). `mutated` (en setVoxel) evita registrar cambios nulos.
 const undoStack=[], redoStack=[]; const MAXUNDO=80;
-const snapshot=()=>({ v:[...state.voxels], s:[SX,SY,SZ], sel:[...selection], p:state.pivotes.map(p=>p.slice()) });
+const snapshot=()=>({ v:[...state.voxels], s:[SX,SY,SZ], sel:[...selection], p:state.pivotes.map(p=>p.slice()), c:[...state.caras] });
 function applySnapshot(snap){
   state.voxels=new Map(snap.v); setSize(...snap.s);
   state.pivotes=(snap.p||[]).map(p=>p.slice());                                // los pivotes también se deshacen
+  state.caras=new Map(snap.c||[]);                                             // y las máscaras de caras
   selection.clear(); if(snap.sel) for(const k of snap.sel) selection.add(k);   // restaura la selección
-  hover=null; hover3d=null;
+  hover=null; hover3d=null; hoverCara3d=null;
   syncLayer(); render();
 }
 function updateUndoUI(){
@@ -366,6 +434,80 @@ function drawVoxCell(c, X, Y, W, H){
   if(isTex(c)){ const fc=getTexFaces(texKeyOf(c)); if(fc){ ectx.imageSmoothingEnabled=false; ectx.drawImage(fc.faces[0], X, Y, W, H); return; } }
   ectx.fillStyle=voxFill(c); ectx.fillRect(X, Y, W, H);
 }
+// Marca en 2D las caras SIN marcar de un voxel. La vista de Capas es cenital, así que cada cara tiene
+// un sitio natural donde dibujarse: +Z es la celda entera (es la que estás mirando de frente), las
+// cuatro laterales son sus cuatro bordes, y -Z —el envés, que desde arriba no se ve por definición—
+// va como punto en el centro, que es el único sitio que no se pisa con ningún borde. Sin esto la
+// vista de Capas sería la única que no dice nada de la máscara: una mata de hierba se dibujaría
+// «llena» y no habría forma de saber, sin pasarse a 3D, qué caras le faltan.
+// El reparto de la celda entre las seis caras, en píxeles del lienzo. Es la ÚNICA definición: de aquí
+// salen la marca roja, el resalte del cursor y el acierto del clic, así que las tres no pueden
+// desalinearse. Y como el sitio donde se pinta es el mismo donde se pulsa, no hay ningún mapa que
+// aprenderse: se marca donde se ve. `L` es el lado del recuadro que dibuja `drawEdit` (celda - hueco).
+// Ojo con `fi=0`: su zona es la celda ENTERA porque lo que pinta es un tinte translúcido por debajo de
+// todo lo demás. Como región de clic es lo que sobra al descontar las otras cinco, y por eso
+// `caraDeCelda2d` la deja de última: coinciden igual, porque el único sitio donde se ve el tinte a
+// solas es justo ese sobrante.
+function carasZona2d(fi, X, Y, L){
+  const gr=Math.max(1.5, L*0.16);                                    // grosor de las franjas de borde
+  switch(fi){
+    case 0: return {r:[X, Y, L, L]};                       // +Z, la de arriba: la celda entera
+    case 1: return {c:[X+L/2, Y+L/2, gr*0.9]};             // -Z, el envés: punto en el centro
+    case 2: return {r:[X+L-gr, Y, gr, L]};                 // +X, borde derecho
+    case 3: return {r:[X, Y, gr, L]};                      // -X, borde izquierdo
+    case 4: return {r:[X, Y+L-gr, L, gr]};                 // +Y, borde inferior
+    default:return {r:[X, Y, L, gr]};                      // -Y, borde superior
+  }
+}
+function trazaZona2d(ctx, z){
+  ctx.beginPath();
+  if(z.r) ctx.rect(z.r[0], z.r[1], z.r[2], z.r[3]);
+  else    ctx.arc(z.c[0], z.c[1], z.c[2], 0, Math.PI*2);
+}
+// El envés va el ÚLTIMO porque es el único que puede quedar encima de otro (con la celda muy pequeña
+// el punto del centro llega a rozar las franjas); el resto no se solapan.
+const CARAS_ORDEN_2D=[0,2,3,4,5,1];
+function drawCarasCell2d(x, y, z, X, Y, W, H){
+  const m=caraMaskRaw(x,y,z);
+  if(!m) return;   // sin marcas no se pinta nada: la marca dice lo que SE VE, y aquí no se ve nada
+  const L=Math.min(W,H);
+  ectx.save();
+  ectx.fillStyle=CARA_APAGADA;
+  for(const fi of CARAS_ORDEN_2D){
+    if(!(m&(1<<fi))) continue;
+    ectx.globalAlpha = fi===0 ? 0.5 : 1;   // la de arriba tapa la celda entera: sin translucidez no se vería el voxel
+    trazaZona2d(ectx, carasZona2d(fi, X, Y, L)); ectx.fill();
+  }
+  ectx.restore();
+}
+// El inverso de `carasZona2d`: en qué cara has pulsado. En 3D hay que apuntar a una cara de verdad y
+// desde ciertos ángulos es imposible acertar; aquí la celda siempre enseña las seis, así que en Capas
+// se puede elegir cualquiera sin girar nada. El centro gana al borde, igual que al pintar, donde el
+// punto del envés se dibuja encima; y en una esquina gana el borde MÁS CERCANO.
+function caraDeCelda2d(px, py){
+  const b=viewGeom();
+  const cx=Math.floor((px-b.originX)/b.cell), cy=Math.floor((py-b.originY)/b.cell);
+  if(cx<0||cy<0||cx>=SX||cy>=SY) return null;
+  const gap=Math.max(0, Math.min(1.5, b.cell*0.06)), L=b.cell-2*gap;   // el mismo recuadro que pinta `drawEdit`
+  // Recortado al recuadro: los pocos píxeles del hueco entre celdas caen al borde más cercano y no a
+  // la cara de arriba, que es lo que pasaría dejando u/v salirse de [0,L].
+  const u=Math.min(L, Math.max(0, px-(b.originX+cx*b.cell)-gap));
+  const v=Math.min(L, Math.max(0, py-(b.originY+cy*b.cell)-gap));
+  const gr=Math.max(1.5, L*0.16);
+  const z=state.layer;   // en Capas siempre se marca sobre la capa a la vista
+  if(Math.hypot(u-L/2, v-L/2) <= gr*0.9) return {x:cx, y:cy, z, fi:1};
+  const du=Math.min(u, L-u), dv=Math.min(v, L-v);
+  if(Math.min(du,dv) < gr) return {x:cx, y:cy, z, fi: du<=dv ? (u<L/2?3:2) : (v<L/2?5:4)};
+  return {x:cx, y:cy, z, fi:0};
+}
+let hoverCara2d=null;   // zona bajo el cursor con la herramienta «Caras» (solo resalte; no toca el documento)
+// Gemela de `aplicaCara3d`: mismo criterio, misma máscara, mismo historial. Lo único distinto es de
+// dónde sale la cara (una zona de la celda en vez de un rayo) y qué se repinta.
+function aplicaCara2d(f){
+  const m=caraMaskRaw(f.x,f.y,f.z), b=1<<f.fi;
+  const n = carasOp ? (m|b) : (m&~b);
+  if(n!==m){ setCaraMask(f.x,f.y,f.z,n); render(); }
+}
 // Pivotes en la vista de capas. El NÚMERO es lo que importa: es el orden en que se dibujaron y
 // es lo que el snippet nombra con `pivote: N`. Los de otras capas se pintan apagados para poder
 // contarlos sin ir capa por capa (si no, el nº 2 «desaparece» y el 3 parece el 2).
@@ -405,9 +547,13 @@ function drawEdit(){
     ectx.globalAlpha=1;
   }
   // capa actual
+  const marcarCaras = state.caras.size>0 && verCarasApagadas();
   for(let x=0;x<SX;x++)for(let y=0;y<SY;y++){
     const c=getVoxel(x,y,state.layer);
-    if(c){ drawVoxCell(c, px(x)+gap, py(y)+gap, cell-2*gap, cell-2*gap); }
+    if(c){
+      drawVoxCell(c, px(x)+gap, py(y)+gap, cell-2*gap, cell-2*gap);
+      if(marcarCaras) drawCarasCell2d(x, y, state.layer, px(x)+gap, py(y)+gap, cell-2*gap, cell-2*gap);
+    }
   }
   // rejilla
   ectx.strokeStyle='rgba(255,255,255,0.06)'; ectx.lineWidth=1;
@@ -436,6 +582,18 @@ function drawEdit(){
     ectx.strokeStyle=state.tool==='erase'?'#e2685a':'#e2a44a';
     ectx.lineWidth=2;
     ectx.strokeRect(px(hover.x)+gap,py(hover.y)+gap,cell-2*gap,cell-2*gap);
+    // «Caras»: además del recuadro de la celda, la ZONA concreta que se va a marcar. Sin esto las
+    // cuatro franjas y el punto del centro son invisibles hasta que ya has marcado algo, y no habría
+    // forma de acertar a la primera dentro de una celda de doce píxeles.
+    if(state.tool==='caras' && hoverCara2d && hoverCara2d.x===hover.x && hoverCara2d.y===hover.y
+       && getVoxel(hover.x,hover.y,state.layer)){
+      const z=carasZona2d(hoverCara2d.fi, px(hover.x)+gap, py(hover.y)+gap, cell-2*gap);
+      ectx.save();
+      trazaZona2d(ectx, z);
+      ectx.fillStyle=CARA_APAGADA; ectx.globalAlpha=0.45; ectx.fill();
+      ectx.globalAlpha=1; ectx.strokeStyle='#fff'; ectx.lineWidth=1.5; ectx.stroke();
+      ectx.restore();
+    }
   }
   // recuadro de selección (Shift+arrastre con la herramienta Selección)
   if(marquee){
@@ -716,6 +874,39 @@ const CUBE_FACES = [
   { nb:[0,1,0],  n:[0,1,0],  s:0.52, c:[[0,1,0],[0,1,1],[1,1,1],[1,1,0]] }, // +Y
   { nb:[0,-1,0], n:[0,-1,0], s:0.92, c:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]] }, // -Y
 ];
+// ── Máscara de caras (state.caras) ─────────────────────────────────────────────
+// Un voxel puede pintar solo algunas de sus 6 caras: bit i encendido = se pinta CUBE_FACES[i].
+// MC_FACES (el mallado del Mundo) usa el MISMO orden de índices, así que no hay conversión
+// editor↔mundo; lo único que cambia entre los dos es cómo se permutan al girar.
+const MASK_ALL = 63;
+// Al girar el dibujo, las caras viajan con él. La permutación se DERIVA de la propia
+// transformación afín `fn` (la misma que mueve las coordenadas) aplicándola al vector normal de
+// cada cara: fn(n)-fn(0) es su parte lineal. Nunca se escribe a mano — una tabla fija se
+// desincronizaría de la geometría en cuanto alguien tocase `fn` o `mcRotXZ`.
+function facePerm(fn){
+  const o=fn(0,0,0), P=new Array(6);
+  for(let i=0;i<6;i++){
+    const nb=CUBE_FACES[i].nb, t=fn(nb[0],nb[1],nb[2]);
+    const dx=t[0]-o[0], dy=t[1]-o[1], dz=t[2]-o[2];
+    P[i]=CUBE_FACES.findIndex(f=>f.nb[0]===dx&&f.nb[1]===dy&&f.nb[2]===dz);
+  }
+  return P;
+}
+function permMask(m,P){
+  let r=0;
+  for(let i=0;i<6;i++) if(m&(1<<i)) r|=1<<P[i];
+  return r;
+}
+// Gira un Map de máscaras entero: remapea la clave con `fn` y permuta los bits con su misma parte lineal.
+function permCaras(caras,fn){
+  const P=facePerm(fn), out=new Map();
+  for(const [k,m] of caras){
+    const p=k.split(',');
+    const q=fn(+p[0],+p[1],+p[2]);
+    out.set(q[0]+','+q[1]+','+q[2], permMask(m,P));
+  }
+  return out;
+}
 function resizeEdit3d(){
   const wrap=edit3d.parentElement;
   const dpr=Math.min(2, window.devicePixelRatio||1);
@@ -840,17 +1031,65 @@ function project3d(W,H,view){
 }
 let _voxDrawnLast=0;   // voxels dibujados (dentro del visor) en el último project3d
 // ¿cara fi del voxel v visible? front-facing Y sin vecino delante
+// Las caras APAGADAS se siguen dibujando (marcadas en rojo) salvo que el interruptor de la barra pida
+// verlas realmente ocultas. Manda el interruptor y solo él, TAMBIÉN con la herramienta «Caras» puesta:
+// el sitio donde más falta hace ver la pieza como quedará en el Mundo es justo mientras se apagan
+// caras. Lo que salva de que apagar una cara sea irreversible no es dibujarla, sino que el picking
+// (`pickFace3d`) la sigue encontrando aunque no se pinte — ver `paraClicar` en faceVisIso.
+const verCarasApagadas = () => carasMarcar;
+// El culling de caras traseras vale porque un voxel es un CUBO CERRADO: su interior no se ve nunca.
+// Quitarle una cara lo convierte en una cáscara abierta, y por el hueco se le ve el envés de las que
+// quedan — por eso Minecraft dibuja la mata de hierba a dos caras. Sin esto, apagar la cara que te da
+// la vista deja un agujero en vez de enseñar lo que hay detrás dentro de la misma pieza.
+// Ojo: con la regla del objeto, en un dibujo CON marcas es cáscara todo lo que no lleve las seis
+// marcadas a mano — incluido el voxel que no tiene ninguna, que no se pinta en absoluto.
+const esCascaraEn = (x,y,z) => caraMask(x,y,z) !== MASK_ALL;
+// El OTRO culling, el de caras interiores, es donde está la vuelta que se le dio al modelo. Un voxel con
+// marcas YA NO es «un cubo al que le faltan caras»: es **el conjunto de caras marcadas**, y punto. Se
+// dibuja lo marcado y nada más, así que no hay que adivinar qué se ve por el hueco — por ese camino, o se
+// colaba el fondo a través de la pieza entera, o asomaban de refilón todos los tabiques interiores y
+// salían como un diente de sierra en los bordes. Las dos versiones se probaron; no hay una tercera.
+// De ahí salen las dos únicas reglas:
+//   · una CÁSCARA no tapa a nadie — no es maciza, así que las caras del vecino que daban contra ella
+//     pasan a verse, y son las que rellenan el hueco que dejó la cara sin marcar;
+//   · un CUBO MACIZO sí tapa — la cara que se le pega por dentro no se ve, esté marcada o no.
+// Si los dos son cáscara comparten el mismo plano y se pintaría dos veces: desempata la dirección, se
+// queda la positiva (+Z/+X/+Y) mientras vaya a pintarse y si no ocupa su sitio la negativa.
+const caraPintada = (x,y,z,fi) => caraOn(x,y,z,fi) || verCarasApagadas();
+// Hueca = cáscara de verdad. Con el interruptor en «marcadas» las caras sin marcar se siguen pintando (en
+// rojo), o sea que la pieza vuelve a ser maciza y aquí no hay ninguna cáscara: el culling es el de siempre
+// y el dibujo sale idéntico al de un modelo sin máscara.
+const esHueca = (x,y,z) => !verCarasApagadas() && esCascaraEn(x,y,z);
+function taparia(occ,v,fi){
+  const f=CUBE_FACES[fi], x=v.x+f.nb[0], y=v.y+f.nb[1], z=v.z+f.nb[2];
+  if(!occ.has(x+','+y+','+z)) return false;              // sin vecino: cara exterior, se pinta
+  if(!esHueca(x,y,z)) return true;                       // el vecino es macizo: la tapa entera
+  return (fi&1)===1 && caraPintada(x,y,z,fi^1);          // los dos son cáscara: la pinta el positivo
+}
 function faceVis3d(g,v,fi){
-  if(!g.front[fi]) return false;
-  const f=CUBE_FACES[fi];
-  return !g.occupied.has((v.x+f.nb[0])+','+(v.y+f.nb[1])+','+(v.z+f.nb[2]));
+  if(!g.front[fi] && !esHueca(v.x,v.y,v.z)) return false;
+  if(!caraOn(v.x,v.y,v.z,fi) && !verCarasApagadas()) return false;
+  return !taparia(g.occupied,v,fi);
 }
 // En modo aislado, culling y picking solo contra la ocupación SÓLIDA (capas visibles)
 const occIso = g => (isoOn() && g.solidOcc) ? g.solidOcc : g.occupied;
-function faceVisIso(g,v,fi){
-  if(!g.front[fi]) return false;
-  const f=CUBE_FACES[fi];
-  return !occIso(g).has((v.x+f.nb[0])+','+(v.y+f.nb[1])+','+(v.z+f.nb[2]));
+// `paraClicar`: para el picking la máscara no cuenta. La cara sigue estando ahí aunque no se pinte, y
+// si no se pudiera clicar, apagarla con el interruptor en «ocultas» no tendría vuelta atrás.
+function faceVisIso(g,v,fi,paraClicar){
+  if(!g.front[fi] && !esHueca(v.x,v.y,v.z)) return false;
+  if(!paraClicar && !caraOn(v.x,v.y,v.z,fi) && !verCarasApagadas()) return false;
+  return !taparia(occIso(g),v,fi);
+}
+// Orden en que recorrer las seis caras de un voxel: primero las que dan la espalda a la cámara y
+// luego las que la miran, para que al dibujar una cáscara a dos caras el frente TAPE al envés. Es
+// constante para toda la escena (`front` es de la proyección, no del voxel), así que se calcula una
+// vez por frame; el orden relativo de las que miran a la cámara no cambia, o sea que un dibujo sin
+// máscara sigue pintándose exactamente en la misma secuencia que antes.
+function ordenCaras3d(g){
+  const o=[];
+  for(let fi=0;fi<6;fi++) if(!g.front[fi]) o.push(fi);
+  for(let fi=0;fi<6;fi++) if(g.front[fi]) o.push(fi);
+  return o;
 }
 function facePoly3d(g,v,fi){
   const c=CUBE_FACES[fi].c;
@@ -870,6 +1109,7 @@ function fillPoly3d(pts){
 const texFaceCache=new Map();   // clave -> {faces:[canvas×6], avg:[hex×6], hueco:bool}
 function buildTexFaces(def){
   const N=texSize(def.size), vox=def.voxels||{};   // size puede venir como {x,y,z}; texSize lo normaliza a un entero cúbico
+  const caras=def.caras||null;                     // máscara de caras por voxel (0..63); sin ella, las 6 encendidas
   const faces=[], avg=[];
   // `hueco` = alguna cara dejó texels transparentes. Se sabe AQUÍ gratis (ya se cuentan los opacos en
   // `ns` para el color medio); mirarlo luego releyendo el atlas con getImageData costaba hasta 144 ms.
@@ -893,8 +1133,23 @@ function buildTexFaces(def){
       for(let k=0;k<N;k++){                                         // busca el primer voxel opaco por la normal
         const idx=start+dir*k;
         if(na===0) vx=idx; else if(na===1) vy=idx; else vz=idx;
-        const cc=vox[vx+','+vy+','+vz];
-        if(cc){ hex=cc; break; }
+        const ck=vx+','+vy+','+vz;
+        const cc=vox[ck];
+        if(cc){
+          // El PRIMER voxel de la columna manda, tenga la cara encendida o apagada. Si su bit `fi` está
+          // apagado, ese voxel no pinta por aquí y lo que se ve es el AIRE de delante, no lo que haya
+          // detrás: el texel sale transparente y la textura pasa a ser de RECORTE (hueco=true ⇒ el shader
+          // del terreno hace discard). Seguir buscando detrás sería justo el bug: rellenaba los agujeros
+          // de una cáscara perforada con su propia cara opuesta y el bloque salía macizo.
+          // Y manda la regla del OBJETO, la misma que `caraMask` y `mcStructGeom`: con `caras` en el
+          // documento, un voxel SIN entrada no pinta ninguna cara (0), no las seis. Tratar la ausencia
+          // como 63 aquí es lo que convertía un follaje en un cubo verde: sus voxels de dentro no
+          // pintan nada en la pieza fina, pero al proyectar tapaban todos los agujeros de la cáscara
+          // (medido en `leaves.vox.json`: 85-93 % de texels opacos en vez de 34-45 %).
+          const m = caras ? (Number.isInteger(caras[ck]) ? caras[ck] : 0) : MASK_ALL;
+          if((m>>fi)&1) hex=cc;
+          break;
+        }
       }
       const o=(row*N+col)*4;
       if(hex && hex[0]==='*') hex=hex.slice(1);   // ignora '*' emisivo al hornear la textura
@@ -937,10 +1192,26 @@ function paintFace3d(ctx, v, fi, p, s, seams=true){
   ctx.fillStyle=col; ctx.fill();
   ctx.strokeStyle = seams ? 'rgba(0,0,0,0.18)' : col; ctx.stroke();
 }
+// Una cara MARCADA se pinta en ROJO, no con su color: lo que dice es «ésta es la que se verá en el
+// Mundo», y por eso el rojo va sobre las que se quedan y no sobre las que se van. Al revés el dibujo
+// contestaba a la pregunta contraria: enseñaba en rojo justo lo que ibas a perder al pulsar «Ocultas».
+// Lleva el mismo sombreado por orientación que el resto, para que el volumen de la pieza se siga
+// leyendo y no salga una silueta plana.
+function paintCaraMarcada(ctx, fi, seams=true){
+  const col=shade(CARA_APAGADA, CUBE_FACES[fi].s);
+  ctx.fillStyle=col; ctx.fill();
+  ctx.strokeStyle = seams ? 'rgba(0,0,0,0.18)' : col; ctx.stroke();
+}
 // Color sólido (uint32) para el rasterizador: cara media de la textura, o color plano.
 function rasterCol(c, fi, s){
   if(isTex(c)){ const fc=getTexFaces(texKeyOf(c)); return col32(fc?fc.avg[fi]:texRepr(texKeyOf(c)), s); }
   return col32(c, s);
+}
+// Lo mismo, pero mirando antes la máscara. Va aparte de rasterCol porque a ése lo llama también el
+// iso de las miniaturas, que no sabe de máscaras y pinta la pieza llena a propósito.
+function rasterCaraCol(v, fi){
+  return (verCarasApagadas() && hayMarcas() && caraOn(v.x,v.y,v.z,fi))
+    ? col32(CARA_APAGADA, CUBE_FACES[fi].s) : rasterCol(v.c, fi, CUBE_FACES[fi].s);
 }
 // Sombra al suelo (vista grande): cada voxel proyecta su huella sobre el plano del suelo (z=minz),
 // desplazada según su altura (sol alto ⇒ estela corta). Se rasteriza a una máscara para NO apilar
@@ -1005,21 +1276,27 @@ function renderFree3d(ctx, W, H, view, seams, skyColor, shadowOn){
     if(skyColor){ ctx.fillStyle=SKY_GROUND; ctx.fillRect(0,hy,W,H-hy); ctx.fillStyle=skyColor; ctx.fillRect(0,0,W,hy); }
     if(shadowOn){ const sh=groundShadowMask(W,H,g); if(sh) blitShadowDecal(ctx,sh); }  // sombra al suelo bajo los voxels
     ctx.lineJoin='round'; ctx.lineWidth=1; ctx.strokeStyle='rgba(0,0,0,0.18)';
-    for(const v of g.list) for(let fi=0; fi<6; fi++){
+    const orden=ordenCaras3d(g);
+    for(const v of g.list) for(const fi of orden){
       if(!faceVis3d(g,v,fi)) continue;
       const p=facePoly3d(g,v,fi);
       ctx.beginPath(); ctx.moveTo(p[0][0],p[0][1]); for(let i=1;i<4;i++) ctx.lineTo(p[i][0],p[i][1]); ctx.closePath();
-      paintFace3d(ctx, v, fi, p, CUBE_FACES[fi].s, seams);
+      // Mismo criterio que rasterCaraCol y que la rama PATH: el rojo va sobre las caras MARCADAS, que son
+      // las que sobreviven al pulsar «Ocultas». Solo tiene sentido en las cáscaras — en una pieza maciza no
+      // hay nada marcado que distinguir.
+      if(verCarasApagadas() && hayMarcas() && caraOn(v.x,v.y,v.z,fi)) paintCaraMarcada(ctx, fi, seams);
+      else paintFace3d(ctx, v, fi, p, CUBE_FACES[fi].s, seams);
     }
   } else {
     const img=getRaster(ctx,W,H), buf=new Uint32Array(img.data.buffer);
     if(skyColor){ buf.fill(col32(skyColor,1), 0, hy*W); buf.fill(col32(SKY_GROUND,1), hy*W, W*H); }  // fondo raster: cielo sobre el horizonte, tierra debajo (putImageData reemplaza, no compone)
     else buf.fill(0);                                // sin cielo => transparente (reutilizado)
     if(shadowOn){ const sh=groundShadowMask(W,H,g); if(sh) blendShadowBuf(buf,sh); }  // sombra al suelo bajo los voxels
-    for(const v of g.list) for(let fi=0; fi<6; fi++){
+    const orden=ordenCaras3d(g);
+    for(const v of g.list) for(const fi of orden){
       if(!faceVis3d(g,v,fi)) continue;
       const p=facePoly3d(g,v,fi);
-      scanQuad(buf,W,H, rasterCol(v.c,fi,CUBE_FACES[fi].s), p[0][0],p[0][1],p[1][0],p[1][1],p[2][0],p[2][1],p[3][0],p[3][1]);
+      scanQuad(buf,W,H, rasterCaraCol(v,fi), p[0][0],p[0][1],p[1][0],p[1][1],p[2][0],p[2][1],p[3][0],p[3][1]);
     }
     ctx.putImageData(img,0,0);
   }
@@ -1039,27 +1316,36 @@ function renderEdit3dScene(ctx,W,H,view){
   if(!iso && g.list.length>BIG3D){                  // modelo grande => raster sin costuras (el pincel rasteriza aparte en drawEdit3d)
     const img=getRaster(ctx,W,H), buf=new Uint32Array(img.data.buffer);
     buf.fill(col32('#0e1119',1));
-    for(const v of g.list) for(let fi=0; fi<6; fi++){
+    const orden=ordenCaras3d(g);
+    for(const v of g.list) for(const fi of orden){
       if(!faceVis3d(g,v,fi)) continue;
       const p=facePoly3d(g,v,fi);
-      scanQuad(buf,W,H, rasterCol(v.c,fi,CUBE_FACES[fi].s), p[0][0],p[0][1],p[1][0],p[1][1],p[2][0],p[2][1],p[3][0],p[3][1]);
+      scanQuad(buf,W,H, rasterCaraCol(v,fi), p[0][0],p[0][1],p[1][0],p[1][1],p[2][0],p[2][1],p[3][0],p[3][1]);
     }
     ctx.putImageData(img,0,0);
     return g;
   }
   ctx.lineJoin='round'; ctx.lineWidth=1; ctx.strokeStyle='rgba(0,0,0,0.18)';
+  const orden=ordenCaras3d(g);
   for(const v of g.list){
     const ghost = iso && !isoSolid(v.z);
     ctx.globalAlpha = ghost ? 0.12 : 1;
-    for(let fi=0; fi<6; fi++){
-      if(!g.front[fi]) continue;
-      const f=CUBE_FACES[fi];
+    const hueca = esHueca(v.x,v.y,v.z);   // ¿se dibuja abierta? → culling de traseras (ver faceVis3d)
+    for(const fi of orden){
+      if(!g.front[fi] && !hueca) continue;
+      // Esta rama NO llama a faceVis3d: lo inlinea. Es la de los modelos pequeños, o sea casi todos,
+      // así que la máscara tiene que consultarse aquí también o el editor la ignoraría en la práctica.
+      const apagada = !caraOn(v.x,v.y,v.z,fi);
+      if(apagada && !verCarasApagadas()) continue;
+      const marcada = hayMarcas() && !apagada && verCarasApagadas();   // rojo = «ésta se queda»
       const occ = (iso && !ghost) ? solidOcc : g.occupied;
-      if(occ.has((v.x+f.nb[0])+','+(v.y+f.nb[1])+','+(v.z+f.nb[2]))) continue;
+      if(taparia(occ,v,fi)) continue;
       const p=facePoly3d(g,v,fi);
       ctx.beginPath(); ctx.moveTo(p[0][0],p[0][1]);
       for(let i=1;i<4;i++) ctx.lineTo(p[i][0],p[i][1]); ctx.closePath();
-      paintFace3d(ctx, v, fi, p, CUBE_FACES[fi].s);
+      ctx.globalAlpha = ghost ? 0.12 : 1;
+      if(marcada) paintCaraMarcada(ctx, fi);   // rojiza: ésta es la que quedará en el Mundo
+      else paintFace3d(ctx, v, fi, p, CUBE_FACES[fi].s);
     }
   }
   ctx.globalAlpha=1;
@@ -1097,7 +1383,7 @@ function drawEdit3d(){
   const interact=(orbiting||pan3d||paintDrag);
   const key=[voxKey(),view3d.yaw.toFixed(4),view3d.pitch.toFixed(4),view3d.zoom.toFixed(3),
              Math.round(view3d.panX),Math.round(view3d.panY),W,H,isolateMode,isoOn()?state.layer:-1,interact?1:0,paintDrag?1:0,
-             view3d.persp?1:0,_perspK].join('|');
+             view3d.persp?1:0,_perspK,verCarasApagadas()?1:0].join('|');   // el interruptor de caras sin marcar cambia lo que se ve
   if(key!==e3baseKey){
     e3baseKey=key;
     if(paintDrag && !isoOn()){
@@ -1107,10 +1393,11 @@ function drawEdit3d(){
       const bctx=e3base.getContext('2d');
       const img=getRaster(bctx,w2,h2), buf=new Uint32Array(img.data.buffer);
       buf.fill(col32('#0e1119',1));
-      for(const v of g3d.list) for(let fi=0; fi<6; fi++){
+      const orden=ordenCaras3d(g3d);
+      for(const v of g3d.list) for(const fi of orden){
         if(!faceVis3d(g3d,v,fi)) continue;
         const p=facePoly3d(g3d,v,fi);
-        scanQuad(buf,w2,h2, rasterCol(v.c,fi,CUBE_FACES[fi].s), p[0][0]*.5,p[0][1]*.5,p[1][0]*.5,p[1][1]*.5,p[2][0]*.5,p[2][1]*.5,p[3][0]*.5,p[3][1]*.5);
+        scanQuad(buf,w2,h2, rasterCaraCol(v,fi), p[0][0]*.5,p[0][1]*.5,p[1][0]*.5,p[1][1]*.5,p[2][0]*.5,p[2][1]*.5,p[3][0]*.5,p[3][1]*.5);
       }
       bctx.putImageData(img,0,0);
     } else if(interact){
@@ -1130,6 +1417,7 @@ function drawEdit3d(){
   if(!interact){                                     // overlays solo fuera del arrastre
     if(selection.size) drawSelection3d();
     if(hover3d) drawHover3d();
+    if(hoverCara3d) drawHoverCara3d();
     if(state.tool==='build' && buildGhost) drawBuildGhost();
     if(pasting) drawPasteGhost3d();
     drawPivotes3d();
@@ -1179,6 +1467,19 @@ function drawSelection3d(){
   }
   e3ctx.restore();
 }
+// Con «Caras» lo que se va a tocar es UNA cara, así que el resaltado es esa cara y no el cubo entero: con
+// las seis aristas encendidas hay que adivinar cuál de las tres visibles se va a marcar. Rojo encendido,
+// el mismo tono con el que se señalan las caras sin marcar pero subido, para que se lea «ésta es».
+function drawHoverCara3d(){
+  const g=g3d, f=hoverCara3d; if(!g||!f) return;
+  e3ctx.save();
+  fillPoly3d(facePoly3d(g,f,f.fi));
+  e3ctx.fillStyle='rgba(255,59,48,0.42)'; e3ctx.fill();
+  e3ctx.lineJoin='round'; e3ctx.lineWidth=Math.max(2,g.S*0.09);
+  e3ctx.strokeStyle='#ff5b4e'; e3ctx.shadowColor='#ff3b30'; e3ctx.shadowBlur=12;
+  e3ctx.stroke();
+  e3ctx.restore();
+}
 function drawHover3d(){
   const g=g3d, v=hover3d; if(!g||!v) return;
   e3ctx.save(); e3ctx.strokeStyle='#ffe23a'; e3ctx.lineWidth=Math.max(2,g.S*0.12);
@@ -1215,10 +1516,13 @@ function pickVoxel3d(px,py,g){
 function pickFace3d(px,py,g){
   g=g||g3d; if(!g) return null;
   const iso=isoOn();
+  // Con la herramienta «Caras» se pueden clicar también las apagadas aunque no se estén pintando: es la
+  // única forma de reencenderlas con el interruptor en «ocultas». El resto de herramientas no las ve.
+  const apagadasTambien = state.tool==='caras';
   for(let i=g.list.length-1;i>=0;i--){
     const v=g.list[i];
     if(iso && !isoSolid(v.z)) continue;
-    for(let fi=0; fi<6; fi++){ if(!faceVisIso(g,v,fi)) continue;
+    for(let fi=0; fi<6; fi++){ if(!faceVisIso(g,v,fi,apagadasTambien)) continue;
       if(inQuad(px,py,facePoly3d(g,v,fi))) return {x:v.x,y:v.y,z:v.z,fi}; }
   }
   return null;
@@ -1297,6 +1601,7 @@ function updateInfo(){
   // completo por cada repintado, tirando un trabajo que estaba hecho a un `if` de distancia.
   const {minx,maxx,miny,maxy,minz,maxz}=voxParsed().box;
   $('#dims').textContent=`${maxx-minx+1}×${maxy-miny+1}×${maxz-minz+1} · ${n} voxels`;
+  syncCarasVer();   // aparece/desaparece con la máscara del documento, que cambia al cargar y al pintar
 }
 
 function syncLayer(){
@@ -1304,6 +1609,17 @@ function syncLayer(){
   $('#lf-label').textContent=(state.layer+1)+'/'+SZ;
   if(mode!=='3d') $('#stage-title').textContent='Edición · capa '+(state.layer+1);
   $('#layer-slider').value=state.layer;
+}
+// El interruptor de caras sin marcar: existe solo si hay algo que enseñar. Dice en qué estado ESTÁ
+// (no lo que hace al pulsarlo), que es lo que se puede leer de un vistazo mientras dibujas.
+function syncCarasVer(){
+  const box=$('#ctrl-caras'); if(!box) return;
+  box.hidden = !state.caras.size && state.tool!=='caras';
+  const b=$('#btn-caras-ver'); if(!b) return;
+  b.textContent = carasMarcar ? '🟥 Marcadas' : '👁 Ocultas';
+  b.title = carasMarcar
+    ? 'Las caras MARCADAS se ven en rojo: son las únicas que quedarán, porque en cuanto hay una marca el resto del objeto se oculta. Las demás siguen dibujadas con su color para poder clicarlas. Pulsa para ocultarlas y ver la pieza como se verá en el Mundo.'
+    : 'Solo se dibujan las caras marcadas: el resto del objeto está oculto, como se verá en el Mundo. Pulsa para verlas en rojo y recuperar las que no lo están.';
 }
 function syncColor(){
   $('#color-custom').value=/^#[0-9a-f]{6}$/i.test(state.color)?state.color:'#000000';
@@ -1391,17 +1707,41 @@ function normPivotes(ps){
            .map(p=>[Math.round(p[0]),Math.round(p[1]),Math.round(p[2])]);
 }
 
-function load(map,meta,size,pivotes){
+// Igual que normPivotes pero para `caras`: "x,y,z" -> entero 0..62. Se tira lo que no cabe en la
+// rejilla y lo que vale 63, porque "las seis caras" ya es lo que significa NO tener entrada; dejarlo
+// entrar haría que un dibujo normal arrastrase un Map lleno y `caras.size` dejaría de ser el atajo.
+// `lim` = rejilla contra la que recortar; por defecto la del documento abierto. Lo necesita drawThumb,
+// que pinta la miniatura de OTRO documento sin cargarlo (y que podría ser más grande que el actual).
+function normCaras(o,lim){
+  const m=new Map();
+  const LX=lim?lim[0]:SX, LY=lim?lim[1]:SY, LZ=lim?lim[2]:SZ;
+  if(!o || typeof o!=='object') return m;
+  for(const k of Object.keys(o)){
+    const p=k.split(',');
+    if(p.length!==3) continue;
+    const x=+p[0], y=+p[1], z=+p[2], v=o[k];
+    if(!Number.isInteger(x)||!Number.isInteger(y)||!Number.isInteger(z)) continue;
+    if(x<0||y<0||z<0||x>=LX||y>=LY||z>=LZ) continue;
+    if(!Number.isInteger(v)||v<0||v>MASK_ALL) continue;   // el 63 SÍ vale: son las seis marcadas a mano
+    m.set(x+','+y+','+z, v);
+  }
+  return m;
+}
+
+function load(map,meta,size,pivotes,caras,atravesable){
   setSize(...normSize(size||16));
   state.voxels=map;
   state.pivotes=normPivotes(pivotes);
+  state.caras=normCaras(caras);   // después de setSize: normCaras recorta contra la rejilla ya fijada
+  state.atravesable=!!atravesable;
   if(meta){ state.meta={...meta}; }
-  state.layer=0; state.rot=0; hover3d=null; selection.clear(); serverId=null; loadedName=null;
+  state.layer=0; state.rot=0; hover3d=null; hoverCara3d=null; selection.clear(); serverId=null; serverKind=null; loadedName=null;
   view3d.zoom=1; view3d.panX=0; view3d.panY=0;
   view.zoom=1; view.panX=0; view.panY=0; updateZoomLabel();
   clearHistory();                       // documento nuevo: sin historial que cruzar
   $('#meta-name').value=state.meta.name;
   $('#meta-type').value=state.meta.type;
+  $('#meta-atravesable').checked=state.atravesable;
   const roleEl=$('#meta-role');
   roleEl.textContent=state.meta.role||'';
   roleEl.hidden=!state.meta.role;
@@ -1478,8 +1818,9 @@ async function loadFromUrl(url, id){
   try{
     const d=await fetch(url,{cache:'no-store'}).then(r=>r.json());
     ingestTextures(d);
-    load(new Map(Object.entries(d.voxels||{})), d.meta||{name:url,type:'objeto'}, d.size, d.pivotes);
+    load(new Map(Object.entries(d.voxels||{})), d.meta||{name:url,type:'objeto'}, d.size, d.pivotes, d.caras, d.atravesable);
     serverId = id || d.id || null;   // load() lo deja a null: se pone DESPUÉS
+    serverKind = serverId ? 'asset' : null;   // los tres llamantes son la galería de assets
     loadedName = state.meta.name;
     toast('Cargado «'+((d.meta&&d.meta.name)||url)+'»');
   }catch(e){ toast('No se pudo cargar '+url); }
@@ -1495,17 +1836,18 @@ function fmtDate(iso){
 async function apiHabitantes(){ return fetch('/api/habitantes',{cache:'no-store'}).then(r=>r.json()); }
 // miniatura iso de un objeto voxel (usa renderIso con swap temporal de state.voxels)
 function drawThumb(cv, d){
-  const saved=state.voxels;
+  const saved=state.voxels, savedCaras=state.caras;
   state.voxels=new Map(Object.entries(d.voxels||{}));
+  state.caras=normCaras(d.caras, normSize(d.size||16));   // la miniatura enseña la pieza con sus caras, no rellena
   renderIso(cv.getContext('2d'), cv.width, cv.height, 0, 40, false);   // rot 0 (no depende de SX/SY), sin rejilla
-  state.voxels=saved;
+  state.voxels=saved; state.caras=savedCaras;
 }
 async function loadHabitante(id){
   try{
     const d=await fetch('/api/habitantes/'+id,{cache:'no-store'}).then(r=>r.json());
     ingestTextures(d);
-    load(new Map(Object.entries(d.voxels||{})), d.meta||{name:id,type:'personaje'}, d.size, d.pivotes);
-    serverId=id; loadedName=state.meta.name; closeHabitantes();
+    load(new Map(Object.entries(d.voxels||{})), d.meta||{name:id,type:'personaje'}, d.size, d.pivotes, d.caras, d.atravesable);
+    serverId=id; serverKind='hab'; loadedName=state.meta.name; closeHabitantes();
     document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-active',x.dataset.tab==='objeto'));
     toast('Cargado «'+((d.meta&&d.meta.name)||id)+'»');
   }catch(e){ toast('No se pudo cargar'); }
@@ -1514,13 +1856,13 @@ async function renameHabitante(id,cur){
   const name=prompt('Nuevo nombre del habitante:', cur||'');
   if(name==null || !name.trim() || name===cur) return;
   await fetch('/api/habitantes/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim()})});
-  if(serverId===id) state.meta.name=name.trim(), $('#meta-name').value=name.trim();
+  if(serverId===id && serverKind==='hab') state.meta.name=name.trim(), $('#meta-name').value=name.trim();
   openHabitantes(); refreshRosters();
 }
 async function delHabitante(id,name){
   if(!confirm('¿Borrar «'+(name||id)+'» del servidor? No se puede deshacer.')) return;
   await fetch('/api/habitantes/'+id,{method:'DELETE'});
-  if(serverId===id) serverId=null;
+  if(serverId===id && serverKind==='hab') serverId=null, serverKind=null;
   openHabitantes(); refreshRosters();
 }
 // Renombrar un asset cambia SOLO el rótulo. El id y el fichero se quedan porque los voxels del mundo
@@ -1598,11 +1940,13 @@ async function openHabitantes(kind){
       <p class="hab-date">${fmtDate(h.savedAt)}</p>
       <div class="hab-acts">
         <button class="btn sm" data-a="load">Cargar</button>
+        <button class="btn sm" data-a="ficha">📋 Ficha</button>
         <button class="btn sm" data-a="ren">Renombrar</button>
         <button class="btn sm danger" data-a="del">Borrar</button>
       </div>`;
     grid.appendChild(card);
     fetch('/api/habitantes/'+h.id,{cache:'no-store'}).then(r=>r.json()).then(d=>drawThumb(card.querySelector('canvas'),d)).catch(()=>{});
+    card.querySelector('[data-a=ficha]').onclick=()=>openFicha(h,'hab');
     card.querySelector('[data-a=load]').onclick=()=>loadHabitante(h.id);
     card.querySelector('[data-a=ren]').onclick=()=>renameHabitante(h.id,h.name);
     card.querySelector('[data-a=del]').onclick=()=>delHabitante(h.id,h.name);
@@ -1619,7 +1963,13 @@ function closeHabitantes(){ $('#hab-modal').hidden=true; }
 let fichaAsset=null;
 // Espejo de mcIndexAssets: si cambias las claves que se registran allí, cámbialas aquí — esta lista es
 // justo lo que el dueño va a copiar al script, y mentirle es peor que no enseñar nada.
+// 'asset' | 'hab'. Los habitantes NO pasan por mcIndexAssets, así que no tienen nombre corto, ni id ni
+// rótulo que sirvan de clave: la única que funciona es 'hab:<id>'. Enseñar eso es justo el trabajo de
+// la ficha — el cable de redstone se rompió por confundir los dos espacios de nombres (BUG-RS5).
+let fichaKind='asset';
+function fichaClave(a){ return fichaKind==='hab' ? 'hab:'+a.id : 'asset:'+a.file; }
 function fichaClaves(a){
+  if(fichaKind==='hab') return [];
   const cl=[];
   if(a.alias) cl.push({k:String(a.alias).trim().toLowerCase(), nota:'nombre corto', alias:true});
   if(a.id) cl.push({k:String(a.id).trim().toLowerCase(), nota:'id'});
@@ -1629,35 +1979,50 @@ function fichaClaves(a){
   return cl;
 }
 function fichaEjemplo(){
-  const cl=fichaClaves(fichaAsset||{file:''});
-  return "await game.addMaterial('"+(cl.length?cl[0].k:'')+"')";
+  const a=fichaAsset||{file:'',id:''};
+  const cl=fichaClaves(a);
+  return "await game.addMaterial('"+(cl.length?cl[0].k:fichaClave(a))+"')";
 }
 function fichaPinta(){
   const a=fichaAsset; if(!a) return;
   $('#ficha-title').textContent=(a.icon?a.icon+' ':'')+(a.name||a.id);
-  $('#ficha-clave').value='asset:'+a.file;
+  const esHab=fichaKind==='hab';
+  const clave=fichaClave(a);
+  $('#ficha-clave').value=clave;
   $('#ficha-ejemplo').value=fichaEjemplo();
   const sz=a.size&&typeof a.size==='object' ? `${a.size.x}×${a.size.y}×${a.size.z}` : (a.size||16)+'³';
   $('#ficha-datos').innerHTML=[
-    ['Tipo', a.type||'—'], ['Grupo', a.group||'—'], ['Rol', a.role||'—'],
-    ['Tamaño', sz], ['Fichero', a.file]
+    ['Tipo', a.type||'—'], ['Grupo', esHab?'Mis piezas guardadas':(a.group||'—')], ['Rol', a.role||'—'],
+    ['Tamaño', sz], ['Fichero', esHab?('data/habitantes/'+a.id+'.json'):a.file]
   ].map(([k,v])=>`<dt>${esc(k)}</dt><dd title="${esc(String(v))}">${esc(String(v))}</dd>`).join('');
-  $('#ficha-claves').innerHTML=fichaClaves(a)
-    .map(c=>`<li class="${c.alias?'es-alias':''}">${esc(c.k)} <span class="hab-sub">· ${esc(c.nota)}</span></li>`).join('');
-  getRoomData('asset:'+a.file).then(d=>drawThumb($('#ficha-thumb'),d)).catch(()=>{});
+  $('#ficha-claves').innerHTML=esHab
+    ? '<li class="hab-sub">Ninguno: una pieza guardada solo responde a su clave entera, <code>'+esc(clave)+'</code>.</li>'
+    : fichaClaves(a)
+      .map(c=>`<li class="${c.alias?'es-alias':''}">${esc(c.k)} <span class="hab-sub">· ${esc(c.nota)}</span></li>`).join('');
+  getRoomData(clave).then(d=>drawThumb($('#ficha-thumb'),d)).catch(()=>{});
 }
-function openFicha(a){
-  fichaAsset=a;
+// kind='hab' para las piezas de data/habitantes: se ven igual, pero no admiten nombre corto ni icono
+// (el servidor solo deja renombrarlas), así que esa mitad del formulario se esconde en vez de fingir
+// que se puede editar. Sin esto, media galería no tenía forma de enseñar su clave (BUG-GAL2).
+function openFicha(a, kind){
+  fichaAsset=a; fichaKind=kind||'asset';
+  const esHab=fichaKind==='hab';
   $('#ficha-alias').value=a.alias||'';
   $('#ficha-icon').value=a.icon||'';
   $('#ficha-desc').value=a.description||'';
   $('#ficha-error').hidden=true;
+  $('#ficha-alias-h3').textContent=esHab?'Ejemplo de uso':'Nombre corto';
+  $('#ficha-alias-wrap').hidden=esHab;
+  $('#ficha-alias-hint').hidden=esHab;
+  $('#ficha-sec-icono').hidden=esHab;
+  $('#ficha-save').hidden=esHab;
   fichaPinta();
   $('#ficha-modal').hidden=false;
 }
-function closeFicha(){ $('#ficha-modal').hidden=true; fichaAsset=null; }
+function closeFicha(){ $('#ficha-modal').hidden=true; fichaAsset=null; fichaKind='asset'; }
 async function guardarFicha(){
   const a=fichaAsset; if(!a) return;
+  if(fichaKind==='hab') return;   // no hay alias que guardar, y /api/assets no es su sitio
   const err=$('#ficha-error');
   const body={ alias:$('#ficha-alias').value.trim().toLowerCase(),
                icon:$('#ficha-icon').value.trim(),
@@ -1712,6 +2077,12 @@ function refreshRosters(){ refreshHabitantesList(); loadRooms(); refreshTexturas
 // ===================== Persistencia =====================
 const LS='voxelforge:current';
 let serverId=null;                 // id del habitante en el servidor (si el objeto viene/va allí)
+// De qué GALERÍA vino el dibujo: 'hab' | 'asset' | null (dibujo nuevo, sin origen). Va junto a serverId
+// porque un id sin espacio de nombres no identifica nada: 'cable' existe como habitante Y como asset, y
+// son piezas distintas con claves distintas ('hab:cable' vs 'asset:assets/cable.vox.json'). Guardar
+// enruta por ESTO, no por meta.type — enrutar por el tipo mandaba a /api/assets cualquier habitante de
+// tipo 'textura', que es como el cable de redstone acabó duplicado en las dos galerías (BUG-GAL1).
+let serverKind=null;
 let loadedName=null;               // el rótulo que tenía al cargarlo: si cambia, Guardar pregunta (ver save())
 // Defs de las texturas realmente usadas => se embeben para un modelo autocontenido (render offline)
 function embeddedTextures(){
@@ -1723,11 +2094,17 @@ function currentVox(){
   const doc={format:'voxelforge-1', size:{x:SX,y:SY,z:SZ}, meta:state.meta, voxels:Object.fromEntries(state.voxels)};
   const t=embeddedTextures(); if(t) doc.textures=t;
   if(state.pivotes.length) doc.pivotes=state.pivotes.map(p=>p.slice());   // clave de 1er nivel: el server guarda el doc tal cual
+  if(state.caras.size) doc.caras=Object.fromEntries(state.caras);         // ídem; sin máscaras, la clave ni aparece
+  if(state.atravesable) doc.atravesable=true;                             // ídem; en falso la clave ni aparece
   return doc;
 }
 // El id viaja en la copia local: si no, recargar la página perdía de qué asset venía el dibujo y el
 // siguiente Guardar lo bifurcaba a un fichero nuevo (justo lo que se vino a arreglar).
-function localSnap(){ const s={size:{x:SX,y:SY,z:SZ}, meta:state.meta, voxels:[...state.voxels], pivotes:state.pivotes, serverId, loadedName}; const t=embeddedTextures(); if(t) s.textures=t; return JSON.stringify(s); }
+function localSnap(){ const s={size:{x:SX,y:SY,z:SZ}, meta:state.meta, voxels:[...state.voxels], pivotes:state.pivotes, caras:Object.fromEntries(state.caras), atravesable:state.atravesable, serverId, serverKind, loadedName}; const t=embeddedTextures(); if(t) s.textures=t; return JSON.stringify(s); }
+// ¿A qué galería va este dibujo? Manda de dónde VINO, no de qué tipo es: una pieza vuelve siempre al
+// sitio del que se cargó, aunque sea una 'textura' que vive entre los habitantes (como el cable de
+// redstone). Solo cuando no hay origen —dibujo nuevo— decide el tipo, que es la regla de siempre.
+function vaAAssets(){ return serverKind ? serverKind==='asset' : !!(state.meta && state.meta.type==='textura'); }
 async function save(){
   // copia local siempre (para recuperar al recargar)
   localStorage.setItem(LS, localSnap());
@@ -1746,13 +2123,13 @@ async function save(){
   }
   const body=currentVox(); if(serverId) body.id=serverId;
   try{
-    const isTex = state.meta && state.meta.type === 'textura';
+    const isTex = vaAAssets();
     const endpoint = isTex ? '/api/assets' : '/api/habitantes';
     const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if (!r.ok) throw new Error('HTTP ' + r.status + ' - El servidor API no soporta ' + endpoint);
     const j=await r.json();
     if (!j || !j.id) throw new Error('Respuesta inválida del servidor');
-    serverId=j.id; loadedName=state.meta.name;
+    serverId=j.id; serverKind=isTex?'asset':'hab'; loadedName=state.meta.name;
     if(isTex && typeof refreshTexturas === 'function') refreshTexturas();
     // Refresca todo lo que ya esté usando este objeto en el Mundo: galería, ranura y lo estampado en el mapa.
     await mcRefreshSavedKey(isTex ? 'asset:assets/' + j.id + '.vox.json' : 'hab:' + j.id);
@@ -1770,13 +2147,13 @@ async function saveAs(){
   state.meta.name=name.trim(); $('#meta-name').value=state.meta.name;
   const body=currentVox();                      // sin id => nuevo registro
   try{
-    const isTex = state.meta && state.meta.type === 'textura';
+    const isTex = vaAAssets();                  // la copia nace en la MISMA galería que el original
     const endpoint = isTex ? '/api/assets' : '/api/habitantes';
     const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if (!r.ok) throw new Error('HTTP ' + r.status + ' - El servidor API no soporta ' + endpoint);
     const j=await r.json();
     if (!j || !j.id) throw new Error('Respuesta inválida del servidor');
-    serverId=j.id; loadedName=state.meta.name;
+    serverId=j.id; serverKind=isTex?'asset':'hab'; loadedName=state.meta.name;
     localStorage.setItem(LS, localSnap());
     if(isTex && typeof refreshTexturas === 'function') refreshTexturas();
     // Es un objeto NUEVO: nadie lo usa todavía, pero tiene que salir ya en la galería del Mundo.
@@ -1794,7 +2171,10 @@ function restore(){
     state.meta=d.meta||state.meta;
     state.voxels=new Map(d.voxels||[]);
     state.pivotes=normPivotes(d.pivotes);
+    state.caras=normCaras(d.caras);
+    state.atravesable=!!d.atravesable;
     serverId=d.serverId||null;         // de qué asset/habitante venía, para no bifurcarlo al guardar
+    serverKind=d.serverKind||null;     // …y de qué galería, para devolverlo a la suya (ver vaAAssets)
     loadedName=d.loadedName||state.meta.name;
     return true;
   }catch(e){ return false; }
@@ -1804,6 +2184,8 @@ function exportJSON(){
   const data={format:'voxelforge-1', size:{x:SX,y:SY,z:SZ}, meta:state.meta,
     voxels:Object.fromEntries(state.voxels)};
   if(state.pivotes.length) data.pivotes=state.pivotes.map(p=>p.slice());
+  if(state.caras.size) data.caras=Object.fromEntries(state.caras);
+  if(state.atravesable) data.atravesable=true;
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -1817,7 +2199,7 @@ function importJSON(file){
     try{
       const d=JSON.parse(rd.result);
       const m=new Map(Object.entries(d.voxels||{}));
-      load(m, d.meta||{name:file.name.replace(/\.vox\.json$/,''),type:'objeto'}, d.size, d.pivotes);
+      load(m, d.meta||{name:file.name.replace(/\.vox\.json$/,''),type:'objeto'}, d.size, d.pivotes, d.caras, d.atravesable);
       try {
         const isTex = (d.meta && d.meta.type === 'textura');
         const endpoint = isTex ? '/api/assets' : '/api/habitantes';
@@ -1894,7 +2276,7 @@ function copySelection(){                              // Ctrl+C: guarda los vox
   for(const k of selection){ const [x,y,z]=k.split(',').map(Number); const c=getVoxel(x,y,z); if(c===undefined) continue;
     raw.push({x,y,z,c}); if(x<minx)minx=x; if(y<miny)miny=y; if(z<minz)minz=z; if(x>maxx)maxx=x; if(y>maxy)maxy=y; }
   if(!raw.length) return false;
-  clipboard={ cells:raw.map(v=>({dx:v.x-minx, dy:v.y-miny, dz:v.z-minz, c:v.c})),
+  clipboard={ cells:raw.map(v=>({dx:v.x-minx, dy:v.y-miny, dz:v.z-minz, c:v.c, m:caraMask(v.x,v.y,v.z)})),
               gx:Math.floor((maxx-minx)/2), gy:Math.floor((maxy-miny)/2) };
   toast(clipboard.cells.length+' voxel(s) copiados');
   return true;
@@ -1918,7 +2300,9 @@ function pasteAt(ax,ay,az){                             // materializa el pegado
   if(!pasting) return;
   const ox=ax-pasting.gx, oy=ay-pasting.gy, oz=(az==null?state.layer:az), placed=new Set();
   edit(()=>{ for(const cel of pasting.cells){ const x=ox+cel.dx, y=oy+cel.dy, z=oz+cel.dz;
-    if(x<0||y<0||z<0||x>=SX||y>=SY||z>=SZ) continue; setVoxel(x,y,z,cel.c); placed.add(x+','+y+','+z); } });
+    if(x<0||y<0||z<0||x>=SX||y>=SY||z>=SZ) continue; setVoxel(x,y,z,cel.c);
+    // La máscara viaja en el portapapeles; sin `m` (copia de una sesión vieja) vale el 63 de siempre.
+    setCaraMask(x,y,z, cel.m===undefined?MASK_ALL:cel.m); placed.add(x+','+y+','+z); } });
   selection.clear(); for(const k of placed) selection.add(k);   // la selección pasa a lo recién pegado
   pasting=null; pasteHover3d=null; if(mode==='3d') update3dCursor(); else refreshEditCursor(); render();
   toast(placed.size+' voxel(s) pegados');
@@ -1933,6 +2317,34 @@ editCv.addEventListener('pointerdown',e=>{
     e.preventDefault(); return;
   }
   const selTool=state.tool==='select';
+  // «Caras» en Capas. En 3D hay que apuntar a la cara y desde según qué ángulo no se puede: las de
+  // abajo y las que dan al fondo quedan tapadas por el propio objeto. Aquí la celda enseña las seis a
+  // la vez y se pulsa justo donde se pinta la marca. Va ANTES del pan porque el botón derecho
+  // significa «desmárcala», pero detrás de nada: Ctrl (pan) y Alt (cuentagotas) se comprueban aquí
+  // mismo para que sigan mandando sobre la herramienta, igual que en 3D.
+  if(state.tool==='caras' && (e.button===0 || e.button===2)
+     && !e.ctrlKey && !e.metaKey && !(e.altKey||altHeld)){
+    const p=canvasPx(e), f=caraDeCelda2d(p.px,p.py);
+    if(!f || !getVoxel(f.x,f.y,f.z)){
+      if(e.button===0) toast('Pulsa sobre un voxel de esta capa');
+      e.preventDefault(); return;
+    }
+    hover={x:f.x,y:f.y}; hoverCara2d=f;
+    if(e.shiftKey){                                // Shift = devolverle las seis a este voxel
+      if(caraMaskRaw(f.x,f.y,f.z)!==MASK_ALL) edit(()=>setCaraMask(f.x,f.y,f.z,MASK_ALL));
+      render();
+    }else{
+      // Con un dedo no hay botón derecho, así que en táctil manda la zona por la que empiezas; y se
+      // fija UNA vez para que al arrastrar no vaya marcando y desmarcando lo mismo.
+      carasOp = e.button===2 ? 0
+              : e.pointerType==='touch' ? ((caraMaskRaw(f.x,f.y,f.z)&(1<<f.fi)) ? 0 : 1)
+              : 1;
+      // `painting` marca el gesto igual que al pintar: difiere la miniatura 3D al soltar (barrer
+      // caras la invalida entera) y deja que `endPointer` cierre el paso de deshacer sin más ramas.
+      painting=true; beginGesture(); aplicaCara2d(f); render();
+    }
+    e.preventDefault(); return;
+  }
   if(e.button===1 || (e.button===2 && !selTool) || e.ctrlKey || e.metaKey || (e.button===0 && state.tool==='hand')){   // central/derecho, Ctrl o Mano = pan (der con Selección = deseleccionar)
     panning=true; panLast=canvasPx(e); editCv.style.cursor='grabbing'; e.preventDefault(); return;
   }
@@ -1967,6 +2379,18 @@ editCv.addEventListener('pointermove',e=>{
     return;
   }
   const c=cellFromEvent(e);
+  // «Caras» mira DENTRO de la celda, así que no le vale el «¿ha cambiado de celda?» de abajo: dentro
+  // de una misma celda el cursor pasa del borde al centro sin que `hover` se mueva, y el resalte se
+  // quedaría clavado en la primera zona que tocaste.
+  if(state.tool==='caras'){
+    const p=canvasPx(e), f=caraDeCelda2d(p.px,p.py);
+    const movida = !f !== !hoverCara2d
+                || (f && hoverCara2d && (f.x!==hoverCara2d.x || f.y!==hoverCara2d.y || f.fi!==hoverCara2d.fi));
+    hoverCara2d=f; hover=c;
+    if(carasOp!==null && f && getVoxel(f.x,f.y,f.z)) aplicaCara2d(f);   // el arrastre barre caras, como en 3D
+    if(movida) render();
+    return;
+  }
   if(!hover||hover.x!==c.x||hover.y!==c.y){
     hover=c;
     if(painting && sel2d) apply2dSelect(c);
@@ -1982,10 +2406,10 @@ function endPointer(){ const wasPaint=painting;
     marquee=null;
   }
   else if(painting && !sel2d) endGesture();
-  painting=false; panning=false; sel2d=null; refreshEditCursor();
+  painting=false; panning=false; sel2d=null; carasOp=null; refreshEditCursor();
   if(wasPaint) drawIso(); }   // miniatura 3D diferida: se actualiza UNA vez al soltar, no en cada trazo
 editCv.addEventListener('pointerup',endPointer);
-editCv.addEventListener('pointerleave',()=>{ hover=null; endPointer(); drawEdit(); });
+editCv.addEventListener('pointerleave',()=>{ hover=null; hoverCara2d=null; endPointer(); drawEdit(); });
 editCv.addEventListener('contextmenu',e=>e.preventDefault());   // permitir pan con botón derecho
 editCv.addEventListener('wheel',e=>{
   e.preventDefault();
@@ -1997,6 +2421,10 @@ editCv.addEventListener('wheel',e=>{
 $('#zoom-in').onclick =()=>{ if(mode==='3d') zoom3dAt(edit3d.width/2, edit3d.height/2, 1.12); else zoomAt(editCv.width/2, editCv.height/2, 1.12); };
 $('#zoom-out').onclick=()=>{ if(mode==='3d') zoom3dAt(edit3d.width/2, edit3d.height/2, 1/1.12); else zoomAt(editCv.width/2, editCv.height/2, 1/1.12); };
 $('#zoom-reset').onclick=()=>{ if(mode==='3d'){ view3d.zoom=1; view3d.panX=0; view3d.panY=0; drawEdit3d(); } else resetView(); };
+$('#btn-caras-ver').onclick=()=>{
+  setCarasMarcar(!carasMarcar);
+  toast(carasMarcar ? 'Caras marcadas en rojo: son las que se verán' : 'Solo las caras marcadas: así se verá en el Mundo');
+};
 
 // tecla Ctrl = modo mover (pan) en ambas vistas, con cursor de mano
 function refreshEditCursor(){ if(!panning) editCv.style.cursor = pasting ? 'move' : altHeld ? CURSORS.pick : (ctrlHeld||state.tool==='hand') ? 'grab' : 'crosshair'; }
@@ -2053,8 +2481,8 @@ function applyShowPreview(v){
   return _showPreview;
 }
 $('#mode-tabs').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) setMode(b.dataset.mode); });
-$('#e3-rot-left').onclick =()=>{ view3d.yaw+=Math.PI/4; leaveCamFront(); hover3d=null; drawEdit3d(); };
-$('#e3-rot-right').onclick=()=>{ view3d.yaw-=Math.PI/4; leaveCamFront(); hover3d=null; drawEdit3d(); };
+$('#e3-rot-left').onclick =()=>{ view3d.yaw+=Math.PI/4; leaveCamFront(); hover3d=null; hoverCara3d=null; drawEdit3d(); };
+$('#e3-rot-right').onclick=()=>{ view3d.yaw-=Math.PI/4; leaveCamFront(); hover3d=null; hoverCara3d=null; drawEdit3d(); };
 // Alternar entre la orientación libre actual y la proyección ortogonal frontal (yaw=pitch=0, se ve X↔horizontal, Z↔vertical)
 function updateCamBtn(){ const b=$('#e3-cam'); if(!b) return;
   b.classList.toggle('on', camFront);
@@ -2112,6 +2540,8 @@ function applyTool3d(v){                // v: voxel elegido {x,y,z}
 let paint3d=false, selecting=false, orbiting=false, orbitLast=null, orbitMoved=false;
 let building=false, buildGhost=null, buildGeom=null;    // Construir: colocar voxels contra la cara clicada (estilo Minecraft); buildGeom = geometría congelada del arrastre
 let dragGeom=null;                                      // Borrar: geometría congelada del arrastre (arrasa solo la superficie inicial, no cava hacia dentro)
+let carasOp=null;                                       // «Caras»: 0=desmarcar la apuntada, 1=marcarla (null = no se está pintando)
+let hoverCara3d=null;                                   // «Caras»: {x,y,z,fi} de la cara bajo el cursor
 let last3dLayer=null;                                   // última z editada en 3D (construir/pintar/borrar); al pasar a Capas se activa esa capa
 let selBox=null;                  // {a,b,base:Set,mode} arrastre de Selección en 3D = caja de voxels de A a B
 let pan3d=false, pan3dLast=null;
@@ -2128,7 +2558,7 @@ const _rotate=`<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' vi
 const CURSORS={
   paint:_cur(_pencil,3,25,'crosshair'), erase:_cur(_eraser,5,24,'crosshair'),
   pick:_cur(_dropper,4,26,'crosshair'), fill:_cur(_bucket,8,20,'crosshair'),
-  select:'crosshair', orbit:_cur(_rotate,14,14,'grab'), build:'copy',
+  select:'crosshair', orbit:_cur(_rotate,14,14,'grab'), build:'copy', caras:'cell',
 };
 function update3dCursor(){
   edit3d.style.cursor =
@@ -2143,7 +2573,7 @@ function update3dCursor(){
     state.tool==='build'? (buildGhost?CURSORS.build:'crosshair') :  // Construir: + si hay hueco válido
     state.tool==='orbit'? CURSORS.orbit :                // herramienta Giro
     state.tool==='hand' ? 'grab' :                       // herramienta Mano
-    hover3d             ? (CURSORS[state.tool]||'crosshair') :
+    (hover3d||hoverCara3d) ? (CURSORS[state.tool]||'crosshair') :
                           'default';                     // fondo, sin acción
 }
 const selKey=v=>v.x+','+v.y+','+v.z;
@@ -2200,11 +2630,12 @@ function paintSelection(){
 function moveSel(dx,dy,dz){
   if(!selection.size) return false;
   const items=[];
-  for(const k of selection){ const [x,y,z]=k.split(',').map(Number); items.push({x,y,z,c:getVoxel(x,y,z)}); }
+  for(const k of selection){ const [x,y,z]=k.split(',').map(Number); items.push({x,y,z,c:getVoxel(x,y,z),m:caraMask(x,y,z)}); }
   for(const m of items){ const nx=m.x+dx,ny=m.y+dy,nz=m.z+dz; if(nx<0||ny<0||nz<0||nx>=SX||ny>=SY||nz>=SZ) return false; }
   for(const m of items) setVoxel(m.x,m.y,m.z,null);                        // vaciar origen
   const ns=new Set();
-  for(const m of items){ const nx=m.x+dx,ny=m.y+dy,nz=m.z+dz; setVoxel(nx,ny,nz,m.c); ns.add(nx+','+ny+','+nz); }
+  // Trasladar no gira: la máscara se copia tal cual (aquí no hay permutación que aplicar).
+  for(const m of items){ const nx=m.x+dx,ny=m.y+dy,nz=m.z+dz; setVoxel(nx,ny,nz,m.c); setCaraMask(nx,ny,nz,m.m); ns.add(nx+','+ny+','+nz); }
   selection.clear(); for(const k of ns) selection.add(k);                  // la selección sigue a los voxels
   return true;
 }
@@ -2214,6 +2645,8 @@ function worldShift(axis, offset){
   if(offset<=0) return;
   const sh=k=>{ const p=k.split(',').map(Number); p[axis]+=offset; return p.join(','); };
   const nv=new Map(); for(const [k,c] of state.voxels) nv.set(sh(k),c); state.voxels=nv;
+  // Traslación pura: la máscara cambia de celda pero NO permuta (no hay giro).
+  if(state.caras.size){ const nc=new Map(); for(const [k,m] of state.caras) nc.set(sh(k),m); state.caras=nc; }
   const ns=new Set(); for(const k of selection) ns.add(sh(k)); selection.clear(); for(const k of ns) selection.add(k);
   if(exBase) for(const b of exBase){ const p=[b.x,b.y,b.z]; p[axis]+=offset; b.x=p[0]; b.y=p[1]; b.z=p[2]; }
   if(exOcc){ const no=new Set(); for(const k of exOcc) no.add(sh(k)); exOcc=no; }
@@ -2285,6 +2718,16 @@ function applyExtrudeDrag(steps){
     }
   }
 }
+// Pintar caras con el botón pulsado. La OPERACIÓN la fija el botón al empezar el arrastre y se repite
+// igual en todas las caras que barra: conmutar cara a cara aquí no serviría, porque un arrastre vuelve a
+// pasar por la misma cara muchas veces y la dejaría parpadeando. Todo el trazo es UN paso de deshacer.
+function aplicaCara3d(f){
+  const m=caraMaskRaw(f.x,f.y,f.z), b=1<<f.fi;
+  // Izquierdo marca, derecho desmarca, siempre la cara apuntada. Sin casos especiales: un voxel sin
+  // entrada vale 0, así que la primera marca deja exactamente esa cara y «Ocultas» enseña solo ésa.
+  const n = carasOp ? (m|b) : (m&~b);
+  if(n!==m){ setCaraMask(f.x,f.y,f.z,n); scheduleEdit3d(); }
+}
 edit3d.addEventListener('contextmenu',e=>e.preventDefault());
 edit3d.addEventListener('pointerdown',e=>{
   edit3d.setPointerCapture(e.pointerId);
@@ -2302,6 +2745,27 @@ edit3d.addEventListener('pointerdown',e=>{
   if(e.button===0 && pickKey){                       // Alt+clic = tomar color del voxel
     if(v){ const c=getVoxel(v.x,v.y,v.z); if(c) chooseColor(c); }
     e.preventDefault(); return;
+  }
+  // Herramienta «Caras»: el izquierdo marca la cara APUNTADA (no la celda) y el derecho la desmarca. Va
+  // antes del giro con botón derecho porque aquí el derecho significa «desmárcala»; si no acierta a ninguna
+  // cara se deja pasar y el derecho sigue girando la vista como en el resto de herramientas.
+  if(state.tool==='caras' && (e.button===0 || e.button===2)){
+    const {px,py}=edit3dPx(e), f=pickFace3d(px,py,g3d);
+    if(f){
+      if(e.shiftKey){                                 // Shift = devuélveme las seis de este voxel
+        if(caraMaskRaw(f.x,f.y,f.z)!==MASK_ALL) edit(()=>setCaraMask(f.x,f.y,f.z,MASK_ALL));
+      }else{                                          // izq marca, der desmarca, y el arrastre sigue barriendo
+        // Con un dedo no hay botón derecho, así que en táctil la operación la decide la cara por la que
+        // empiezas: si ya está marcada el trazo desmarca, y si no, marca. Se fija UNA vez al empezar, igual
+        // que con ratón, para que el arrastre no parpadee.
+        carasOp = e.button===2 ? 0
+                : e.pointerType==='touch' ? ((caraMaskRaw(f.x,f.y,f.z)&(1<<f.fi)) ? 0 : 1)
+                : 1;
+        beginGesture(); aplicaCara3d(f);
+      }
+      last3dLayer=f.z; render(); e.preventDefault(); return;
+    }
+    if(e.button===0){ toast('Apunta a una cara del dibujo'); e.preventDefault(); return; }
   }
   if(e.button===1 || (e.button===2 && state.tool!=='select')){   // rotar: botón derecho (o central); con Selección el der deselecciona
     orbiting=true; orbitLast=edit3dPx(e); orbitMoved=false; hover3d=null; update3dCursor(); drawEdit3d(); return;
@@ -2366,6 +2830,11 @@ edit3d.addEventListener('pointermove',e=>{
     const p=edit3dPx(e);
     view3d.panX+=p.px-pan3dLast.px; view3d.panY+=p.py-pan3dLast.py; pan3dLast=p; scheduleEdit3d(); return;
   }
+  if(carasOp!==null){                              // «Caras»: el arrastre barre caras, una a una es inviable
+    const {px,py}=edit3dPx(e), f=pickFace3d(px,py,g3d);
+    if(f){ aplicaCara3d(f); last3dLayer=f.z; }
+    return;
+  }
   if(orbiting){                                    // arrastre = orbitar (yaw/pitch libres)
     const p=edit3dPx(e), dx=p.px-orbitLast.px, dy=p.py-orbitLast.py;
     if(Math.abs(dx)+Math.abs(dy)>3) orbitMoved=true;
@@ -2410,6 +2879,12 @@ edit3d.addEventListener('pointermove',e=>{
     if(tk!==gk){ buildGhost=t; scheduleEdit3d(); }
     update3dCursor(); return;
   }
+  if(state.tool==='caras'){                          // «Caras» resalta la CARA apuntada, no el voxel
+    const {px,py}=edit3dPx(e), f=pickFace3d(px,py,g3d);
+    const nk=f?f.x+','+f.y+','+f.z+','+f.fi:null, ck=hoverCara3d?hoverCara3d.x+','+hoverCara3d.y+','+hoverCara3d.z+','+hoverCara3d.fi:null;
+    if(nk!==ck || hover3d){ hoverCara3d=f; hover3d=null; scheduleEdit3d(); }
+    update3dCursor(); return;
+  }
   const v=(state.tool==='hand'||state.tool==='orbit'||state.tool==='extrude') ? null : pick3dAt(e);   // sin resaltado con herramientas de vista/extrude
   const nk=v?v.x+','+v.y+','+v.z:null, ck=hover3d?hover3d.x+','+hover3d.y+','+hover3d.z:null;
   if(nk!==ck){ hover3d=v; scheduleEdit3d(); }
@@ -2417,7 +2892,8 @@ edit3d.addEventListener('pointermove',e=>{
 });
 function end3d(){
   const wasPaint=paint3d||building;
-  if(paint3d||building) endGesture();
+  if(paint3d||building||carasOp!==null) endGesture();
+  carasOp=null;
   if(moving || extruding){ endGesture(); render(); }
   const wasView=orbiting||pan3d;
   paint3d=false; building=false; buildGeom=null; dragGeom=null; selecting=false; selBox=null; orbiting=false; pan3d=false; moving=false; extruding=false;
@@ -2426,7 +2902,7 @@ function end3d(){
   update3dCursor();
 }
 edit3d.addEventListener('pointerup',end3d);
-edit3d.addEventListener('pointerleave',()=>{ end3d(); if(hover3d){ hover3d=null; drawEdit3d(); } if(buildGhost){ buildGhost=null; drawEdit3d(); } });
+edit3d.addEventListener('pointerleave',()=>{ end3d(); if(hover3d||hoverCara3d){ hover3d=null; hoverCara3d=null; drawEdit3d(); } if(buildGhost){ buildGhost=null; drawEdit3d(); } });
 // zoom con la rueda, centrado en el cursor
 function zoom3dAt(cx,cy,factor){
   const z0=view3d.zoom; view3d.zoom=Math.max(0.3, Math.min(32, z0*factor));   // hasta 32 (3200%): se ve el interior
@@ -2446,6 +2922,11 @@ let prevTool='paint';                       // herramienta previa a elegir Color
 function setTool(t){
   if(t==='pick' && state.tool!=='pick') prevTool=state.tool;
   if(t!=='build' && buildGhost){ buildGhost=null; if(mode==='3d') scheduleEdit3d(); }  // limpia el fantasma al salir de Construir
+  // Los dos resaltados son excluyentes: «Caras» señala una cara y el resto de herramientas el voxel entero.
+  // Sin esto, al cambiar de herramienta se queda encendido el del anterior hasta que el ratón se mueva.
+  if((t==='caras') !== (state.tool==='caras') && (hover3d||hoverCara3d)){
+    hover3d=null; hoverCara3d=null; if(mode==='3d') scheduleEdit3d();
+  }
   state.tool=t;
   document.querySelectorAll('#tools .tool, #tool-float .tool')
     .forEach(b=>b.classList.toggle('is-active', b.dataset.tool===t));
@@ -2455,11 +2936,18 @@ function setTool(t){
       t==='extrude' ? 'extruye la selección según su normal (arrastra, o ↑ fuera / ↓ dentro)' :
       t==='select' ? 'selecciona (izq) · deselecciona (der) · arrastra o flechas mueve · Supr elimina' :
       t==='pivot'  ? 'clic sobre un voxel pone el pivote en su celda · clic encima lo quita · el nº es su orden' :
+      t==='caras'  ? 'izquierdo marca la cara que resalta en rojo · derecho la desmarca · Shift+clic marca las seis de ese voxel · en cuanto hay UNA marca en el objeto, todo lo que no esté marcado se oculta · el derecho sobre el botón «Caras» borra todas las marcas y el dibujo vuelve a verse entero · el botón de la barra alterna entre verlas en rojo y ocultarlas (ocultas se siguen pudiendo clicar)' :
                      'clic aplica la herramienta al voxel'
     ) + ' · botón der. rota · Alt+clic color · Ctrl+arrastre mueve · rueda zoom (acerca para ver el interior)';
     update3dCursor();
   } else {
     editCv.style.cursor = (t==='hand'||ctrlHeld) ? 'grab' : 'crosshair';
+    // En Capas la pista la pone `setMode` y no cambia con la herramienta, pero «Caras» sí necesita
+    // decir cómo se reparte la celda: los bordes y el punto del centro no se adivinan mirando.
+    $('#stage-hint').textContent = t==='caras'
+      ? 'cada celda se reparte en seis zonas: los 4 bordes son las caras de los lados, el punto del centro es la de debajo y el resto la de arriba · el resalte blanco enseña cuál vas a marcar · izquierdo marca en rojo · derecho desmarca · Shift+clic las seis · arrastra para barrer'
+      : 'clic pinta · Alt+clic color · rueda zoom · Ctrl+arrastre mueve · B/E/I/G · [ ] capa · R rota';
+    if(hoverCara2d){ hoverCara2d=null; drawEdit(); }   // el resalte del anterior no se queda encendido
   }
 }
 function onToolClick(e){
@@ -2472,12 +2960,32 @@ function onToolClick(e){
 }
 $('#tools').addEventListener('click', onToolClick);
 $('#tool-float').addEventListener('click', onToolClick);
-// Botón derecho sobre "Selección" => deseleccionar todos los voxels
+// La caja de giro (.stage-side) se aparta de la paleta flotante, y la paleta no siempre mide lo mismo:
+// en un lienzo bajo se reparte en dos columnas y crece hacia la izquierda. Se publica su ancho REAL en
+// una variable CSS en vez de suponerlo, que es lo único que no se desincroniza al añadir herramientas
+// o al cambiar el tamaño de la ventana.
+(function medirPaletaFlotante(){
+  const tf=$('#tool-float'); if(!tf || !window.ResizeObserver) return;
+  const host=tf.parentElement;
+  new ResizeObserver(()=>{ if(tf.offsetWidth) host.style.setProperty('--tool-float-w', tf.offsetWidth+'px'); }).observe(tf);
+})();
+// Botón derecho sobre un BOTÓN de herramienta: nunca el menú del navegador. Estos botones son cromo de la
+// app, ahí el menú solo tapa el lienzo, y con «Caras» es peor que molesto: el derecho es media herramienta,
+// así que al leer que «el derecho quita las seis» se prueba sobre el botón y lo único que sale es el menú.
 function onToolContext(e){
   const b=e.target.closest('.tool'); if(!b) return;
-  if(b.dataset.tool==='select'){
-    e.preventDefault();
+  e.preventDefault();
+  if(b.dataset.tool==='select'){                  // «Selección» sí lo aprovecha: deselecciona todo
     if(selection.size){ selection.clear(); render(); toast('Selección vaciada'); }
+  }else if(b.dataset.tool==='caras'){             // «Caras»: devuelve las seis a TODO el objeto
+    // Mismo gesto y mismo sentido que en «Selección»: el derecho sobre el botón deshace lo que la
+    // herramienta acumula. Volver voxel a voxel con Shift+clic no es alternativa cuando la mitad de las
+    // caras que hay que devolver miran para dentro y ni se ven. Entra en el historial, como todo.
+    if(state.caras.size){
+      const n=state.caras.size;
+      edit(()=>{ for(const k of [...state.caras.keys()]){ const [x,y,z]=k.split(',').map(Number); setCaraMask(x,y,z,0); } });
+      render(); toast('Caras devueltas: '+n+' voxel'+(n===1?'':'s')+' vuelven a verse enteros');
+    }else toast('Este objeto no tiene ninguna cara marcada');
   }
 }
 $('#tools').addEventListener('contextmenu', onToolContext);
@@ -2628,6 +3136,13 @@ window.addEventListener('resize',()=>{ if(modalOpen){ sizeBig(); drawIsoBig(); }
 // meta
 $('#meta-name').oninput=e=>state.meta.name=e.target.value;
 $('#meta-type').onchange=e=>state.meta.type=e.target.value;
+// No entra en el historial de deshacer: como el nombre y el tipo, es una propiedad de la FICHA, no del
+// dibujo, y un Ctrl+Z que deshiciera una casilla en vez del último trazo desconcierta más que ayuda.
+$('#meta-atravesable').onchange=e=>{
+  state.atravesable=e.target.checked;
+  toast(state.atravesable ? 'Atravesable: en el Mundo se cruza sin frenarse (sigue viéndose y rompiéndose)'
+                          : 'Ya no es atravesable: vuelve a chocar');
+};
 
 // tamaño del objeto (X×Y×Z)
 $('#size-apply').onclick=()=>{
@@ -2787,7 +3302,7 @@ window.addEventListener('keydown',e=>{
     view3d.yaw += (e.key==='ArrowLeft' ? Math.PI/4 : -Math.PI/4);
     hover3d=null; buildGhost=null; drawEdit3d(); return;
   }
-  const map={b:'paint',e:'erase',i:'pick',g:'fill',s:'select',h:'hand',o:'orbit',x:'extrude',c:'build',p:'pivot'};
+  const map={b:'paint',e:'erase',i:'pick',g:'fill',s:'select',h:'hand',o:'orbit',x:'extrude',c:'build',p:'pivot',a:'caras'};
   if(map[e.key]){ setTool(map[e.key]); }
   else if(e.key===']') setLayer(state.layer+1);
   else if(e.key==='[') setLayer(state.layer-1);
@@ -2868,6 +3383,10 @@ const roomDataCache=new Map();     // key -> objeto {voxels,...}
 
 async function getRoomData(key){
   if(roomDataCache.has(key)) return roomDataCache.get(key);
+  // Una variante girada ('…@5', ver mcClaveBase) es el MISMO documento: solo cambia cómo se hornea su
+  // geometría, no lo que hay en disco. Comparte la promesa con la clave base — ni un fetch de más.
+  const base=mcClaveBase(key);
+  if(base!==key){ const p=getRoomData(base); roomDataCache.set(key,p); return p; }
   const p=(async()=>{
     if(key.startsWith('asset:')) return fetch(key.slice(6),{cache:'no-store'}).then(r=>r.json());
     if(key.startsWith('hab:'))   return fetch('/api/habitantes/'+key.slice(4),{cache:'no-store'}).then(r=>r.json());
@@ -2894,17 +3413,25 @@ function texSize(sz){
 async function getTexDef(key){
   if(texDefs.has(key)) return texDefs.get(key);
   const d=await getRoomData(key);
-  const def={ size:texSize(d.size), voxels:d.voxels||{} };
+  // `atravesable` viaja con la def porque mcBuildPalette es el unico sitio que recorre TODOS los
+  // materiales del mundo con su documento en la mano: es ahi donde se hornea mc.atraviesaDoc.
+  const def={ size:texSize(d.size), voxels:d.voxels||{}, caras:d.caras||null, atravesable:!!d.atravesable };
   texDefs.set(key,def); texReprCache.set(key, computeTexRepr(def));
   return def;
 }
 // Olvida todo lo cacheado de una textura (tras editarla y re-guardarla) => se recarga fresca
-function invalidateTex(key){ texDefs.delete(key); texFaceCache.delete(key); texReprCache.delete(key); roomDataCache.delete(key); e3baseKey=''; }
+// Ojo con las variantes giradas ('…@5'): cuelgan del mismo documento, así que si se olvida solo la clave
+// base se quedan servidas las viejas y la pieza girada seguiría saliendo con el dibujo de antes.
+function invalidateTex(key){ texDefs.delete(key); texFaceCache.delete(key); texReprCache.delete(key); roomDataCache.delete(key); e3baseKey='';
+  for(const m of [texDefs, texFaceCache, texReprCache, roomDataCache]) for(const k of [...m.keys()]) if(mcClaveBase(k)===key && k!==key) m.delete(k);
+  for(const k in mc.finoGeom) if(mcClaveBase(k)===key) delete mc.finoGeom[k];
+  for(const k in mc.structs) if(mcClaveBase(k)===key) delete mc.structs[k];
+}
 // Rehidrata texturas embebidas en un modelo cargado: pobla defs+caché+repr (render offline)
 function ingestTextures(doc){
   if(!doc || !doc.textures) return;
   for(const [k,def] of Object.entries(doc.textures)){
-    const d={ size:texSize(def.size), voxels:def.voxels||{} };
+    const d={ size:texSize(def.size), voxels:def.voxels||{}, caras:def.caras||null };
     texDefs.set(k,d); texReprCache.set(k, computeTexRepr(d));
     roomDataCache.set(k, Promise.resolve(d));
   }
@@ -4235,12 +4762,14 @@ function applyShowFPS(v){ _showFPS=!!v;
   try{ localStorage.setItem('vf_showFPS', _showFPS?'1':'0'); }catch(e){}
   const el=$('#e3-fps'); if(el) el.hidden = !(_showFPS && mode==='3d');   // el medidor vive en la vista 3D
   updatePlayMeters();                                                     // REQ-DBG1: y en el modo Play
+  updateWorldMeters();                                                    // BUG-DBG2: y en el Mundo, sin esperar al frame
   return _showFPS; }
 let _showVox=false; try{ _showVox = localStorage.getItem('vf_showVox')==='1'; }catch(e){}
 function applyShowVox(v){ _showVox=!!v;
   try{ localStorage.setItem('vf_showVox', _showVox?'1':'0'); }catch(e){}
   const el=$('#e3-vox'); if(el) el.hidden = !(_showVox && mode==='3d');
   updatePlayMeters();                                                     // REQ-DBG1: y en el modo Play
+  updateWorldMeters();                                                    // BUG-DBG2: y en el Mundo, sin esperar al frame
   return _showVox; }
 // REQ-DBG1: los mismos toggles de depuración F12 valen en Play. Los medidores viven sobre
 // #play-stage y se refrescan desde playTick (FPS real de pantalla) y playLoadRoom (voxels de sala).
@@ -4257,6 +4786,24 @@ Object.defineProperty(game, 'showFPS', { enumerable:true,   // callable `game.sh
 Object.defineProperty(game, 'showVoxels', { enumerable:true,   // muestra/oculta el nº de voxels dibujados
   get(){ const f=v=>applyShowVox(v===undefined?!_showVox:v); f.valueOf=()=>_showVox; f.toString=()=>String(_showVox); return f; },
   set(v){ applyShowVox(v); } });
+// REQ-OSD1 · los dos botones de la esquina del Mundo (🧩 Código y ✕ Cerrar) estorban en las capturas.
+// Nacen OCULTOS: Esc cierra y Alt+C abre los snippets, así que con teclado no hacen falta.
+let _showOSD=false; try{ _showOSD = localStorage.getItem('vf_showOSD')==='1'; }catch(e){}
+function applyShowOSDbuttons(v){ _showOSD=!!v;
+  try{ localStorage.setItem('vf_showOSD', _showOSD?'1':'0'); }catch(e){}
+  updateOSDbuttons();
+  return _showOSD; }
+// ⚠️ En táctil «✕ Cerrar» NO se puede esconder: sin teclado no hay Esc y el Mundo se quedaría sin
+// salida. Se consulta `mcTouchOn` y no `MC_TOUCH` a propósito: mcTouchOn es lo que ya decide si salen
+// los mandos táctiles (`game.touchControls`) y el dueño puede forzarlo en los dos sentidos, así que
+// mirar la constante cruda dejaría las dos cosas diciendo lo contrario en un portátil táctil.
+function updateOSDbuttons(){
+  const c=$('#mc-code-btn'); if(c) c.hidden=!_showOSD;
+  const x=$('#mc-close');    if(x) x.hidden=!(_showOSD || mcTouchOn);
+}
+Object.defineProperty(game, 'showOSDbuttons', { enumerable:true,   // `game.showOSDbuttons(true)` o `= true`
+  get(){ const f=v=>applyShowOSDbuttons(v===undefined?!_showOSD:v); f.valueOf=()=>_showOSD; f.toString=()=>String(_showOSD); return f; },
+  set(v){ applyShowOSDbuttons(v); } });
 const applyPaintAlpha=v=>{ state.alpha=Math.max(0,Math.min(1,+v)); if(state.tex) state.tex=null; syncColor(); return state.alpha; };
 Object.defineProperty(game, 'paintAlpha', { enumerable:true,   // `game.paintAlpha(0.5)` o `game.paintAlpha=0.5`: opacidad del pincel (0..1)
   get(){ const f=v=>applyPaintAlpha(v===undefined?state.alpha:v); f.valueOf=()=>state.alpha; f.toString=()=>String(state.alpha); return f; },
@@ -4265,6 +4812,9 @@ const applyPaintGlow=v=>{ state.emit=!!v; if(state.tex) state.tex=null; syncColo
 Object.defineProperty(game, 'paintGlow', { enumerable:true,   // `game.paintGlow()` alterna / `game.paintGlow=true`: pincel emisivo (brilla en el Mundo)
   get(){ const f=v=>applyPaintGlow(v===undefined?!state.emit:v); f.valueOf=()=>state.emit; f.toString=()=>String(state.emit); return f; },
   set(v){ applyPaintGlow(v); } });
+Object.defineProperty(game, 'carasMarcadas', { enumerable:true,   // `game.carasMarcadas()` alterna / `=false`: caras sin marcar en rojo o realmente ocultas
+  get(){ const f=v=>setCarasMarcar(v===undefined?!carasMarcar:v); f.valueOf=()=>carasMarcar; f.toString=()=>String(carasMarcar); return f; },
+  set(v){ setCarasMarcar(v); } });
 // game.nearClip = zoom a partir del cual se pelan los voxels más cercanos a la cámara.
 // Subirlo => desaparecen más tarde (0 = pelar desde el principio). Persistido, se refleja al vuelo.
 function applyNearClip(v){ _clipStart=Math.max(0, +v||0);
@@ -4656,9 +5206,11 @@ async function playLoadRoom(cellKey, spawn){
   cv.width=PLAY_W; cv.height=PLAY_H;
   PLAY_VIEW.zoom=_playZoom; PLAY_VIEW.panX=0; PLAY_VIEW.panY=-_playLift*PLAY_H;   // REQ-PLAYFIT: acerca y sube la sala para comerse el margen del techo abierto (fondo ocluido)
   const saved=state.voxels; state.voxels=new Map(Object.entries(roomVox));
+  // La sala es OTRO dibujo: las máscaras del objeto abierto no pueden colarse en su render.
+  const savedCaras=state.caras; state.caras=new Map();
   const base=document.createElement('canvas'); base.width=PLAY_W; base.height=PLAY_H;
   renderFree3d(base.getContext('2d'), PLAY_W, PLAY_H, PLAY_VIEW, false);
-  play.g=project3d(PLAY_W, PLAY_H, PLAY_VIEW); state.voxels=saved; play.base=base;
+  play.g=project3d(PLAY_W, PLAY_H, PLAY_VIEW); state.voxels=saved; state.caras=savedCaras; play.base=base;
   game.voxels=_voxDrawnLast; updatePlayMeters();                  // REQ-DBG1: voxels dibujados de la sala (tras culling)
   // Oclusión POR PÍXEL: imagen base + buffer de profundidad de la superficie visible
   // (raster en orden pintor => por píxel queda la profundidad de lo más CERCANO). Sin AA.
@@ -4909,7 +5461,10 @@ const mc={
   structAtlas:null, structAtlasTex:null, // atlas de TEXTURAS de estructuras (gemelo de atlas/atlasTex) — solo claves tex: usadas por las estructuras vivas
   structUV:{},                    // clave tex: → [6 rects UV] dentro del atlas de estructuras
   notes:{}, noteCell:null,        // t1 · notas post-it: "x,y,z" → texto (persiste en mundo.json); noteCell = bloque que edita el panel
-  noteAlpha:0.85,                 // opacidad del marcador flotante de nota (game.noteAlpha)
+  noteAlpha:0.85,                 // opacidad del marcador flotante de nota (game.noteAlpha) — solo para las notas SIN cartel
+  noteSigns:true,                 // game.noteSigns: cada nota planta un cartel de verdad (assets/cartel.vox.json) en vez del post-it
+  noteText:true, noteTextDist:14, // game.noteText / game.noteTextDist: el texto escrito en la tabla del cartel, y desde cuántos bloques se lee
+  noteFont:18, noteWidth:720,     // game.noteFont / game.noteWidth: cuerpo (múltiplo de 9) y ancho del panel DOM de editar/ver nota — REQ-CART2
   unlockedAt:0,                   // instante (perf.now) en que se soltó el pointer-lock (para el Esc de 2 pasos)
   chunks:new Map(),               // "cx,cz" -> {vbo, count, dirty}
   prog:null, loc:null,            // programa GLSL del terreno (atlas) + localizaciones
@@ -4929,6 +5484,7 @@ const mc={
   tool:'build',                   // acción del clic derecho (game.playerTool: 'build' pone al lado | 'paint' repinta el bloque)
   structTextures:true,            // game.structTextures: true = estructuras texturadas de verdad (detalle del editor, coste nivel 1) · false = color plano por cara (media, más barato)
   structGreedy:true,              // game.structGreedy: true = greedy meshing (fusiona caras coplanares de la misma textura/color → muchas menos caras) · false = una cara por voxel (como antes)
+  useOldStructBuild:false,        // game.useOldStructBuildCall: true = el clic derecho vuelve a estampar SIEMPRE una pieza suelta (mcStampStruct, 1 draw call cada una). false (defecto) = lo que cabe en una celda se pone con setVoxel, dentro de la malla del chunk
   heldBtn:-1, actAt:0,            // botón de ratón mantenido (construir/romper continuo) y último instante de acción
   xray:false,                     // modo rayos-X (tecla X): dibuja el volumen de colisión translúcido a través de las paredes
   rayFijo:null,                   // rayo de apuntado CONGELADO (game.rayoFijo()): desde el ojo el rayo se ve como un punto
@@ -4958,6 +5514,37 @@ const mc={
   shadow:null,                    // MAPA DE SOMBRA del sol vertical: {size,fbo,tex,depth,dirty} — altura de la superficie más alta por téxel (mcRenderShadow)
   sunExtra:null,                  // gancho: geometría que dibuja OTRO (snippets con pasada propia) y que también debe
                                   // proyectar sombra. Se llama en la pasada del sol con dibuja(vbo,count,stride,model).
+  atraviesa:null,                 // gancho: Uint8Array indexado por id de bloque, 1 = el jugador lo cruza sin frenarse.
+                                  // Lo ESCRIBE un snippet (game.bloques.define) y app.js solo lo consulta, en mcSolidWalk
+                                  // y en ningún otro sitio: aquí no se sabe qué materiales son atravesables ni por qué.
+                                  // null (lo normal) = coste cero.
+  traspasaLuz:null,               // gancho para CORREGIR a mano quién deja pasar la LUZ DEL CIELO, por id de bloque:
+                                  // 1 = pasa, 2 = tapa, 0 = lo que diga el defecto. Igual que `atraviesa`, lo escribe
+                                  // un snippet (game.bloques.define(clave,{luz:'pasa'|'tapa'})) y app.js solo lo
+                                  // consulta, en mcComputeLight/mcRelightBox (vía mcTablaLuz).
+                                  // El DEFECTO no vive aquí sino en `recorte`: un bloque cuya textura se ve a través
+                                  // deja pasar la luz sin que nadie lo declare. Esto es solo la excepción a mano.
+                                  // NO abre la columna de cielo: un dosel sigue dando sombra a lo que tiene debajo.
+                                  // null (lo normal) = coste cero.
+  recorte:null,                   // Uint8Array por id de bloque, 1 = su textura tiene AGUJEROS (alpha 0 ⇒ el shader
+                                  // del terreno hace discard). Lo hornea mcBuildPalette y lo lee un solo sitio:
+                                  // mcTapaCara, o sea el mallado del chunk. null (lo normal) = coste cero.
+  atraviesaDoc:null,              // lo MISMO, pero lo escribe app.js desde el propio documento del material
+                                  // ("atravesable": true en su .vox.json) al hornear la paleta. Eso es
+                                  // intrinseco del material, no una opinion de este mundo, asi que va aparte
+                                  // del gancho de arriba y mcSolidWalk consulta los dos. Para que vuelva a
+                                  // chocar se le quita el flag al .vox.json: game.bloques.quitar() solo
+                                  // deshace lo que puso el snippet.
+  finoRejilla:null,               // Uint8Array por id de bloque, 1 = este material NO llena su celda (una flor, una
+                                  // mata, una llama): proyectarlo sobre las 6 caras del cubo es infiel por
+                                  // definición, así que el mallador emite su GEOMETRÍA REAL dentro de la malla del
+                                  // chunk. Sale de la misma señal que ya calcula mcStructCells (`pielCubre`), lo
+                                  // hornea mcBuildPalette, y lo leen mcTablaFina y (a través de ella) mcTapaCara.
+  finoExtra:null,                 // válvula a mano encima de lo anterior, mismo idioma que traspasaLuz: 1 = geometría
+                                  // real siempre, 2 = nunca (cubo proyectado, como antes). La escribe el snippet.
+  finoGeom:{},                    // clave → geometría fina de rot 0 ya horneada. Vive APARTE de mc.structs[k].meshRot
+                                  // porque mcRestampAll la vacía en cada estampado, y el terreno no debe re-mallarse
+                                  // por eso: aquí la referencia se conserva hasta que cambie el material.
   shadowMoveMs:45,                // ms mínimos entre re-horneados del mapa de sombra cuando lo ÚNICO que cambió es
                                   // la posición de los agentes (~22 Hz). 0 = como antes, uno por frame (game.shadowMoveMs)
   sunProbe:0.51,                  // distancia a la que cada cara pregunta al mapa del sol, en bloques (game.sunProbe).
@@ -4968,7 +5555,11 @@ const mc={
   blockLight:null,                // Uint8Array 0..MC_MAXLIGHT por celda: luz de BLOQUE emisiva (*#hex) difundida por el aire (mcComputeBlockLight); escalar/neutra (no tiñe)
   glowLevel:15,                   // nivel de siembra de la luz emisiva (game.glowLevel; 0 = sin luz de bloque; 15 = MC_MAXLIGHT = alcance máximo)
  glowFocus:0.2,                  // foco del haz emisivo 0..1 (game.glowFocus): 0=omnidireccional (antorcha), 1=haz estrecho hacia la normal neta de las caras emisivas
-  hasGlow:false,                  // ¿alguna estructura viva tiene ≥1 voxel emisivo? cache para saltar BFS/mallado sin brillo
+  hasGlow:false,                  // ¿hay ≥1 voxel emisivo vivo (estructura o celda de rejilla)? cache para saltar BFS/mallado sin brillo
+  _glowIds:null,                  // id de bloque → geometría fina con ≥1 celda emisiva (o null); lo hornea mcGlowCeldas
+  _glowFirma:null,                // firma de esos ids: si cambia (paleta nueva, geometría recién horneada) hay que re-barrer
+  _glowCeldas:null,               // Set de índices de mc.grid con una pieza emisiva puesta: el índice DISPERSO de emisores
+  _glowRef:null,                  // qué mc.grid está indexado (cambia al cargar/redimensionar → re-barrido)
   quads:0,                        // caras dibujadas este frame (→ game.voxels)
   agents:new Map(),               // agentes/NPC vivos (id → handle); ver «AGENTES» al final (game.defineAgent)
 };
@@ -4976,7 +5567,88 @@ function mcIdx(x,y,z){ return x + y*mc.dim.x + z*mc.dim.x*mc.dim.y; }
 function mcInside(x,y,z){ return x>=0&&y>=0&&z>=0&&x<mc.dim.x&&y<mc.dim.y&&z<mc.dim.z; }
 function mcSolid(x,y,z){ if(y<0) return true;   // suelo del mundo: sólido hacia abajo (no mesha la cara inferior, nunca se ve)
   return mcInside(x,y,z) ? mc.grid[mcIdx(x,y,z)]!==0 : false; }
-function mcSetBlock(x,y,z,id){ if(mcInside(x,y,z)){ mc.grid[mcIdx(x,y,z)]=id; mcDirty(x,y,z); } }
+// ¿el vecino TAPA esta cara? Tercera pregunta sobre la misma rejilla, y otra vez lo que la separa de
+// mcSolid («¿hay materia aquí?») es un array: un bloque de RECORTE —textura con agujeros, la copa de
+// hojas— tiene materia pero se ve a través, así que NO tapa. Si tapara, por sus propios agujeros se
+// vería el vacío que dejaron las caras peladas de al lado. Es la regla de las hojas «fancy» de
+// Minecraft. La usa SOLO el mallado del chunk; mcSolid sigue byte-idéntico porque lo comparten el
+// rayo de apuntar y romper/poner. Con mc.recorte=null es exactamente mcSolid: coste cero.
+function mcTapaCara(x,y,z){
+  if(!mcSolid(x,y,z)) return false;
+  if((!mc.recorte && !mc._geoFina) || y<0 || !mcInside(x,y,z)) return true;   // el suelo del mundo y el exterior tapan como siempre
+  const id=mc.grid[mcIdx(x,y,z)];
+  if(mc._geoFina && mc._geoFina[id]) return false;   // …y una celda que se dibuja con su geometría real tampoco tapa: no es un cubo
+  return !(mc.recorte && mc.recorte[id]); }
+// Tabla densa `id de bloque → geometría fina horneada` (o null) = la fuente ÚNICA de «esta celda NO se dibuja
+// como un cubo, sino con sus voxels de verdad». La rehace mcMeshChunk (unas decenas de ids, microsegundos)
+// porque las tres cosas de las que sale cambian por su cuenta: la paleta (mcBuildPalette), la caché de
+// geometría (mc.finoGeom) y la válvula a mano (mc.finoExtra). Se guarda en mc._geoFina para que mcTapaCara,
+// que solo recibe coordenadas, mire exactamente lo mismo que el bucle que emite las caras.
+// Un id marcado pero SIN geometría todavía sale como cubo —lo de siempre— y se pide el horneado por detrás.
+function mcTablaFina(){
+  const auto=mc.finoRejilla, ex=mc.finoExtra;
+  if(!auto && !ex) return (mc._geoFina=null);                 // ningún material fino en este mundo: coste cero
+  const n=mc.blockKey?mc.blockKey.length:0, T=new Array(n).fill(null);
+  for(let id=1; id<n; id++){
+    const modo = (ex && ex[id]) ? ex[id] : ((auto && auto[id]) ? 1 : 0);
+    if(modo!==1) continue;                                    // 2 = nunca (cubo proyectado); 0 = no aplica
+    const key=mc.blockKey[id], g=mc.finoGeom[key];
+    if(g && (g.colCount || g.alphaCount)) T[id]=g; else mcCalientaFina(key);
+  }
+  return (mc._geoFina=T);
+}
+// Hornea (async) la geometría fina de un material y re-malla cuando llega. Es la red de seguridad del camino
+// normal, que la calienta mcBuildPalette antes del primer mallado: mcMeshChunk es SÍNCRONO y mcStructGeom no,
+// así que sin caché caliente no hay nada que emitir. Una vez por material, no por celda ni por chunk.
+const mcFinoPend=new Set();
+function mcCalientaFina(key){
+  if(!key || mc.finoGeom[key] || mcFinoPend.has(key)) return;
+  mcFinoPend.add(key);
+  mcStructGeom(mcClaveBase(key), mcClaveOri(key)).then(g=>{ mcFinoPend.delete(key); mc.finoGeom[key]=g; mcMeshAll(); })
+                      .catch(e=>{ mcFinoPend.delete(key); console.warn('[mundo] geometría fina', key, e); });
+}
+// ¿me frena al andar? Es OTRA pregunta que mcSolid («¿hay materia aquí?»), y lo único que las separa es
+// `mc.atraviesa`. mcSolid NO se parchea a propósito: lo usan a la vez el mallado, el rayo de apuntar y
+// romper/poner, y una hierba atravesable tiene que seguir viéndose, rompiéndose y saliendo en rayos-X.
+// Es la misma pareja que `bits` (colisión) y `bitsAim` (apuntado) en las estructuras finas, un piso más abajo.
+function mcSolidWalk(x,y,z){ if(y<0) return true;
+  if(!mcInside(x,y,z)) return false;
+  const id=mc.grid[mcIdx(x,y,z)];
+  if(id===0) return false;
+  if(mc.atraviesa && mc.atraviesa[id]) return false;      // lo dice el MUNDO (snippet, game.bloques.define)
+  return !(mc.atraviesaDoc && mc.atraviesaDoc[id]); }     // …o el propio MATERIAL en su .vox.json
+function mcSetBlock(x,y,z,id){ if(mcInside(x,y,z)){ mc.grid[mcIdx(x,y,z)]=id; mcDirty(x,y,z); mcGlowTocada(x,y,z); } }
+
+// ── Emisores que viven en la REJILLA ──────────────────────────────────────────────────────────────────
+// La luz de bloque nació cuando una pieza luminosa solo podía existir estampada suelta, así que
+// mcComputeBlockLight sembraba únicamente desde mc.structures. Desde que el clic derecho mete las piezas que
+// caben en una celda dentro de mc.grid, una antorcha puesta ahí se veía encendida pero no alumbraba nada:
+// sus celdas emisivas no las miraba nadie. La geometría fina YA trae emitCells/emitDir horneados
+// (mcStructGeom), que es exactamente lo que consume la siembra — lo único que faltaba era ENCONTRARLAS.
+// Barrer la rejilla entera en cada edición cuesta ~60 ms en 512×40×512, así que se mantiene un índice
+// DISPERSO: se rehace de cero solo cuando cambia qué materiales emiten (paleta nueva o geometría recién
+// horneada) o la rejilla entera (cargar/redimensionar), y se corrige celda a celda desde mcGlowTocada.
+function mcGlowCeldas(){
+  const GEO=mcTablaFina();          // id → geometría fina real (la misma tabla que ya usan mallado y colisión)
+  let EM=null, firma='';
+  if(GEO) for(let id=1; id<GEO.length; id++){ const g=GEO[id];
+    if(g && g.emitCells && g.emitCells.length){ (EM||(EM=new Array(GEO.length).fill(null)))[id]=g; firma+=id+','; } }
+  mc._glowIds=EM;
+  if(firma!==mc._glowFirma || mc._glowRef!==mc.grid || !mc._glowCeldas){
+    mc._glowFirma=firma; mc._glowRef=mc.grid;
+    const S=mc._glowCeldas=new Set();
+    if(EM && mc.grid){ const g=mc.grid, n=g.length;               // el único barrido completo, y solo aquí
+      for(let i=0;i<n;i++){ const v=g[i]; if(v && EM[v]) S.add(i); } }
+  }
+  return mc._glowCeldas;
+}
+// Una celda de la rejilla acaba de cambiar: mantiene el índice al día en O(1). Se llama DESPUÉS de escribir,
+// así que le vale el estado real de la celda (poner emisor = alta, romperlo o repintarlo = baja).
+function mcGlowTocada(x,y,z){
+  const S=mc._glowCeldas; if(!S || mc._glowRef!==mc.grid) return;   // sin índice todavía: ya barrerá mcGlowCeldas
+  const EM=mc._glowIds, i=mcIdx(x,y,z), id=mc.grid[i];
+  if(EM && id && EM[id]) S.add(i); else S.delete(i);
+}
 
 // Guardado incremental. Se apunta QUÉ celdas han cambiado, no el mundo entero: serializar fps
 // (512×40×512) cuesta 18 s y un POST de 257 MB, y eso era el precio de poner UN bloque.
@@ -5034,10 +5706,12 @@ function mcResize(){
   if(cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; }
   gl.viewport(0,0,cv.width,cv.height);   // el canvas queda con image-rendering:pixelated (CSS) → ampliar mantiene el pixel-art
 }
-// Medidor propio del Mundo (#mc-fps/#mc-vox), gemelo de updatePlayMeters. Reusa game.showFPS (_showFPS).
+// Medidor propio del Mundo (#mc-fps/#mc-vox), gemelo de updatePlayMeters. Cada medidor cuelga de SU
+// interruptor: #mc-fps de game.showFPS y #mc-vox de game.showVoxels. Los dos iban con _showFPS
+// (BUG-DBG2), así que el contador de vox se encendía con el de fps y game.showVoxels() no hacía nada.
 function updateWorldMeters(){
   const ef=$('#mc-fps'); if(ef){ ef.hidden=!(_showFPS && mc.active); ef.textContent=Math.round(mc.fps)+' fps'; }
-  const ev=$('#mc-vox'); if(ev){ ev.hidden=!(_showFPS && mc.active); ev.textContent=(game.voxels||0)+' vox'; }
+  const ev=$('#mc-vox'); if(ev){ ev.hidden=!(_showVox && mc.active); ev.textContent=(game.voxels||0)+' vox'; }
 }
 const MC_EYE=1.62;   // altura del ojo sobre los pies del jugador
 
@@ -5087,12 +5761,21 @@ async function mcStructCells(srcKey){
   const doc=await getRoomData(srcKey);
   const src=doc.voxels||{};
   const seen=new Set(); const cells=[]; let w=0,h=0,d=0, nvox=0, translucido=false;
+  // ¿la PIEL cubre el cubo? El terreno proyecta la pieza sobre las 6 caras de la celda (buildTexFaces),
+  // así que esa proyección solo es fiel si por cada columna de cada eje hay materia: entonces lo que se
+  // ve del dibujo ES su cáscara, y con `caras` los agujeros llegan tal cual (textura de recorte). Si no
+  // la cubre —una mata en cruz, una llama— la silueta se aplasta contra un cubo lleno, y eso es justo lo
+  // que hay que avisar (mcAvisaSiFino). Tres proyecciones de 16×16, una por eje.
+  const T2=MC_TILE*MC_TILE;
+  const proyX=new Uint8Array(T2), proyY=new Uint8Array(T2), proyZ=new Uint8Array(T2);
   for(const k in src){
     const p=k.split(','), ax=+p[0], ay=+p[1], az=+p[2];
     if(!Number.isFinite(ax)||!Number.isFinite(ay)||!Number.isFinite(az)) continue;
     const v=src[k];
     if(v==null) continue;
     nvox++;
+    if(ax>=0 && ay>=0 && az>=0 && ax<MC_TILE && ay<MC_TILE && az<MC_TILE){
+      proyX[ay*MC_TILE+az]=1; proyY[ax*MC_TILE+az]=1; proyZ[ax*MC_TILE+ay]=1; }
     // Solo '#rrggbbaa' (9 chars) o '*#rrggbbaa' (10) pueden llevar alpha; el filtro por longitud evita llamar a
     // colorAlpha 2,5 M de veces en una sala grande (taberna) para nada.
     if(!translucido && typeof v==='string' && v.length>=9 && colorAlpha(v)<1) translucido=true;
@@ -5107,9 +5790,70 @@ async function mcStructCells(srcKey){
   // …y OPACO: el atlas del terreno se hornea a RGB sin alpha (buildTexFaces fija d[o+3]=255) y el shader del
   // terreno solo hace recorte binario, así que un cubo translúcido colocado como bloque saldría MACIZO. Con alpha
   // se estampa como ESTRUCTURA FINA, que sí lo mezcla de verdad (aAlpha/vAlpha + pasada con BLEND).
-  const blockLike = (w<=1 && h<=1 && d<=1 && nvox >= MC_TILE*MC_TILE*MC_TILE && !translucido);
-  const rec=Object.assign(mc.structs[srcKey]||{}, {cells, w,h,d, count:cells.length, nvox, translucido, blockLike});
+  // …y SIN máscara de caras: un 16³ macizo al que le han quitado una cara entraría en mc.grid, y la
+  // proyección a las 6 caras del bloque es otro camino que no sabe de `caras` — la máscara se perdería
+  // en silencio. Con `caras`, la pieza pasa a ser estructura fina (más cara de dibujar, pero fiel).
+  // …y SIN `caras` ni `atravesable`, aunque el camino de TERRENO ya respete los dos (la máscara llega
+  // como textura de RECORTE y mcBuildPalette hornea mc.atraviesaDoc): un macizo con máscara puesto como
+  // bloque son 6 texturas agujereadas y NADA detrás —se ve el otro lado—, mientras que la pieza fina
+  // enseña sus voxels de dentro. Ojo: esto decide si el material entra en la RANURA como bloque; quién
+  // acaba en la rejilla al hacer clic derecho lo decide mcCabeEnRejilla, más abajo.
+  const conCaras = !!(doc.caras && Object.keys(doc.caras).length);
+  let nX=0,nY=0,nZ=0; for(let i=0;i<T2;i++){ nX+=proyX[i]; nY+=proyY[i]; nZ+=proyZ[i]; }
+  const pielCubre = (w<=1 && h<=1 && d<=1 && nX===T2 && nY===T2 && nZ===T2);
+  const blockLike = (w<=1 && h<=1 && d<=1 && nvox >= MC_TILE*MC_TILE*MC_TILE && !translucido && !conCaras && !doc.atravesable);
+  // conCaras/atravesable se siguen guardando en la ficha: los mira la UI, y son lo que distingue una
+  // cáscara con agujeros de un cubo macizo cuando hay que explicar por qué una pieza va como estructura.
+  const rec=Object.assign(mc.structs[srcKey]||{}, {cells, w,h,d, count:cells.length, nvox, translucido, blockLike,
+    pielCubre, conCaras, atravesable:!!doc.atravesable});
   mc.structs[srcKey]=rec; return rec;
+}
+// ¿Esta pieza se ve IGUAL puesta como celda de la rejilla que estampada suelta? Es la pregunta que ya
+// respondía mcAvisaSiFino para quejarse desde scripting, y ahora también la que decide qué hace el clic
+// derecho: si la respuesta es sí, poner y estampar son la MISMA función (setVoxel) y la pieza deja de
+// costar un draw call. Tres motivos para decir que no:
+//   · varias celdas (una sala, un árbol): en la rejilla cada celda se proyectaría suelta.
+//   · la piel cubre el cubo Y es translúcida o tiene `caras`: el atlas del terreno recorta, no mezcla, y
+//     una máscara sobre un macizo enseñaría el otro lado en vez de lo de dentro (ver mcStructCells).
+//   · sin huella todavía (nunca se ha mirado el dibujo): se calienta la caché y esta vez va como pieza.
+// Lo que NO llena su celda (una flor, una mata) sí entra: el mallador emite su geometría de verdad dentro
+// de la malla del chunk (mc.finoRejilla) y mcTerrenoChoca la usa también para chocar, así que la forma
+// manda igual que en la pieza suelta. Queda la válvula game.useOldStructBuildCall para volver a la de antes.
+// El giro (R / Shift+R) tampoco obliga a estampar: va en la clave, ver mcClaveConOri.
+function mcCabeEnRejilla(key){
+  const rec=key && mc.structs[key];
+  if(!rec || rec.w==null){ if(key) mcStructCells(key).catch(()=>{}); return false; }
+  if(rec.w>1 || rec.h>1 || rec.d>1) return false;
+  if(rec.pielCubre && (rec.translucido || rec.conCaras)) return false;
+  return true;
+}
+// ¿Y esta pieza, en la rejilla, sale con su GEOMETRÍA de verdad (mc.finoRejilla) en vez de proyectada
+// sobre las 6 caras del cubo? Es la misma condición que hornea mcBuildPalette. Importa para el giro: una
+// pieza proyectada como cubo no tiene dónde enseñar que está girada, así que ésa se sigue estampando.
+function mcEsFinaEnRejilla(key){
+  const rec=key && mc.structs[mcClaveBase(key)];
+  return !!(rec && rec.w<=1 && rec.h<=1 && rec.d<=1 && !rec.blockLike && !rec.pielCubre);
+}
+// ── El giro cabe en la CLAVE ────────────────────────────────────────────────────────────────────────
+// Una celda de mc.grid es un Uint16 con el id del bloque: no hay hueco para el giro. Pero sí hay otro id.
+// «Esta pieza, girada así» entra en la paleta como un material más, con la clave del original y el sufijo
+// `@<ori>`, donde ori = giro | vuelco<<2 (1..15; el 0 no se escribe, es la pieza tal cual).
+// Puesto ahí, el giro viaja SOLO por todo lo que ya existía, sin tocar una línea: mc.grid sigue siendo
+// ids, mcSerialize sigue escribiendo 'tex:<clave>', la paleta del .vox v2 y /api/mundo/edits tratan la
+// clave como cadena opaca (server.py no se entera), y al recargar el mundo la variante se da de alta
+// sola como cualquier otro material que venga del fichero. Y como mc._geoFina[id] ya devuelve la
+// geometría horneada de ESE id, el mallado, la sombra y la colisión por forma salen girados gratis.
+function mcClaveBase(k){ return typeof k==='string' ? k.replace(/@\d{1,2}$/,'') : k; }
+function mcClaveOri(k){ const m=typeof k==='string' && /@(\d{1,2})$/.exec(k); return m ? (+m[1])&15 : 0; }
+function mcClaveConOri(k,ori){ ori=(ori|0)&15; return ori ? mcClaveBase(k)+'@'+ori : mcClaveBase(k); }
+// Al girar el fantasma (R / Shift+R) la pieza pasa a ser OTRO material, y darlo de alta es descargar +
+// re-hornear la paleta. Se hace ya, mientras el dueño mira el fantasma, para que el clic de después sea
+// el camino normal y no el de «material pendiente» (que llega tarde y sin historial).
+function mcPrecargaGirada(key, ori){
+  if(!key || !ori || !mcEsFinaEnRejilla(key)) return;
+  const vk=mcClaveConOri(key, ori);
+  if(mc.blockKey.indexOf(vk)>0) return;
+  game.addMaterial(vk).catch(e=>console.warn('[mundo] variante girada', vk, e));
 }
 // Ancla la estructura por el CENTRO de su base (no por la esquina): convierte la celda apuntada por la mira
 // en la esquina min de estampado restando media huella horizontal —según el giro (90°/270° intercambian
@@ -5157,6 +5901,20 @@ function mcRotXZ(x,z,rot,W,D){
     default: return [x, z];             // 0°
   }
 }
+// Permutación de caras que provoca la orientación combinada (tilt,yaw) de una estructura estampada.
+// Se DERIVA de las mismas dos llamadas a mcRotXZ que mueven las coordenadas en mcStructGeom, aplicadas
+// al vector normal de cada cara: así no puede desincronizarse de la geometría. Devuelve P con
+// P[i] = índice de la cara en la que acaba MC_FACES[i].
+function mcFacePerm(tilt,yaw,bx,by,bz,bzT){
+  const T=(x,y,z)=>{ const t=mcRotXZ(y,z,tilt,by,bz), r=mcRotXZ(x,t[1],yaw,bx,bzT); return [r[0],t[0],r[1]]; };
+  const o=T(0,0,0), P=new Array(6);
+  for(let i=0;i<6;i++){
+    const d=MC_FACES[i].dir, q=T(d[0],d[1],d[2]);
+    const ex=q[0]-o[0], ey=q[1]-o[1], ez=q[2]-o[2];
+    P[i]=MC_FACES.findIndex(F=>F.dir[0]===ex&&F.dir[1]===ey&&F.dir[2]===ez);
+  }
+  return P;
+}
 // Orientación estampada = entero combinado 0..15: bits 0-1 = giro (yaw, cuartos sobre el eje vertical Y, la sala
 // gira para MIRAR al jugador, ticket #3); bits 2-3 = vuelco (tilt, cuartos sobre el eje X, plano altura↔profundidad,
 // Shift+R). `rot&3`=yaw, `(rot>>2)&3`=tilt. Con tilt=0 es idéntico al comportamiento previo (compat con saves viejos).
@@ -5178,6 +5936,10 @@ async function mcStructGeom(srcKey, rot){
   if(cached && cached[rot]) return cached[rot];
   const doc=await getRoomData(srcKey);
   const src=doc.voxels||{};
+  // Máscara de caras del documento. Los índices de MC_FACES y los de CUBE_FACES (editor) coinciden uno a
+  // uno —el swap de ejes ya está en la tabla, ver los comentarios «← asset +Z»—, así que el entero viaja
+  // del editor al Mundo sin traducir. Lo único que hay que hacer aquí es girarlo con la pieza.
+  const carasDoc=(doc.caras && typeof doc.caras==='object' && Object.keys(doc.caras).length) ? doc.caras : null;
   // Paso 1: coords finas base (swap del terreno, sin rotar) + extensiones base para poder rotar el plano horizontal.
   const base=[]; let minx=Infinity, miny=Infinity, minz=Infinity;
   for(const k in src){
@@ -5185,7 +5947,9 @@ async function mcStructGeom(srcKey, rot){
     if(!Number.isFinite(ax)||!Number.isFinite(ay)||!Number.isFinite(az)) continue;
     const v=src[k]; if(v==null) continue;
     const x=ax, z=ay;                   // asset X→x de mundo, asset Y→profundidad z (asset Z→altura, más abajo)
-    base.push([x, az, z, v]);           // [x, altura, z, valor]
+    const cm=carasDoc ? carasDoc[k] : undefined;
+    // Con `caras` en el documento manda la regla del objeto: sin entrada, ninguna cara (0).
+    base.push([x, az, z, v, carasDoc ? ((Number.isInteger(cm)&&cm>=0&&cm<=63)?cm:0) : 63]);   // [x, altura, z, valor, máscara]
     if(x<minx)minx=x; if(az<miny)miny=az; if(z<minz)minz=z;
   }
   // Normaliza al ORIGEN DE LA CELDA que contiene el mínimo, NO al mínimo del contenido: quita el desplazamiento de
@@ -5201,10 +5965,13 @@ async function mcStructGeom(srcKey, rot){
   const solid=new Set(); const raw=[]; let mx=0,my=0,mz=0;
   const emitCells=new Set();   // celdas-de-bloque locales (floor(fine/16)) con ≥1 voxel emisivo (Parte B: siembra de luz de bloque)
   const emitDir=new Map();     // celda-bloque local → [dx,dy,dz]: suma de normales de sus caras emisivas EXPUESTAS = dirección del HAZ (Parte B foco)
+  const maskAt=new Map();      // voxel fino local → máscara de caras (TODOS, si el documento trae `caras`)
+  const facePerm=carasDoc ? mcFacePerm(tilt,yaw,bx,by,bz,bzT) : null;   // la misma rotación, aplicada a las normales
   for(const b of base){
     const t=mcRotXZ(b[1], b[2], tilt, by, bz);     // Paso 2a: vuelco `tilt` cuartos sobre el eje X → rota el par (altura,profundidad)
     const r=mcRotXZ(b[0], t[1], yaw, bx, bzT);     // Paso 2b: giro `yaw` cuartos sobre el eje Y → rota el plano (fx,fz)
     const fx=r[0], fy=t[0], fz=r[1], v=b[3];       // todo queda en [0,ext)
+    if(facePerm) maskAt.set(fx+','+fy+','+fz, permMask(b[4], facePerm));   // también el 63: es una marca, no un defecto
     solid.add(fx+','+fy+','+fz); raw.push([fx,fy,fz,v]);
     if(isGlow(v)) emitCells.add(Math.floor(fx/MC_TILE)+','+Math.floor(fy/MC_TILE)+','+Math.floor(fz/MC_TILE));
     if(fx+1>mx)mx=fx+1; if(fy+1>my)my=fy+1; if(fz+1>mz)mz=fz+1;
@@ -5221,12 +5988,16 @@ async function mcStructGeom(srcKey, rot){
   const useTex=mc.structTextures!==false;    // texturar de verdad (detalle del editor) vs. color plano por cara
   const greedy=mc.structGreedy!==false;      // fusionar caras coplanares de la misma textura/color (game.structGreedy)
   const S=1/MC_TILE, col=[], alpha=[], tex=[], avgCache={}, dim=[mx,my,mz];   // col=opaco, alpha=translúcido (pasada con blend aparte)
+  // Cuánto se mete el ENVÉS de una cara con máscara dentro de su propio voxel (en voxels finos). Ver
+  // emitQuad: es lo que evita que dos piezas pegadas se peleen por el mismo plano. 0 = como antes.
+  const INS = (typeof mc.carasInset === 'number' ? mc.carasInset : 0.08) * S;
   // Celda-muestra por CARA (luz): 3 enteros (celda de BLOQUE, relativa al origen de la estructura) por cara, en
   // arrays paralelos a col/alpha/tex (mismo orden de push). mcBuildStructMesh los usa para hornear shade*=lightLut[lv]
   // según la luz del entorno (skylight + luz de bloque), igual que el terreno muestrea la celda de aire vecina.
   const colSC=[], alphaSC=[], texSC=[];
-  const TRI=[0,1,2,0,2,3];
+  const TRI=[0,1,2,0,2,3], TRI_ATRAS=[3,2,0,2,1,0];   // el mismo par de triángulos con el bobinado al revés
   const valAt=new Map(); for(const r of raw) valAt.set(r[0]+','+r[1]+','+r[2], r[3]);
+  const hayCaras=maskAt.size>0;   // un doc sin `caras` no paga ni una consulta en el bucle de mallado
   const has=(a,b,c)=>solid.has(a+','+b+','+c);
   // Material de una celda para la cara f: {t:1,key} texturado real, o {t:0,col} color plano por cara; `id` agrupa el greedy.
   function matAt(cx,cy,cz,f){
@@ -5242,22 +6013,34 @@ async function mcStructGeom(srcKey, rot){
   }
   // Emite una cara (posiblemente fusionada W×H): base = celda min del rectángulo; size = extensión por eje (1 en
   // el eje normal → plano de la cara). Texturado: aTile repite el tile por voxel (fract en el shader); color: plano.
-  function emitQuad(f, base, size, m){
-    const F=MC_FACES[f], q=F.corners, M=MC_FMETA[f], d=F.dir;
+  // Con `atras` sale el MISMO cuadro con el bobinado invertido: el envés. No es un cuadro nuevo en otro
+  // sitio, es el de siempre visto desde el otro lado — la forma de que un plano de un voxel de grosor se
+  // vea por las dos caras pese al CULL_FACE que activa mcStructGL.
+  function emitQuad(f, base, size, m, atras){
+    const F=MC_FACES[f], q=F.corners, M=MC_FMETA[f], d=F.dir, ORD=atras?TRI_ATRAS:TRI;
+    // ⚠️ El ENVÉS se mete `INS` dentro de su voxel; el anverso NO se toca. Dos piezas pegadas emiten
+    // CADA UNA su cara en el plano que comparten, y el motor deshace ese empate con el culling de
+    // traseras (mcStructGL): sobrevive la que mira a la cámara. Una cara con máscara se dibuja por
+    // las DOS caras, así que en ese plano quedaban cuatro triángulos y dos de ellos miraban a la
+    // cámara: empate exacto de profundidad = el ruido de texturas mezcladas que se veía en un muro de
+    // hojas. Moviendo solo el envés, los anversos siguen coincidiendo exactos (y el culling los sigue
+    // arbitrando como siempre) y el envés gana o pierde por una distancia decidida, no por el ruido.
+    const ix=d[0]*INS, iy=d[1]*INS, iz=d[2]*INS;   // 0 en el anverso; contra la normal en el envés
+    const ox=atras?-ix:0, oy=atras?-iy:0, oz=atras?-iz:0;
     // Celda-muestra por CARA (v1): la celda de BLOQUE del lado aire de la esquina mínima. base es la esquina fina
     // mínima; sumar d (±1 en la normal, 0 en el plano) cruza a la celda de aire vecina, luego floor a bloque.
     const sx=Math.floor((base[0]+d[0])/MC_TILE), sy=Math.floor((base[1]+d[1])/MC_TILE), sz=Math.floor((base[2]+d[2])/MC_TILE);
     if(m.t===1){
       const r=mc.structUV[m.key][F.tex], repU=size[M.tuAx], repV=size[M.tvAx];
       const tileC=[[0,0],[repU,0],[repU,repV],[0,repV]];   // corners q0..q3 ↔ (u0v0,u1v0,u1v1,u0v1) en espacio de repetición
-      for(const k of TRI){ const c=q[k];
-        tex.push((base[0]+(c[0]?size[0]:0))*S, (base[1]+(c[1]?size[1]:0))*S, (base[2]+(c[2]?size[2]:0))*S,
+      for(const k of ORD){ const c=q[k];
+        tex.push((base[0]+(c[0]?size[0]:0))*S+ox, (base[1]+(c[1]?size[1]:0))*S+oy, (base[2]+(c[2]?size[2]:0))*S+oz,
                  tileC[k][0], tileC[k][1], r.u0, r.v0, r.u1, r.v1, F.s); }
       texSC.push(sx,sy,sz);
     } else {
       const c3=m.col, isA=(m.a>=0.996), arr=(isA ? col : alpha);   // opaco al VBO normal; translúcido al VBO de la pasada con blend
-      for(const k of TRI){ const c=q[k];
-        arr.push((base[0]+(c[0]?size[0]:0))*S, (base[1]+(c[1]?size[1]:0))*S, (base[2]+(c[2]?size[2]:0))*S,
+      for(const k of ORD){ const c=q[k];
+        arr.push((base[0]+(c[0]?size[0]:0))*S+ox, (base[1]+(c[1]?size[1]:0))*S+oy, (base[2]+(c[2]?size[2]:0))*S+oz,
                  c3[0],c3[1],c3[2], F.s, m.emit, m.a); }
       (isA?colSC:alphaSC).push(sx,sy,sz);
     }
@@ -5275,8 +6058,28 @@ async function mcStructGeom(srcKey, rot){
       const mask=new Array(dimA*dimB).fill(null), pay=new Array(dimA*dimB);
       for(let b=0;b<dimB;b++) for(let a=0;a<dimA;a++){
         const cx=(nAx===0?ln:A===0?a:b), cy=(nAx===1?ln:A===1?a:b), cz=(nAx===2?ln:A===2?a:b);
-        if(!has(cx,cy,cz) || has(cx+d[0],cy+d[1],cz+d[2])) continue;   // no sólida o cara interna
+        // «cara interna» = la tapa el vecino. Un vecino CÁSCARA no tapa: se ve a través de él, y por sus
+        // huecos aparecería el fondo en vez del interior de la pieza. Entonces esa cara compartida sí se
+        // pinta, pero UNA sola vez o las dos copias se pelean por el mismo plano: manda la positiva.
+        if(!has(cx,cy,cz)) continue;
+        const cm = hayCaras ? maskAt.get(cx+','+cy+','+cz) : undefined;
+        const nx=cx+d[0], ny=cy+d[1], nz=cz+d[2];
+        if(has(nx,ny,nz)){
+          const nm = hayCaras ? maskAt.get(nx+','+ny+','+nz) : undefined;
+          // Misma regla que `taparia` en el editor: una celda con marcas es un conjunto de caras, no un
+          // cubo, asi que NO tapa; una sin marcas es maciza y tapa entera. Sin `caras` en el documento
+          // `nm` es siempre undefined y se sale por la primera: el mismo culling de siempre.
+          if(nm===undefined || nm===63) continue;                              // vecino macizo: la tapa entera
+          if((f&1)===1 && (nm&(1<<(f^1)))) continue;                           // los dos son cascara: la pinta el positivo
+        }
+        // …o cara apagada en `caras`. Es greedy-safe: la celda se queda con mask[i]=null y el fusionado
+        // de abajo solo une ids iguales, así que un rectángulo nunca cruza por encima de una cara apagada.
+        if(cm!==undefined && !(cm&(1<<f))) continue;
         const m=matAt(cx,cy,cz,f); if(!m) continue;
+        // Un voxel con máscara ha dejado de ser un cubo cerrado: por el hueco se le ve el envés de las
+        // caras que le quedan, y el mallador culla por bobinado. Se marca para emitir también el revés;
+        // el sufijo del id evita de paso que el greedy funda una cara de dos lados con una normal.
+        if(cm!==undefined && cm!==63){ m.dosCaras=true; m.id+='|2'; }
         const i=a+b*dimA; mask[i]=m.id; pay[i]=m;
       }
       const vis=new Uint8Array(dimA*dimB);
@@ -5292,14 +6095,23 @@ async function mcStructGeom(srcKey, rot){
         const bc=[0,0,0]; bc[nAx]=ln; bc[A]=a; bc[B]=b;
         const size=[1,1,1]; size[A]=wa; size[B]=hb;
         emitQuad(f, bc, size, pay[i]);
+        if(pay[i].dosCaras) emitQuad(f, bc, size, pay[i], true);   // y su envés, para que se vea del otro lado
       }
     }
   }
   // Bitset denso de ocupación fina (índice [y][z][x]): la colisión/raycast sondean por acceso directo a
   // array (O(1) sin hashing ni strings) tras recortar contra el AABB de la estructura — coste ~cero si el
   // jugador no la toca, y barato aunque esté dentro (antes: Set global con una consulta hash por celda).
-  const bits=new Uint8Array(mx*my*mz);
-  for(const k of solid){ const p=k.split(','); bits[((+p[1])*mz + +p[2])*mx + +p[0]]=1; }
+  // Dos preguntas distintas sobre la misma pieza: `bits` = ¿me frena al andar? y `bitsAim` = ¿hay materia
+  // aquí, para mirarla/romperla/verla en rayos-X? Mientras la pieza no sea atravesable son LA MISMA
+  // REFERENCIA: cero memoria extra y ninguna forma de que diverjan por descuido.
+  const bitsAim=new Uint8Array(mx*my*mz);
+  for(const k of solid){ const p=k.split(','); bitsAim[((+p[1])*mz + +p[2])*mx + +p[0]]=1; }
+  // `atravesable` es lo único que las separa: la ocupación de COLISIÓN se queda a ceros, y el jugador
+  // cruza la pieza como si no estuviera. Un array de ceros y NUNCA null: mundo-autoarranque envuelve
+  // mcStructColl y re-implementa el bucle sobre `g.bits` con un `if(!g || !g.bits) continue`, así que un
+  // null no haría la mata atravesable — la borraría también del apuntado y ya no se podría ni romper.
+  const bits = doc.atravesable ? new Uint8Array(mx*my*mz) : bitsAim;
   // emitCells del Set → Int16Array plano [cx,cy,cz,…] (celdas-de-bloque locales con voxel emisivo) para sembrar luz de bloque.
   const emitArr=new Int16Array(emitCells.size*3), emitDirArr=new Int16Array(emitCells.size*3);
   { let i=0; for(const k of emitCells){ const p=k.split(','), dd=emitDir.get(k)||[0,0,0];
@@ -5310,10 +6122,10 @@ async function mcStructGeom(srcKey, rot){
                colSC:new Int16Array(colSC), alphaSC:new Int16Array(alphaSC), texSC:new Int16Array(texSC),  // celda-muestra de luz por CARA (3 int/cara)
                emitCells:emitArr,                                              // celdas-de-bloque locales con ≥1 voxel emisivo (Parte B)
                emitDir:emitDirArr,                                             // dirección del haz por celda emisiva (normal neta de caras expuestas)
-               ext:{x:mx*S, y:my*S, z:mz*S}, bits, fdim:[mx,my,mz] };
+               ext:{x:mx*S, y:my*S, z:mz*S}, bits, bitsAim, fdim:[mx,my,mz] };
   const rec=(mc.structs[srcKey]=mc.structs[srcKey]||{}); (rec.meshRot=rec.meshRot||{})[rot]=mesh;
   // Copia de solo-colisión: {bits,fdim} y nada de vértices, para no retener los Float32Array de la malla vieja.
-  (rec.colRot=rec.colRot||{})[rot]={bits, fdim:mesh.fdim};
+  (rec.colRot=rec.colRot||{})[rot]={bits, bitsAim, fdim:mesh.fdim};
   return mesh;
 }
 // Malla de una INSTANCIA estampada: traslada cada flujo fino a la celda de mundo (ox,oy,oz) y sube DOS VBO.
@@ -5414,17 +6226,53 @@ function mcUploadStructAtlas(){
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   mc.structAtlasTex=tex;
 }
+// OJO al vaciado de la línea de abajo: mientras esta función corre, mc.palette/mc.blockKey/mc.name2id
+// están a medias, así que CUALQUIER pregunta del tipo «¿está cargado este material?» miente. Quien
+// necesite la respuesta durante ese rato tiene que preguntarle a mc.blocks (ver mcClaveCargada), y para
+// saber si estamos en esa ventana está mc.paletaEnObra.
 async function mcBuildPalette(onProgress){
+  mc.paletaEnObra=(mc.paletaEnObra||0)+1;
+  try{ return await mcBuildPaletteImpl(onProgress); }
+  finally{ mc.paletaEnObra--; }
+}
+async function mcBuildPaletteImpl(onProgress){
   mc.palette=[null]; mc.blockKey=[null]; mc.name2id={};
   const AW=6*MC_TILE, AH=Math.max(1,mc.blocks.length)*MC_TILE;
   const cv=document.createElement('canvas'); cv.width=AW; cv.height=AH;
   const ctx=cv.getContext('2d'); ctx.imageSmoothingEnabled=false;
   let hueco=false;                          // ¿alguna textura trae agujeros? (ver el final de la función)
+  let recorte=null;                         // …y CUÁLES, por id de bloque: el mesher lo necesita bloque a bloque
+  let atravDoc=null;                        // se crea solo si algún material se declara atravesable (coste cero si no)
+  let fino=null;                            // …y CUÁLES no llenan su celda (flor/mata): se dibujan con su geometría real
   for(let bi=0; bi<mc.blocks.length; bi++){
     const b=mc.blocks[bi], id=bi+1; let faces=null;
     const _tB=performance.now(), _cached=texDefs.has(b.key);   // ¿ya estaba en caché o toca descargarla?
     // Una textura que falla se pinta fucsia MACIZO, así que no cuenta como hueco.
-    try{ const tf=buildTexFaces(await getTexDef(b.key)); faces=tf.faces; if(tf.hueco) hueco=true; }catch(e){}
+    try{ const def=await getTexDef(b.key); const tf=buildTexFaces(def); faces=tf.faces;
+      // Textura con agujeros = bloque de RECORTE: enciende el `discard` del shader (global) y además se
+      // apunta su id, porque el mallado tiene que dejar de pelar contra él (mcTapaCara).
+      if(tf.hueco){ hueco=true; if(!recorte) recorte=new Uint8Array(mc.blocks.length+1); recorte[id]=1; }
+      // El "atravesable" del documento vale también para el camino de TERRENO. Aquí no se sabe qué es
+      // «hierba»: solo se copia lo que el material dice de sí mismo, igual que el snippet copia su tabla.
+      if(def.atravesable){ if(!atravDoc) atravDoc=new Uint8Array(mc.blocks.length+1); atravDoc[id]=1; }
+    }catch(e){}
+    // ¿La pieza CABE en la celda pero su PIEL no cubre el cubo (una flor, una mata, una llama)? Entonces la
+    // proyección a las 6 caras —que es lo que acaba de hornearse arriba— no puede parecerse al dibujo: da una
+    // silueta aplastada contra las paredes de la celda, y por eso `leaves` (cáscara 0..15 en los tres ejes) sí
+    // sale bien y una flor (x 6..10) no. Es la MISMA señal que ya decide si una pieza puesta a mano va como
+    // bloque o como estructura (mcStructCells), aplicada aquí para que la celda de rejilla se dibuje con sus
+    // voxels de verdad SIN dejar de ser una celda de rejilla: sin instancia, sin draw call propio.
+    // Se hornea la geometría ya, porque mcMeshChunk es síncrono y no puede esperarla (ver mcCalientaFina).
+    // El sufijo `@<ori>` (ver mcClaveBase) es lo único que distingue a una variante girada de su original:
+    // misma pieza, misma textura, misma huella; lo que cambia es CON QUÉ GIRO se hornea su geometría.
+    const kBase=mcClaveBase(b.key), kOri=mcClaveOri(b.key);
+    if(kBase.startsWith('asset:') || kBase.startsWith('hab:')) try{
+      const rec=await mcStructCells(kBase);
+      if(rec && rec.w<=1 && rec.h<=1 && rec.d<=1 && !rec.blockLike && !rec.pielCubre){
+        if(!fino) fino=new Uint8Array(mc.blocks.length+1); fino[id]=1;
+        if(!mc.finoGeom[b.key]) mc.finoGeom[b.key]=await mcStructGeom(kBase, kOri);
+      }
+    }catch(e){}
     if(onProgress) onProgress(bi+1, mc.blocks.length, b.name, b.key, performance.now()-_tB, _cached);
     mc.name2id[b.name]=id; mc.blockKey[id]=b.key;
     const rects=[];
@@ -5444,6 +6292,9 @@ async function mcBuildPalette(onProgress){
   // dice buildTexFaces mientras rasteriza, que es quien escribe los alpha 0. De regalo se cae el
   // `catch` de canvas contaminado: ya no se lee ningún píxel, así que no hay nada que contaminar.
   mc.atlasHasAlpha=hueco;
+  mc.recorte=recorte;
+  mc.atraviesaDoc=atravDoc;                 // se rehornea entero en cada mcBuildPalette (también desde mcAddBlock)
+  mc.finoRejilla=fino;                      // ídem: la paleta manda, y mc.finoExtra (snippet) sigue mandando encima
   mcLoadNote('Atlas '+AW+'x'+AH+': atlasHasAlpha='+mc.atlasHasAlpha
     +(mc.atlasHasAlpha?' (shader con discard)':' (shader opaco, early-z)'));
 }
@@ -5461,8 +6312,36 @@ function mcUploadAtlas(){
 }
 // Añade un bloque de la galería a la paleta (si no está ya) y devuelve su id. Solo APENDA => ids estables,
 // no hace falta remeshar (el id nuevo aún no está en la rejilla). Reconstruye atlas+textura GL.
+// Dar de alta una VARIANTE GIRADA («…@5», ver mcClaveConOri) no puede costar lo que dar de alta un material
+// nuevo. Por el camino largo son segundos en un mapa grande, y por dos motivos que aquí no hacen falta:
+// mcBuildPalette re-hornea los N materiales, y el atlas crece de alto → cambian las UV de TODOS los bloques
+// → mcMeshAll re-malla el mundo entero. Pero el dibujo de la variante es el MISMO que el del original (solo
+// cambia con qué giro se hornea su geometría) y, siendo fina, ni siquiera mira el atlas: se dibuja con su
+// geometría de verdad y color de vértice. Así que se apendan a mano las casillas de la paleta, se le pasan
+// las UV del original y NO se toca el atlas: sin cambio de alto, nada de lo ya mallado caduca.
+// Devuelve el id, o -1 si esto no es una variante de una pieza fina ya cargada (ahí manda el camino largo).
+async function mcAltaVariante(vk){
+  const ori=mcClaveOri(vk); if(!ori) return -1;
+  const base=mcClaveBase(vk), idB=mc.blockKey.indexOf(base);
+  if(idB<1 || !mc.finoRejilla || !mc.finoRejilla[idB]) return -1;
+  const g=await mcStructGeom(base, ori); if(!g) return -1;
+  const ex=mc.blockKey.indexOf(vk); if(ex>0) return ex;            // se coló otra alta mientras se horneaba
+  const id=mc.blocks.length+1;
+  mc.blocks.push({name:vk, key:vk});
+  mc.blockKey[id]=vk; mc.name2id[vk]=id;
+  mc.palette[id]=mc.palette[idB];                                  // mismas UV → el atlas no crece
+  mc.finoGeom[vk]=g;
+  const conId=(a,v)=>{ const n=new Uint8Array(Math.max(a?a.length:0, id+1)); if(a) n.set(a); n[id]=v; return n; };
+  mc.finoRejilla=conId(mc.finoRejilla, 1);
+  if(mc.recorte)      mc.recorte     =conId(mc.recorte,      mc.recorte[idB]|0);
+  if(mc.atraviesaDoc) mc.atraviesaDoc=conId(mc.atraviesaDoc, mc.atraviesaDoc[idB]|0);
+  if(mc.finoExtra)    mc.finoExtra   =conId(mc.finoExtra,    mc.finoExtra[idB]|0);
+  mcTablaFina();                                                   // la tabla que leen colisión y mcTapaCara
+  return id;
+}
 async function mcAddBlock(key, name){
   const ex=mc.blockKey.indexOf(key); if(ex>0) return ex;                        // ya en la paleta
+  const rapido=await mcAltaVariante(key); if(rapido>0) return rapido;           // variante girada: sin re-hornear ni re-mallar
   mc.blocks.push({name:name||key, key});
   await mcBuildPalette(); mcUploadAtlas();
   if(mc.grid) mcMeshAll();   // el atlas creció de alto → las UV (v) de TODOS los bloques cambian: remeshar chunks
@@ -5648,6 +6527,23 @@ function mcBuildStructTexProgram(){
     uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
     uSunProbe:gl.getUniformLocation(p,'uSunProbe') };
 }
+// Programa del RÓTULO de un cartel: un quad texturado en coordenadas de mundo, y nada más. Ni luz, ni
+// sombra, ni niebla — el texto es una CALCOMANÍA pegada a la tabla, no geometría: si se sombreara con
+// el resto se volvería ilegible justo en el sitio donde uno se para a leerlo. uAlpha lo desvanece con
+// la distancia (ver mcDrawNoteTexts).
+const MC_NOTETXT_VS=`
+attribute vec3 aPos; attribute vec2 aUV;
+uniform mat4 uProj; uniform mat4 uView; varying vec2 vUV;
+void main(){ gl_Position=uProj*(uView*vec4(aPos,1.0)); vUV=aUV; }`;
+const MC_NOTETXT_FS=`
+precision mediump float; varying vec2 vUV; uniform sampler2D uTex; uniform float uAlpha;
+void main(){ vec4 t=texture2D(uTex,vUV); gl_FragColor=vec4(t.rgb, t.a*uAlpha); }`;
+function mcBuildNoteTextProgram(){
+  const gl=mc.gl, p=glProgram(gl,mcVS(MC_NOTETXT_VS),mcFS(MC_NOTETXT_FS)); mc.noteTxtProg=p;
+  mc.noteTxtLoc={ aPos:gl.getAttribLocation(p,'aPos'), aUV:gl.getAttribLocation(p,'aUV'),
+    uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'),
+    uTex:gl.getUniformLocation(p,'uTex'), uAlpha:gl.getUniformLocation(p,'uAlpha') };
+}
 // Programa del SOL: escribe la ALTURA de cada fragmento, visto desde arriba con proyección ortográfica. Solo usa
 // aPos, así que sirve tal cual para los tres formatos de vértice (terreno 6·4, estructuras 9·4, texturadas 10·4):
 // basta con cambiar el stride. NDC: x,z → la caja del mundo; z de clip = 1-2h, o sea que lo MÁS ALTO queda lo más
@@ -5768,7 +6664,8 @@ function mcRenderShadow(){
     gl.uniformMatrix4fv(SL.uModel,false,model||IDENT);
     gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
     gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,stride,0); gl.drawArrays(gl.TRIANGLES,0,count); };
-  for(const ch of mc.chunks.values()) if(ch.count && ch.vbo) draw(ch.vbo, ch.count, 6*4);
+  for(const ch of mc.chunks.values()){ if(ch.count && ch.vbo) draw(ch.vbo, ch.count, 6*4);
+    if(ch.finoCount && ch.finoVbo) draw(ch.finoVbo, ch.finoCount, 9*4); }   // las celdas finas dan su sombra de verdad, no la del cubo
   for(const a of mc.agents.values()) if(a.count && a.vbo) draw(a.vbo, a.count, 6*4);
   for(const st of mc.structures){
     if(st.colCount && st.colVbo) draw(st.colVbo, st.colCount, 9*4, st.model);
@@ -5812,13 +6709,16 @@ function mcMeshChunk(cx,cz){
     lightLut=new Float32Array(MC_MAXLIGHT+1);
     for(let lv=0;lv<=MC_MAXLIGHT;lv++) lightLut[lv]=Math.pow(dark,(MC_MAXLIGHT-lv)/MC_MAXLIGHT);
   }
+  const GEO=mcTablaFina();   // id → geometría real (o null): las celdas que no son cubos, ver más abajo
+  const finas=[];            // …y dónde están: [x,y,z,id, x,y,z,id, …] (plano, sin objetos por celda)
   for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
     const id=mc.grid[mcIdx(x,y,z)]; if(!id) continue;
+    if(GEO && GEO[id]){ finas.push(x,y,z,id); continue; }   // no es un cubo: se emite abajo con sus voxels
     const rects=mc.palette[id]; if(!rects) continue;
     for(let f=0;f<6;f++){
       const F=MC_FACES[f], d=F.dir;
       const ax=x+d[0], ay=y+d[1], az=z+d[2];
-      if(mcSolid(ax,ay,az)) continue;   // vecino sólido => cara interna, se pela
+      if(mcTapaCara(ax,ay,az)) continue;   // el vecino la tapa => cara interna, se pela (un bloque de recorte no tapa)
       const r=rects[F.tex], C=F.corners;
       let s=F.s;
       if(lightLut){ let lv=MC_MAXLIGHT; if(mcInside(ax,ay,az)){ const li=mcIdx(ax,ay,az); lv=Math.max(L[li], BL?BL[li]:0); } s*=lightLut[lv]; }   // fuera de la rejilla = cielo abierto; max(skylight, luz de bloque)
@@ -5826,11 +6726,51 @@ function mcMeshChunk(cx,cz){
       for(const k of [0,1,2,0,2,3]){ const c=C[k]; verts.push(x+c[0], y+c[1], z+c[2], uv[k][0], uv[k][1], s); }
     }
   }
+  // ── Las celdas que NO son cubos, fundidas en la malla del chunk ──────────────────────────────────────
+  // Una flor pintada con setVoxel sigue siendo una celda de mc.grid como cualquier otra; lo único que cambia
+  // es que en vez de proyectarla sobre las 6 caras del cubo se emiten aquí SUS VOXELS, los mismos que dibujaría
+  // estampada como pieza. Y se puede porque el formato de las estructuras (pos3+rgb3+shade+emit+alpha, color
+  // POR VÉRTICE, mc.structProg) no depende del atlas del terreno: geometrías distintas se concatenan en un
+  // buffer. Ahí está todo el asunto — una pieza suelta cuesta 1 draw call (200 flores = 200, ~400 ms medidos)
+  // y esto cuesta 0: van dentro del buffer del chunk, que ya se dibujaba. Mismo dibujo, mismo precio.
+  const fcol=[], falpha=[];
+  if(finas.length){
+    // Traslada un flujo fino (stride 9) a la celda de mundo y hornea la luz del entorno por CARA con su
+    // celda-muestra: exactamente la misma cuenta que mcBuildStructMesh, pero acumulando en un array común
+    // en vez de subir una VBO por instancia.
+    const copia=(src,count,sc,out,ox,oy,oz)=>{
+      for(let f=0, nf=count/6; f<nf; f++){
+        let k=1;
+        if(lightLut && sc){
+          const wx=ox+sc[f*3], wy=oy+sc[f*3+1], wz=oz+sc[f*3+2];
+          if(mcInside(wx,wy,wz)){ const li=mcIdx(wx,wy,wz); k=lightLut[Math.max(L[li], BL?BL[li]:0)]; }   // fuera de rejilla = cielo (k=1)
+        }
+        for(let v=0;v<6;v++){ const b=(f*6+v)*9;
+          out.push(src[b]+ox, src[b+1]+oy, src[b+2]+oz, src[b+3], src[b+4], src[b+5], src[b+6]*k, src[b+7], src[b+8]); }
+      }
+    };
+    for(let i=0;i<finas.length;i+=4){
+      const x=finas[i], y=finas[i+1], z=finas[i+2], g=GEO[finas[i+3]];
+      copia(g.colLocal,   g.colCount,   g.colSC,   fcol,   x,y,z);
+      copia(g.alphaLocal, g.alphaCount, g.alphaSC, falpha, x,y,z);
+    }
+  }
   const key=cx+','+cz; let ch=mc.chunks.get(key);
-  if(!ch){ ch={vbo:gl.createBuffer(), count:0}; mc.chunks.set(key,ch); }
+  if(!ch){ ch={vbo:gl.createBuffer(), count:0, finoVbo:null, finoCount:0, finoAVbo:null, finoACount:0}; mc.chunks.set(key,ch); }
   gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
   ch.count=verts.length/6; ch.aabb=[x0,0,z0, x1,dim.y,z1];
+  // Los dos flujos finos del chunk: opaco (pasada de color por vértice) y translúcido (pasada con blend).
+  // Sin celdas finas no se crea ni un buffer, y si dejan de haberlas se libera: un mundo sin flores no paga nada.
+  const sube=(vboProp,cntProp,arr)=>{
+    const n=arr.length/9;
+    if(!n){ if(ch[vboProp]) gl.deleteBuffer(ch[vboProp]); ch[vboProp]=null; ch[cntProp]=0; return; }
+    if(!ch[vboProp]) ch[vboProp]=gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, ch[vboProp]);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW);
+    ch[cntProp]=n;
+  };
+  sube('finoVbo','finoCount', fcol); sube('finoAVbo','finoACount', falpha);
   mcShadowDirty();   // el terreno cambió de forma → el mapa del sol ya no vale
 }
 // t7 · SKYLIGHT: propaga la luz del cielo por el aire → mc.light[idx] en 0..MC_MAXLIGHT. Reciben luz plena (cielo)
@@ -5838,14 +6778,40 @@ function mcMeshChunk(cx,cz){
 // del mundo (el vacío del borde también es cielo → una ventana al borde ilumina). Luego la luz se difunde a los 6
 // vecinos de aire perdiendo 1 nivel por paso (buckets por nivel: cada celda se fija una vez, del más alto al más
 // bajo). Así junto a una boca hay luz plena y al fondo de un túnel penumbra, sin depender del grosor de tierra encima.
+// Tabla de «¿por aquí pasa la luz del cielo?» indexada por id de bloque, para consultar `PASA[g[j]]` en vez de
+// `g[j]===0`. Un índice a un Uint8Array cuesta lo mismo que la comparación que sustituye, así que el bucle de
+// difusión (lo caro de aquí: 684 ms en 512×40×512) no se resiente: medido en los dos mundos reales, 23,6 → 23,6 ms
+// y 20,5 → 16,5 ms.
+//
+// Sale de DOS fuentes, en este orden: el defecto automático (`mc.recorte`) y encima la excepción a mano del
+// snippet (`mc.traspasaLuz`). Se construye una por llamada a propósito: las dos cambian cuando les da la gana
+// —`mc.recorte` lo rehornea mcBuildPalette y `mc.traspasaLuz` lo escribe el snippet— así que una tabla cacheada
+// se quedaría vieja sin que nadie la invalidara.
+// Un id por encima del final (paleta recién crecida) lee `undefined` = falsy = opaco: se queda corto, no revienta.
+function mcTablaLuz(){
+  const t=mc.traspasaLuz, r=mc.recorte;
+  const n=Math.max(256, (mc.blockKey?mc.blockKey.length:0)+1, t?t.length:0, r?r.length:0);
+  const P=new Uint8Array(n);
+  // POR DEFECTO manda `mc.recorte`: si la textura del bloque tiene AGUJEROS, la luz pasa. Es el mismo criterio que
+  // ya usa el shader para hacer `discard` y el mesher para no pelar caras — «si se ve a través, se ve a través» —,
+  // así que las hojas se ven iluminadas sin que nadie declare nada, y roca/tierra/hierba siguen tapando (las cuevas
+  // siguen a oscuras). Ojo: lo mide la PROYECCIÓN a las 6 caras del cubo (buildTexFaces), no el nº de voxels; una
+  // pieza dispersa cuya cáscara tapa las seis caras NO es de recorte y por tanto NO es permeable por defecto.
+  if(r) for(let id=1, m=Math.min(r.length,n); id<m; id++) if(r[id]) P[id]=1;
+  // …y encima, la excepción a mano del snippet: 1 = pasa, 2 = tapa (una vidriera de recorte que sí deba sombrear).
+  if(t) for(let id=1, m=Math.min(t.length,n); id<m; id++){ if(t[id]===1) P[id]=1; else if(t[id]===2) P[id]=0; }
+  P[0]=1;   // el aire pasa SIEMPRE, diga lo que diga nadie
+  return P;
+}
 function mcComputeLight(){
   const dim=mc.dim, g=mc.grid, NX=dim.x, NY=dim.y, NZ=dim.z, sxy=NX*NY, N=NX*NY*NZ;
   const L=(mc.light&&mc.light.length===N)?mc.light:(mc.light=new Uint8Array(N));
   if(mc.interiorDark>=1) return;   // desactivado: mcMeshChunk no muestrea la luz, no hace falta calcularla
   L.fill(0);
+  const PASA=mcTablaLuz();
   const buckets=[]; for(let i=0;i<=MC_MAXLIGHT;i++) buckets.push([]);
   const top=buckets[MC_MAXLIGHT];
-  const seed=i=>{ if(g[i]===0 && L[i]!==MC_MAXLIGHT){ L[i]=MC_MAXLIGHT; top.push(i); } };
+  const seed=i=>{ if(PASA[g[i]] && L[i]!==MC_MAXLIGHT){ L[i]=MC_MAXLIGHT; top.push(i); } };
   for(let z=0;z<NZ;z++) for(let x=0;x<NX;x++)   // siembra: cada columna, de arriba abajo, mientras sea aire = cielo
     for(let y=NY-1;y>=0;y--){ const i=x+y*NX+z*sxy; if(g[i]!==0) break; seed(i); }
   // El "vacío" fuera del mundo también es cielo (se dibuja azul): deja entrar luz por las 4 CARAS LATERALES, para
@@ -5859,12 +6825,12 @@ function mcComputeLight(){
     for(let bi=0;bi<b.length;bi++){
       const i=b[bi]; if(L[i]!==lvl) continue;   // fijada a un nivel mayor por otra ruta → obsoleta
       const x=i%NX, y=((i/NX)|0)%NY, z=(i/sxy)|0;
-      if(x>0){    const j=i-1;   if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(x<NX-1){ const j=i+1;   if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(y>0){    const j=i-NX;  if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(y<NY-1){ const j=i+NX;  if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(z>0){    const j=i-sxy; if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(z<NZ-1){ const j=i+sxy; if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(x>0){    const j=i-1;   if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(x<NX-1){ const j=i+1;   if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(y>0){    const j=i-NX;  if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(y<NY-1){ const j=i+NX;  if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(z>0){    const j=i-sxy; if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(z<NZ-1){ const j=i+sxy; if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
     }
   }
 }
@@ -5884,12 +6850,15 @@ function mcComputeLight(){
 // `test_luz_incremental_navegador.js` compara mc.light celda a celda contra mcComputeLight() tras cientos de ediciones.
 const MC_RELIGHT_R=MC_MAXLIGHT+2;
 let mcRelightPrev=null;                 // scratch reusado (el mc.light de antes en la caja): sin basura por edición
-function mcRelightBox(bx,bz){
+// Acepta UNA celda (bx,bz) o la CAJA (bx,bz)..(bx1,bz1) de una ráfaga entera: el razonamiento de arriba no
+// depende de que la edición sea un solo bloque, solo de que el halo de ±MC_RELIGHT_R quede dentro de la caja.
+function mcRelightBox(bx,bz,bx1,bz1){
   const dim=mc.dim, g=mc.grid, NX=dim.x, NY=dim.y, NZ=dim.z, sxy=NX*NY, N=NX*NY*NZ;
   const L=(mc.light&&mc.light.length===N)?mc.light:(mc.light=new Uint8Array(N));
   if(mc.interiorDark>=1) return null;   // desactivada: mcMeshChunk no muestrea la luz, no hace falta calcularla
-  const x0=Math.max(0,bx-MC_RELIGHT_R), x1=Math.min(NX-1,bx+MC_RELIGHT_R);
-  const z0=Math.max(0,bz-MC_RELIGHT_R), z1=Math.min(NZ-1,bz+MC_RELIGHT_R);
+  if(bx1===undefined){ bx1=bx; bz1=bz; }
+  const x0=Math.max(0,Math.min(bx,bx1)-MC_RELIGHT_R), x1=Math.min(NX-1,Math.max(bx,bx1)+MC_RELIGHT_R);
+  const z0=Math.max(0,Math.min(bz,bz1)-MC_RELIGHT_R), z1=Math.min(NZ-1,Math.max(bz,bz1)+MC_RELIGHT_R);
   const w=x1-x0+1, wy=w*NY, nb=wy*(z1-z0+1);
   if(!mcRelightPrev || mcRelightPrev.length<nb) mcRelightPrev=new Uint8Array(nb);
   const prev=mcRelightPrev;
@@ -5897,7 +6866,11 @@ function mcRelightBox(bx,bz){
     const i=x+y*NX+z*sxy; prev[(x-x0)+y*w+(z-z0)*wy]=L[i]; L[i]=0;
   }
   const buckets=[]; for(let i=0;i<=MC_MAXLIGHT;i++) buckets.push([]);
-  const sembrar=(i,lv)=>{ if(g[i]===0 && L[i]<lv){ L[i]=lv; buckets[lv].push(i); } };
+  // MISMA tabla y MISMOS predicados que mcComputeLight, sin excepciones: en cuanto las dos difieran en un
+  // solo `if`, el mundo editado deja de coincidir con el recién cargado. Es justo lo que compara celda a
+  // celda `test_luz_incremental_navegador.js`.
+  const PASA=mcTablaLuz();
+  const sembrar=(i,lv)=>{ if(PASA[g[i]] && L[i]<lv){ L[i]=lv; buckets[lv].push(i); } };
   for(let z=z0;z<=z1;z++) for(let x=x0;x<=x1;x++)     // cielo por arriba, columna a columna (igual que el global)
     for(let y=NY-1;y>=0;y--){ const i=x+y*NX+z*sxy; if(g[i]!==0) break; sembrar(i,MC_MAXLIGHT); }
   for(let y=0;y<NY;y++){                              // las 4 caras del MUNDO, solo si la caja llega hasta ellas
@@ -5907,22 +6880,22 @@ function mcRelightBox(bx,bz){
     if(z1===NZ-1) for(let x=x0;x<=x1;x++) sembrar(x+y*NX+(NZ-1)*sxy, MC_MAXLIGHT);
     // …y el CONTORNO: lo de fuera no ha cambiado, así que alumbra hacia dentro con su nivel −1. En Y no hace falta,
     // porque la caja ya va del suelo al techo del mundo.
-    if(x0>0)      for(let z=z0;z<=z1;z++){ const i=x0+y*NX+z*sxy, o=i-1;   if(g[o]===0&&L[o]>1) sembrar(i,L[o]-1); }
-    if(x1<NX-1)   for(let z=z0;z<=z1;z++){ const i=x1+y*NX+z*sxy, o=i+1;   if(g[o]===0&&L[o]>1) sembrar(i,L[o]-1); }
-    if(z0>0)      for(let x=x0;x<=x1;x++){ const i=x+y*NX+z0*sxy, o=i-sxy; if(g[o]===0&&L[o]>1) sembrar(i,L[o]-1); }
-    if(z1<NZ-1)   for(let x=x0;x<=x1;x++){ const i=x+y*NX+z1*sxy, o=i+sxy; if(g[o]===0&&L[o]>1) sembrar(i,L[o]-1); }
+    if(x0>0)      for(let z=z0;z<=z1;z++){ const i=x0+y*NX+z*sxy, o=i-1;   if(PASA[g[o]]&&L[o]>1) sembrar(i,L[o]-1); }
+    if(x1<NX-1)   for(let z=z0;z<=z1;z++){ const i=x1+y*NX+z*sxy, o=i+1;   if(PASA[g[o]]&&L[o]>1) sembrar(i,L[o]-1); }
+    if(z0>0)      for(let x=x0;x<=x1;x++){ const i=x+y*NX+z0*sxy, o=i-sxy; if(PASA[g[o]]&&L[o]>1) sembrar(i,L[o]-1); }
+    if(z1<NZ-1)   for(let x=x0;x<=x1;x++){ const i=x+y*NX+z1*sxy, o=i+sxy; if(PASA[g[o]]&&L[o]>1) sembrar(i,L[o]-1); }
   }
   for(let lvl=MC_MAXLIGHT; lvl>=1; lvl--){            // la misma difusión por buckets, pero SIN salirse de la caja
     const b=buckets[lvl], nl=lvl-1;
     for(let bi=0;bi<b.length;bi++){
       const i=b[bi]; if(L[i]!==lvl) continue;         // fijada a un nivel mayor por otra ruta → obsoleta
       const x=i%NX, y=((i/NX)|0)%NY, z=(i/sxy)|0;
-      if(x>x0){   const j=i-1;   if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(x<x1){   const j=i+1;   if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(y>0){    const j=i-NX;  if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(y<NY-1){ const j=i+NX;  if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(z>z0){   const j=i-sxy; if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
-      if(z<z1){   const j=i+sxy; if(g[j]===0&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(x>x0){   const j=i-1;   if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(x<x1){   const j=i+1;   if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(y>0){    const j=i-NX;  if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(y<NY-1){ const j=i+NX;  if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(z>z0){   const j=i-sxy; if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
+      if(z<z1){   const j=i+sxy; if(PASA[g[j]]&&L[j]<nl){ L[j]=nl; buckets[nl].push(j); } }
     }
   }
   let cx0=NX,cz0=NZ,cx1=-1,cz1=-1;                    // qué cambió DE VERDAD: casi siempre un puñado de celdas
@@ -5942,6 +6915,11 @@ function mcComputeBlockLight(){
   const BL=nueva? (mc.blockLight=new Uint8Array(N)) : mc.blockLight;
   if(nueva) mc._blCero=true;          // recién creada: los typed arrays nacen a cero
   const lv0=Math.min(MC_MAXLIGHT, mc.glowLevel|0);
+  // Emisores puestos en la REJILLA (una antorcha con setVoxel): mcRecomputeHasGlow solo mira mc.structures, así que
+  // sin esto la bandera se quedaba en false y la función se iba por el atajo de abajo. Solo la ENCIENDE: apagarla
+  // aquí es innecesario (BL a cero ya se ve igual, ver mcMeshChunk) y se pisaría con el mallado a medio poblar.
+  const GE=mcGlowCeldas();
+  if(GE.size) mc.hasGlow=true;
   if(!mc.hasGlow || lv0<=0){          // sin emisivos: BL en 0, mcMeshChunk lo trata como sin luz de bloque
     // …pero sin re-poner a cero lo que YA está a cero. Es un fill de N bytes en cada bloque puesto o roto: 3 ms en
     // 512×40×512 para no cambiar ni un byte. La bandera vive aquí porque este es el único sitio que escribe BL.
@@ -5962,31 +6940,38 @@ function mcComputeBlockLight(){
   // a lv0 como MUESTRA para caras a ras (sin propagar). Con foco y haz definido (normal neta de caras emisivas expuestas
   // ≠ 0) se siembran solo los vecinos de aire del HEMISFERIO delantero, con su dirección de haz → cono. Si el haz es ≈0
   // (antorcha: emite igual por todas las caras) o focus=0 → omnidireccional a pleno (comportamiento clásico).
-  for(const s of mc.structures){ const ec=s.emitCells; if(!ec||!ec.length) continue; const ed=s.emitDir;
-    for(let k=0;k<ec.length;k+=3){ const cx=s.ox+ec[k], cy=s.oy+ec[k+1], cz=s.oz+ec[k+2];
-      if(!mcInside(cx,cy,cz)) continue; const i=cx+cy*NX+cz*sxy;
-      let nx=0,ny=0,nz=0,nl=0; if(ed){ nx=ed[k]; ny=ed[k+1]; nz=ed[k+2]; nl=Math.sqrt(nx*nx+ny*ny+nz*nz); }
-      const directional = focus>0 && nl>0.5;
-      if(g[i]!==0 && BL[i]<lv0) BL[i]=lv0;   // muestra sólida a ras (celda emisiva sólida), sin propagar
-      if(!directional){
-        seedFull(i);
-        if(cx>0)    seedFull(i-1);   if(cx<NX-1) seedFull(i+1);
-        if(cy>0)    seedFull(i-NX);  if(cy<NY-1) seedFull(i+NX);
-        if(cz>0)    seedFull(i-sxy); if(cz<NZ-1) seedFull(i+sxy);
-      } else {
-        const inv=1/nl; nx*=inv; ny*=inv; nz*=inv;
-        const qx=Math.round(nx*100), qy=Math.round(ny*100), qz=Math.round(nz*100);   // haz cuantizado a Int8 (−100..100)
-        // Fuente fijada a lv0 SIN empujar al BFS: muestra a ras Y bloquea que el vecino delantero relaye luz por detrás.
-        if(BL[i]<lv0) BL[i]=lv0;
-        // Siembra solo el hemisferio delantero (d·n>0) a lv0, con la dirección del haz → el BFS anisótropo lo estrecha.
-        const nb=(j,dx,dy,dz)=>{ if(g[j]!==0) return; if(dx*nx+dy*ny+dz*nz<=0.01) return;
-          if(BL[j]<lv0){ BL[j]=lv0; BD[j*3]=qx; BD[j*3+1]=qy; BD[j*3+2]=qz; buckets[lv0].push(j); } };
-        if(cx>0)    nb(i-1,-1,0,0);   if(cx<NX-1) nb(i+1,1,0,0);
-        if(cy>0)    nb(i-NX,0,-1,0);  if(cy<NY-1) nb(i+NX,0,1,0);
-        if(cz>0)    nb(i-sxy,0,0,-1); if(cz<NZ-1) nb(i+sxy,0,0,1);
-      }
+  // Una celda emisiva de mundo con su haz (ed[k..k+2], o ed=null). El cuerpo es el de siempre; se saca a función
+  // porque ahora tiene DOS fuentes: las estructuras estampadas y las piezas puestas en la rejilla.
+  const siembra=(cx,cy,cz, ed,k)=>{
+    if(!mcInside(cx,cy,cz)) return; const i=cx+cy*NX+cz*sxy;
+    let nx=0,ny=0,nz=0,nl=0; if(ed){ nx=ed[k]; ny=ed[k+1]; nz=ed[k+2]; nl=Math.sqrt(nx*nx+ny*ny+nz*nz); }
+    const directional = focus>0 && nl>0.5;
+    if(g[i]!==0 && BL[i]<lv0) BL[i]=lv0;   // muestra sólida a ras (celda emisiva sólida), sin propagar
+    if(!directional){
+      seedFull(i);
+      if(cx>0)    seedFull(i-1);   if(cx<NX-1) seedFull(i+1);
+      if(cy>0)    seedFull(i-NX);  if(cy<NY-1) seedFull(i+NX);
+      if(cz>0)    seedFull(i-sxy); if(cz<NZ-1) seedFull(i+sxy);
+    } else {
+      const inv=1/nl; nx*=inv; ny*=inv; nz*=inv;
+      const qx=Math.round(nx*100), qy=Math.round(ny*100), qz=Math.round(nz*100);   // haz cuantizado a Int8 (−100..100)
+      // Fuente fijada a lv0 SIN empujar al BFS: muestra a ras Y bloquea que el vecino delantero relaye luz por detrás.
+      if(BL[i]<lv0) BL[i]=lv0;
+      // Siembra solo el hemisferio delantero (d·n>0) a lv0, con la dirección del haz → el BFS anisótropo lo estrecha.
+      const nb=(j,dx,dy,dz)=>{ if(g[j]!==0) return; if(dx*nx+dy*ny+dz*nz<=0.01) return;
+        if(BL[j]<lv0){ BL[j]=lv0; BD[j*3]=qx; BD[j*3+1]=qy; BD[j*3+2]=qz; buckets[lv0].push(j); } };
+      if(cx>0)    nb(i-1,-1,0,0);   if(cx<NX-1) nb(i+1,1,0,0);
+      if(cy>0)    nb(i-NX,0,-1,0);  if(cy<NY-1) nb(i+NX,0,1,0);
+      if(cz>0)    nb(i-sxy,0,0,-1); if(cz<NZ-1) nb(i+sxy,0,0,1);
     }
-  }
+  };
+  for(const s of mc.structures){ const ec=s.emitCells; if(!ec||!ec.length) continue; const ed=s.emitDir;
+    for(let k=0;k<ec.length;k+=3) siembra(s.ox+ec[k], s.oy+ec[k+1], s.oz+ec[k+2], ed, k); }
+  // …y lo MISMO desde la rejilla: una pieza que cabe en su celda (una antorcha puesta con setVoxel) trae los
+  // mismos emitCells/emitDir horneados en su geometría fina; lo único que cambia es de dónde sale el origen.
+  for(const ci of GE){ const geo=mc._glowIds && mc._glowIds[g[ci]]; if(!geo) continue;
+    const ec=geo.emitCells, ed=geo.emitDir, cx=ci%NX, cy=((ci/NX)|0)%NY, cz=(ci/sxy)|0;
+    for(let k=0;k<ec.length;k+=3) siembra(cx+ec[k], cy+ec[k+1], cz+ec[k+2], ed, k); }
   // BFS por buckets con COSTE VARIABLE (≥1) según alineación del paso con el haz de la celda origen; lleva el haz al vecino.
   // Coste entero ≥1 ⇒ el nivel destino siempre baja ⇒ cae en un bucket inferior (procesado después): relajación válida.
   const relax=(i,j,dx,dy,dz)=>{
@@ -6008,7 +6993,8 @@ function mcComputeBlockLight(){
   }
 }
 // Recalcula mc.hasGlow: ¿alguna estructura viva tiene ≥1 celda emisiva? (cache para saltar BFS/mallado de luz de bloque).
-function mcRecomputeHasGlow(){ mc.hasGlow=false; for(const s of mc.structures){ if(s.emitCells&&s.emitCells.length){ mc.hasGlow=true; break; } } }
+function mcRecomputeHasGlow(){ mc.hasGlow=false; for(const s of mc.structures){ if(s.emitCells&&s.emitCells.length){ mc.hasGlow=true; return; } }
+  if(mcGlowCeldas().size) mc.hasGlow=true; }   // …o alguna pieza emisiva puesta en la rejilla (mcGlowCeldas)
 function mcMeshAll(){
   mcComputeLight();
   mcComputeBlockLight();
@@ -6042,7 +7028,8 @@ function mcResizeWorld(nx,ny,nz){
       const id=og[x + y*old.x + z*old.x*old.y]; if(id) ng[nxp + y*nx + nzp*nx*ny]=id;
     }
   }
-  const gl=mc.gl; if(gl) for(const [,ch] of mc.chunks) if(ch.vbo) gl.deleteBuffer(ch.vbo);   // sin fugas de VBO
+  const gl=mc.gl; if(gl) for(const [,ch] of mc.chunks){ if(ch.vbo) gl.deleteBuffer(ch.vbo);   // sin fugas de VBO
+    if(ch.finoVbo) gl.deleteBuffer(ch.finoVbo); if(ch.finoAVbo) gl.deleteBuffer(ch.finoAVbo); }
   mc.chunks.clear();
   mc.dim={x:nx,y:ny,z:nz}; mc.grid=ng;
   for(const s of mc.structures){ s.ox+=dx; s.oz+=dz; }   // las estructuras se desplazan con el terreno para no descuadrarse
@@ -6061,13 +7048,16 @@ function mcResizeWorld(nx,ny,nz){
   return mc.dim;
 }
 // Re-mesha el chunk que contiene (x,z) y, si la celda toca borde, el vecino (para que las caras del borde cuadren).
-function mcRemeshAround(x,z){
-  const luz=mcRelightBox(x,z);   // el skylight, SOLO alrededor: el barrido global costaba 684 ms en 512×40×512
+// Con (x1,z1) re-malla la CAJA (x,z)..(x1,z1) de una ráfaga entera en una sola pasada.
+function mcRemeshAround(x,z,x1c,z1c){
+  if(x1c===undefined){ x1c=x; z1c=z; }
+  const bx0=Math.min(x,x1c), bx1=Math.max(x,x1c), bz0=Math.min(z,z1c), bz1=Math.max(z,z1c);
+  const luz=mcRelightBox(bx0,bz0,bx1,bz1);   // el skylight, SOLO alrededor: el barrido global costaba 684 ms en 512×40×512
   mcComputeBlockLight();         // …e igual para la luz de bloque emisiva (el hueco reabierto puede dejarla pasar/taparla)
   // Antes se re-mallaba un 3×3 fijo «por si acaso». Ahora se sabe qué celdas cambiaron de luz, así que se re-malla
   // exactamente eso: normalmente 1 chunk en vez de 9. El ±1 en bloques es la GEOMETRÍA — si la celda tocada está en el
   // borde del chunk, la cara que se ve es la del vecino y hay que rehacerlo también.
-  let ax0=x-1, az0=z-1, ax1=x+1, az1=z+1;
+  let ax0=bx0-1, az0=bz0-1, ax1=bx1+1, az1=bz1+1;
   if(luz){ if(luz[0]<ax0)ax0=luz[0]; if(luz[1]<az0)az0=luz[1]; if(luz[2]>ax1)ax1=luz[2]; if(luz[3]>az1)az1=luz[3]; }
   const ncx=Math.ceil(mc.dim.x/MC_CHUNK), ncz=Math.ceil(mc.dim.z/MC_CHUNK);
   const cx0=Math.max(0,Math.floor(ax0/MC_CHUNK)), cx1=Math.min(ncx-1,Math.floor(ax1/MC_CHUNK));
@@ -6076,7 +7066,7 @@ function mcRemeshAround(x,z){
   // Las estructuras hornean su shade al construir la instancia (posición-independiente): una edición del terreno que
   // reabre/tapa el paso de luz re-oscurece/aclara el terreno vecino pero NO la estructura por sí sola. Re-hornean
   // las cercanas re-muestreando la luz fresca (skylight + luz de bloque) → abrir el techo aclara también la figura.
-  if(mc.structures.length) mcRebakeStructsNear(x,z);
+  if(mc.structures.length) mcRebakeStructsNear(bx0,bz0,bx1,bz1);
 }
 // Re-hornea el shade de las estructuras cuyo AABB solapa el vecindario del edit (la luz se difunde ≤MC_MAXLIGHT bloques,
 // +1 de margen): reconstruye su instancia con mcBuildStructMesh, que vuelve a muestrear max(skylight, luz de bloque) por
@@ -6086,10 +7076,13 @@ function mcRemeshAround(x,z){
 // articulado) se volvería permanente en cuanto alguien edite un bloque cerca. Lo demás NO se copia
 // a propósito: quien anima esas instancias las re-adquiere por (key,ox,oy,oz), que es lo único
 // estable entre reconstrucciones.
-function mcCarryEfimera(from,to){ if(from && from.efimera) to.efimera=true; return to; }
-async function mcRebakeStructsNear(x,z){
-  const R=MC_MAXLIGHT+1;
-  const affected=mc.structures.filter(s=>{ const a=s.aabb; return x>=a[0]-R&&x<=a[3]+R&&z>=a[2]-R&&z<=a[5]+R; });
+// `nota` va en el mismo saco por el mismo motivo: es lo que ata un cartel a su nota, y sin copiarlo
+// una edición cerca convertiría el cartel en un mueble suelto que ya nadie retira ni sabe leer.
+function mcCarryEfimera(from,to){ if(from && from.efimera) to.efimera=true; if(from && from.nota) to.nota=from.nota; return to; }
+async function mcRebakeStructsNear(x,z,x1,z1){
+  if(x1===undefined){ x1=x; z1=z; }
+  const R=MC_MAXLIGHT+1;   // solape de cajas: con (x1,z1) igual a (x,z) es el mismo test de punto de siempre
+  const affected=mc.structures.filter(s=>{ const a=s.aabb; return x1>=a[0]-R&&x<=a[3]+R&&z1>=a[2]-R&&z<=a[5]+R; });
   for(const s of affected){
     if(mc.structures.indexOf(s)<0) continue;                 // se retiró mientras se reconstruía otra
     const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot);
@@ -6139,13 +7132,41 @@ function mcFineBoxHit(fx0,fy0,fz0,fx1,fy1,fz1){
   return false;
 }
 function mcFineSolidAt(fx,fy,fz){ return mcFineBoxHit(fx,fy,fz, fx,fy,fz); }
-function mcCollidesWorld(px,py,pz){   // ¿el AABB del jugador en (px,py,pz) solapa bloques del terreno o estructuras?
-  const HW=MC_HW*mc.scale, PH=MC_PH*mc.scale;
+// El terreno dentro del AABB del jugador. Una celda de rejilla frena como el CUBO entero, que es lo barato
+// y lo correcto para un bloque… pero NO para lo que se dibuja con su geometría de verdad (mc._geoFina): una
+// alfombra de un voxel de alto o una flor pasarían a ser un muro de 16/16 y no se podrían pisar. Esas frenan
+// por su FORMA, en 1/16, con el mismo bitset (`bits`) que usa la pieza estampada — o sea que poner algo con
+// el clic derecho ya no cambia por dónde se puede andar. Sin materiales finos, mc._geoFina es null y esto es
+// el bucle de siempre; con ellos, el sondeo fino solo entra en las celdas que de verdad lo son.
+function mcTerrenoChoca(px,py,pz,HW,PH){
   const x0=Math.floor(px-HW), x1=Math.floor(px+HW);
   const y0=Math.floor(py),    y1=Math.floor(py+PH-1e-4);
   const z0=Math.floor(pz-HW), z1=Math.floor(pz+HW);
-  for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++)
-    if(mcSolid(x,y,z)) return true;
+  const GEO=mc._geoFina, T=MC_TILE;
+  let fx0=0,fy0=0,fz0=0,fx1=0,fy1=0,fz1=0, caja=false;
+  for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){
+    if(!mcSolidWalk(x,y,z)) continue;
+    if(!GEO || y<0) return true;                                  // suelo del mundo, o mundo sin nada fino
+    const g=GEO[mc.grid[mcIdx(x,y,z)]];
+    if(!g || !g.bits) return true;                                // celda normal: el cubo entero
+    if(!caja){ caja=true;
+      fx0=Math.floor((px-HW)*T); fy0=Math.floor(py*T);            // la caja del jugador en 1/16, una sola vez
+      fz0=Math.floor((pz-HW)*T); fx1=Math.floor((px+HW)*T);
+      fy1=Math.floor((py+PH-1e-4)*T); fz1=Math.floor((pz+HW)*T); }
+    const d=g.fdim, bx=x*T, by=y*T, bz=z*T;
+    const ax0=Math.max(fx0-bx,0), ax1=Math.min(fx1-bx,d[0]-1); if(ax0>ax1) continue;
+    const ay0=Math.max(fy0-by,0), ay1=Math.min(fy1-by,d[1]-1); if(ay0>ay1) continue;
+    const az0=Math.max(fz0-bz,0), az1=Math.min(fz1-bz,d[2]-1); if(az0>az1) continue;
+    for(let fy=ay0;fy<=ay1;fy++) for(let fz=az0;fz<=az1;fz++){
+      const row=(fy*d[2]+fz)*d[0];
+      for(let fx=ax0;fx<=ax1;fx++) if(g.bits[row+fx]) return true;
+    }
+  }
+  return false;
+}
+function mcCollidesWorld(px,py,pz){   // ¿el AABB del jugador en (px,py,pz) solapa bloques del terreno o estructuras?
+  const HW=MC_HW*mc.scale, PH=MC_PH*mc.scale;
+  if(mcTerrenoChoca(px,py,pz,HW,PH)) return true;
   if(mc.structures.length){
     const T=MC_TILE;
     if(mcFineBoxHit(Math.floor((px-HW)*T), Math.floor(py*T),           Math.floor((pz-HW)*T),
@@ -6155,12 +7176,8 @@ function mcCollidesWorld(px,py,pz){   // ¿el AABB del jugador en (px,py,pz) sol
 }
 function mcCollides(px,py,pz){   // ¿el AABB del jugador en (px,py,pz) solapa algún voxel sólido?
   const HW=MC_HW*mc.scale, PH=MC_PH*mc.scale;
-  // Terreno: resolución de bloque de mundo (16³).
-  const x0=Math.floor(px-HW), x1=Math.floor(px+HW);
-  const y0=Math.floor(py),    y1=Math.floor(py+PH-1e-4);
-  const z0=Math.floor(pz-HW), z1=Math.floor(pz+HW);
-  for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++)
-    if(mcSolid(x,y,z)) return true;
+  // Terreno: resolución de bloque de mundo (16³), salvo las celdas que se dibujan finas (ver mcTerrenoChoca).
+  if(mcTerrenoChoca(px,py,pz,HW,PH)) return true;
   // Estructuras: resolución FINA (1/16), igual que su malla → se camina por el interior y los vanos,
   // no por la huella gruesa (que atraparía al jugador dentro de una sala llena de muebles).
   if(mc.structures.length){
@@ -6363,7 +7380,7 @@ function mcRender(){
   const fx=mc.pos[0]/MC_CHUNK, fz=mc.pos[2]/MC_CHUNK;                                // chunk (fraccional) del jugador
   const vis=mc._visChunks||(mc._visChunks=[]); vis.length=0;                         // scratch reutilizado (sin GC por frame)
   for(const [key,ch] of mc.chunks){
-    if(!ch.count) continue;
+    if(!ch.count && !ch.finoCount && !ch.finoACount) continue;   // ni terreno ni celdas finas: nada que dibujar
     const p=key.split(','), ccx=+p[0], ccz=+p[1];
     if(Math.abs(ccx-cxp)>mc.renderDist || Math.abs(ccz-czp)>mc.renderDist) continue; // distancia de render
     if(!mcChunkVisible(ch,pv)) continue;                                             // frustum cull
@@ -6373,6 +7390,7 @@ function mcRender(){
   vis.sort((a,b)=>a._d-b._d);   // cercano→lejano: con el early-z, el terreno próximo tapa (por depth) a los fragmentos de detrás antes de sombrearlos → menos overdraw
   let quads=0;
   for(const ch of vis){
+    if(!ch.count) continue;                   // chunk solo con celdas finas: se dibuja en la pasada de estructuras
     gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
     gl.enableVertexAttribArray(L.aPos);   gl.vertexAttribPointer(L.aPos,3,gl.FLOAT,false,stride,0);
     gl.enableVertexAttribArray(L.aUV);    gl.vertexAttribPointer(L.aUV,2,gl.FLOAT,false,stride,12);
@@ -6394,7 +7412,10 @@ function mcRender(){
   // Estructuras estampadas (voxeles finos), frustum-culled por su aabb — DOS pasadas:
   // Las TRES pasadas (estas dos y la translúcida) van con sesgo de profundidad: una estructura apoyada en el
   // terreno comparte plano con el bloque de al lado y sin sesgo el empate lo reparte el ruido (ver mcStructGL).
-  if(mc.structures.length){
+  // Por aquí salen TAMBIÉN los lotes finos del chunk (las flores de mc.grid): mismo formato y mismo estado de
+  // GL que una estructura —sesgo y culling de traseras incluidos—, pero uno por chunk en vez de uno por celda.
+  let finoOp=0, finoAl=0; for(const ch of vis){ finoOp+=ch.finoCount|0; finoAl+=ch.finoACount|0; }
+  if(mc.structures.length || finoOp || finoAl){
     mcStructGL(true);
     // 1) Color por vértice (voxeles #hex, y tex: cuando game.structTextures=false) — programa de estructuras.
     if(mc.structProg){
@@ -6412,6 +7433,18 @@ function mcRender(){
         mcStructAttrib(SL, sstr);
         gl.drawArrays(gl.TRIANGLES,0,s.colCount);
         quads+=s.colCount/6;
+      }
+      // …y los lotes del chunk, que ya vienen en coordenadas de MUNDO (sin matriz de modelo) y ya pasaron el
+      // frustum con el aabb del chunk: solo hay que cambiar el buffer.
+      if(finoOp){
+        gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
+        for(const ch of vis){
+          if(!ch.finoCount) continue;
+          gl.bindBuffer(gl.ARRAY_BUFFER, ch.finoVbo);
+          mcStructAttrib(SL, sstr);
+          gl.drawArrays(gl.TRIANGLES,0,ch.finoCount);
+          quads+=ch.finoCount/6;
+        }
       }
     }
     // 2) Texturado real (voxeles tex: con game.structTextures) — shader propio con repetición por voxel
@@ -6440,7 +7473,7 @@ function mcRender(){
     // 3) Translúcido (voxeles #rrggbbaa) — pasada con blend SIN escribir profundidad (sin ordenar: pixel-art,
     //    order-independent, barato). Va después de TODO lo opaco (terreno + estructuras) para mezclarse encima.
     if(mc.structProg){
-      let any=false; for(const s of mc.structures){ if(s.alphaCount && mcStructVisible(s,pv)){ any=true; break; } }
+      let any=!!finoAl; for(const s of mc.structures){ if(s.alphaCount && mcStructVisible(s,pv)){ any=true; break; } }
       if(any){
         const SL=mc.structLoc, sstr=9*4;
         gl.useProgram(mc.structProg);
@@ -6460,11 +7493,22 @@ function mcRender(){
           gl.drawArrays(gl.TRIANGLES,0,s.alphaCount);
           quads+=s.alphaCount/6;
         }
+        if(finoAl){
+          gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
+          for(const ch of vis){
+            if(!ch.finoACount) continue;
+            gl.bindBuffer(gl.ARRAY_BUFFER, ch.finoAVbo);
+            mcStructAttrib(SL, sstr);
+            gl.drawArrays(gl.TRIANGLES,0,ch.finoACount);
+            quads+=ch.finoACount/6;
+          }
+        }
         gl.depthMask(true); gl.disable(gl.BLEND);
       }
     }
     mcStructGL(false);   // fuera antes de la pasada del sol del frame siguiente, que hereda el estado
   }
+  mcDrawNoteTexts(pj, view);      // el texto de cada nota, pegado en la tabla de su cartel (se desvanece de lejos)
   mcDrawPreview(pj, view);        // vista-previa translúcida de la habitación mientras se mantiene el clic derecho
   mcDrawOverlays(pj, view);
   mc.quads=quads; game.voxels=Math.round(quads);
@@ -6591,10 +7635,14 @@ function mcDrawOverlays(pj, view){
   }
   // 2) Rayos-X (tecla X): volumen de colisión alrededor del jugador, VISIBLE a través de las paredes.
   const xrayLines=[];
-  if(mc.xray){ mcXrayVolume(xray); mcXrayRay(xray, xrayLines); }
+  if(mc.xray){ mcXrayVolume(xrayLines); mcXrayRay(xray, xrayLines); }   // el volumen va a LÍNEAS (REQ-XR1); a `xray` solo le queda el impacto del rayo
   // 3) t1 · marcadores de nota: un post-it amarillo flotando sobre cada bloque anotado (dentro de la distancia de render).
+  // Solo para las notas que NO tienen cartel: con carteles encendidos el post-it sobraría encima de la
+  // tabla, y con ellos apagados (o pasado el tope de MC_NOTE_SIGN_MAX) sigue siendo la única marca.
   const notes=[]; const R=mc.renderDist*MC_CHUNK, p=mc.pos;
+  const conCartel=new Set(); for(const s of mc.structures) if(s.nota) conCartel.add(s.nota);
   if(mc.noteAlpha>0) for(const k in mc.notes){ const q=k.split(','), x=+q[0], y=+q[1], z=+q[2];
+    if(conCartel.has(k)) continue;
     if(Math.abs(x+0.5-p[0])>R || Math.abs(z+0.5-p[2])>R) continue;
     mcPushBoxTris(notes, x+0.34,y+1.16,z+0.44, x+0.66,y+1.5,z+0.5, 1,0.84,0.22);   // hoja del post-it (cara amarilla)
     mcPushBoxTris(notes, x+0.47,y+1.0,z+0.47,  x+0.53,y+1.18,z+0.53, 0.55,0.4,0.12); // «pincho» que lo clava al bloque
@@ -6658,7 +7706,11 @@ function mcMatName(id){
     const map={}; for(const nm in mc.name2id) map[mc.name2id[nm]]=nm;
     mcXnameCache={len:mc.blockKey.length, map};
   }
-  return mcXnameCache.map[id] || String(mc.blockKey[id]||'').replace(/^asset:assets\//,'').replace(/^hab:/,'').replace(/\.vox\.json$/,'') || ('#'+id);
+  // Una variante girada («…@5», ver mcClaveConOri) se acorta por su clave base y se le devuelve el sufijo:
+  // así el nombre que enseña rayos-X sigue valiendo tal cual en setVoxel, que entiende el sufijo.
+  const bruto=String(mcXnameCache.map[id] || mc.blockKey[id] || ''), ori=mcClaveOri(bruto);
+  const corto=mcClaveBase(bruto).replace(/^asset:assets\//,'').replace(/^hab:/,'').replace(/\.vox\.json$/,'');
+  return (corto ? corto+(ori?'@'+ori:'') : '') || ('#'+id);
 }
 // Tipo de material para la etiqueta de rayos-X: CÓMO se coloca (bloque de terreno vs estructura fina) y de DÓNDE
 // sale (badge de la galería: bloque / textura / guardada). Memoizado porque las etiquetas se rehacen cada frame;
@@ -6681,9 +7733,13 @@ function mcMatKind(key, isStruct){
 // (que corre en `new Function`) no podría engancharse con `window.mcXrayExtra = …`, que es como se engancha
 // todo lo demás desde 'mundo-autoarranque'. Con `var` las dos formas valen.
 var mcXrayExtra=null;
-function mcXrayExtraTexto(key, s){
+// (x,y,z) es la CELDA de la etiqueta —de la rejilla, o el origen de la estructura—, y va suelta y no
+// en un array a propósito: esto corre una vez por etiqueta y frame (hasta ~250), y un array por
+// llamada es basura para el GC a 60 fps. Quien no la necesite se queda con dos parámetros: los
+// enganches viejos siguen valiendo tal cual.
+function mcXrayExtraTexto(key, s, x, y, z){
   if(!mcXrayExtra) return '';
-  try{ return mcXrayExtra(key, s) || ''; }
+  try{ return mcXrayExtra(key, s, x, y, z) || ''; }
   catch(e){ mcXrayExtra=null; console.warn('mcXrayExtra desenganchado:', e && e.message); return ''; }
 }
 function mcUpdateXrayLabels(){
@@ -6724,7 +7780,7 @@ function mcUpdateXrayLabels(){
   for(let x=cx-R;x<=cx+R;x++) for(let y=cy-1;y<=cy+3;y++) for(let z=cz-R;z<=cz+R;z++){
     if(mcInside(x,y,z) && mc.grid[mcIdx(x,y,z)]){ const id=mc.grid[mcIdx(x,y,z)];
       emit(x+0.5,y+0.5,z+0.5, x+','+y+','+z, mcMatKind(mc.blockKey[id], false), mcMatName(id), false,
-           mcXrayExtraTexto(mc.blockKey[id], null)); }
+           mcXrayExtraTexto(mc.blockKey[id], null, x, y, z)); }
   }
   // Estructuras finas cercanas: una etiqueta por instancia en el centro de su AABB (rayos-X ya dibuja su caja naranja).
   // La coord es su celda de origen y el «material» su clave cruda (hab:cristal / asset:…) — igual que la muestran los bloques.
@@ -6733,7 +7789,7 @@ function mcUpdateXrayLabels(){
     const mxc=(a[0]+a[3])/2, myc=(a[1]+a[4])/2, mzc=(a[2]+a[5])/2;
     if(Math.abs(mxc-p[0])>R+8 || Math.abs(mzc-p[2])>R+8) continue;           // solo el entorno (como los bloques)
     emit(mxc, myc, mzc, s.ox+','+s.oy+','+s.oz, mcMatKind(s.key, true), String(s.key), true,
-         mcXrayExtraTexto(s.key, s));
+         mcXrayExtraTexto(s.key, s, s.ox, s.oy, s.oz));
   }
   // Impacto del rayo de apuntado: si paró en un voxel fino o en un bloque, y dónde caería el bloque nuevo.
   const r=mc.rayFijo||mcRayoInfo();
@@ -6768,11 +7824,18 @@ function mcXrayRay(tris, lines){
   mcPushBoxEdges(lines, c[0],c[1],c[2], c[0]+1,c[1]+1,c[2]+1, 1,1,1);              // celda que PARA el rayo
   mcPushBoxEdges(lines, q[0],q[1],q[2], q[0]+1,q[1]+1,q[2]+1, 0.35,1,0.45);        // celda donde iría el bloque
 }
+// ⚠️ Esto emite ARISTAS (gl.LINES), no relleno — REQ-XR1. Con cubos macizos a alfa 0.38 y sin
+// DEPTH_TEST la opacidad se compone capa a capa (1 − 0.62^k, y con CULL_FACE apagado cada caja son
+// DOS capas), así que tres bloques en la línea de visión ya saturaban a blanco: medido, la pasada
+// tapaba el 92 % de la pantalla en el circuito del dueño. Bajar el alfa solo mueve dónde satura.
+// Y las cajas van a las cotas EXACTAS de la celda (no al 0.03/0.97 de antes): así la arista que
+// comparten dos celdas vecinas cae en la misma recta y se ve UNA línea, no dos paralelas — que es
+// lo que convertiría un suelo en una maraña.
 function mcXrayVolume(out){
   const p=mc.pos, R=3;
   const cx=Math.floor(p[0]), cy=Math.floor(p[1]), cz=Math.floor(p[2]);
   for(let x=cx-R;x<=cx+R;x++) for(let y=cy-1;y<=cy+3;y++) for(let z=cz-R;z<=cz+R;z++){
-    if(mcInside(x,y,z) && mc.grid[mcIdx(x,y,z)]) mcPushBoxTris(out, x+0.03,y+0.03,z+0.03, x+0.97,y+0.97,z+0.97, 0.95,0.2,0.2);
+    if(mcInside(x,y,z) && mc.grid[mcIdx(x,y,z)]) mcPushBoxEdges(out, x,y,z, x+1,y+1,z+1, 0.95,0.2,0.2);
   }
   if(mc.structures.length){
     const T=MC_TILE, HW=MC_HW*mc.scale, PH=MC_PH*mc.scale, M=0.35;   // AABB del jugador + margen
@@ -6786,14 +7849,15 @@ function mcXrayVolume(out){
     // que dos estructuras solapadas pintan su voxel común dos veces (invisible: es el mismo cubo).
     for(const s of mc.structures){
       const g=mcStructColl(s); if(!g) continue;
+      const bits=g.bitsAim||g.bits;                    // rayos-X enseña lo que HAY, no lo que frena
       const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T;
       const x0=Math.max(fx0-bx,0), x1=Math.min(fx1-bx,d[0]-1); if(x0>x1) continue;
       const y0=Math.max(fy0-by,0), y1=Math.min(fy1-by,d[1]-1); if(y0>y1) continue;
       const z0=Math.max(fz0-bz,0), z1=Math.min(fz1-bz,d[2]-1); if(z0>z1) continue;
       for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){
         const row=(y*d[2]+z)*d[0];
-        for(let x=x0;x<=x1;x++) if(g.bits[row+x])
-          mcPushBoxTris(out, (bx+x)/T,(by+y)/T,(bz+z)/T, (bx+x+1)/T,(by+y+1)/T,(bz+z+1)/T, 1,0.55,0.1);
+        for(let x=x0;x<=x1;x++) if(bits[row+x])
+          mcPushBoxEdges(out, (bx+x)/T,(by+y)/T,(bz+z)/T, (bx+x+1)/T,(by+y+1)/T,(bz+z+1)/T, 1,0.55,0.1);
       }
     }
   }
@@ -6830,6 +7894,34 @@ function mcRaycast(maxd, hitStruct){   // desde el ojo, dirección de mirada; de
   }
   return null;
 }
+// ── Sondas de APUNTADO (mirar / romper / rayos-X), hermanas de las de colisión ──────────────────────
+// Andar y apuntar no son la misma pregunta: una mata de hierba se atraviesa al caminar pero tiene que
+// poder mirarse y romperse de un clic. Estas leen `bitsAim` (ocupación real) donde las de colisión leen
+// `bits`; mientras nada sea atravesable son la misma referencia y responden exactamente lo mismo.
+//
+// Van POR ENCIMA de mcStructColl a propósito: se pide `g` a la global —no a mc.structs— para que los
+// envoltorios del snippet (mundo-autoarranque) sigan aplicando. Y se lee `g.bitsAim||g.bits`, así que un
+// `g` fabricado por un tercero que solo traiga `bits` sigue funcionando igual que antes.
+function mcAimBoxHit(fx0,fy0,fz0,fx1,fy1,fz1){
+  const T=MC_TILE;
+  for(const s of mc.structures){
+    const g=mcStructColl(s); if(!g) continue;
+    const bits=g.bitsAim||g.bits;
+    const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T;
+    const x0=Math.max(fx0-bx,0), x1=Math.min(fx1-bx,d[0]-1); if(x0>x1) continue;
+    const y0=Math.max(fy0-by,0), y1=Math.min(fy1-by,d[1]-1); if(y0>y1) continue;
+    const z0=Math.max(fz0-bz,0), z1=Math.min(fz1-bz,d[2]-1); if(z0>z1) continue;
+    for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){
+      const row=(y*d[2]+z)*d[0];
+      for(let x=x0;x<=x1;x++) if(bits[row+x]) return true;
+    }
+  }
+  return false;
+}
+function mcAimSolidAt(fx,fy,fz){
+  return mcAimBoxHit(fx,fy,fz, fx,fy,fz);
+}
+
 // ¿El rayo atraviesa un voxel fino LLENO dentro de la celda (x,y,z)? Devuelve la distancia del impacto, o -1.
 // Sub-DDA a resolución fina (1/16) acotado a la celda: ≤48 pasos, y solo se entra aquí si la celda toca alguna
 // estructura, así que el coste va con las celdas de estructura que cruza el rayo, no con el alcance.
@@ -6849,7 +7941,7 @@ function mcStructRayHit(x,y,z, o,d, t0){
   let t=0;                                           // t relativo a t0 al entrar en el voxel fino actual
   for(let i=0;i<3*T+3;i++){
     if(fx<x*T||fx>=x*T+T||fy<y*T||fy>=y*T+T||fz<z*T||fz>=z*T+T) return -1;   // salió de la celda: sigue el DDA grueso
-    if(mcFineSolidAt(fx,fy,fz)) return t0+t;
+    if(mcAimSolidAt(fx,fy,fz)) return t0+t;
     if(tX<tY && tX<tZ){ fx+=sX; t=tX; tX+=dX; }
     else if(tY<tZ){     fy+=sY; t=tY; tY+=dY; }
     else {              fz+=sZ; t=tZ; tZ+=dZ; }
@@ -6861,9 +7953,10 @@ function mcStructAt(px,py,pz){
   const T=MC_TILE, fx=Math.floor(px*T), fy=Math.floor(py*T), fz=Math.floor(pz*T);
   for(const s of mc.structures){
     const g=mcStructColl(s); if(!g) continue;
+    const bits=g.bitsAim||g.bits;                      // qué estructura estoy señalando, aunque se atraviese
     const d=g.fdim, lx=fx-s.ox*T, ly=fy-s.oy*T, lz=fz-s.oz*T;
     if(lx<0||ly<0||lz<0||lx>=d[0]||ly>=d[1]||lz>=d[2]) continue;
-    if(g.bits[(ly*d[2]+lz)*d[0]+lx]) return s;
+    if(bits[(ly*d[2]+lz)*d[0]+lx]) return s;
   }
   return null;
 }
@@ -6873,7 +7966,7 @@ function mcStructAt(px,py,pz){
 function mcStructCellSolid(x,y,z){
   if(!mc.structures.length || y<0) return false;
   const T=MC_TILE;
-  return mcFineBoxHit(x*T, y*T, z*T, x*T+T-1, y*T+T-1, z*T+T-1);
+  return mcAimBoxHit(x*T, y*T, z*T, x*T+T-1, y*T+T-1, z*T+T-1);
 }
 // Re-malla TODAS las estructuras vivas (al cambiar game.structTextures): invalida la geometría fina cacheada
 // (el modo de textura cambió), recompone el atlas y reconstruye las VBO de cada instancia. La colisión fina
@@ -6983,7 +8076,7 @@ function mcBreak(){
   const T=MC_TILE, MAXD=mcReach(), step=1/T;
   for(let t=step; t<=MAXD; t+=step){
     const px=o[0]+d[0]*t, py=o[1]+d[1]*t, pz=o[2]+d[2]*t;
-    if(mc.structures.length && mcFineSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T))){
+    if(mc.structures.length && mcAimSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T))){
       const s=mcStructAt(px,py,pz);
       // Una pieza efímera no es una edición del dueño: se va sin historial y sin guardar. Con
       // historial, un Ctrl+Z la resucitaría como estructura de verdad y la metería en el mundo.
@@ -7002,13 +8095,46 @@ function mcPlace(){
   const c=hit.cell, n=hit.normal, nx=c[0]+n[0], ny=c[1]+n[1], nz=c[2]+n[2];
   if(!mcInside(nx,ny,nz) || mcSolid(nx,ny,nz)) return;
   const sk=mc.slotStruct[mc.sel];
-  if(sk){ const rot=mcPreviewOri(), o=mcStructOrigin(sk, nx, ny, nz, rot, n);     // orientación a mano (R giro / Shift+R vuelco); centro en suelo, canto en pared
+  if(sk){ const rot=mcPreviewOri();
+    // Poner y estampar son la MISMA función cuando la pieza se ve igual en la rejilla (mcCabeEnRejilla):
+    // va por setVoxel y deja de costar un draw call. La orientación a mano (R giro / Shift+R vuelco)
+    // también, porque el giro cabe en la clave: se pone la variante `<clave>@<ori>` (ver mcClaveConOri).
+    // Lo que se proyecta sobre las 6 caras del cubo no puede —ahí no se ve el giro— y se sigue estampando.
+    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk))){
+      mcPonEnRejilla(nx,ny,nz, mcClaveConOri(sk,rot)); return; }
+    const o=mcStructOrigin(sk, nx, ny, nz, rot, n);               // orientación a mano (R giro / Shift+R vuelco); centro en suelo, canto en pared
     mcStampStruct(sk, o[0], o[1], o[2], rot); return; }           // ranura de estructura: estampa la habitación entera con la orientación elegida
   const id=mc.hotbar[mc.sel]; if(!id) return;
   mcSetBlock(nx,ny,nz,id);
   if(mcCollides(mc.pos[0],mc.pos[1],mc.pos[2])){ mcSetBlock(nx,ny,nz,0); return; } // no encajonar al jugador
   mcPushHist({t:'b',x:nx,y:ny,z:nz,before:0,after:id});
   mcRemeshAround(nx,nz); mcScheduleSave();
+}
+// Un clic derecho que acaba en la rejilla. Llama al MISMO mcSetVoxel que el scripting —incluido el camino
+// de material aún sin cargar, que apunta la celda y la escribe al llegar la textura— y le añade lo que el
+// clic necesita y un script no: deshacer y no encajonar al jugador. mcSetVoxel ya re-malla y guarda.
+// Un material que aún no está en la paleta se escribe en cuanto acaba de descargarse, no en el clic. Sin
+// esto ese primer clic no se podría deshacer, que es justo el caso de una pieza recién girada (mcClaveConOri).
+async function mcHistTrasCarga(x,y,z,before){
+  for(const p of [...mcPendCarga.values()]) await Promise.resolve(p).catch(()=>{});
+  await new Promise(r=>setTimeout(r,0));
+  const after=mc.grid[mcIdx(x,y,z)];
+  if(after!==before) mcPushHist({t:'b',x,y,z,before,after});
+}
+function mcPonEnRejilla(x,y,z,key){
+  const before=mc.grid[mcIdx(x,y,z)], pendientes=mcBuildN;   // ¿hay escrituras de script esperando su volcado?
+  if(mcSetVoxel(x,y,z,key)===false) return false;
+  const id=mc.grid[mcIdx(x,y,z)];
+  if(id===before){ mcHistTrasCarga(x,y,z,before); return true; }   // pendiente de cargar: la escritura llega luego
+  let puesto=true;
+  if(mcCollides(mc.pos[0],mc.pos[1],mc.pos[2])){ mcSetBlock(x,y,z,before); puesto=false; }  // no encajonar al jugador
+  else mcPushHist({t:'b',x,y,z,before,after:id});
+  // Un clic no es un script: ni el volcado diferido ni el resumen «N bloques colocados» 80 ms después.
+  // Se cambia el volcado de setVoxel por el del bloque normal (mcRemeshAround). Si un script tenía escrituras
+  // a medio volcar, mandan ellas: mcSetVoxel ya metió esta celda en mcBuildBox, así que su flush nos incluye.
+  if(!pendientes && !mc.batching){ clearTimeout(mcBuildT); mcBuildT=0; mcBuildN=0; mcBuildBox=null; mcMat2id={};
+    mcRemeshAround(x,z); mcScheduleSave(); }
+  return puesto;
 }
 // game.playerTool 'paint': repinta el bloque APUNTADO con el bloque seleccionado (no crea uno nuevo al lado).
 // Solo sobre terreno normal (las estructuras no son rejilla). No encajona: cambiar color no cambia el volumen.
@@ -7116,7 +8242,7 @@ function mcRotateSelBox(){
         const after=rotated.get(x+','+y+','+z)||0;
         const before=mc.grid[mcIdx(x,y,z)];
         if(before===after) continue;
-        mc.grid[mcIdx(x,y,z)]=after; mcDirty(x,y,z); edits.push({x,y,z,before,after});
+        mc.grid[mcIdx(x,y,z)]=after; mcDirty(x,y,z); mcGlowTocada(x,y,z); edits.push({x,y,z,before,after});
       }
   if(!edits.length){ toast('Nada que rotar'); return false; }
   mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave();
@@ -7146,7 +8272,7 @@ async function mcPasteWorld(){
     if(wx<minx)minx=wx; if(wy<miny)miny=wy; if(wz<minz)minz=wz;                // caja de lo pegado, para dejarlo seleccionado
     if(wx>maxx)maxx=wx; if(wy>maxy)maxy=wy; if(wz>maxz)maxz=wz;
     const before=mc.grid[mcIdx(wx,wy,wz)]; if(before===id) continue;
-    mc.grid[mcIdx(wx,wy,wz)]=id; mcDirty(wx,wy,wz); edits.push({x:wx,y:wy,z:wz,before,after:id});
+    mc.grid[mcIdx(wx,wy,wz)]=id; mcDirty(wx,wy,wz); mcGlowTocada(wx,wy,wz); edits.push({x:wx,y:wy,z:wz,before,after:id});
     if(isColor) fellBack++;
   }
   if(minx===Infinity){ toast('Nada colocado (fuera del mapa o sin material)'); return; }
@@ -7158,17 +8284,365 @@ async function mcPasteWorld(){
 // --- t1 · notas post-it sobre un bloque ---
 function mcNoteKey(c){ return c[0]+','+c[1]+','+c[2]; }
 const MC_NOTE_MAX=280;                                  // tope de una nota (post-it, no un ensayo)
+
+// ── El cartel de una nota ────────────────────────────────────────────────────────────────────────
+// Una nota se ve como un CARTEL de verdad (assets/cartel.vox.json: poste + tabla, 2×2 celdas, 1/16
+// de canto) plantado encima de su bloque, en vez del post-it amarillo que se dibujaba a mano.
+//
+// Los carteles NO son datos del mundo: se DERIVAN de mc.notes. Van marcados `efimera`, así que
+// mcStructuresDoc no los guarda y mundo.json sigue llevando solo las notas — la fuente de verdad no
+// se duplica y no hay forma de que un cartel se quede huérfano en el fichero. Se sincronizan solos:
+// quien escriba en mc.notes (el panel de la tecla N, un snippet, un agente) planta su cartel sin
+// enterarse, y al borrar la nota el cartel se va.
+//
+// ⚠️ El cartel ocupa 2×2 celdas ENCIMA del bloque anotado, así que apuntar al cartel NO es apuntar a
+// la nota: mcNoteAnchor es la vuelta del cartel a su bloque, y es lo que hace que la tecla N y el
+// visor de texto funcionen mirando el cartel, que es justo lo que uno mira.
+const MC_NOTE_SIGN='asset:assets/cartel.vox.json';
+const MC_NOTE_SIGN_ROT=1;                               // canto en Z: la tabla mira de frente a quien llega
+const MC_NOTE_SIGN_MAX=64;                              // tope de carteles: cada uno es una malla y una llamada de dibujo
+const MC_NOTE_SIGN_LOTE=8;                              // cuántos se plantan por repaso (ver mcSyncNoteSignsRun)
+function mcNoteSignOrigin(k){ const q=k.split(','); return [+q[0], +q[1]+1, +q[2]]; }   // se planta SOBRE el bloque
+
+// ¿Hay algún cartel de más o de menos? Es el chequeo barato que corre en el bucle: recorre las
+// estructuras (no las notas), y solo si no cuadra se paga la sincronización de verdad.
+function mcNoteSignsDesfasados(){
+  const quiere=mc.noteSigns!==false; let n=0;
+  for(const s of mc.structures) if(s.nota){ if(!quiere || !mc.notes[s.nota]) return true; n++; }
+  return n!==(quiere ? Math.min(Object.keys(mc.notes).length, MC_NOTE_SIGN_MAX) : 0);
+}
+// Las sincronizaciones se ENCOLAN, no se descartan: estampar es asíncrono, y una nota escrita
+// mientras se planta otra se quedaría sin cartel hasta el siguiente repaso. Encadenar además hace que
+// quien haga `await` reciba el trabajo terminado, que es lo que esperan las pruebas y los snippets.
+let mcNoteSignAt=0, mcNoteSignQ=Promise.resolve();
+function mcSyncNoteSigns(){
+  return (mcNoteSignQ = mcNoteSignQ.then(mcSyncNoteSignsRun, mcSyncNoteSignsRun)
+    .catch(e=>{ console.warn('[notas] no se pudo plantar el cartel:', e); }));
+}
+async function mcSyncNoteSignsRun(){
+  if(!mc.grid) return;
+  const quiere=mc.noteSigns!==false, tienen=new Map();
+  for(const s of mc.structures.slice()) if(s.nota){
+    if(quiere && mc.notes[s.nota] && !tienen.has(s.nota)) tienen.set(s.nota, s);
+    else mcRemoveStruct(s, true);                       // nota borrada, carteles apagados o duplicado
+  }
+  if(!quiere) return;
+  // Se plantan por tandas: estampar construye malla (y a veces re-hornea el atlas), así que un
+  // agente que suelta veinte notas de golpe congelaría el cuadro. Lo que quede lo recoge el repaso
+  // del siguiente ciclo, medio segundo después.
+  let plantados=0;
+  for(const k in mc.notes){
+    if(tienen.has(k)) continue;
+    if(tienen.size>=MC_NOTE_SIGN_MAX) break;            // el resto se queda con el post-it (ver el overlay)
+    if(plantados>=MC_NOTE_SIGN_LOTE) break;
+    const o=mcNoteSignOrigin(k);
+    if(!mcInside(o[0],o[1],o[2])) continue;
+    const s=await mcStampStruct(MC_NOTE_SIGN, o[0],o[1],o[2], MC_NOTE_SIGN_ROT, true);
+    if(!s) continue;
+    s.efimera=true; s.nota=k;                           // marcar DESPUÉS del await: antes no hay instancia viva
+    tienen.set(k, s); plantados++;
+  }
+}
+// De la celda apuntada a la celda que tiene la nota: ella misma si ya está anotada, o el bloque del
+// cartel al que pertenece. Devuelve null si ahí no hay nada anotado.
+function mcNoteAnchor(cell){
+  if(!cell) return null;
+  if(mc.notes[mcNoteKey(cell)]) return cell;
+  for(const s of mc.structures){
+    if(!s.nota || !mc.notes[s.nota] || !s.aabb) continue;
+    const a=s.aabb;
+    if(cell[0]>=Math.floor(a[0]) && cell[0]<=Math.ceil(a[3])-1 &&
+       cell[1]>=Math.floor(a[1]) && cell[1]<=Math.ceil(a[4])-1 &&
+       cell[2]>=Math.floor(a[2]) && cell[2]<=Math.ceil(a[5])-1){ const q=s.nota.split(','); return [+q[0],+q[1],+q[2]]; }
+  }
+  return null;
+}
+// ── El TEXTO de la nota, escrito en la tabla del cartel ──────────────────────────────────────────
+// «me gustaría ver el contenido de la nota sobre el cartel cuando sea posible, de muy lejos no haría
+// falta». Un cartel que no se puede leer es solo un icono: obliga a apuntar y bajar la vista al visor.
+// Aquí el texto se hornea en una TEXTURA y se pega como CALCOMANÍA sobre la tabla, con la fuente del
+// juego (la misma --font-game de style.css). De lejos se desvanece y vuelve a valer el visor.
+//
+// La tabla NO se declara en el .vox.json: se DERIVA de la forma real de la pieza estampada, leyendo el
+// bitset fino que ya tiene la malla. Así cualquier asset con pinta de cartel —tabla ancha arriba, poste
+// estrecho abajo— recibe su rótulo sin tocar una tabla de constantes, y si alguien redibuja cartel.vox.json
+// el rótulo se re-encuadra solo. Lo que no tenga esa forma simplemente no se rotula.
+// Resolución del lienzo del rótulo. Estos son TOPES, no el tamaño: el alto del lienzo se ELIGE por texto
+// (ver mcNoteTexture) para que el cuerpo óptimo caiga justo en un múltiplo de 9 y no haya que redondear
+// hacia abajo. Con un alto FIJO se perdía muchísimo: en una tabla 2,14:1 el cuerpo que llena la caja es
+// 25,2 px sobre 256, y como solo valen 9/18/27… se horneaba a 18 → letras un 29 % más pequeñas de lo que
+// cabía. El tope sube a 384 (antes 256) porque a más lienzo, más múltiplos de 9 donde elegir y más píxeles
+// de lienzo por píxel de diseño (36/9 = 4 en vez de 2), que es lo que se ve al acercarse al cartel.
+const MC_NOTE_TEXT_H=384;       // tope de alto del lienzo en px (el ancho sale del aspecto de la tabla)
+const MC_NOTE_TEXT_WMAX=1024;   // …y tope de ancho: una tabla muy alargada no se lleva una textura enorme
+// Alto de referencia con el que se MIDE la razón óptima cuerpo/lienzo. No se dibuja nada a esta resolución
+// —measureText no depende del tamaño del lienzo—, solo se busca en ella el cuerpo continuo que llena la
+// caja; cuanto más alta, más fina sale la razón (a 1024 el paso es del 0,1 %).
+const MC_NOTE_TEXT_REF=1024;
+// Margen en VOXELS FINOS para no pisar el marco dibujado de la tabla. Es 1 y no 2 porque el marco del
+// cartel mide UN voxel fino: con 2 se tiraba el 25 % del alto de una tabla de 16 (12,5 % por lado) para
+// tapar un marco de 1. Ojo: este margen y el del lienzo (abajo) hacen EL MISMO trabajo y se componen —
+// entre los dos se comían casi la mitad de la tabla antes de escribir una letra.
+const MC_NOTE_TEXT_PAD=1;
+const MC_NOTE_TEXT_MIN=9;       // px de fuente por debajo de los cuales ya no se encoge más: se recorta con «...»
+const MC_NOTE_TEXT_CACHE=24;    // rótulos horneados vivos a la vez (LRU); cada uno es una textura en la GPU
+const MC_NOTE_TEXT_LEGIBLE=10;  // px de pantalla por letra a partir de los cuales el rótulo releva al visor
+const MC_GAME_FONT='"Pixeloid Sans"';   // == --font-game de style.css: si se cambia allí, hay que cambiarlo aquí
+// El mínimo es 9 y no 6 porque Pixeloid tiene 1836 unidades por em y su píxel de diseño mide 204, o sea
+// font-size/9: solo los múltiplos de 9 caen en rejilla y salen nítidos. Por debajo de 9 el rasterizado
+// empasta las letras y el rótulo se vuelve ilegible antes que recortado, así que ahí ya se corta con «...».
+
+// Rectángulo de la TABLA de un cartel estampado, en coordenadas de mundo. Sale del bitset de la malla
+// (`bitsAim`, la ocupación real: el cartel es atravesable y su `bits` de colisión son ceros), que ya está
+// en orientación de mundo — o sea que el giro de la instancia ya viene aplicado y no hay que rotar nada.
+// Se cachea en la propia instancia porque el barrido es de miles de celdas y esto corre en cada cuadro.
+function mcNoteBoardRect(s){
+  const marca=s.key+'|'+(s.rot|0)+'|'+s.ox+','+s.oy+','+s.oz;   // el origen entra en la marca: el mundo se desplaza (mcShift)
+  if(s._boardFor===marca) return s._board;
+  const g=mcStructColl(s); if(!g) return null;     // malla invalidada (re-horneado): se reintenta al cuadro siguiente
+  s._boardFor=marca; s._board=null;
+  const bits=g.bitsAim||g.bits, d=g.fdim;
+  let x0=1e9,x1=-1,y0=1e9,y1=-1,z0=1e9,z1=-1;
+  for(let y=0;y<d[1];y++) for(let z=0;z<d[2];z++){ const row=(y*d[2]+z)*d[0];
+    for(let x=0;x<d[0];x++) if(bits[row+x]){
+      if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; if(z<z0)z0=z; if(z>z1)z1=z; } }
+  if(x1<0) return null;
+  // El eje NORMAL es el horizontal DELGADO: una tabla es un plano de pocos voxels finos de grosor. Si los
+  // dos ejes horizontales son gruesos esto no es un cartel (un bloque, una estatua) y no se rotula.
+  const sx=x1-x0+1, sz=z1-z0+1;
+  let na, ha;
+  if(sx<=4 && sx<sz){ na=0; ha=2; }
+  else if(sz<=4 && sz<sx){ na=2; ha=0; }
+  else return null;
+  // Ancho ocupado fila a fila: la tabla son las filas anchas de ARRIBA, y el poste las estrechas de abajo.
+  const filas=new Array(d[1]);
+  let ancho=0;
+  for(let y=y0;y<=y1;y++){ let a=1e9,b=-1;
+    for(let z=0;z<d[2];z++){ const row=(y*d[2]+z)*d[0];
+      for(let x=0;x<d[0];x++) if(bits[row+x]){ const h=(ha===0)?x:z; if(h<a)a=h; if(h>b)b=h; } }
+    filas[y]=(b<0)?null:[a,b];
+    if(b>=0) ancho=Math.max(ancho, b-a+1);
+  }
+  let abajo=y1;
+  for(let y=y1;y>=y0;y--){ const f=filas[y]; if(!f || (f[1]-f[0]+1) < ancho*0.7) break; abajo=y; }
+  let a=1e9,b=-1;
+  for(let y=abajo;y<=y1;y++){ const f=filas[y]; if(f){ if(f[0]<a)a=f[0]; if(f[1]>b)b=f[1]; } }
+  // A coordenadas de mundo: fino + origen de la instancia, dividido por el tamaño de celda fina. Los
+  // límites altos son EXCLUSIVOS (la cara exterior del último voxel), que es donde se pega el rótulo.
+  const T=MC_TILE, base=[s.ox*T, s.oy*T, s.oz*T];
+  const h0=a+MC_NOTE_TEXT_PAD, h1=b+1-MC_NOTE_TEXT_PAD;
+  const v0=abajo+MC_NOTE_TEXT_PAD, v1=y1+1-MC_NOTE_TEXT_PAD;
+  if(h1-h0<4 || v1-v0<3) return null;              // tabla diminuta: no cabe ni una letra legible
+  const nmin=(na===0)?x0:z0, nmax=(na===0)?x1:z1;
+  s._board={ na, ha,
+    h0:(base[ha]+h0)/T, h1:(base[ha]+h1)/T,
+    v0:(base[1]+v0)/T,  v1:(base[1]+v1)/T,
+    n0:(base[na]+nmin)/T, n1:(base[na]+nmax+1)/T };
+  return s._board;
+}
+// La fuente del juego es un @font-face: hornear antes de que llegue dejaría la de reserva pegada en la
+// textura hasta recargar. Se pide una vez y, cuando esté, se tira la caché para que se re-hornee bien.
+let mcNoteFontPedida=false;
+function mcNoteFontPedir(){
+  if(mcNoteFontPedida) return; mcNoteFontPedida=true;
+  try{ document.fonts.load('16px '+MC_GAME_FONT).then(mcFreeNoteTexts, ()=>{}); }catch(e){}
+}
+function mcFreeNoteTexts(){
+  if(!mc._noteTex) return;
+  if(mc.gl) for(const e of mc._noteTex.values()) mc.gl.deleteTexture(e.tex);
+  mc._noteTex.clear();
+}
+// Parte el texto en líneas que quepan en `maxW` px con la fuente ya puesta en `g`. Respeta los saltos de
+// línea del autor y parte a lo bruto la palabra que no quepa entera (un enlace largo, por ejemplo).
+function mcNoteWrap(g, txt, maxW){
+  const out=[];
+  for(const parrafo of String(txt).split('\n')){
+    let linea='';
+    for(const pal of parrafo.split(/\s+/)){
+      if(!pal) continue;
+      const cand = linea ? linea+' '+pal : pal;
+      if(g.measureText(cand).width<=maxW){ linea=cand; continue; }
+      if(linea){ out.push(linea); linea=''; }
+      let trozo='';
+      for(const ch of pal){
+        if(g.measureText(trozo+ch).width<=maxW) trozo+=ch;
+        else { if(trozo) out.push(trozo); trozo=ch; }
+      }
+      linea=trozo;
+    }
+    out.push(linea);
+  }
+  return out;
+}
+// Hornea (o recupera de la caché) el rótulo de un texto para una tabla de ese aspecto. Devuelve la textura
+// y si hubo que RECORTAR: un rótulo recortado no sustituye al visor, así que el que mira sigue viéndolo.
+function mcNoteTexture(txt, aspecto){
+  if(!mc.gl) return null;
+  if(!mc._noteTex) mc._noteTex=new Map();
+  const asp=Math.max(0.2, aspecto);
+  // La clave lleva el ASPECTO de la tabla y no el tamaño del lienzo, porque el lienzo ya no es fijo:
+  // se deduce del texto más abajo. Mismo texto + misma tabla => mismo horneado.
+  const clave=txt+'|'+asp.toFixed(3);
+  const viejo=mc._noteTex.get(clave);
+  if(viejo){ mc._noteTex.delete(clave); mc._noteTex.set(clave, viejo); return viejo; }  // lo recién usado, al final
+  const cv=document.createElement('canvas');     // sin tamaño todavía: el lienzo se dimensiona al final
+  const g=cv.getContext('2d'); if(!g) return null;
+  const fuente=px=>px+'px '+MC_GAME_FONT+', ui-monospace, monospace';
+  // Interlineado 1.25 y no 1.55: la caja de línea propia de Pixeloid es 1.22 em (asc 1836 + desc 408
+  // sobre 1836 upem); el 1.55 era el ritmo de Press Start 2P, que no tiene descendentes que separar.
+  const inter=px=>Math.round(px*1.25);
+  // Caja útil de un lienzo de alto H. El margen es del 2 % y no del 5 % porque NO es el que separa del
+  // marco —de eso ya se encarga MC_NOTE_TEXT_PAD en voxels finos, y los dos se componían—. Aquí solo
+  // queda un pelo de aire para que el halo de las letras del borde no se corte contra el canto.
+  const caja=H=>{ const W=Math.max(64, Math.round(H*asp));
+                  const mx=Math.round(W*0.02), my=Math.round(H*0.02);
+                  return {W, H, anchoU:W-mx*2, altoU:H-my*2}; };
+  // ¿Entra el texto con este cuerpo en esta caja? Devuelve las líneas ya partidas, o null.
+  const cabe=(size,c)=>{ g.font=fuente(size);
+                         const L=mcNoteWrap(g, txt, c.anchoU);
+                         return L.length*inter(size)<=c.altoU ? L : null; };
+
+  // ── 1) Cuánto da de sí la tabla, SIN la rejilla de múltiplos de 9 estorbando ─────────────────
+  // El ajuste es invariante de escala (las métricas de la fuente son lineales en el cuerpo), así que
+  // el resultado útil no es un cuerpo sino una RAZÓN cuerpo/alto-de-lienzo. Se busca a una resolución
+  // de referencia alta —no se dibuja nada ahí, measureText no depende del lienzo— para que salga fina.
+  // El techo sale de la CAJA, no de un número mágico: el mayor cuerpo con el que UNA línea cabe de alto
+  // es altoU/1.25. Pasarse no es un riesgo: si no entra a lo ANCHO, mcNoteWrap lo parte en más líneas.
+  const ref=caja(MC_NOTE_TEXT_REF);
+  let lo=MC_NOTE_TEXT_MIN, hi=Math.max(MC_NOTE_TEXT_MIN, Math.floor(ref.altoU/1.25));
+  while(lo<hi){ const mid=(lo+hi+1)>>1; if(cabe(mid, ref)) lo=mid; else hi=mid-1; }   // binaria: ~10 pruebas, no 40
+  const razon = cabe(lo, ref) ? lo/MC_NOTE_TEXT_REF : 0;      // 0 = no cabe ni al mínimo => habrá recorte
+
+  // ── 2) El lienzo se ELIGE para que un múltiplo de 9 caiga JUSTO en esa razón ─────────────────
+  // Antes el alto era fijo y el cuerpo se redondeaba hacia abajo, tirando hasta un 29 % del tamaño que
+  // la tabla admitía. Ahora es al revés: se coge el mayor múltiplo de 9 que quepa dentro del tope y se
+  // estira el lienzo a size/razón, de modo que la letra llena la caja sin salirse de la rejilla de 9.
+  const Hmax=Math.max(64, Math.round(Math.min(MC_NOTE_TEXT_H, MC_NOTE_TEXT_WMAX/asp)));
+  let c=caja(Hmax), lineas=null, size=0, cortado=false;
+  if(razon>0) for(size=Math.max(MC_NOTE_TEXT_MIN, Math.floor(Hmax*razon/9)*9); size>=MC_NOTE_TEXT_MIN; size-=9){
+    // Se re-comprueba en la caja definitiva y no se da por bueno lo medido en la de referencia: los
+    // márgenes y el interlineado se redondean a entero, y a poco lienzo eso mueve el resultado.
+    const cand=caja(Math.min(Hmax, Math.max(64, Math.round(size/razon))));
+    const L=cabe(size, cand);
+    if(L){ lineas=L; c=cand; break; }
+  }
+  const W=c.W, H=c.H, anchoU=c.anchoU, altoU=c.altoU;
+  let lh=inter(size);
+  if(!lineas){                                   // no cabe ni a la mínima: se recorta y el visor sigue haciendo falta
+    size=MC_NOTE_TEXT_MIN; g.font=fuente(size); lh=inter(size);
+    const L=mcNoteWrap(g, txt, anchoU), n=Math.max(1, Math.floor(altoU/lh));
+    lineas=L.slice(0,n); cortado=L.length>n;
+    if(cortado){ let u=lineas[n-1];
+      // Pixeloid sí trae el glifo «…» (U+2026), que gasta un carácter en vez de tres en un cartel ya justo.
+      while(u.length && g.measureText(u+'…').width>anchoU) u=u.slice(0,-1);
+      lineas[n-1]=u+'…'; }
+  }
+  cv.width=W; cv.height=H;                       // dimensionar el lienzo RESETEA el contexto: la fuente se vuelve a poner abajo
+  g.clearRect(0,0,W,H);
+  g.font=fuente(size); g.textAlign='center'; g.textBaseline='top'; g.lineJoin='round';
+  g.lineWidth=Math.max(2, size*0.28);
+  const top=Math.round((H-lineas.length*lh)/2);
+  for(let i=0;i<lineas.length;i++){
+    const y=top+i*lh+Math.round((lh-size)/2);
+    // Halo claro debajo + tinta oscura encima: así se lee igual sobre la veta clara del roble y sobre la oscura.
+    g.strokeStyle='rgba(247,226,178,0.75)'; g.strokeText(lineas[i], W/2, y);
+    g.fillStyle='rgba(40,27,13,0.96)';      g.fillText(lineas[i], W/2, y);
+  }
+  const gl=mc.gl, tex=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,cv);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);   // sin mipmaps: el rótulo solo se ve de cerca
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  const e={tex, cortado, frac:size/H};   // `frac` = alto de una letra en fracción de tabla: sirve para saber si se LEE
+  mc._noteTex.set(clave, e);
+  while(mc._noteTex.size>MC_NOTE_TEXT_CACHE){    // el más viejo sin usar se va, y su textura con él
+    const k=mc._noteTex.keys().next().value, v=mc._noteTex.get(k);
+    mc._noteTex.delete(k); gl.deleteTexture(v.tex);
+  }
+  return e;
+}
+// Pasada del rótulo: un quad texturado por cartel visible, pegado a la cara de la tabla que da al ojo.
+// Va sin luz ni niebla a propósito (ver MC_NOTETXT_FS) y con depthMask apagado, para que un muro por
+// delante siga tapándolo pero el rótulo no escriba profundidad sobre lo que venga después.
+function mcDrawNoteTexts(pj, view){
+  const gl=mc.gl;
+  if(!mc._noteTextDrawn) mc._noteTextDrawn=new Set(); else mc._noteTextDrawn.clear();
+  mc.noteTextN=0;
+  if(!gl || mc.noteText===false || mc.noteSigns===false) return;
+  let hay=false; for(const s of mc.structures){ if(s.nota){ hay=true; break; } }
+  if(!hay) return;
+  mcNoteFontPedir();
+  if(!mc.noteTxtProg) mcBuildNoteTextProgram();
+  const L=mc.noteTxtLoc; if(!L) return;
+  const ex=mc.pos[0], ey=mc.pos[1]+MC_EYE*mc.scale, ez=mc.pos[2];
+  const dmax=Math.max(1, mc.noteTextDist*mc.scale), d0=dmax*0.75;
+  let listo=false;
+  for(const s of mc.structures){
+    if(!s.nota) continue;
+    const txt=mc.notes[s.nota]; if(!txt) continue;
+    if(s.model) continue;                        // movido/girado por un snippet: el rect sale de la rejilla fina sin girar
+    const r=mcNoteBoardRect(s); if(!r) continue;
+    // ¿Desde qué lado se mira? El rótulo va en la cara de la tabla que da al ojo, un pelo por delante.
+    const alta=((r.na===0)?ex:ez) >= (r.n0+r.n1)*0.5;
+    const pl=(alta ? r.n1+0.02 : r.n0-0.02);
+    const hm=(r.h0+r.h1)*0.5, vm=(r.v0+r.v1)*0.5;
+    const dx=((r.na===0)?pl:hm)-ex, dy=vm-ey, dz=((r.na===0)?hm:pl)-ez;
+    const dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    if(dist>dmax) continue;
+    const alpha = dist<=d0 ? 1 : Math.max(0, 1-(dist-d0)/(dmax-d0));
+    if(alpha<=0.02) continue;
+    const ent=mcNoteTexture(txt, (r.h1-r.h0)/(r.v1-r.v0)); if(!ent) continue;
+    // La «derecha» del que lee es up × normal; sin esto el texto sale espejado por una de las dos caras.
+    const dir=(r.na===0) ? (alta?-1:1) : (alta?1:-1);
+    const ha0=(dir>0)?r.h0:r.h1, ha1=(dir>0)?r.h1:r.h0;
+    const V=[];
+    const pon=(h,v,u,t)=>{ if(r.na===0) V.push(pl,v,h,u,t); else V.push(h,v,pl,u,t); };
+    pon(ha0,r.v0,0,1); pon(ha1,r.v0,1,1); pon(ha1,r.v1,1,0);
+    pon(ha0,r.v0,0,1); pon(ha1,r.v1,1,0); pon(ha0,r.v1,0,0);
+    if(!listo){
+      listo=true;
+      gl.useProgram(mc.noteTxtProg);
+      gl.uniformMatrix4fv(L.uProj,false,pj.m); gl.uniformMatrix4fv(L.uView,false,view);
+      gl.activeTexture(gl.TEXTURE0); gl.uniform1i(L.uTex,0);
+      mcAttribs([L.aPos,L.aUV]);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false); gl.disable(gl.CULL_FACE);   // la cara visible ya se elige arriba: el culling sobra
+      if(!mc.noteTxtVbo) mc.noteTxtVbo=gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, mc.noteTxtVbo);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, ent.tex);
+    gl.uniform1f(L.uAlpha, alpha);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(V), gl.DYNAMIC_DRAW);
+    gl.vertexAttribPointer(L.aPos,3,gl.FLOAT,false,5*4,0);
+    gl.vertexAttribPointer(L.aUV, 2,gl.FLOAT,false,5*4,12);
+    gl.drawArrays(gl.TRIANGLES,0,6);
+    mc.noteTextN++;
+    // Se lee ENTERA y de tamaño legible ⇒ el visor de debajo de la mira sobra (ver mcUpdateNoteView).
+    // Que QUEPA no basta: una nota larga cabe encogida hasta ser un borrón, y ahí el visor es lo único que
+    // salva. Se mide lo que de verdad importa: cuántos PÍXELES DE PANTALLA mide una letra desde aquí.
+    const px = (r.v1-r.v0)*ent.frac*(mc.canvas.height/(2*Math.tan(mc.fov/2)))/Math.max(0.001,dist);
+    if(!ent.cortado && alpha>0.99 && px>=MC_NOTE_TEXT_LEGIBLE) mc._noteTextDrawn.add(s.nota);
+  }
+  if(listo){ gl.depthMask(true); gl.disable(gl.BLEND); }
+}
 // Tecla N: abre el panel para el bloque apuntado (crea o edita). Como el editor libera el ratón, guarda la celda.
 function mcOpenNote(){
-  const hit=mcRaycast(mcReach()); if(!hit){ toast('Apunta a un bloque para anotarlo'); return; }
-  mc.noteCell=hit.cell.slice();
-  const k=mcNoteKey(hit.cell);
+  // hitStruct=true: sin él el rayo ATRAVIESA el cartel (una estructura fina no cuenta salvo que se
+  // pida), y la N mirando al cartel abría una nota en la pared del fondo.
+  const hit=mcRaycast(mcReach(), true); if(!hit){ toast('Apunta a un bloque para anotarlo'); return; }
+  // Apuntar al CARTEL es apuntar a su nota: si no, la N sobre un cartel abriría una nota nueva en el
+  // aire, justo encima de la que se quería leer.
+  const cell=mcNoteAnchor(hit.cell)||hit.cell;
+  mc.noteCell=cell.slice();
+  const k=mcNoteKey(cell);
   const cur=mc.notes[k]||'';
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();   // suelta el ratón para poder escribir
   const ta=$('#mc-note-text'); ta.value=cur; ta.maxLength=MC_NOTE_MAX;
   $('#mc-note-del').hidden=!cur;                        // «Borrar» solo si ya había nota
   
-  const hasTrace = (typeof game !== 'undefined' && game.noteTraces && (game.noteTraces[k] || game.noteTraces[hit.cell[0] + ',' + (hit.cell[1]-1) + ',' + hit.cell[2]] || game.noteTraces[hit.cell[0] + ',' + (hit.cell[1]+1) + ',' + hit.cell[2]]));
+  const hasTrace = (typeof game !== 'undefined' && game.noteTraces && (game.noteTraces[k] || game.noteTraces[cell[0] + ',' + (cell[1]-1) + ',' + cell[2]] || game.noteTraces[cell[0] + ',' + (cell[1]+1) + ',' + cell[2]]));
   const traceBtn = $('#mc-note-trace');
   if (traceBtn) traceBtn.hidden = !hasTrace;
 
@@ -7181,10 +8655,11 @@ function mcSaveNote(){
     else if(mc.notes[k]){ delete mc.notes[k]; toast('Nota borrada'); }   // guardar en blanco = borrar
     mcDirtyHeader();
     mcScheduleSave();
+    mcSyncNoteSigns();                                                  // …y el cartel aparece/desaparece con ella
   }
   mcCloseNote();
 }
-function mcDeleteNote(){ if(mc.noteCell){ delete mc.notes[mcNoteKey(mc.noteCell)]; mcDirtyHeader(); mcScheduleSave(); toast('Nota borrada'); } mcCloseNote(); }
+function mcDeleteNote(){ if(mc.noteCell){ delete mc.notes[mcNoteKey(mc.noteCell)]; mcDirtyHeader(); mcScheduleSave(); mcSyncNoteSigns(); toast('Nota borrada'); } mcCloseNote(); }
 
 function mcShowTraceModal(){
   if(!mc.noteCell) return;
@@ -7254,13 +8729,132 @@ function mcCopyFallback(txt){
   console.log(txt);
   toast('Traza volcada a la consola F12');
 }
+
+// --- Tecla F · foto del Mundo -------------------------------------------------------------------
+// Una captura de lo que se ve, con la ficha (mapa, coordenadas, orientación…) QUEMADA en la imagen:
+// así sigue ahí después de copiar y pegar, que es para lo que se saca. La misma ficha se guarda
+// aparte en crudo (data/fotos/<id>.json) para que la galería pueda ordenar y volver a las coords.
+//
+// ⚠️ La captura es SÍNCRONA justo detrás de un mcRender() nuestro. El canvas del Mundo se crea sin
+// `preserveDrawingBuffer` (app.js:5425), así que el buffer de dibujo se descarta al cerrar el
+// fotograma: leerlo tras un `await`, un setTimeout o un requestAnimationFrame devuelve NEGRO. Es la
+// misma regla que ya siguen los tests de navegador.
+const MC_RUMBOS=['N','NO','O','SO','S','SE','E','NE'];   // yaw=0 mira a −Z (Norte) y crece hacia −X (Oeste)
+
+function mcFichaFoto(){
+  const cv=mc.canvas, g=Math.floor;
+  const yaw360=((mc.yaw*180/Math.PI)%360+360)%360;
+  const hit=mcRaycast(mcReach(), true);
+  let apunta=null;
+  if(hit){
+    // Un material vive en uno de dos sitios, así que hay que mirar en los dos: mc.grid (bloque 16³
+    // macizo) y mc.structures (pieza fina). Mirar solo la rejilla dejaría «apunta: ?» delante de una
+    // escalera o una mata. La sonda se mete media celda fina HACIA DENTRO por la normal: justo en la
+    // superficie el redondeo cae fuera de la pieza tan a menudo como dentro.
+    const id=mcGetVoxel(hit.cell[0],hit.cell[1],hit.cell[2]);
+    let clave=(id && mc.blockKey[id]) || null;
+    if(!clave && hit.point && hit.normal){
+      const e=1/(MC_TILE*2), p=hit.point, n=hit.normal;
+      const s=mcStructAt(p[0]-n[0]*e, p[1]-n[1]*e, p[2]-n[2]*e);
+      if(s) clave=s.key;
+    }
+    apunta={ celda:hit.cell.slice(), clave };
+  }
+  return {
+    mapa: mcMapName(),
+    pos: [+mc.pos[0].toFixed(2), +mc.pos[1].toFixed(2), +mc.pos[2].toFixed(2)],
+    celda: [g(mc.pos[0]), g(mc.pos[1]), g(mc.pos[2])],
+    yaw: game.yaw, pitch: game.pitch,                    // misma convención que game.yaw/game.pitch (−180..180)
+    rumbo: MC_RUMBOS[Math.round(yaw360/45)%8],
+    escala: +mc.scale.toFixed(2),
+    apunta,
+    ancho: cv.width, alto: cv.height,
+    fecha: new Date().toISOString()
+  };
+}
+
+// Dibuja la ficha en una franja bajo la imagen. Franja aparte y no encima del mundo: superpuesta
+// tapaba justo lo que se está fotografiando. El tamaño sale del ANCHO de la captura, no de una
+// constante, porque la misma foto se saca a 390 px de móvil y a 2560 de escritorio.
+function mcPintaFicha(ctx, f, w, y, h){
+  const px=Math.max(11, Math.min(24, Math.round(w/64)));
+  ctx.fillStyle='#0e1016'; ctx.fillRect(0,y,w,h);
+  ctx.fillStyle='#2a3040'; ctx.fillRect(0,y,w,Math.max(1,Math.round(px/11)));
+  const izq=Math.round(px*0.9);
+  ctx.textBaseline='middle';
+  ctx.font='600 '+px+'px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+  ctx.fillStyle='#e7ecf4';
+  ctx.fillText(f.mapa+'  ·  '+f.pos.join(', ')+'  ·  mirando '+f.rumbo+' ('+f.yaw+'° / '+f.pitch+'°)',
+               izq, y+h*0.32);
+  ctx.font=px*0.82+'px ui-monospace,SFMono-Regular,Menlo,monospace';
+  ctx.fillStyle='#8a93a6';
+  const ap=f.apunta ? (f.apunta.clave||'?')+' en '+f.apunta.celda.join(',') : 'nada (cielo)';
+  const d=new Date(f.fecha);
+  // «vista» y no a secas: ancho/alto son los del RENDER, y el fichero mide más porque lleva esta
+  // franja pegada debajo. Sin la palabra, los dos números se contradicen y parece un fallo.
+  ctx.fillText('apunta: '+ap+'   escala ×'+f.escala+'   vista '+f.ancho+'×'+f.alto+'   '+
+               d.toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),
+               izq, y+h*0.71);
+}
+
+// Devuelve una promesa con {id, url, bytes, ficha, portapapeles}. `game.foto()` la expone tal cual.
+function mcFoto(){
+  if(!mc.active || !mc.gl){ toast('📷 abre el Mundo primero'); return Promise.resolve(null); }
+  const ficha=mcFichaFoto();
+  mcRender();                                            // fotograma fresco: lo de abajo lee ESTE buffer
+  const cv=mc.canvas, w=cv.width, px=Math.max(11,Math.min(24,Math.round(w/64))), franja=Math.round(px*3.2);
+  const out=document.createElement('canvas');
+  out.width=w; out.height=cv.height+franja;
+  const ctx=out.getContext('2d');
+  ctx.drawImage(cv,0,0);                                 // ← síncrono y pegado al mcRender de arriba
+  // La mira es un <div> del HTML, no está en el canvas: sin repintarla, la foto no enseña adónde
+  // apuntaba quien la sacó, que es de lo que se va a hablar al comentarla.
+  const cx=w/2, cy=cv.height/2, r=Math.round(px*0.55);
+  ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=Math.max(1,Math.round(px/9));
+  ctx.beginPath(); ctx.moveTo(cx-r,cy); ctx.lineTo(cx+r,cy); ctx.moveTo(cx,cy-r); ctx.lineTo(cx,cy+r); ctx.stroke();
+  mcPintaFicha(ctx, ficha, w, cv.height, franja);
+
+  // toDataURL y NO toBlob: toBlob es asíncrono y sacaría la escritura del portapapeles fuera del
+  // gesto de teclado que la autoriza. Del mismo base64 salen el POST y el Blob del portapapeles.
+  const url=out.toDataURL('image/png'), b64=url.slice(url.indexOf(',')+1);
+  const bin=atob(b64), u8=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+  const blob=new Blob([u8],{type:'image/png'});
+
+  // OJO: navigator.clipboard SOLO existe en contexto seguro (HTTPS o localhost) y el Mundo se sirve
+  // por HTTP plano en :8500 — abierto por IP esto es undefined y no hay nada que hacer (para una
+  // imagen no vale el apaño de execCommand que usa mcCopyTraceText). No es un fallo: la foto se
+  // guarda igual en el servidor, que es el camino que siempre funciona.
+  let portapapeles=false;
+  try{
+    if(navigator.clipboard && navigator.clipboard.write && window.ClipboardItem){
+      navigator.clipboard.write([new ClipboardItem({'image/png':blob})]).then(()=>{portapapeles=true;}).catch(()=>{});
+    }
+  }catch(e){}
+
+  return fetch('/api/fotos',{ method:'POST', headers:{'Content-Type':'application/json'},
+                              body:JSON.stringify({png:b64, ficha}) })
+    .then(r=>r.ok?r.json():r.json().then(j=>Promise.reject(j.error||r.status)))
+    .then(res=>{
+      toast('📷 '+res.id.split('_')[0]+' · '+ficha.mapa+' '+ficha.celda.join(',')+' · '+ficha.rumbo+
+            '  → /fotos', 3);
+      return Object.assign({ficha, portapapeles}, res);
+    })
+    .catch(e=>{ toast('📷 no se pudo guardar la foto: '+e, 4); return null; });
+}
 // Al mirar un bloque con nota (jugando), muestra su texto bajo la mira; si no, oculta el visor.
 function mcUpdateNoteView(){
   const el=$('#mc-noteview'); if(!el) return;
   if(!mc.active || document.pointerLockElement!==mc.canvas || !$('#mc-note').hidden){ el.hidden=true; return; }
-  const hit = Object.keys(mc.notes).length ? mcRaycast(mcReach()) : null;
-  const txt = hit ? mc.notes[mcNoteKey(hit.cell)] : null;
-  if(txt){ if(el.textContent!==txt) el.textContent=txt; el.hidden=false; } else el.hidden=true;
+  const hit = Object.keys(mc.notes).length ? mcRaycast(mcReach(), true) : null;   // true = el cartel también cuenta
+  const cell = hit ? mcNoteAnchor(hit.cell) : null;                     // mirar el cartel es mirar la nota
+  const clave = cell ? mcNoteKey(cell) : null;
+  const txt = clave ? mc.notes[clave] : null;
+  // Si el texto ya se está leyendo ENTERO en la tabla del cartel, el visor sobra: repetirlo tapa el mundo
+  // por gusto. Cuando no cupo y salió recortado, o de lejos, el visor vuelve — que es a lo que sirve.
+  if(txt && !(mc._noteTextDrawn && mc._noteTextDrawn.has(clave))){
+    if(el.textContent!==txt) el.textContent=txt; el.hidden=false;
+  } else el.hidden=true;
 }
 // Estampa una habitación como MALLA DE SUS VOXELES FINOS (no cubos): construye la malla en (ox,oy,oz) y
 // la añade a mc.structures (el render la dibuja; la colisión fina sondea el bitset de su malla cacheada →
@@ -7294,6 +8888,10 @@ async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet){
   }
   const rec=await mcStructCells(srcKey);
   if(!quiet){ mcPushHist({t:'s+', sp:{key:srcKey,ox,oy,oz,rot}}); mcUnstick(); mcDirtyHeader(); mcScheduleSave(); toast('Estructura colocada · '+rec.count+' celdas'); }
+  // Devuelve la instancia VIVA, que no tiene por qué ser la `s` de arriba: si el atlas creció de
+  // escalón, mcRestampAll la reemplazó por una copia. Quien quiera marcarla (efimera, nota…) tiene
+  // que marcar la que está en la lista, no el cascarón.
+  return mc.structures.find(t=>t.key===srcKey && t.ox===ox && t.oy===oy && t.oz===oz && (t.rot|0)===rot) || null;
 }
 const MC_SLOTS=9;                                     // ranuras de la hotbar (teclas 1-9)
 // Pinta las 9 ranuras desde mc.hotbar (id de bloque, 0=vacía). Clic izq: vacía→selector, llena→seleccionar;
@@ -7307,7 +8905,10 @@ function mcBuildHotbar(){
     slot.title=b?b.name:'Vacía · clic para elegir de la galería';
     const cv=document.createElement('canvas'); cv.width=cv.height=MC_TILE;
     const cx=cv.getContext('2d'); cx.imageSmoothingEnabled=false;
-    if(b && mc.atlas) cx.drawImage(mc.atlas, 0, (id-1)*MC_TILE, MC_TILE, MC_TILE, 0,0, MC_TILE,MC_TILE); // cara superior
+    // Una variante girada («…@5») no tiene fila propia en el atlas —comparte la del original, ver
+    // mcAltaVariante—, así que el icono se saca de la fila de su clave base.
+    const fila=b ? (mcClaveOri(b.key) ? mc.blockKey.indexOf(mcClaveBase(b.key)) : id) : 0;
+    if(b && mc.atlas && fila>0) cx.drawImage(mc.atlas, 0, (fila-1)*MC_TILE, MC_TILE, MC_TILE, 0,0, MC_TILE,MC_TILE); // cara superior
     slot.appendChild(cv);
     const key=document.createElement('span'); key.className='mc-slot-key'; key.textContent=(i+1); slot.appendChild(key);
     slot.onclick=()=>{ if(mc.hotbar[i]){ mc.sel=i; mcSelectSlot(); } else mcOpenPicker(i); };
@@ -7599,6 +9200,10 @@ game.aim=function(alcance){
   const o=[mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]];
   return [Math.floor(o[0]+dir[0]*d), Math.floor(o[1]+dir[1]*d), Math.floor(o[2]+dir[2]*d)];
 };
+// game.foto() · lo mismo que la tecla F, para scripts y pruebas. Devuelve una promesa con
+// {id, url, bytes, ficha}: `const f = await game.foto()` deja en f.ficha las coordenadas exactas
+// desde las que se sacó, y en f.url la ruta para verla o descargarla (galería completa en /fotos).
+game.foto=mcFoto;
 // game.notes() · tabla de las notas post-it del mundo ("x,y,z" → texto) para copiar coords a game.tp / game.gotoNote.
 game.notes=function(){
   const ks=Object.keys(mc.notes);
@@ -7641,6 +9246,20 @@ const MC_MAT_ALIAS={ stone:'asset:assets/roca.vox.json', smooth_stone:'asset:ass
 const MC_MAT_ALIAS_FIJOS = new Set(Object.keys(MC_MAT_ALIAS));
 let mcMat2id={}, mcWarnedMat={};                    // caché material→id de la ráfaga + avisos ya dados
 
+// Nombre de material → CLAVE de bloque ('asset:…', 'hab:…' o el nombre tal cual), SIN mirar si está
+// cargada en la paleta. Es la mitad de mcResolveMat que sabe de motes, y la usa también la carga
+// automática de más abajo: si el índice de assets sabe QUÉ FICHERO es, el material no está
+// «desconocido», solo «todavía sin cargar» — y poner roca ahí era tirar información que ya teníamos.
+function mcMatKey(m, mLow){
+  // '<lo que sea>@5' = ese material girado (ver mcClaveConOri): el mote se resuelve sin el sufijo y el
+  // sufijo se vuelve a pegar, así que game.setVoxel(x,y,z,'flor@1') vale igual que la clave larga.
+  const ori=mcClaveOri(m);
+  if(ori){ const kb=mcMatKey(mcClaveBase(m), mcClaveBase(mLow)); return kb ? mcClaveConOri(kb, ori) : kb; }
+  let key = MC_MAT_ALIAS[mLow] || (mc.name2id[m]?mc.blockKey[mc.name2id[m]]:null);
+  if(!key && mcAssetsRegistry[mLow]) key = 'asset:' + mcAssetsRegistry[mLow];
+  if(!key && mcAssetsRegistry[mLow.replace(/\s+/g, '_')]) key = 'asset:' + mcAssetsRegistry[mLow.replace(/\s+/g, '_')];
+  return key || m;
+}
 function mcResolveMat(material){
   if(material===0||material==null||material===false) return 0;   // aire: setVoxel(x,y,z,0/null) ROMPE el bloque (explosiones)
   if(typeof material==='number') return (material>0 && material<mc.blockKey.length)?material:(mc.name2id['roca']||1);
@@ -7648,10 +9267,7 @@ function mcResolveMat(material){
   if(m==='' || m.toLowerCase()==='air' || m.toLowerCase()==='aire') return 0;   // alias de aire por nombre
   if(m in mcMat2id) return mcMat2id[m];
   const mLow = m.toLowerCase();
-  let key = MC_MAT_ALIAS[mLow] || (mc.name2id[m]?mc.blockKey[mc.name2id[m]]:null);
-  if(!key && mcAssetsRegistry[mLow]) key = 'asset:' + mcAssetsRegistry[mLow];
-  if(!key && mcAssetsRegistry[mLow.replace(/\s+/g, '_')]) key = 'asset:' + mcAssetsRegistry[mLow.replace(/\s+/g, '_')];
-  if(!key) key = m;
+  const key = mcMatKey(m, mLow);
   let id = mc.blockKey.indexOf(key); if(id<1) id = mc.name2id[m] || mc.name2id[mLow] || -1;
   if(id<1){                                          // desconocido (p.ej. '#hex' no aplica al terreno) → roca + aviso 1 vez
     // El aviso va TAMBIÉN por toast: el dueño construye desde el móvil, y ahí un console.warn es
@@ -7662,14 +9278,129 @@ function mcResolveMat(material){
   }
   mcMat2id[m]=id; return id;
 }
-let mcBuildT=0, mcBuildN=0;
-function mcFlushBuild(){ mcBuildT=0; mcMeshAll(); if(mc.active) mcUnstick(); mcScheduleSave();
+let mcBuildT=0, mcBuildN=0, mcBuildBox=null;
+// La CAJA en planta que abarca la ráfaga. Es lo que separa una explosión de TNT de un mcMeshAll por fotograma:
+// una onda de 1054 bloques cabe en 17×17 columnas, o sea 4 chunks, no los 1024 del mundo. Medido en 512×40×512,
+// el snippet de TNT pasó de 41,5 s (10 mcMeshAll = 35,8 s solo de mallado) a re-mallar únicamente su cráter.
+function mcMarcaBuild(x,z){
+  const b=mcBuildBox;
+  if(!b){ mcBuildBox={x0:x,z0:z,x1:x,z1:z}; return; }
+  if(x<b.x0) b.x0=x; else if(x>b.x1) b.x1=x;
+  if(z<b.z0) b.z0=z; else if(z>b.z1) b.z1=z;
+}
+// ¿compensa el incremental? Su coste es la caja MÁS el halo de ±MC_RELIGHT_R que necesita el skylight; pasada
+// media planta del mundo, el barrido global sale más barato que pagar ese halo (y encima re-hornea los agentes).
+function mcCajaCompensa(b){
+  const NX=mc.dim.x, NZ=mc.dim.z, R=MC_RELIGHT_R;
+  const w=Math.min(NX, b.x1-b.x0+1+2*R), d=Math.min(NZ, b.z1-b.z0+1+2*R);
+  return w*d < NX*NZ*0.5;
+}
+function mcFlushBuild(){ mcBuildT=0;
+  const b=mcBuildBox; mcBuildBox=null;
+  if(b && mcCajaCompensa(b)) mcRemeshAround(b.x0,b.z0,b.x1,b.z1);
+  else mcMeshAll();
+  if(mc.active) mcUnstick(); mcScheduleSave();
   toast('setVoxel: '+mcBuildN+' bloques colocados'); mcBuildN=0; mcMat2id={}; }
+// ---- Carga automática de la textura que falta -------------------------------------------------
+// El índice de assets sabe que 'flor_amarilla' es assets/flor-amarilla.vox.json ANTES de cargarla. Antes
+// setVoxel resolvía eso a roca y había que acordarse de llamar a game.addMaterial() a mano; ahora se
+// apunta la celda, se pide la textura en segundo plano y se pintan todas las celdas apuntadas cuando
+// llega (UNA carga por material, no una por voxel). Efecto visible: la celda tarda un instante en
+// aparecer, así que un getVoxel inmediatamente después de setVoxel todavía devuelve lo que había.
+const mcPendCel=new Map();     // 'x,y,z' → clave de bloque que le toca a esa celda cuando cargue
+const mcPendCarga=new Map();   // clave → carga en vuelo
+// ¿este material ya lo tiene el mundo? Devuelve su CLAVE de bloque, o null. Se le pregunta a mc.blocks
+// y NO a mc.blockKey/mc.name2id porque esos dos se vacían de golpe al reconstruir la paleta y se
+// rellenan textura a textura: durante esa ventana todo parece «sin cargar» (ver mcBuildPalette).
+function mcClaveCargada(key, m, mLow){
+  for(let i=0;i<mc.blocks.length;i++){
+    const b=mc.blocks[i];
+    if(b.key===key || (m!=null && (b.name===m || b.name===mLow))) return b.key;
+  }
+  return null;
+}
+function mcEsperaPaleta(){                           // …y si está en obras, se espera a que termine
+  return new Promise(res=>{ (function mira(){ if(!mc.paletaEnObra) return res(); setTimeout(mira,30); })(); });
+}
+function mcMatPendiente(material){
+  if(!mc.grid || !material || typeof material==='number') return null;
+  const m=String(material).trim(); if(!m) return null;
+  const mLow=m.toLowerCase();
+  if(mLow==='air'||mLow==='aire') return null;
+  if(!mc.paletaEnObra && (m in mcMat2id)) return null;   // ya resuelto en esta ráfaga: camino normal
+  const key=mcMatKey(m,mLow);
+  const cargada=mcClaveCargada(key,m,mLow);
+  // Cargado y la paleta al día → camino normal. Cargado pero con la paleta en obras → también se apunta:
+  // esperar unos milisegundos es mejor que escribir el bloque equivocado, que es lo que salía antes.
+  if(cargada) return mc.paletaEnObra ? cargada : null;
+  // Y si no está cargado, solo vale lo que se puede ir a buscar a disco. Un nombre inventado
+  // ('chocolate') sigue el camino de siempre —roca + aviso—, porque no hay ningún fichero que cargar.
+  if(!(key.startsWith('asset:')||key.startsWith('hab:')||key.endsWith('.json'))) return null;
+  return key;
+}
+function mcOlvidaPendientes(key){ for(const [c,k] of mcPendCel) if(k===key) mcPendCel.delete(c); }
+function mcApuntaPendiente(x,y,z,key){
+  mcPendCel.set(x+','+y+','+z, key);
+  if(mcPendCarga.has(key)) return;                   // ya se está cargando por otra celda
+  // Si el material ya está en mc.blocks no hay nada que descargar (y pedirlo otra vez lo DUPLICARÍA con
+  // la paleta a medias): solo hay que esperar. Si no está, se descarga por game.addMaterial y no por
+  // mcAddBlock, porque es quien invalida la caché mcMat2id al crecer la paleta.
+  // Y antes de dar de alta el material se comprueba que el fichero EXISTE y trae voxels: mcBuildPalette
+  // se traga una textura que falla (la pinta fucsia) y el bloque se quedaría para siempre en la lista de
+  // materiales del mundo, que se guarda en disco. Una errata no debe ensuciar el mundo. getTexDef cachea,
+  // así que el game.addMaterial de después no vuelve a descargar nada.
+  const carga = mcClaveCargada(key)
+    ? mcEsperaPaleta().then(()=>mc.blockKey.indexOf(key))
+    : getTexDef(key).then(def=>{
+        if(!def || !def.voxels || !Object.keys(def.voxels).length) throw new Error('textura vacía o inexistente');
+        return game.addMaterial(key);
+      });
+  mcPendCarga.set(key, carga.then(async id=>{
+    mcPendCarga.delete(key);
+    if(!(id>0)){ mcOlvidaPendientes(key); toast('No he podido cargar «'+key+'»'); return; }
+    await mcStructCells(key).catch(()=>null);        // deja el dibujo en mc.structs: el mallador lo necesita
+    let n=0;
+    for(const [c,k] of mcPendCel){
+      if(k!==key) continue;
+      mcPendCel.delete(c);
+      const p=c.split(',');
+      mcSetBlock(+p[0],+p[1],+p[2], id); mcMarcaBuild(+p[0],+p[2]); n++;
+    }
+    if(!n) return;
+    mcBuildN+=n;
+    if(!mc.batching) mcFlushBuild();                 // dentro de un lote ya flusheará endBatch()
+  }).catch(e=>{
+    mcPendCarga.delete(key); mcOlvidaPendientes(key);
+    console.warn('setVoxel: no he podido cargar «'+key+'»', e);
+    toast('No he podido cargar la textura de «'+key+'»');
+  }));
+}
+// Deja la celda limpia antes de escribir: la rejilla la pisa mcSetBlock sola, pero una pieza fina vive
+// en mc.structures y NO se va sola. Sin esto, repintar una celda apilaría piezas y setVoxel(x,y,z,0)
+// no borraría nada de lo estampado.
+function mcQuitaPiezaEn(x,y,z){
+  let n=0;
+  for(let i=mc.structures.length-1;i>=0;i--){
+    const s=mc.structures[i];
+    if(s.ox===x && s.oy===y && s.oz===z){ mcRemoveStruct(s,true); n++; }
+  }
+  return n;
+}
 function mcSetVoxel(x,y,z,material){
   if(!mc.grid){ console.warn('setVoxel: abre el Mundo (🌍) primero'); return false; }
   x=Math.round(x); y=Math.round(y); z=Math.round(z);
   if(!mcInside(x,y,z)) return false;                 // fuera de límites: se ignora sin romper el script
-  mcSetBlock(x,y,z, mcResolveMat(material)); mcBuildN++;
+  const pend=mcMatPendiente(material);
+  if(pend){ mcApuntaPendiente(x,y,z,pend); return true; }   // conocido pero sin cargar: se carga solo
+  if(mcPendCel.size) mcPendCel.delete(x+','+y+','+z);       // una escritura de verdad manda sobre lo apuntado
+  const id=mcResolveMat(material);
+  // Lo que NO llena la celda (una flor, una mata, una llama) se escribe en la rejilla como todo lo demás: es
+  // el MALLADOR quien, en vez de proyectarla sobre las 6 caras del cubo, emite su geometría de verdad dentro
+  // de la malla del chunk (mcTablaFina). Así una flor puesta con setVoxel se ve igual que estampada como
+  // pieza y sigue costando 0 draw calls: es una celda de rejilla, no una instancia.
+  if(id) mcAvisaSiFino(material, id);   // solo para lo que de verdad no cabe: la transparencia real
+  if(mcQuitaPiezaEn(x,y,z) && !mc.batching){ clearTimeout(mcStampT); mcStampT=setTimeout(mcFlushStamp, 80); }
+  mcSetBlock(x,y,z, id); mcBuildN++; mcMarcaBuild(x,z);
   // En modo lote (beginBatch/endBatch) NO se re-malla por bloque; endBatch() dispara un único mcFlushBuild al cerrar.
   if(!mc.batching){ clearTimeout(mcBuildT); mcBuildT=setTimeout(mcFlushBuild, 80); }   // re-malla+guarda una vez al acabar la ráfaga
   return true;
@@ -7680,6 +9411,73 @@ function mcGetVoxel(x,y,z){
   if(!mcInside(x,y,z)) return 0;                     // fuera de límites = aire para el script
   return mc.grid[mcIdx(x,y,z)] || 0;                 // 0 = aire
 }
+// setVoxel escribe SIEMPRE en mc.grid, y una celda de rejilla se dibuja proyectando la pieza sobre las
+// 6 caras del cubo (buildTexFaces). Eso ya NO pierde la máscara de `caras` (una cara apagada sale con
+// alpha 0 y la textura pasa a ser de RECORTE, que el mesher y el shader ya saben tratar) ni el «no
+// frena» de `atravesable` (mc.atraviesaDoc). Queda mal en dos casos, y son los que se avisan:
+//   · FORMA — la piel no cubre el cubo (mata en cruz, llama): la silueta se aplasta contra un cubo lleno.
+//   · TRANSPARENCIA REAL — el atlas del terreno recorta (alpha 0/1), no mezcla.
+// Colocar A MANO no tiene ese problema porque mcPlace desvía todo material no-blockLike a mcStampStruct.
+// Se avisa UNA sola vez por material (esto se llama por voxel) y TAMBIÉN por toast: el dueño construye
+// desde el móvil y ahí un console.warn es indistinguible de «el script no hace nada».
+const mcAvisadoFino={};
+function mcAvisaSiFino(material, id){
+  const key=mcClaveBase(mc.blockKey[id]); if(!key || mcAvisadoFino[key]) return;   // el giro de la variante no cambia el aviso
+  mcAvisadoFino[key]=true;                       // se marca YA: el aviso es asíncrono y esto se llama por voxel
+  mcStructCells(key).then(rec=>{
+    // blockLike es el caso trivial de «la piel cubre el cubo»: un 16³ macizo. Con la piel cubriendo, lo
+    // que se ve del dibujo es su cáscara y el terreno la dibuja fiel, agujeros incluidos.
+    if(rec.blockLike || (rec.pielCubre && !rec.translucido)) return;
+    // …y si CABE en una celda pero no la llena (una flor, una mata), tampoco hay nada que avisar: el
+    // mallador emite su geometría real dentro de la malla del chunk (mcTablaFina), con su alfa y todo,
+    // así que se ve como el documento sin costar un draw call. Solo queda la queja para lo que sigue
+    // sin tener arreglo por ese camino: varias celdas (cada una se proyecta suelta) o un macizo translúcido.
+    if(rec.w<=1 && rec.h<=1 && rec.d<=1 && !rec.pielCubre) return;
+    const falta=[];
+    if(!rec.pielCubre) falta.push('forma');                 // varias celdas: cada una se proyecta a un cubo lleno
+    if(rec.translucido) falta.push('transparencia real');   // el terreno recorta, no mezcla
+    if(!falta.length) return;
+    const m=String(material), q=falta.join(' + ');
+    console.warn('setVoxel: «'+m+'» tiene '+q+', y eso no cabe en un bloque de terreno (mc.grid) → sale como '+
+      'cubo macizo. Para colocarlo como pieza fina, fiel al documento: game.stamp("'+m+'",x,y,z). '+
+      'Cuesta un draw call y una línea de mundo.json POR PIEZA, así que para terreno normal sigue usando setVoxel.');
+    toast('«'+m+'»: '+q+' no cabe en un bloque → cubo macizo. Usa game.stamp("'+m+'",x,y,z)');
+  }).catch(()=>{});
+}
+// Material → CLAVE de pieza ('asset:…' / 'hab:…'). Una clave exacta pasa tal cual (no hace falta que esté
+// en la paleta del terreno); un nombre corto se resuelve con el MISMO mcResolveMat que setVoxel, para que
+// 'leaves' signifique lo mismo en las dos llamadas.
+function mcStampSrc(material){
+  const m=String(material==null?'':material).trim();
+  if(m.startsWith('asset:') || m.startsWith('hab:')) return m;
+  const pend=mcMatPendiente(m);   // el índice sabe qué fichero es aunque no esté en la paleta, y stamp no
+  if(pend) return pend;           // necesita la paleta: se usa la clave y se acabó (aquí no hace falta esperar)
+  const id=mcResolveMat(m);
+  return id>0 ? mc.blockKey[id] : null;
+}
+let mcStampT=0, mcStampN=0; const mcAvisadoMacizo={};
+function mcFlushStamp(){ mcStampT=0; if(mc.active) mcUnstick(); mcDirtyHeader(); mcScheduleSave();
+  toast('game.stamp: '+mcStampN+' piezas colocadas'); mcStampN=0; }
+// game.stamp(material, x,y,z, rot) · coloca una PIEZA FINA (voxels de verdad) en vez de un bloque de
+// terreno: exactamente lo que hace la mano al colocar desde la hotbar (mcPlace → mcStampStruct), y la
+// única forma desde scripting de conservar la máscara de `caras`, la transparencia y `atravesable`.
+// PRECIO, y es explícito: cada pieza es una entrada de mc.structures = UN DRAW CALL y una línea en el
+// `structures[]` de mundo.json. Un prado de mil matas son mil de cada. Para terreno normal, setVoxel.
+// Respeta beginBatch/endBatch igual que setVoxel: un solo guardado y un solo resumen al cerrar el lote.
+game.stamp=async function(material, x, y, z, rot){
+  if(!mc.grid){ toast('game.stamp: abre el Mundo (🌍) primero'); return false; }
+  const key=mcStampSrc(material); if(!key) return false;
+  x=Math.round(x); y=Math.round(y); z=Math.round(z);
+  if(!mcInside(x,y,z)) return false;                  // fuera de límites: se ignora sin romper el script
+  const rec=await mcStructCells(key);
+  if(rec.blockLike && !mcAvisadoMacizo[key]){ mcAvisadoMacizo[key]=true;
+    toast('«'+material+'» es un bloque macizo: setVoxel(…) lo pone igual y sale muchísimo más barato'); }
+  await mcStampStruct(key, x, y, z, (rot|0)&15, true);   // quiet: el resumen y el guardado los da mcFlushStamp
+  mcStampN++;
+  if(!mc.batching){ clearTimeout(mcStampT); mcStampT=setTimeout(mcFlushStamp, 80); }
+  return true;
+};
+window.stamp=game.stamp;
 let mcBatchDepth=0;
 function mcBeginBatch(){ mcBatchDepth++; mc.batching=true; clearTimeout(mcBuildT); mcBuildT=0; }
 function mcEndBatch(){
@@ -7687,7 +9485,9 @@ function mcEndBatch(){
   if(mcBatchDepth>0) return;                          // seguimos dentro de un lote exterior
   mc.batching=false;
   clearTimeout(mcBuildT); mcBuildT=0;
+  clearTimeout(mcStampT); mcStampT=0;
   if(mcBuildN>0) mcFlushBuild();                      // un único re-mallado + guardado de toda la ráfaga
+  if(mcStampN>0) mcFlushStamp();                      // …y un único guardado de las piezas finas del lote
 }
 const _editSetVoxel=setVoxel;
 window.setVoxel=(x,y,z,c)=> (mc && mc.active && mc.grid) ? mcSetVoxel(x,y,z,c) : _editSetVoxel(x,y,z,c);
@@ -7697,6 +9497,10 @@ window.beginBatch=mcBeginBatch; game.beginBatch=mcBeginBatch;
 window.endBatch=mcEndBatch; game.endBatch=mcEndBatch;
 game.addMaterial=async function(key,name){
   let realKey = String(key||'').trim();
+  // El sufijo de giro («…@5», mcClaveConOri) se aparta para resolver el mote y se vuelve a pegar al final:
+  // game.addMaterial('flor@1') tiene que valer igual que la clave larga.
+  const oriPide = mcClaveOri(realKey);
+  if(oriPide) realKey = mcClaveBase(realKey);
   const kLow = realKey.toLowerCase();
   if(mcAssetsRegistry[kLow]){
     realKey = 'asset:' + mcAssetsRegistry[kLow];
@@ -7706,6 +9510,7 @@ game.addMaterial=async function(key,name){
     const found = MC_MAT_ALIAS[kLow];
     if(found) realKey = found;
   }
+  if(oriPide){ await mcAddBlock(realKey, name);  realKey=mcClaveConOri(realKey, oriPide); }  // el original primero: la variante cuelga de él
   const id=await mcAddBlock(realKey, name||key);
   mcMat2id={};
   return id;
@@ -7812,6 +9617,9 @@ function mcTick(now){
   mcUpdateHotbar(dt);             // hunde/emerge la hotbar según la carrera (ver mcUpdateHotbar)
   mcRender();
   mcUpdateNoteView();            // t1 · muestra/oculta el texto de la nota apuntada
+  // Carteles de las notas: el repaso barato va aquí y no en cada escritura de mc.notes porque quien
+  // escribe notas no es solo el panel — también los snippets y los agentes, que no saben de carteles.
+  if(now-mcNoteSignAt>500){ mcNoteSignAt=now; if(mcNoteSignsDesfasados()) mcSyncNoteSigns(); }
   mcUpdateXrayLabels();          // rayos-X · etiquetas de coordenadas sobre los bloques rojos
   updateWorldMeters();
   mc.last=now;
@@ -8008,9 +9816,47 @@ Object.defineProperty(game,'structCull',{ enumerable:true, get:()=>mc.structCull
   set:v=>{ v=!!v; mc.structCull=v; try{localStorage.setItem('vf_mcStructCull', v?'1':'0');}catch(e){} return v; } });
 try{ const a=parseFloat(localStorage.getItem('vf_mcNoteAlpha')); if(isFinite(a)) mc.noteAlpha=Math.max(0,Math.min(1,a)); }catch(e){}
 // game.noteAlpha (t1) = opacidad del post-it flotante que marca un bloque anotado (0..1; 0 = ocultar marcadores).
-// El texto de la nota se ve al mirar el bloque, independientemente de esto. Se ve en vivo y persiste.
+// Con game.noteSigns encendido casi ninguna nota lleva post-it: esto es lo que ven las que se pasan
+// del tope de carteles. El texto se ve al mirar el bloque, independientemente de esto.
 Object.defineProperty(game,'noteAlpha',{ enumerable:true, get:()=>mc.noteAlpha,
   set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.85)); mc.noteAlpha=v; try{localStorage.setItem('vf_mcNoteAlpha',v);}catch(e){} return v; } });
+try{ const s=localStorage.getItem('vf_mcNoteSigns'); if(s!==null) mc.noteSigns=(s==='1'); }catch(e){}
+// game.noteSigns = cada nota planta un CARTEL de verdad encima de su bloque (assets/cartel.vox.json)
+// en vez del post-it dibujado a mano. En false vuelve el post-it y los carteles se retiran; no es un
+// cambio de datos ni en un sentido ni en el otro (los carteles son efímeros, mundo.json no los ve).
+Object.defineProperty(game,'noteSigns',{ enumerable:true, get:()=>mc.noteSigns,
+  set:v=>{ v=!!v; mc.noteSigns=v; try{localStorage.setItem('vf_mcNoteSigns', v?'1':'0');}catch(e){} mcSyncNoteSigns(); return v; } });
+try{ const s=localStorage.getItem('vf_mcNoteText'); if(s!==null) mc.noteText=(s==='1'); }catch(e){}
+try{ const d=parseFloat(localStorage.getItem('vf_mcNoteTextDist')); if(isFinite(d)&&d>0) mc.noteTextDist=d; }catch(e){}
+// game.noteText = el TEXTO de la nota escrito en la tabla de su cartel, para leerlo sin apuntar. En false
+// el cartel queda en blanco y solo se lee apuntando (el visor de debajo de la mira).
+// game.noteTextDist = desde cuántos bloques se lee (se escala con game.playerScale); el último cuarto se
+// desvanece. De más lejos no se dibuja: «de muy lejos no haría falta». Un rótulo que se lee ENTERO releva
+// al visor; si el texto no cupo y se recortó con «...», el visor sigue saliendo.
+Object.defineProperty(game,'noteText',{ enumerable:true, get:()=>mc.noteText,
+  set:v=>{ v=!!v; mc.noteText=v; try{localStorage.setItem('vf_mcNoteText', v?'1':'0');}catch(e){} return v; } });
+Object.defineProperty(game,'noteTextDist',{ enumerable:true, get:()=>mc.noteTextDist,
+  set:v=>{ v=Math.max(1,Math.min(200, isFinite(+v)?+v:14)); mc.noteTextDist=v; try{localStorage.setItem('vf_mcNoteTextDist',v);}catch(e){} return v; } });
+// game.noteFont / game.noteWidth (REQ-CART2) = el PANEL DOM de editar/ver la nota, no el cartel 3D: cuerpo
+// de letra y ancho del diálogo. Son estética discutible, así que van por consola y en vivo en vez de por un
+// ajuste en la UI. El alto del textarea sale del cuerpo (10 líneas), así que subir la letra agranda la caja
+// sola y no hace falta tocar las dos.
+// ⚠️ noteFont REDONDEA A MÚLTIPLO DE 9: Pixeloid tiene su píxel de diseño en font-size/9 y cualquier otro
+// valor sale borroso. O sea que los escalones son 9 (el de antes, ilegible), 18 (el de serie), 27, 36, 45.
+try{ const f=parseFloat(localStorage.getItem('vf_mcNoteFont')); if(isFinite(f)&&f>0) mc.noteFont=f; }catch(e){}
+try{ const w=parseFloat(localStorage.getItem('vf_mcNoteWidth')); if(isFinite(w)&&w>0) mc.noteWidth=w; }catch(e){}
+function mcNoteUIAplicar(){
+  const r=document.documentElement.style;
+  r.setProperty('--note-fs', mc.noteFont+'px');
+  r.setProperty('--note-w',  mc.noteWidth+'px');
+}
+Object.defineProperty(game,'noteFont',{ enumerable:true, get:()=>mc.noteFont,
+  set:v=>{ v=Math.round((isFinite(+v)?+v:18)/9)*9; v=Math.max(9,Math.min(45,v)); mc.noteFont=v;
+           try{localStorage.setItem('vf_mcNoteFont',v);}catch(e){} mcNoteUIAplicar(); return v; } });
+Object.defineProperty(game,'noteWidth',{ enumerable:true, get:()=>mc.noteWidth,
+  set:v=>{ v=Math.max(240,Math.min(1600, isFinite(+v)?+v:720)); mc.noteWidth=v;
+           try{localStorage.setItem('vf_mcNoteWidth',v);}catch(e){} mcNoteUIAplicar(); return v; } });
+mcNoteUIAplicar();   // lo guardado en localStorage tiene que llegar al CSS sin esperar a que alguien lo toque
 Object.defineProperty(game,'playerSpeed',{ enumerable:true, get:()=>mc.speed,
   set:v=>{ v=Math.max(1,Math.min(40,+v||5)); mc.speed=v; try{localStorage.setItem('vf_mcSpeed',v);}catch(e){} return v; } });
 // game.airControl / airAccel / airCap = movimiento en el AIRE estilo Quake (air-strafe). airControl on: la velocidad
@@ -8057,6 +9903,16 @@ Object.defineProperty(game,'structGreedy',{ enumerable:true, get:()=>mc.structGr
   set:v=>{ v=!!v; mc.structGreedy=v; try{localStorage.setItem('vf_mcStructGreedy', v?'1':'0');}catch(e){}
     for(const k in mc.structs){ if(mc.structs[k]) mc.structs[k].meshRot={}; }   // invalida geometría cacheada
     if(mc.active) mcRestampAll(); return v; } });
+try{ const t=localStorage.getItem('vf_mcOldStructBuild'); if(t!==null) mc.useOldStructBuild=(t==='1'); }catch(e){}
+// game.useOldStructBuildCall = volver a la llamada de siempre al construir con el clic derecho. Desde que el
+// mallador emite la geometría de verdad de lo que no llena su celda (mc.finoRejilla), poner una pieza que CABE
+// en una celda y pintarla con setVoxel dan la misma imagen, así que el clic derecho usa setVoxel y esa pieza
+// deja de costar un draw call. Lo que NO cabe (una sala, un árbol) se estampa igual que siempre; R/Shift+R sí
+// van por la rejilla, porque el giro cabe en la clave (mcClaveConOri), salvo en lo que se proyecta como cubo.
+// true = estampar SIEMPRE una pieza suelta, como antes.
+Object.defineProperty(game,'useOldStructBuildCall',{ enumerable:true, get:()=>mc.useOldStructBuild,
+  set:v=>{ v=!!v; mc.useOldStructBuild=v; try{localStorage.setItem('vf_mcOldStructBuild', v?'1':'0');}catch(e){}
+    toast(v?'Clic derecho: estampa una pieza suelta (como antes)':'Clic derecho: setVoxel cuando la pieza cabe en una celda'); return v; } });
 // game.interiorDark (t7) = penumbra automática de interiores por SKYLIGHT. La luz del cielo se difunde por el aire
 // (mcComputeLight) perdiendo 1 nivel por bloque; la sombra de cada cara depende de la LUZ que le llega: plena junto
 // a una boca / a cielo abierto, y hasta interiorDark en el fondo sin luz de un túnel. Al basarse en la luz REAL, no
@@ -8150,11 +10006,11 @@ game.toast=game.showToast=function(msg, secs){ toast(String(msg), secs); return 
 game.dumpVars=function(){
   const keys=['nearClip','perspStrength','playFill','playZoom','playLift',   // edición 3D / modo jugar
     'fov','renderDist','renderScale','mouseSpeed','yaw','pitch','hotbarHide','reach',   // Mundo (WebGL)
-    'ghostAlpha','structGhostAlpha','noteAlpha','structBias','structCull','playerSpeed','playerScale','playerTool',
+    'ghostAlpha','structGhostAlpha','noteAlpha','noteSigns','noteText','noteTextDist','noteFont','noteWidth','structBias','structCull','playerSpeed','playerScale','playerTool',
     'airControl','airAccel','airCap',
-    'structTextures','structGreedy','interiorDark','sunShade','shadowSize','glowLevel','glowFocus','worldSize',
+    'structTextures','structGreedy','useOldStructBuildCall','interiorDark','sunShade','shadowSize','glowLevel','glowFocus','worldSize',
     'agentSpeed','agentSaveMs'];
-  const V={ showFPS:_showFPS, showVoxels:_showVox };                          // callables → su booleano subyacente
+  const V={ showFPS:_showFPS, showVoxels:_showVox, showOSDbuttons:_showOSD, carasMarcadas:carasMarcar }; // callables → su booleano subyacente
   for(const k of keys) V[k]=game[k];
   try{ console.table(V); }catch(e){}
   console.log(JSON.stringify(V,null,2));                                      // copiable como literal
@@ -8165,6 +10021,7 @@ function closeWorld(){
   mcTouchShow(false);
   mcPauseAgents();   // los agentes se pausan al salir al editor: retienen memoria y coords hasta reabrir el Mundo
   mcCloseNote(); { const nv=$('#mc-noteview'); if(nv) nv.hidden=true; }   // t1 · cierra el editor/visor de notas al salir
+  mcFreeNoteTexts();   // los rótulos horneados de los carteles: al volver se re-hornean con el texto de entonces
   if(mc.grid){ clearTimeout(mcSaveT); mcSaveWorld(); }   // vuelca cualquier edición pendiente al salir
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
   if(mc.raf){ cancelAnimationFrame(mc.raf); mc.raf=0; }
@@ -8215,9 +10072,11 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   if(k==='x'){ mc.xray=!mc.xray; toast('Rayos-X: '+(mc.xray?'ON':'OFF')); e.preventDefault(); return; }    // modo depuración: ver el volumen de colisión
   if(k==='u'){ mcForceUnstick(); toast('Desatascado'); e.preventDefault(); return; }                       // U = sácame de aquí (sube sobre lo que estorbe; si no, al spawn)
   if(k==='n'){ mcOpenNote(); e.preventDefault(); return; }                                                  // N = anota el bloque apuntado (post-it)
+  if(k==='f'){ mcFoto(); e.preventDefault(); return; }                                                      // F = foto de lo que se ve (ficha quemada en la imagen) → data/fotos/ y galería en /fotos
   if(k==='r' && mc.slotStruct[mc.sel]){                                                                       // gira/vuelca la estructura 90° (mantén clic derecho para ver la vista-previa; suelta = estampa así)
     if(e.shiftKey){ mc.previewTilt=(mc.previewTilt+1)&3; toast('Vuelco: '+(mc.previewTilt*90)+'°'); }          // Shift+R = vuelco sobre el eje X (plano altura↔profundidad)
     else { mc.previewRot=(mc.previewRot+1)&3; toast('Giro: '+(mc.previewRot*90)+'°'); }                        // R = giro sobre el eje vertical (plano horizontal)
+    mcPrecargaGirada(mc.slotStruct[mc.sel], mcPreviewOri());   // la pieza girada es otro material (mcClaveConOri): que esté listo ANTES del clic
     e.preventDefault(); return; }
   if(k==='r' && mc.tool==='select' && mc.selBox){ mcRotateSelBox(); e.preventDefault(); return; }              // gira 90° (horizontal) los bloques de la caja seleccionada — p.ej. tras Ctrl+V pegar
   // S SOLO mientras se MANTIENE el clic derecho colocando una estructura: alterna pegado canto↔centrado (la
@@ -8260,7 +10119,10 @@ Object.defineProperty(game,'touchLook',{ enumerable:true, get:()=>+(mcLookSens/M
 let mcTouchOn=MC_TOUCH;
 try{ const t=localStorage.getItem('vf_mcTouch'); if(t==='0'||t==='1') mcTouchOn=(t==='1'); }catch(e){}
 Object.defineProperty(game,'touchControls',{ enumerable:true, get:()=>mcTouchOn,
-  set:v=>{ mcTouchOn=!!v; try{localStorage.setItem('vf_mcTouch',mcTouchOn?'1':'0');}catch(e){} mcTouchShow(mc.active); return mcTouchOn; } });
+  set:v=>{ mcTouchOn=!!v; try{localStorage.setItem('vf_mcTouch',mcTouchOn?'1':'0');}catch(e){} mcTouchShow(mc.active);
+           updateOSDbuttons();   // REQ-OSD1: quitar los mandos táctiles devuelve el teclado (y Esc), y al revés
+           return mcTouchOn; } });
+updateOSDbuttons();   // REQ-OSD1: aquí y no antes, porque mcTouchOn se declara justo encima
 
 function mcTouchShow(on){ const z=$('#mc-touch'); if(z) z.hidden=!(on && mcTouchOn); if(!on) mcStickSuelta(); }
 function mcStickSuelta(){    // el pulgar levantado deja de andar: si no, te quedas caminando solo
@@ -8287,6 +10149,12 @@ function mcStickSuelta(){    // el pulgar levantado deja de andar: si no, te que
 
   salto.addEventListener('pointerdown',e=>{ if(!mc.active) return;
     mcJumpId=e.pointerId; mc.keys[' ']=true; try{ salto.setPointerCapture(e.pointerId); }catch(err){} e.preventDefault(); });
+
+  // La foto se dispara en pointerUP y no en down como el salto: un botón que dispara al tocarlo se
+  // activa al rozarlo mientras se busca el pulgar, y esto escribe un fichero. Nada de estado que
+  // soltar, así que mcTouchSuelta no tiene que saber de él.
+  const foto=$('#mc-tfoto');
+  if(foto) foto.addEventListener('pointerup',e=>{ if(!mc.active) return; mcFoto(); e.preventDefault(); });
 }
 // ⚠️ LOS FINALES SE ESCUCHAN EN WINDOW, NO EN CADA MANDO. Un `pointerup` perdido deja el estado
 // pegado, y los dos síntomas salen a la vez: te quedas ANDANDO SOLO (la tecla del joystick no se
@@ -8362,15 +10230,18 @@ let mcAgentSaveDirty=false, mcAgentSaveAt=0;
 
 // Escritura BARATA para agentes. mcSetVoxel/mcFlushBuild no valen en un bucle continuo: hacen mcMeshAll()
 // completo, mcUnstick, guardado y un toast cada 80ms. Aquí: mc.grid + marcar el chunk, y remallar UNA vez por
-// frame. La luz solo cambia si se rompe el invariante sólido↔aire (mcComputeLight difunde por aire y hasGlow
-// sale de mc.structures) → sólido→sólido (pintar) puede saltarse el BFS; aire↔sólido cae al camino caro.
+// frame. La luz solo cambia si se rompe el invariante sólido↔aire (mcComputeLight difunde por aire) → sólido↔
+// sólido (pintar) puede saltarse el BFS; aire↔sólido cae al camino caro. Y desde que la rejilla también puede
+// llevar emisores (mcGlowCeldas), pintar una antorcha ENCIMA de piedra —o taparla— tampoco puede saltárselo.
 function mcAgentSetBlock(x,y,z,id){
   if(!mc.grid || !mcInside(x,y,z)) return false;
   const i=mcIdx(x,y,z), prev=mc.grid[i];
   if(prev===id) return false;
-  mc.grid[i]=id; mcDirty(x,y,z);
+  const glowAntes=!!(mc._glowCeldas && mc._glowCeldas.has(i));
+  mc.grid[i]=id; mcDirty(x,y,z); mcGlowTocada(x,y,z);
   mcAgentSaveDirty=true;
-  if(prev===0 || id===0) mcRemeshAround(x,z);   // cambia la luz: recomputar + re-mallar 3×3 (raro: los agentes pintan)
+  const glowDespues=!!(mc._glowCeldas && mc._glowCeldas.has(i));
+  if(prev===0 || id===0 || glowAntes!==glowDespues) mcRemeshAround(x,z);   // cambia la luz: recomputar + re-mallar 3×3 (raro: los agentes pintan)
   else mcAgentDirty.add(Math.floor(x/MC_CHUNK)+','+Math.floor(z/MC_CHUNK));
   return true;
 }
@@ -8904,6 +10775,7 @@ $('#meta-name').value=state.meta.name;
 $('#meta-type').value=state.meta.type;
 $('#meta-role').textContent=state.meta.role||'';
 $('#meta-role').hidden=!state.meta.role;
+$('#meta-atravesable').checked=state.atravesable;
 setTool(state.tool);
 isoCv.style.cursor='ns-resize';
 syncLayer(); syncColor(); updateZoomLabel(); updateUndoUI(); updateInfo();

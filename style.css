@@ -9,7 +9,28 @@
   --accent-2:#6bd3a0;    /* verde */
   --danger:#e2685a;
   --radius:10px;
+  /* Fuente del JUEGO (modo Mundo): pixel art, a juego con los voxels. Solo la usan los textos que se
+     leen jugando — la UI del editor sigue con la de sistema, que es la que aguanta formularios densos.
+     El mismo nombre lo pide app.js para escribir el rótulo de un cartel en su textura (MC_GAME_FONT):
+     si se cambia aquí, hay que cambiarlo allí. */
+  --font-game:'Pixeloid Sans', ui-monospace, monospace;
   font-synthesis:none;
+}
+/* Pixeloid Sans · SIL Open Font License 1.1 (assets/fonts/Pixeloid-OFL.txt). Sustituye a Press Start 2P
+   (que sigue en assets/fonts/ por si hay que volver): es de píxeles igual, pero PROPORCIONAL, así que
+   cunde mucho más — 'A' ocupa 0.67 em y la 'i' 0.22, frente al 1.0 em de TODO carácter en Press Start 2P.
+   ⚠️ Su rejilla nativa es de 1836/9 = 204 unidades ⇒ un píxel de diseño = font-size/9. Sale nítida en
+   tamaños MÚLTIPLOS DE 9 (9, 18, 27…) y borrosa en los de en medio: al cambiar un cuerpo, redondear a 9.
+   Con font-size 9px la mayúscula mide 7px y la x 5px. */
+@font-face{
+  font-family:'Pixeloid Sans';
+  src:url('assets/fonts/PixeloidSans.ttf') format('truetype');
+  font-weight:400; font-style:normal; font-display:swap;
+}
+@font-face{                          /* el :root lleva font-synthesis:none ⇒ sin esta cara, la negrita no existiría */
+  font-family:'Pixeloid Sans';
+  src:url('assets/fonts/PixeloidSans-Bold.ttf') format('truetype');
+  font-weight:700; font-style:normal; font-display:swap;
 }
 
 *{box-sizing:border-box}
@@ -99,6 +120,9 @@ body{
 }
 .field input:focus, .field select:focus{outline:0; border-color:var(--accent)}
 .role{margin:0 0 4px; color:var(--accent); font-size:12px; font-style:italic}
+/* Casilla suelta de la tarjeta Objeto: mismo margen que un .field, o se descuelga del resto de la columna. */
+.meta-sw{display:flex; align-items:center; gap:7px; margin-bottom:10px; font-size:12px; color:var(--muted); cursor:pointer}
+.meta-sw input{cursor:pointer}
 .size-row{display:flex; align-items:center; gap:5px}
 .size-row input[type=number]{
   width:44px; background:var(--panel-2); border:1px solid var(--line); color:var(--ink);
@@ -205,7 +229,10 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .vox-float[hidden]{display:none}
 .tool-float{
   position:absolute; top:12px; right:12px; z-index:5;
-  display:flex; flex-direction:column; gap:6px;
+  display:flex; flex-direction:column; gap:4px;
+  /* Si el lienzo es tan bajo que la columna no cabe, las herramientas pasan a una segunda columna en
+     vez de salir con scroll: una barra de herramientas con scroll esconde justo la que buscas. */
+  flex-wrap:wrap; max-height:calc(100% - 24px);
   background:rgba(14,17,25,.82); border:1px solid var(--line);
   border-radius:10px; padding:6px; backdrop-filter:blur(3px);
 }
@@ -227,11 +254,14 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
   position:absolute; right:12px; top:12px; z-index:5;
   display:flex; flex-direction:column; align-items:stretch; gap:8px;
 }
-/* En 3D la paleta de herramientas ocupa esa misma esquina (.tool-float, 78 px de ancho) y el giro le
-   caía encima. Se aparta a su izquierda mientras la paleta esté a la vista; en 2D vuelve al borde.
-   Va por hermano posterior y no por una clase de modo para que dependa de lo que SE VE, no de un
-   estado que haya que acordarse de sincronizar. */
-#tool-float:not([hidden]) ~ .stage-side{ right:98px }
+/* En 3D la paleta de herramientas ocupa esa misma esquina (.tool-float) y el giro le caía encima. Se
+   aparta a su izquierda mientras la paleta esté a la vista; en 2D vuelve al borde. Va por hermano
+   posterior y no por una clase de modo para que dependa de lo que SE VE, no de un estado que haya que
+   acordarse de sincronizar.
+   Cuánto se aparta tampoco es un número fijo: si el lienzo es bajo, la paleta pasa a dos columnas y
+   crece hacia la izquierda. Por eso se usa su ancho MEDIDO (--tool-float-w, que pone app.js con un
+   ResizeObserver). El 22 es su margen derecho (12) más el hueco que queda entre las dos cajas. */
+#tool-float:not([hidden]) ~ .stage-side{ right:calc(var(--tool-float-w, 52px) + 22px) }
 .layer-float, .rotobj-float{
   display:flex; flex-direction:column; align-items:stretch; gap:4px;
   background:rgba(14,17,25,.82); border:1px solid var(--line);
@@ -243,12 +273,16 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 /* compacto: los tres giros ocupan lo mismo que ▲ 1/16 ▼ */
 .rotobj-float .btn{padding:3px 12px; font-size:12px; letter-spacing:.5px}
 .rotobj-cap{font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; text-align:center}
+/* En 3D son once herramientas en columna: con su etiqueta debajo no caben en el alto del lienzo y
+   la paleta salía con scroll. Aquí van sin texto (el nombre sigue en el title), solo el icono. */
 .tool-float .tool{
-  width:64px; background:var(--panel-2); border:1px solid var(--line); color:var(--ink);
-  border-radius:8px; padding:7px 4px; cursor:pointer; font-size:17px;
-  display:flex; flex-direction:column; align-items:center; gap:2px;
+  width:38px; background:var(--panel-2); border:1px solid var(--line); color:var(--ink);
+  border-radius:8px; padding:6px 0; cursor:pointer; font-size:17px;
+  display:flex; flex-direction:column; align-items:center; gap:0;
 }
-.tool-float .tool span{font-size:10px; color:var(--muted)}
+.tool-float .tool span{display:none}
+/* La muestra de color cabe en la esquina de un botón tan pequeño solo si encoge con él. */
+.tool-float .tool-swatch{top:2px; left:2px; width:9px; height:9px; border-radius:2px}
 .tool-float .tool:hover{border-color:var(--accent)}
 .tool-float .tool.is-active{border-color:var(--accent); background:#241f16}
 .tool-float .tool.is-active span{color:var(--accent)}
@@ -627,6 +661,11 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
   background:rgba(14,17,25,.34); border:1px solid rgba(255,255,255,.28); color:#fff;
   font-size:26px; line-height:1; padding:0; pointer-events:auto; touch-action:none}
 .mc-tbtn:active{background:rgba(255,255,255,.32)}
+/* Foto (lo que hace la tecla F) encima del salto: sin teclado no hay ninguna otra forma de sacarla
+   desde el móvil. Más pequeño que el salto porque se pulsa mil veces menos y no debe robarle sitio.
+   A diferencia de romper/poner, sacar una foto NO edita el mundo, así que aquí sí cabe un botón. */
+.mc-tbtn.foto{width:52px; height:52px; font-size:20px;
+  bottom:calc(146px + env(safe-area-inset-bottom,0px))}
 /* Móvil en HORIZONTAL: la pantalla es baja (la del dueño, ~380 px de alto útil) y los mandos se
    comían media vista. Más pequeños y pegados abajo, que es donde cae el pulgar sujetando el móvil. */
 @media (max-height:520px){
@@ -634,6 +673,8 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
   .mc-stick-knob{width:42px; height:42px}
   .mc-tbtn{width:62px; height:62px; font-size:22px;
     bottom:calc(18px + env(safe-area-inset-bottom,0px)); right:calc(70px + env(safe-area-inset-right,0px))}
+  .mc-tbtn.foto{width:46px; height:46px; font-size:18px;
+    bottom:calc(88px + env(safe-area-inset-bottom,0px)); right:calc(78px + env(safe-area-inset-right,0px))}
 }
 .mc-actions{position:absolute; top:12px; right:12px; z-index:6; display:flex; gap:8px; align-items:center}
 #snip-modal{z-index:50}
@@ -658,22 +699,43 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 @keyframes mc-spin{to{transform:rotate(360deg)}}
 /* t1 · post-its: editor de nota (tecla N) centrado sobre la hotbar, y visor de solo lectura junto a la mira */
 .mc-note{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:60;
-  width:min(420px,92vw); display:flex; flex-direction:column; gap:10px; padding:14px;
+  width:min(var(--note-w,720px),94vw); display:flex; flex-direction:column; gap:10px; padding:14px;
   border-radius:12px; background:rgba(14,17,25,.94); border:1px solid var(--line);
   box-shadow:0 12px 40px rgba(0,0,0,.5); backdrop-filter:blur(4px)}
 .mc-note[hidden]{display:none}
 .mc-note-head{font-size:14px; font-weight:600; color:var(--text)}
-.mc-note textarea{width:100%; resize:vertical; min-height:80px; box-sizing:border-box;
+/* Alto: 10 líneas del cuerpo actual (line-height 1.8 ⇒ ×18), pero sin comerse la pantalla en un móvil
+   apaisado. El tirador de la esquina sigue ahí para estirarlo a mano. */
+.mc-note textarea{width:100%; resize:vertical; box-sizing:border-box;
+  min-height:min(calc(var(--note-fs,18px) * 18), 46vh);
   padding:8px 10px; border-radius:8px; border:1px solid var(--line);
   background:rgba(0,0,0,.35); color:var(--text); font:inherit; font-size:13px; line-height:1.4}
 .mc-note textarea:focus{outline:none; border-color:var(--accent)}
 .mc-note-actions{display:flex; justify-content:flex-end; gap:8px}
 .mc-noteview{position:absolute; left:50%; top:calc(50% + 26px); transform:translateX(-50%); z-index:6;
-  max-width:min(360px,80vw); padding:7px 12px; border-radius:8px; pointer-events:none;
+  max-width:min(calc(var(--note-w,720px) * 0.6),86vw); padding:7px 12px; border-radius:8px; pointer-events:none;
   background:rgba(20,15,4,.82); border:1px solid rgba(255,212,64,.5); color:#ffeab0;
   font-size:13px; line-height:1.35; text-align:center; white-space:pre-wrap;
   text-shadow:0 1px 2px rgba(0,0,0,.7)}
 .mc-noteview[hidden]{display:none}
+/* ---- Los textos que se leen JUGANDO van en la fuente del juego (--font-game) ----
+   Va DESPUÉS de las reglas que pisa (`.mc-note textarea` trae un `font:inherit`, que también borraría
+   la familia). Se queda fuera a propósito lo que no es texto de juego sino diagnóstico: las etiquetas
+   de rayos-X (.mc-xlbl) siguen en monoespaciada, que es donde se leen coordenadas de un vistazo.
+   Casi todos los tamaños son 9px, y no es pereza: el píxel de diseño de Pixeloid mide font-size/9, así
+   que solo los múltiplos de 9 caen en rejilla y salen nítidos, y el siguiente escalón (18px) es el doble.
+   La jerarquía se hace con peso y color, no con el cuerpo. A 9px las mayúsculas miden 7px y la equis 5.
+   ⚠️ Las NOTAS son la excepción y van a `--note-fs` (18px de serie, ver REQ-CART2): a 9px no se leían
+   —el móvil ya estaba al doble— y las notas de los agentes son volcados largos que hay que leer
+   enteros. El escalón intermedio no existe, así que la salida es el doble o nada. `game.noteFont` lo
+   mueve en vivo y solo acepta múltiplos de 9, justo para que no se pueda dejar borroso. */
+.mc-loading-text{font-family:var(--font-game); font-size:9px; line-height:1.7}
+.mc-noteview{font-family:var(--font-game); font-size:var(--note-fs,18px); line-height:1.8}
+.mc-note-head{font-family:var(--font-game); font-size:var(--note-fs,18px)}
+.mc-note textarea{font-family:var(--font-game); font-size:var(--note-fs,18px); line-height:1.8}
+.toast.mc-mode{font-family:var(--font-game); font-size:9px; line-height:1.7}
+.fps-float.mc-float,.vox-float.mc-float2{font-family:var(--font-game); font-size:9px}
+.mc-slot .mc-slot-key{font-family:var(--font-game); font-size:9px}
 /* rayos-X (tecla X): capa de etiquetas de coordenadas; no intercepta clics, cada .mc-xlbl se posiciona por transform */
 .mc-xray-labels{position:absolute; inset:0; z-index:7; pointer-events:none; overflow:hidden}
 .mc-xray-labels[hidden]{display:none}
@@ -684,7 +746,9 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .mc-xlbl-struct{background:rgba(190,90,10,.74)}   /* estructura fina: mismo naranja que su caja de rayos-X */
 .mc-xlbl-mat{font-weight:400; font-size:9px; opacity:.9; color:#ffe08a}   /* nombre de material, usable tal cual en tntMat/setVoxel */
 .mc-xlbl-tipo{font-weight:400; font-size:9px; opacity:.8; color:#cfe9ff}   /* bloque de terreno vs estructura fina + origen en la galería */
-.mc-xlbl-extra{font-weight:400; font-size:9px; opacity:.95; color:#9ff6b0}  /* línea del snippet: comportamientos + giros */
+/* El hueco del snippet. `pre-line` (contra el nowrap del padre) porque el texto lo componen varios
+   enganches encadenados —comportamientos, giros, señal de redstone— y cada uno pide su renglón. */
+.mc-xlbl-extra{font-weight:400; font-size:9px; opacity:.95; color:#9ff6b0; white-space:pre-line; text-align:center}
 .mc-xlbl-tipo:empty{display:none}
 .mc-xlbl-mat:empty{display:none}
 .mc-xlbl-extra:empty{display:none}
@@ -723,7 +787,9 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
   .snip-body{flex-direction:column}
   .snip-list-pane{width:auto; flex:0 0 auto; max-height:34%; border-right:0; border-bottom:3px solid #0a0c11}
 }
-@media (max-width:680px){ .mc-note{width:94vw; padding:12px} .mc-noteview{font-size:12px; padding:6px 10px} }
+/* El cuerpo ya no se toca aquí: desde REQ-CART2 los 18px son el valor de serie en TODAS las anchuras
+   (`--note-fs`), y el móvil era el único sitio donde ya estaba bien. Queda solo el respiro del padding. */
+@media (max-width:680px){ .mc-note{padding:12px} .mc-noteview{padding:6px 10px} }
 
 @media (max-width:980px){
   body{height:auto; min-height:100%}

@@ -114,12 +114,50 @@ const ok = (nom, cond, extra) => {
     out.dCon = +dist(G_CON, FONDO).toFixed(2);
     out.dSin = +dist(G_SIN, FONDO).toFixed(2);
 
+    // ---- 2b) EFECTO: dos piezas CON MASCARA pegadas. Sus caras compartidas caen en el MISMO plano, y una
+    //          cara con mascara se dibuja por los DOS lados (si no, el plano desaparece al mirarlo por detras),
+    //          asi que el culling ya no puede desempatarlas: sin mas, gana la que se dibujo antes y la imagen
+    //          depende del ORDEN de estampado. Eso es lo que se veia como texturas mezcladas. El desempate es
+    //          hundir el enves en su propio voxel (mc.carasInset): el enves siempre se mira desde dentro, asi
+    //          que hundirlo lo acerca a la camara -> gana SIEMPRE la pieza de este lado, decidido por
+    //          geometria y no por el orden. Se comprueba estampando A-luego-B y B-luego-A, y con el hundido
+    //          apagado tiene que volver a salir distinto (si no, el test no estaria mirando nada).
+    // Ojo: el documento va en ejes de EDITOR, donde el alto es la Z (bits 0 y 1 = arriba y abajo).
+    const placa = (clave, color, z, mask) => {
+      const voxels = {}, caras = {};
+      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
+        voxels[x + ',' + y + ',' + z] = color; caras[x + ',' + y + ',' + z] = mask;
+      }
+      roomDataCache.set(clave, Promise.resolve({ size: { x: 16, y: 16, z: 16 }, meta: { name: clave, type: 'objeto' }, voxels, caras }));
+    };
+    placa('zz-abajo', '#22cc22', 15, 1 << 0);   // verde, en el techo de su celda, solo su cara de ARRIBA
+    placa('zz-arriba', '#cc2222', 0, 1 << 1);   // roja,  en el suelo de la suya, solo su cara de ABAJO
+    // Las dos caras caen en y = cy+1. Se mira desde arriba: la de arriba no tiene techo, asi que no hay
+    // ninguna cara delante tapando el empate.
+    mirar(bx + 0.5, cy + 1.0, bz + 0.5, 0, -1.45, 6);
+    const FONDO2 = leer();
+    const parPegado = async (inset, alReves) => {
+      for (const k of ['zz-abajo', 'zz-arriba']) { quitar(k); delete mc.structs[k]; }   // fuerza re-mallado
+      mc.carasInset = inset;
+      const sitios = [['zz-abajo', cy], ['zz-arriba', cy + 1]];
+      if (alReves) sitios.reverse();
+      for (const [k, y] of sitios) await mcStampStruct(k, bx, y, bz, 0, true);
+      return leer();
+    };
+    const conAB = await parPegado(0.08, false), conBA = await parPegado(0.08, true);
+    const sinAB = await parPegado(0, false), sinBA = await parPegado(0, true);
+    out.pegadoVisible = difieren(FONDO2, conAB);
+    out.pegadoOrdenCon = difieren(conAB, conBA);
+    out.pegadoOrdenSin = difieren(sinAB, sinBA);
+    for (const k of ['zz-abajo', 'zz-arriba']) quitar(k);
+    mc.carasInset = 0.08;
+
     // ---- 3) El estado GL no se filtra: la pasada del sol y la del terreno necesitan ver TODAS las caras.
     out.cullActivo = gl.isEnabled(gl.CULL_FACE);
     out.frontFace = gl.getParameter(gl.FRONT_FACE) === gl.CCW;
 
     // ---- limpieza
-    for (const k of ['zz-op', 'zz-rojo', 'zz-azul']) { roomDataCache.delete(k); delete mc.structs[k]; }
+    for (const k of ['zz-op', 'zz-rojo', 'zz-azul', 'zz-abajo', 'zz-arriba']) { roomDataCache.delete(k); delete mc.structs[k]; }
     game.sunShade = 0.55; game.structCull = true;
     out.limpio = !mc.structures.some(o => /^zz-/.test(o.key));
     return out;
@@ -137,6 +175,13 @@ const ok = (nom, cond, extra) => {
   ok('con culling se tinta MENOS (una capa menos, no dos caras en el mismo plano)',
     r.dCon < r.dSin, 'distancia al fondo: con=' + r.dCon + ' sin=' + r.dSin);
 
+  console.log('\nEfecto · dos piezas CON MASCARA pegadas: el plano compartido no lo puede decidir el orden');
+  ok('el par pegado se ve en el encuadre', r.pegadoVisible > 0, r.pegadoVisible + '/' + r.total + ' px');
+  ok('con el hundido del enves, sale la MISMA imagen en los dos ordenes', r.pegadoOrdenCon === 0,
+    r.pegadoOrdenCon + ' px cambian al invertir el orden');
+  ok('sin el hundido, el orden decide (el fallo que se arreglo)', r.pegadoOrdenSin > 0,
+    r.pegadoOrdenSin + ' px cambian al invertir el orden');
+
   console.log('\nEstado GL');
   ok('CULL_FACE no queda activo al acabar el frame', r.cullActivo === false);
   ok('frontFace vuelve a CCW (el resto del render lo da por hecho)', r.frontFace === true);
@@ -145,6 +190,6 @@ const ok = (nom, cond, extra) => {
   if (errores.length) console.log(errores.join('\n'));
 
   await b.close();
-  console.log(fallos ? '\n' + fallos + ' fallo(s)' : '\n' + '13 ok, 0 fallos');
+  console.log(fallos ? '\n' + fallos + ' fallo(s)' : '\n' + '15 ok, 0 fallos');
   process.exit(fallos ? 1 : 0);
 })();

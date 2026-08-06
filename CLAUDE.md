@@ -42,6 +42,21 @@ noroeste para el relieve. NO bajar el brillo con la altura: apaga todos los colo
 `lab` salían grises). En frío cuesta ~1 s (33 MB de JSON) ⇒ **cache en `data/_thumbs/<slug>.json`**
 invalidada por `mtime+tamaño` (en caliente, ~1 ms). Test: `node test_mapas.js`.
 
+**Fotos del Mundo** (tecla **F**, el botón 📷 de los mandos táctiles, o `await game.foto()`). `mcFoto`
+compone la captura y la sube; galería en `GET /fotos` (`fotos.html`) sobre `GET /api/fotos` ·
+`POST /api/fotos` `{png:<base64>, ficha}` · `DELETE /api/fotos/<id>` (a papelera). Almacén:
+`data/fotos/<n>_<mapa>_<fecha>.png` + un `.json` hermano con la misma ficha en crudo (para ordenar y
+volver a las coordenadas sin leer la imagen). Tres cosas que no son obvias:
+- ⚠️ **La captura es SÍNCRONA justo detrás de un `mcRender()` propio.** El canvas se crea sin
+  `preserveDrawingBuffer` (`app.js:5425`), así que leerlo tras un `await`, un `setTimeout` o un
+  `requestAnimationFrame` devuelve **negro**. Misma regla que los tests de navegador.
+- **`toDataURL` y no `toBlob`**: `toBlob` es asíncrono y sacaría la escritura del portapapeles fuera
+  del gesto de teclado que la autoriza. Del mismo base64 salen el POST y el `Blob`.
+- **El portapapeles es un extra que casi nunca se cumple**: `navigator.clipboard` solo existe en
+  contexto seguro y el Mundo se sirve por HTTP plano, así que abierto por IP no está (y para una
+  imagen no vale el apaño de `execCommand` de `mcCopyTraceText`). Por eso el camino que siempre
+  funciona es el servidor, y la ficha va **quemada en el PNG** para sobrevivir a copiar y pegar.
+
 No hay tests; verificar con un navegador (o Playwright headless: cargar `file://.../index.html`,
 comprobar `#voxel-count` y capturar `screenshot`). API verificable con `curl` (`/api/mapa`, `/api/habitantes`).
 
@@ -86,6 +101,93 @@ actual sale en magenta sólido y los de otras capas tenues; en **3D** se pinta l
 Mundo **Y-arriba** (el `y` del dibujo es la PROFUNDIDAD); el origen es la **esquina de la celda 16³**
 que contiene el mínimo (`Math.floor(min/16)*16`), no el mínimo — es lo que hace `mcStructGeom` al
 mallar; y el punto es el **centro** de la celda marcada (`+0.5`), no su esquina.
+
+**Máscara de caras (herramienta 🃏 «Caras», tecla `A`):** un voxel puede pintar **solo algunas de sus
+6 caras**, que es lo que convierte un voxel en un plano — mata de hierba, bandera, cartel. Clave de
+primer nivel `caras` (mismo patrón que `pivotes`: sobrevive al guardado sin tocar `server.py`):
+
+```json
+"caras": { "8,0,4": 12, "8,0,5": 48 },
+"atravesable": true
+```
+
+Entero **0..63**, bit `i` = `CUBE_FACES[i]` (`app.js`): `0=+Z arriba · 1=−Z abajo · 2=+X · 3=−X ·
+4=+Y · 5=−Y`. **`MC_FACES`, el mallado del Mundo, usa el MISMO orden de índices**, así que no hay
+conversión editor↔mundo; lo único que cambia entre los dos es cómo se permutan al girar. En memoria
+es `state.caras`, un `Map` paralelo a `state.voxels`, y viaja por `edit()`/`snapshot()` (deshacer),
+`rotateModel`, `resizeGrid`, `moveSel`, copiar-pegar y `load`/`exportJSON`/`localSnap` igual que los
+pivotes. `normCaras()` filtra claves mal formadas, fuera de rejilla y valores fuera de `[0,63]`.
+
+⚠️ **La máscara es del OBJETO, no del voxel.** Mientras `state.caras` esté **vacío** el dibujo se ve
+entero (`caraMask` devuelve 63 para todos); en cuanto hay **una sola** marca en cualquier voxel, todo
+lo que no esté marcado se oculta — un voxel **sin entrada** en el Map ya no significa «las seis», sino
+«ninguna». De ahí las dos lecturas, y confundirlas es el bug: **`caraMask(x,y,z)` = lo que se PINTA**
+(63 si el objeto no tiene marcas, 0 si las tiene y este voxel no) y **`caraMaskRaw(x,y,z)` = lo que
+está GUARDADO** (0 cuando no hay entrada). El render lee la primera; la herramienta edita con la
+segunda. Lo que **no se guarda es el 0** (`setCaraMask(...,0)` borra la entrada); el **63 sí se
+guarda**, porque «las seis marcadas a mano» no es lo mismo que «sin marcar».
+
+**Gestos:** izquierdo marca la cara resaltada en rojo, derecho la desmarca (arrastrando barre, y todo
+el trazo es UN paso de deshacer); Shift+clic marca las seis de ese voxel; **botón derecho sobre el
+botón de la herramienta borra todas las marcas del objeto**, que vuelve a verse entero. El botón de la
+barra alterna **«Marcadas»** (las marcadas en rojo y el resto dibujado con su color, para poder
+clicarlo) y **«Ocultas»** (solo las marcadas, como se verá en el Mundo) — ocultas se siguen pudiendo
+clicar, así que ocultar una cara nunca es irreversible.
+
+**Se pinta en las DOS vistas, y no por comodidad.** En 3D hay que apuntar a una cara de verdad, y a la
+de debajo y a las que dan al fondo no se llega sin girar la vista buscando el ángulo. En **Capas** la
+celda enseña las seis a la vez, repartida en las mismas zonas donde se pintan las marcas: los **cuatro
+bordes** son las caras de los lados (`+X` derecha, `−X` izquierda, `+Y` abajo, `−Y` arriba), el **punto
+del centro** es `−Z` y **el resto de la celda** es `+Z`. Mismo gesto que en 3D (izquierdo marca,
+derecho desmarca, Shift las seis, el arrastre barre) y un resalte blanco enseña la zona antes de
+pulsar, porque con el objeto sin marcas no hay nada dibujado que la anuncie.
+
+⚠️ El reparto sale de **`carasZona2d`, que es la única definición**: la usan el dibujo
+(`drawCarasCell2d`), el resalte y el inverso que resuelve el clic (`caraDeCelda2d`), así que se marca
+donde se ve y las tres no pueden desalinearse. La excepción a tener en cuenta al tocarlo: la zona de
+`+Z` es la **celda entera** porque lo que pinta es un tinte translúcido por debajo de todo lo demás,
+mientras que como región de clic es lo que **sobra** al descontar las otras cinco (por eso
+`caraDeCelda2d` la deja de última). Coinciden igual —el único sitio donde ese tinte se ve a solas es
+justo el sobrante—, pero un test que pulse en su centro de masas acaba dando en el punto del envés.
+
+En Capas «Caras» **no pasa por `applyTool`**: necesita el punto exacto dentro de la celda y `applyTool`
+solo recibe la celda, así que lo resuelven `pointerdown`/`pointermove` de `editCv`. Por lo mismo el
+`pointermove` no puede usar el «¿ha cambiado de celda?» del resto de herramientas — dentro de una misma
+celda el cursor va del borde al centro sin que `hover` se mueva.
+
+⚠️ **Dos piezas con máscara pegadas: el envés se hunde un pelo (`mc.carasInset`, 0,08 voxels finos).**
+Una cara con máscara se emite **dos veces**, una por bobinado (`dosCaras`), o el plano desaparece al
+mirarlo por detrás. Pero eso rompe el árbitro de siempre: cuando dos estructuras se tocan, las dos
+emiten su cara en el plano que comparten y el empate lo deshace el **culling de traseras**
+(`mcStructGL`, ver más arriba) — sobrevive la que mira a la cámara. Una cara de dos caras se rasteriza
+por los **dos** lados, así que las dos piezas ponen una cara mirando a la cámara **a la misma
+profundidad**: con `depthFunc(LESS)` gana la que se dibujó antes, o sea el orden de estampado. El
+dueño lo reportó como «se pegan las caras, no hay prioridad de cuál se pinta antes, hay un efecto de
+mezcla de texturas». **No es parpadeo** (no baila al mover la cámara: el empate se resuelve igual cada
+frame), y por eso `game.structBias` no lo arregla — las dos son estructura y llevan el mismo sesgo.
+El desempate es geométrico: el **anverso se queda EXACTO** en el plano del voxel (así el culling sigue
+arbitrando lo de siempre, y un asset sin `caras` no cambia ni un vértice) y el **envés se mete
+`mc.carasInset` hacia dentro de su propio voxel**. Un envés siempre se mira desde dentro, así que
+hundirlo lo **acerca** al que mira ⇒ gana siempre la pieza de este lado, decidido por geometría y no
+por el orden. `mc.carasInset = 0` lo apaga (escape de reserva, como `game.structBias`); cambiarlo
+exige re-mallar (`delete mc.structs[clave]`).
+
+**Límites conocidos y aceptados**: `drawIso`, `drawIsoSlicedBig`, la vista 2D de Capas y la ficha de
+material enseñan la pieza «llena» (en Capas las marcas **se pintan y se editan**, pero el voxel se
+sigue dibujando entero: la celda dice qué caras hay, no cómo quedará en el Mundo). Y un **16³ macizo con `caras` deja de ser `blockLike`**: pasa a
+estructura fina a propósito. Ojo, el motivo **ya no es** que el terreno pierda la máscara —desde
+`mc.recorte`/`mcTapaCara` (más abajo) la respeta—, sino que **lo que se pone A MANO se prefiere fiel**:
+como bloque son 6 texturas agujereadas y NADA detrás (se ve el otro lado), mientras que la pieza fina
+enseña sus voxels de dentro. Desde **scripting** manda `setVoxel`, y ahí sí se usa el terreno: es la
+diferencia entre poner una pieza y levantar un bosque.
+
+Tests: `node test_caras_mascara.js` (contrato y permutación) · `node test_caras_render.js` (los tres
+sitios del editor) · `node test_herramienta_caras.js` (gestos en 3D) · `node test_caras_2d.js` (el
+reparto de la celda en Capas: cada zona da su cara y solo la suya) · `node test_caras_mundo.js` (mallado) ·
+`node test_caras_pegadas.js` (**el guardián**: un asset sin `caras` sale píxel a píxel igual que antes
+de que esto existiera, **y** dos piezas con máscara pegadas dan la misma imagen se estampen en el
+orden que se estampen — con `mc.carasInset=0` el test exige que vuelva a depender del orden, o no
+estaría mirando nada). Asset de referencia: `assets/hierba-alta.vox.json`.
 
 **Historial (deshacer/rehacer):** snapshots `{voxels,size}` en `undoStack`/`redoStack`, **una entrada
 por gesto** (`beginGesture`/`endGesture` en trazos con arrastre; `edit(fn)` para acciones atómicas —
@@ -238,7 +340,16 @@ cuatro, enseña la clave exacta `asset:assets/<id>.vox.json` y deja editar `alia
   (PATCH con `alias:''`), no guardar.
 - La identidad de un asset sigue siendo **su fichero**: ni renombrar ni poner alias mueven nada, porque
   cada voxel del mundo guarda `asset:assets/<id>.vox.json`.
-- Solo assets del juego. Las piezas de `data/habitantes/` (`hab:<id>`) no tienen alias.
+- Solo assets del juego. Las piezas de `data/habitantes/` (`hab:<id>`) **no tienen alias**: no pasan por
+  `mcIndexAssets`, así que ni su id ni su rótulo valen como clave — la única que funciona es `hab:<id>`.
+  Su ficha (`openFicha(h,'hab')`, `fichaKind`) enseña eso y **esconde** la mitad editable en vez de
+  ofrecer un nombre corto que no haría nada.
+- ⚠️ **Guardar enruta por el ORIGEN del dibujo, no por su tipo.** `serverKind` (`'hab'|'asset'|null`)
+  viaja junto a `serverId` y lo lee `vaAAssets()`; `meta.type` solo decide cuando no hay origen (dibujo
+  nuevo). Enrutar por tipo mandaba a `/api/assets` cualquier habitante de tipo `textura` —el cable de
+  redstone, sin ir más lejos— y lo **duplicaba** en la otra galería con el mismo id, donde el circuito
+  (`hab:cable`) ya no lo encontraba. Un id sin espacio de nombres no identifica nada: `cable` puede
+  existir en las dos galerías a la vez. Lo cubre `test_galeria_namespace.js`.
 Las 3 **habitaciones** (Taberna/Herrería/Mazmorra) están **a escala de personaje**: `make_rooms.js`
 dibuja en unidades gruesas (geometría 28×28×13) pero escribe bloques finos S=4 → assets
 **112×112×52** con paredes de 40 frente a personajes 32³; solo guarda la **cáscara** (superficie,
@@ -260,8 +371,14 @@ que los assets/galería no se tocan. `play.doorHw` (disparo de salida en `checkE
 name,cell,exits,pos}`; `room.doorTrim` devuelve el nº; `ROOM_PROPS` en app.js; `setPlayTrim`→
 `reloadPlayRoom` recarga en vivo). Los bucles de carve/clear están acotados a la rejilla. No hay
 control en la UI. Además `window.game` vuelca `{fps,voxels,mode,room,showFPS,showVoxels,nearClip}`; `game.showFPS(false)`/`=false`
-y `game.showVoxels(true)`/`=true` muestran/ocultan los medidores de FPS y de voxels dibujados de la
-vista 3D (persistidos). `game.nearClip` (nº) y `game.nearClip = 8` regulan el umbral de zoom del recorte de cercanía (ver arriba). `project3d` hace **culling por visor** (descarta voxels con el centro fuera del
+y `game.showVoxels(true)`/`=true` muestran/ocultan los medidores de FPS y de voxels dibujados —**cada
+uno el suyo, y en los tres modos** (editor 3D `#e3-*`, Play `#play-*`, Mundo `#mc-*`); persistidos.
+`game.showOSDbuttons(true)`/`=true` enseña los dos botones de la esquina del Mundo (🧩 Código y
+✕ Cerrar), que **nacen ocultos** para que no salgan en las capturas — con teclado sobran, porque Esc
+cierra y Alt+C abre los snippets. ⚠️ **En táctil `✕ Cerrar` no se puede esconder**: sin teclado no hay
+Esc y el Mundo se quedaría sin salida, así que `updateOSDbuttons` lo fuerza visible. El «¿es táctil?»
+lo da **`mcTouchOn`** (lo que decide `game.touchControls`), no la constante `MC_TOUCH`, para que las
+dos cosas no digan lo contrario en un portátil táctil. `game.nearClip` (nº) y `game.nearClip = 8` regulan el umbral de zoom del recorte de cercanía (ver arriba). `project3d` hace **culling por visor** (descarta voxels con el centro fuera del
 lienzo; `occupied` se deja completo), por eso `game.voxels` baja al acercar el zoom. La pisabilidad usa cuerpo ~28 y **erosión** de obstáculos r=3
 (huella del personaje).
 Verificación visual sin navegador: `node render_rooms.js <asset.vox.json> <out.png>` (rasteriza un iso
@@ -310,9 +427,34 @@ través de la estructura. ⚠️ **Desde el ojo el rayo se proyecta justo en la 
 punto**: para verlo como segmento hay que congelarlo con **`game.rayoFijo()`** y apartarse a mirarlo de
 lado. La etiqueta DOM del impacto dice si paró en `voxel fino` o en `bloque` y en qué celda pone.
 
+⚠️ **El volumen se marca con ARISTAS, no con relleno** (REQ-XR1), y las cajas van a las cotas
+**exactas** de la celda. Los cubos macizos a alfa constante 0.38 componían capa sobre capa
+(`1 − 0.62^k`, y con `CULL_FACE` apagado cada caja cuenta **dos**), así que tres bloques en la línea
+de visión saturaban a blanco: medido, tapaban el **92,2 %** de la pantalla; con aristas, el 4,9 %.
+Bajar el alfa no lo arregla, solo mueve dónde satura. Lo de las cotas exactas tampoco es cosmético:
+con el margen viejo (`x+0.03 … x+0.97`) dos celdas vecinas dibujan **dos líneas paralelas** donde
+debe verse una. Y `gl.lineWidth` está topado a 1 en Chrome/ANGLE, así que el grosor **no** es una
+palanca disponible. Guardián: `node test_rayos_x_lineas.js`, con cota por arriba y **por abajo**.
+
+⚠️ **El volumen son 7×5×7 celdas alrededor de los PIES.** Mirando al horizonte no entra nada en
+cuadro y parece que la tecla `X` no hace nada: hay que mirar hacia abajo, y para verlo sobre una
+pieza concreta hay que **plantarse encima**.
+
 **Cuarta línea de la etiqueta = punto de extensión `mcXrayExtra`.** `app.js` pinta tres líneas
-(coordenadas · tipo · material) y deja un hueco: `mcXrayExtra(clave, s|null) => 'texto'`, que rellena quien
-sepa algo que el framework no sabe. Hoy lo engancha `mundo-autoarranque`, y muestra **el comportamiento del
+(coordenadas · tipo · material) y deja un hueco: `mcXrayExtra(clave, s|null, x, y, z) => 'texto'`, que
+rellena quien sepa algo que el framework no sabe. `(x,y,z)` es la **celda** de la etiqueta —de la rejilla,
+o el origen de la estructura— y va suelta y no en un array a propósito: esto corre una vez por etiqueta y
+frame (hasta ~250), y un array por llamada es basura para el GC a 60 fps. El texto puede llevar **varias
+líneas** (`\n`): `.mc-xlbl-extra` es `white-space:pre-line` contra el `nowrap` del padre.
+
+⚠️ **El hueco lo comparten dos enganches, y no de la misma forma.** `mundo-autoarranque` lo **asigna**
+(`window.mcXrayExtra = etiquetaRayosX`) y `redstone/redstone.js` lo **envuelve** encadenando al anterior
+(sello `_redstone` para no apilarse al re-ejecutarse, `_orig` debajo). Funciona porque el orden es fijo:
+el snippet asigna en su línea 3189 y arranca redstone en la 3366, así que el motor siempre llega después;
+y si el snippet se re-ejecuta y borra el envoltorio, vuelve a cargar redstone y se rehace solo. **Un
+enganche nuevo debe envolver, no asignar** — asignar borra en silencio las líneas de los demás.
+
+`mundo-autoarranque` muestra **el comportamiento del
 material y los giros de ESA instancia** (`X` cabeceo · `Y` giro · `Z —`, más `(origen …°)` con el horneado
 de `rot`+`frente`). Si la pieza está parada dice **por qué**: `en reposo (pide 90°, cono -90..30°)` o
 `en reposo (a 14 bloques, alcance 12)` — son arreglos distintos (abrir `limites` / recolocar la pieza vs
@@ -322,8 +464,25 @@ causa de «un brazo me sigue y el otro solo si paso por detrás», y se ve compa
 `window`, así que un snippet (que corre en `new Function`) no podría engancharse. Si el hook lanza, `app.js`
 lo **desengancha y avisa una vez** — si no, sería un warning por etiqueta y frame.
 
+**Quinta línea: el NIVEL de señal (`redstone/redstone.js`, REQ-XR2).** Es lo único de un circuito que no
+se ve mirándolo — la clave dice si una lámpara está encendida, pero no con cuánto, y un cable a 1 y otro a
+14 son el mismo bloque. Dos casos, y son dos a propósito:
+
+- **pieza de circuito** → `⚡ recibe`, y `⚡ recibe → saca` si entrega algo distinto. Un repetidor sale
+  `⚡ 13 → 15`, que es justo la respuesta a «por qué el tendido de después no se acorta».
+- **bloque macizo cualquiera** → solo si de verdad está haciendo de **puente** (r1.2), y la energía
+  **débil** se marca como tal: un cable no la lee, así que «le llega 12 débil, la lámpara de al lado
+  enciende y el cable no» deja de ser un misterio. **El 0 no se pinta**: serían ~245 etiquetas de ruido.
+  Válvula de escape si un material no debería transportar: `game.redstone.aislante(clave)`.
+
+Solo bloques de rejilla: el motor lee `mc.grid`, así que una estructura fina (`s` no nulo) no lleva línea
+—su celda de origen contendría otra cosa y la cifra sería mentira—. Y salida rápida por `hayCircuito`: un
+mundo sin redstone no paga nada.
+
 Test: `node test_rayo_apuntado.js` (extrae las funciones verbatim de `app.js`; fija la regresión
-comprobando que la celda **sí** da sólida por AABB pero el rayo **no** cruza voxel lleno).
+comprobando que la celda **sí** da sólida por AABB pero el rayo **no** cruza voxel lleno) ·
+`node test_rayos_x_power.js` (la línea de señal, el encadenado con `mundo-autoarranque` y que app.js
+pase la celda de verdad en las ~100 etiquetas de una vuelta real de `mcUpdateXrayLabels`).
 
 **Coste de rayos-X: se recorre la ESTRUCTURA, nunca el voxel.** `mcXrayVolume` dibujaba las cajas
 naranjas preguntando `mcFineSolidAt` **voxel fino a voxel fino** de la caja del jugador, y cada pregunta
@@ -334,6 +493,251 @@ recorren los voxels que de verdad caen dentro: 17 ms → **0,23 ms**. Es la mism
 fina — **barrer el AABB en voxels finos no escala**. Test: `node test_rayos_x.js` (dibuja el mismo
 conjunto que la versión ingenua, no llama a `mcFineSolidAt` ni una vez, y 200 estructuras lejanas no
 reciben ni una lectura).
+
+## `atravesable` — se ve, se apunta y se rompe, pero no frena (`bits` vs `bitsAim`)
+
+Una mata de hierba se cruza al andar y sin embargo tiene que seguir pudiéndose romper de un clic. Son
+**dos preguntas distintas sobre la misma materia**, y por eso hay dos bitsets, no uno:
+
+| | qué significa | quién lo lee |
+|---|---|---|
+| `g.bits` | **¿me frena?** (colisión) | `mcFineSolidAt` → `mcCollidesWorld` → `mcCollides` |
+| `g.bitsAim` | **¿hay materia aquí?** (ocupación real) | `mcStructCellSolid`, `mcStructRayHit`, `mcStructAt`, `mcBreak`, `mcXrayVolume` |
+
+Por defecto **`bitsAim` es la MISMA referencia** que `bits` (cero memoria, cero divergencia). Solo
+divergen las piezas atravesables: `bits` = `Uint8Array` de **ceros**, `bitsAim` = la ocupación real.
+
+⚠️ **`bits` nunca es `null`.** `mcStructColl` devuelve `null` si la pieza no tiene `bits`, y entonces
+la hierba desaparecería también del **apuntado** — no se podría romper. Además
+`data/snippets/mundo-autoarranque.json` **re-implementa el bucle leyendo `g.bits`** (`golpe`,
+`claveFinaEn`, el barrido de `trepable`), con un `if(!g || !g.bits) continue`. Por eso `mcFineBoxHit`,
+`mcFineSolidAt` y `mcStructColl` quedan **byte-idénticas**: la capa de apuntado va **encima** de ellas.
+
+**Un material se declara atravesable por dos vías que producen la MISMA forma**, así que `app.js` no
+necesita saber de cuál vino:
+
+1. **El documento** — `"atravesable": true` en su `.vox.json` (casilla en la tarjeta *Objeto*). Es
+   intrínseco del material. **No se deriva de la máscara de `caras`**, y los dos casos reales dicen por
+   qué: el tallo de la mata es un voxel normal de 6 caras y debe atravesarse igual, mientras que una
+   vidriera enmascarada tiene que seguir chocando. Derivarlo daría lo contrario en ambos.
+2. **El mundo** — `game.bloques.define('hab:hierba', { atravesable:true })` en el snippet, que envuelve
+   `mcStructColl` y clona el `g` (cacheado por `clave|rot`). `game.bloques.quitar()` lo deshace.
+
+Y **también hay dos mitades por material**, porque un material vive en uno de dos sitios:
+
+- **Estructura fina** — lo de arriba, cero líneas de `app.js` para la vía 2.
+- **Bloque de terreno (`mc.grid`)** — `mcSolid` **NO se parchea** (lo usan a la vez el mallado, el rayo
+  de apuntar y romper/poner: apagarlo ahí descosería las caras de los vecinos y borraría la pieza del
+  apuntado). Va por **otra pregunta sobre la misma rejilla**, `mcSolidWalk` («¿me frena al andar?»),
+  que consulta **dos** arrays indexados por id de bloque, los dos `null` mientras nadie sea atravesable:
+  `mc.atraviesa` (lo escribe el **snippet**) y `mc.atraviesaDoc` (lo hornea **`mcBuildPalette`** desde
+  el `"atravesable"` del propio documento). Se leen en **ese solo sitio**. Para que un material del
+  documento vuelva a chocar hay que quitarle el flag al `.vox.json`: `game.bloques.quitar()` solo
+  deshace lo que puso el snippet.
+
+### Desde scripting: una hoja es un BLOQUE, como en Minecraft (`setVoxel`)
+
+`setVoxel` escribe siempre en `mc.grid`, y ahí un material se dibuja proyectando su dibujo sobre las 6
+caras del cubo (`buildTexFaces`). Eso **ya no pierde** la máscara de `caras` ni el `atravesable`, así
+que un bosque entero de hojas se planta desde un script **sin un solo draw call extra**:
+
+```js
+setVoxel(x, y, z, 'leaves');          // TERRENO: bloque de RECORTE, con sus agujeros, y se cruza al andar
+game.stamp('leaves', x, y, z, rot);   // PIEZA FINA: para lo que NO cabe en una celda (forma, alpha real)
+```
+
+Medido con 200 hojas (`test_stamp_scripting.js`): **`setVoxel` = 60 ms y 0 draw calls extra**;
+`game.stamp` = **385 ms y 200 draw calls**. Con 2000, `game.stamp` son ~2,4 s — el snippet de montañas
+del dueño se colgaba con eso. Son **cuatro piezas**, y las cuatro hacen falta:
+
+1. **La máscara llega a la textura** — `buildTexFaces` respeta `caras`: si el bit de esa cara está
+   apagado, el texel sale con **alpha 0** y la textura pasa a ser de **RECORTE**. ⚠️ Manda el **primer**
+   voxel de la columna, tenga la cara encendida o apagada: seguir buscando detrás rellenaría el agujero
+   con la cara opuesta de la cáscara y el bloque volvería a salir macizo. Un solo texel transparente
+   enciende `mc.atlasHasAlpha` ⇒ el shader del terreno hace `discard`.
+2. **Un bloque de recorte NO tapa** — `mcTapaCara(x,y,z)` es la **tercera** pregunta sobre la misma
+   rejilla (`mcSolid` = «¿hay materia?», `mcSolidWalk` = «¿me frena?» —que en las celdas finas se afina
+   por la FORMA, ver `mcTerrenoChoca`—, `mcTapaCara` = «¿tapa esta cara?»), y otra vez lo que la separa
+   de `mcSolid` es un array: **`mc.recorte`**, `Uint8Array` por id
+   de bloque que hornea `mcBuildPalette` junto al alpha del atlas. La lee **un solo sitio**, el mallado
+   del chunk; **`mcSolid` queda byte-idéntico** porque lo comparten el rayo de apuntar y romper/poner.
+   Sin esto, por los agujeros de una copa se ve el **vacío**: las caras de dentro estaban peladas. Es la
+   regla de las hojas «fancy» de Minecraft. Medido sobre una copa de 311 bloques: **+15,8 % de
+   vértices, los MISMOS 36 draw calls y el mismo ms/frame** — el culling de chunk cambia el tamaño del
+   VBO, no el número de llamadas. Con `mc.recorte = null` (nadie tiene agujeros) es `mcSolid` pelado.
+3. **`mc.atraviesaDoc`** — el `"atravesable"` del documento vale también en la rejilla (arriba).
+4. **`mc.finoRejilla` — lo que NO llena su celda se dibuja con su GEOMETRÍA DE VERDAD, dentro de la
+   malla del chunk.** Proyectar sobre las 6 caras solo es fiel si el dibujo **toca las paredes** de la
+   celda (`leaves` va de 0 a 15: es una cáscara). Una **flor** vive en x 6..10, y 6..10: su silueta se
+   pega a las 4 paredes y de lejos se veían **cuatro tiras verticales separadas** con un **cuadrado
+   oscuro** debajo. La señal que las separa ya existía: **`rec.pielCubre`** de `mcStructCells`. Con
+   ella `mcBuildPalette` hornea `mc.finoRejilla` (`app.js:5469`), `Uint8Array` por id de bloque,
+   1 = «este material no llena su celda», y deja la geometría de `rot 0` lista en `mc.finoGeom`
+   (`:5476`, caché **aparte** de `mc.structs[k].meshRot`, que `mcRestampAll` borra en cada estampado).
+   ⚠️ **La celda sigue siendo celda de rejilla; lo que cambia es lo que emite el mallador.**
+   `mcMeshChunk` (`:6512`) pide la tabla a `mcTablaFina()`, aparta esas celdas del bucle de cubos y
+   copia su geometría real —trasladada a coordenadas de mundo y con la luz de la celda horneada por
+   cara— a **dos lotes por chunk**, `finoVbo` (opaco) y `finoAVbo` (con alfa), que se dibujan con
+   `mc.structProg` (stride 9: pos3, rgb3, shade, emit, alpha). Es el **mismo programa que las piezas
+   finas**, y por eso geometrías distintas caben en un mismo buffer: va a **color por vértice**, no al
+   atlas del terreno. **Un lote por chunk, no uno por flor** ⇒ 200 flores siguen costando **0 draw
+   calls** (medido: 60 ms en rejilla frente a 397 ms y 200 draw calls como piezas sueltas).
+   El lote entra **también en el pase del sol** (`:6468`), así que la flor proyecta la sombra de su
+   silueta y no la de un cubo. `mcTapaCara` (`:5507`) devuelve `false` sobre una celda fina: no es un
+   cubo, no puede tapar la cara del vecino.
+   Válvula: `mc.finoExtra[id]`, en los dos sentidos y con el idioma de `mc.traspasaLuz` (1 = geometría
+   real siempre, 2 = nunca, proyéctalo como cubo). Guardián: `test_flor_en_rejilla.js`.
+
+**Lo que `setVoxel` avisa se reduce a lo que de verdad no cabe en una celda**, y son dos cosas:
+la **FORMA** (la piel no cubre el cubo **y ocupa varias celdas**, así que cada una se proyecta suelta
+como un cubo lleno) y la **transparencia real** (el atlas recorta, no mezcla).
+Una mata o una flor **ya no avisan**: caben en una celda, el mallador emite su geometría de verdad y
+se ven como el documento (punto 4 de arriba). Lo decide `rec.pielCubre`, que
+`mcStructCells` calcula con las tres proyecciones de 16×16 del dibujo. `caras` y `atravesable` **ya no
+son motivo de aviso**. Se avisa una sola vez por material, por consola **y por toast**: el dueño
+construye desde el móvil y ahí un `console.warn` es indistinguible de «el script no hace nada».
+
+⚠️ **`buildTexFaces` tiene que aplicar la regla del OBJETO, y no aplicarla fue el «cubo verde».**
+El dueño reportó con una captura que las mismas hojas puestas por script salían como un cubo verde
+macizo y puestas a mano salían frondosas. La causa era **una línea** del horneado de la textura
+(`app.js:1078`): al buscar el primer voxel opaco de cada columna trataba «este voxel **no tiene**
+entrada en `caras`» como **63** (pinta las seis) en vez de **0** (no pinta ninguna), que es la regla
+que sí siguen `caraMask` y `mcStructGeom`. Efecto: los voxels **de dentro** del follaje, que en la
+pieza fina no pintan nada, al proyectarse **tapaban todos los agujeros de la cáscara**. Medido sobre
+`assets/leaves.vox.json`: las 6 caras salían **85-93 % opacas**; con la regla correcta salen
+**34-45 %** y `hueco` pasa a `true`, o sea el shader del terreno hace `discard` y se ve a través.
+**Era un fallo del motor, no de autoría del asset.** La zona de pruebas de `/map/test` deja el A/B
+plantado (ver abajo).
+
+⚠️ **Límite que sí sigue en pie: `pielCubre` mide la SILUETA, no el aspecto.** Un dibujo volumétrico
+y denso —un follaje— cubre sus 16×16 columnas en los tres ejes, así que pasa el test y `setVoxel`
+**no avisa**, aunque el terreno solo pueda pintar su cáscara sobre 6 caras. Con el horneado ya
+correcto eso deja de doler para un asset con `caras`, pero para uno **sin** máscara y con interior
+interesante el aviso sigue sin saltar: `pielCubre` responde «¿cabe la silueta?» y la pregunta que
+importa es «¿se parece?». Es un límite conocido, no un pendiente.
+
+`game.stamp(material, x,y,z, rot)` sigue siendo lo mismo que hace la mano (`mcPlace` →
+`mcStampStruct`): acepta nombre corto (mismo `mcResolveMat` que `setVoxel`) o clave exacta
+`asset:…`/`hab:…`, respeta `beginBatch`/`endBatch` y devuelve `false` fuera de límites. **Precio
+explícito: cada pieza es una entrada de `mc.structures` = UN DRAW CALL y una línea en el `structures[]`
+de `mundo.json`.** Es la vía para una mata de hierba o una llama; para un bosque, `setVoxel`.
+
+**Colocar A MANO usa la MISMA función**, desde que el punto 4 hace fiel a la rejilla lo que no llena su
+celda: el clic derecho sobre una ranura de estructura ya no estampa siempre una instancia, sino que
+pregunta **`mcCabeEnRejilla(key)`** y, si cabe, llama a `mcSetVoxel`. Una flor puesta a mano deja de
+costar un draw call y de ocupar una línea del `structures[]` de `mundo.json`. Dice que **no** cabe —y
+entonces se estampa como siempre— en tres casos: **varias celdas** (una sala, un árbol), la piel cubre
+el cubo **y** es translúcida o tiene `caras` (el atlas recorta y no enseña lo de dentro), y **sin huella
+todavía** (se calienta `mcStructCells` y esa vez va de pieza).
+
+**El giro también cabe: va en la CLAVE.** Una celda de `mc.grid` es un `Uint16` con el id del bloque y no
+tiene hueco para la orientación — pero sí puede guardar **otro id**. «Esta pieza, girada así» entra en la
+paleta como un material más, con la clave del original y el sufijo **`@<ori>`**, donde `ori = giro |
+vuelco<<2` (1..15; el 0 no se escribe). Puesto ahí, el giro viaja **solo** por todo lo que ya existía, sin
+tocar una línea: `mc.grid` sigue siendo ids, el guardado sigue escribiendo `tex:<clave>`, la paleta del
+`.vox` v2 y `/api/mundo/edits` tratan la clave como cadena opaca (`server.py` ni se entera) y al recargar
+el mundo la variante se da de alta sola como cualquier material que venga del fichero. Y como
+`mc._geoFina[id]` devuelve la geometría horneada **de ese id**, el mallado, la sombra y la colisión por
+forma salen girados gratis. Las tres piezas: `mcClaveBase` / `mcClaveOri` / `mcClaveConOri`; `getRoomData`
+comparte el documento con la clave base (ni un `fetch` de más) y `mcBuildPalette` hornea
+`mcStructGeom(base, ori)`. `setVoxel(x,y,z,'flor@1')` también lo entiende (`mcMatKey`), y rayos-X enseña
+ese mismo nombre. `R`/`Shift+R` **precargan** la variante mientras miras el fantasma
+(`mcPrecargaGirada`), para que el clic sea el camino normal y no el de «material pendiente».
+
+⚠️ **Dar de alta una variante NO puede pasar por el camino largo de `mcAddBlock`.** Medido en el mapa de
+512×40×512: **3 873 ms** por `mcBuildPalette` (re-hornea los N materiales) + el atlas creciendo de alto,
+que cambia las UV de **todos** los bloques y obliga a `mcMeshAll`. El atajo es `mcAltaVariante`: apende las
+casillas de la paleta a mano y le pasa **las UV del original**, así que el atlas no crece, nada de lo ya
+mallado caduca y no se re-malla nada → **6 ms en frío** (hornear la geometría girada incluida). Es la regla
+general: *si el atlas no cambia de alto, no hay que re-mallar el mundo*.
+
+Lo único que sí se sigue estampando al girarlo es **lo que se proyecta sobre las 6 caras del cubo**
+(`mcEsFinaEnRejilla` en `false`: `blockLike` o `pielCubre`): ahí el giro no se vería, y perderlo en
+silencio sería peor que gastar el draw call.
+
+Y **la celda fina también choca por su FORMA**, no como el cubo de 16/16 — que fue justo lo que se rompió
+al estrenar esto: una placa de **un voxel de alto** puesta con el clic derecho se convertía en un muro de
+bloque entero y ya no se podía pisar. `mcTerrenoChoca` (el bucle de terreno que comparten `mcCollides` y
+`mcCollidesWorld`, extraído para que la regla viva en **un solo sitio**) sondea el mismo bitset `bits` que
+usa la instancia estampada, en 1/16, cuando la celda está en `mc._geoFina`. Sin materiales finos esa tabla
+es `null` y el bucle es el de siempre; con ellos, el sondeo fino solo entra en las celdas que lo son y no
+reserva memoria (el pecado histórico de esta zona fue sondear el AABB fino con claves `string`).
+Válvula por si acaso: `game.useOldStructBuildCall = true` (persiste en `localStorage`,
+`vf_mcOldStructBuild`) devuelve el `mcStampStruct` de siempre. El único punto de decisión es `mcPlace`:
+los dos gestos que construyen (`pointerdown` y `mouseup` con el botón derecho) pasan por ahí. Guardianes:
+`test_clic_derecho_rejilla.js` y el §6 de `test_flor_en_rejilla.js`.
+
+⚠️ Lo que **no** hereda la celda: el par `bits`/`bitsAim` — en la rejilla, `atravesable` lo resuelve
+`mc.atraviesaDoc`, que hace la celda caminable entera (`mcSolidWalk`), y ahí ni se llega a mirar la forma.
+
+### La textura que falta se carga sola (`setVoxel` ya no pone roca por ti)
+
+`setVoxel(x,y,z,'flor_amarilla')` **sin haber llamado antes a `game.addMaterial`** ponía un bloque de
+**roca gris**. Y no por falta de información: `assets/index.json` ya decía que `flor_amarilla` es
+`assets/flor-amarilla.vox.json`. El motor sabía exactamente qué fichero querías y aun así ponía piedra,
+porque `mcResolveMat` solo mira la **paleta cargada** y su fallback es roca. Ahora:
+
+```js
+setVoxel(x, y, z, 'flor_amarilla');   // se carga la textura sola; NO hace falta el addMaterial de antes
+```
+
+La mitad de `mcResolveMat` que traduce motes está separada en **`mcMatKey(m, mLow)`** (alias →
+`asset:…`/`hab:…`), y sobre ella se apoya **`mcMatPendiente`**: si el nombre resuelve a una clave que se
+puede ir a buscar a disco y **no** está cargada, la celda se **apunta** en `mcPendCel`, se pide la
+textura en segundo plano (**una carga por material**, `mcPendCarga`, no una por voxel) y al llegar se
+pintan de golpe todas las celdas apuntadas + `mcFlushBuild()`. Reglas que hay que respetar al tocar esto:
+
+- **El nombre inventado sigue cayendo a roca al momento, con su aviso.** Solo se difiere lo que empieza
+  por `asset:`/`hab:` o acaba en `.json`; si no hay fichero que pedir, no hay nada que esperar.
+- **Manda la última escritura.** Un `setVoxel` normal sobre una celda apuntada la desapunta.
+- **Antes de dar de alta el material se comprueba que el fichero existe y trae voxels** (`getTexDef`,
+  que cachea, así que el `game.addMaterial` de después no re-descarga). `mcBuildPalette` se **traga** una
+  textura que falla —la pinta fucsia— y el bloque se quedaría para siempre en la lista de materiales del
+  mundo, **que se guarda en disco**: una errata no puede ensuciar el mundo.
+- **Se carga por `game.addMaterial` y no por `mcAddBlock`**: es quien invalida la caché `mcMat2id`.
+- `mcStampSrc` usa la misma pregunta, así que `game.stamp('flor_amarilla', …)` con la textura sin cargar
+  tampoco da roca — ahí no hay que esperar a nada, porque estampar no necesita la paleta.
+
+⚠️ **Efecto visible, y es el precio de todo esto: el bloque aparece un instante después.** `setVoxel` es
+**síncrono** y cargar una textura es **asíncrono**, así que un `getVoxel` inmediatamente después de un
+`setVoxel` con material sin cargar todavía devuelve **lo que había** (aire, normalmente). Lo que no hace
+es mentir poniendo otro bloque.
+
+⚠️ **`mcBuildPalette` vacía `mc.palette`/`mc.blockKey`/`mc.name2id` de golpe** y los rellena textura a
+textura: **mientras corre, TODO material parece «sin cargar»** (y `mcResolveMat` devuelve el fallback).
+Por eso la pregunta «¿está cargado?» se le hace a **`mc.blocks`** (`mcClaveCargada`), que es estable, y
+por eso existe **`mc.paletaEnObra`**: durante esa ventana la celda también se apunta y se espera a que
+la paleta termine (`mcEsperaPaleta`) en vez de escribir el bloque equivocado — pedir otra vez un
+material que ya está en `mc.blocks` lo **duplicaría**. El cuerpo real vive en `mcBuildPaletteImpl`; el
+`mcBuildPalette` de fuera solo lleva la cuenta con `try/finally`.
+
+Guardián: `node test_setvoxel_autocarga.js` (21 ok). Busca solo él un mote del índice que **no** esté
+ya en la paleta del mundo, porque las flores ya están plantadas en `/map/test`.
+
+### La zona de pruebas de `/map/test`
+
+`monta_zona_caras.js` (raíz del repo) planta en **`/map/test`** cinco puestos en fila con una **nota
+post-it** al lado de cada uno, para poder mirar con los ojos lo que los tests miden. Es idempotente:
+barre lo fino que hubiera en la caja `x 34-62 · z 40-46` antes de repoblar, porque `game.stamp` **no**
+lo es (cada pasada apila otra estructura en la misma celda).
+
+| puesto | x | qué enseña |
+|---|---|---|
+| 1 | 36 | hojas por `setVoxel` → bloque de terreno con la textura **calada** por `caras` |
+| 2 | 42 | las mismas por `game.stamp` → pieza fina; tiene que **parecerse** al 1 |
+| 3 | 48 | `demo-hojas-sin-caras` = el mismo dibujo **sin** la clave `caras` → el cubo verde de antes |
+| 4 | 54 | `hierba-alta`: 2 caras por voxel, se ve por los 4 lados y se **atraviesa** |
+| 5 | 60 | muro de tablones para probar a mano `game.bloques.define(…,{atravesable:true})` |
+
+Medido con la cámara a 5 bloques y un recuadro central de 64 px: por el puesto 1 se ve **11,8 % de
+cielo** a través del follaje y por el puesto 3 **0 %**. `assets/demo-hojas-sin-caras.vox.json` existe
+**solo** para ese A/B y está dado de alta en `assets/index.json` (el registro del cliente se alimenta
+de ese índice, no del directorio: un `.vox.json` suelto **no** se resuelve por nombre corto).
+
+Test: `node test_stamp_scripting.js` (que la hoja es de recorte y **ya no avisa**; que dos hojas
+pegadas emiten sus 12 caras y dos rocas solo 10; que la mata va al lote fino del chunk y ya no avisa;
+que `mcSolid` no cambia; que `game.stamp` crea la pieza con `bits` en ceros y `bitsAim` ocupado; y el
+precio de cada vía en ms y draw calls).
 
 ## Bloques con comportamiento (`game.bloques`) — el material manda, no el voxel
 
@@ -1305,10 +1709,559 @@ Dos cosas más que iban en el mismo frame:
   N bytes por edición (3 ms en 512²) para no cambiar ni un byte; lo corta la bandera `mc._blCero`, que
   vive junto al único sitio que escribe `BL`.
 
+#### …y una ráfaga de script tampoco (`mcBuildBox`)
+
+Lo de arriba arregla **el clic**, que va por `mcRemeshAround`. Una **ráfaga de `setVoxel`** iba por otro
+camino —`mcFlushBuild`— y ese seguía llamando a **`mcMeshAll()`**, o sea el mundo entero: skylight global
+más los 1024 chunks. Con `beginBatch`/`endBatch` eso es **un `mcMeshAll` por lote**, y un snippet que
+anima algo hace un lote **por fotograma**. El dueño lo reportó con el suyo de TNT: «en mundos grandes va
+suuuper lento, llegando a tardar unos 40 seg», y su propia teoría era la correcta — «se actualiza el mapa
+cada vez que se borran voxels… los fps caen a 0».
+
+La ráfaga apunta su **caja en planta** (`mcBuildBox`, poblada por `mcMarcaBuild` en los dos únicos sitios
+que escriben contando: `mcSetVoxel` y el volcado de `mcApuntaPendiente`) y el flush re-malla **solo eso**.
+Las tres funciones de la edición de un bloque aceptan ahora una **segunda esquina** opcional —
+`mcRelightBox(x,z,x1,z1)`, `mcRemeshAround(x,z,x1,z1)`, `mcRebakeStructsNear(x,z,x1,z1)` —; sin ella se
+comportan **exactamente** como antes, que es lo que mantiene intacto el camino del clic.
+
+- **Sigue habiendo vuelta a `mcMeshAll`**, y no es cosmética: `mcCajaCompensa` compara la caja **más el
+  halo de ±`MC_RELIGHT_R`** que necesita el skylight contra media planta del mundo. Un script que reescribe
+  el mundo entero de un lote no puede pagar el halo dos veces.
+- **El razonamiento de exactitud no cambia** al pasar de celda a caja: lo que vale es que el halo quede
+  dentro, no que la edición sea un solo bloque. Lo comprueba celda a celda el mismo
+  `test_luz_incremental_navegador.js`.
+- **`mcPonEnRejilla` limpia `mcBuildBox`** al quedarse él con el volcado; y en la otra rama (había
+  escrituras de script a medio volcar) su `mcSetVoxel` ya metió la celda en la caja, así que el flush
+  ajeno la incluye. Antes eso lo garantizaba el `mcMeshAll`.
+- **Lo que el camino de la caja NO hace**, igual que ya pasaba con el clic: re-mallar los cuerpos de
+  agente por si creció el atlas, y refrescar `mc.blockLightMeshed`. No hace falta porque la paleta **no
+  puede crecer dentro de un lote** (`mcResolveMat` manda a roca lo desconocido); lo que sí la hace crecer
+  —una textura que llega tarde por `mcApuntaPendiente`— pasa por `game.addMaterial`, que ya re-malla entero
+  **antes** de escribir sus celdas.
+
+Medido en 512×40×512 (SwiftShader, ~10× una GPU), con el snippet `explosion-tnt` del dueño: la segunda
+explosión pasa de **36 209 ms y 9 `mcMeshAll`** a **5 689 ms y 0**. Repartido: de los 35 789 ms que se
+iban en mallado quedan **304 ms** en los 9 flushes (74 ms de skylight, 42 de luz de bloque, 185 en **4
+chunks por flush** en vez de 1024). Lo que queda es tiempo de **fotograma**, no de edición: en reposo ese
+mundo ya cuesta 196 ms/frame con SwiftShader.
+
 **El tope de `game.resizeWorld` sigue en 512×256×512, y es de memoria, no de capricho.** Las cuatro
 rejillas densas son `grid` Uint16 + `light` Uint8 + `blockLight` Uint8 + `blockLightDir` Int8×3 = **7
 bytes por celda**: 512×40×512 son 73 MB, pero un `1000×40×1000` serían **280 MB** solo en arrays, antes
 de las mallas de 3 844 chunks. Subir el tope es una decisión de presupuesto de memoria, aparte de esta.
+
+### Una antorcha alumbra esté donde esté (emisores en la rejilla)
+
+`mcComputeBlockLight` nació cuando una pieza luminosa **solo podía existir estampada suelta**, así que
+sembraba la luz recorriendo `mc.structures` y leyendo sus `emitCells`. Desde que el clic derecho mete
+en `mc.grid` todo lo que cabe en su celda, una antorcha puesta ahí **se veía encendida pero no
+alumbraba nada**: no estaba en esa lista, así que no existía como foco. Es el mismo patrón que el giro
+en la clave — la pieza no cambió, cambió por dónde entra.
+
+La geometría fina de la rejilla **ya trae** `emitCells`/`emitDir` horneados (los mismos que consume la
+siembra), así que la corrección es dónde mirar, no cómo alumbrar: `siembra(cx,cy,cz,ed,k)` es una sola
+función con **dos fuentes**, las estructuras y la rejilla. Una antorcha en cualquiera de las dos vías da
+el **mismo perfil de luz**, y eso es lo que fija `node test_luz_en_rejilla.js`.
+
+⚠️ **Encontrarlas es el problema, no sembrarlas.** Barrer `mc.grid` entera en cada edición cuesta ~60 ms
+en 512×40×512 (medido), y la luz se recalcula en **cada bloque puesto o roto**. Por eso hay un índice
+disperso, `mc._glowCeldas` (Set de índices de celda), con dos reglas:
+
+- Se **rehace de cero** solo cuando cambia *qué materiales emiten* (`mc._glowFirma`: paleta nueva o
+  geometría fina recién horneada) o cuando cambia la rejilla entera (`mc._glowRef`: cargar o
+  redimensionar). Ése es el único barrido O(celdas) que existe.
+- Se **corrige celda a celda** en `mcGlowTocada(x,y,z)`, que se llama **después** de escribir en
+  `mc.grid`. `mcDirty` no vale de embudo: se corta sola cuando el guardado ya está marcado entero.
+
+Dos consecuencias que no se ven en el diff: `mcRecomputeHasGlow` mira también la rejilla (si no, quitar
+una estructura apagaría una antorcha que sigue puesta), y `mcAgentSetBlock` ya no puede saltarse el BFS
+en un sólido→sólido si la celda **gana o pierde** un emisor (pintar una antorcha encima de piedra).
+`mc.hasGlow` solo se **enciende** aquí, nunca se apaga: con `BL` a cero se ve igual (`lv=max(L,BL)`) y
+apagarla pisaría el mallado a medio poblar.
+
+### Si se ve a través, la luz pasa (`mc.recorte` por defecto · `luz:'pasa'`/`'tapa'` a mano)
+
+`leaves` estampada como **bloque** se ve negra por dentro; la **misma** pieza estampada como
+estructura fina se ve iluminada. No es el mapa de sombras del sol, es el **skylight**: el bloque ocupa
+la celda 16³ y corta la difusión (dentro `mc.light=0` ⇒ factor `interiorDark^1` = ×0,1), mientras que
+la estructura fina deja la celda como **aire** y la luz la cruza (`mc.light=15` ⇒ ×1). Por eso el
+mismo dibujo se veía de dos maneras según cómo se hubiera puesto.
+
+**Va POR DEFECTO y no hay que declarar nada**: el criterio es `mc.recorte` — si la textura del bloque
+tiene **agujeros**, la luz pasa. Es el mismo sí/no que ya usa el shader para hacer `discard` y el
+mesher para dejar de pelar caras contra él, o sea: **«si se ve a través, se ve a través»**. Roca,
+tierra y hierba son macizas y siguen tapando, así que **las cuevas siguen a oscuras**.
+
+⚠️ **Lo mide la PROYECCIÓN a las 6 caras del cubo (`buildTexFaces`), no el número de voxels.** Una
+pieza dispersa cuya cáscara tapa las seis caras **no** es de recorte y **no** es permeable por
+defecto. Se ve en los dos assets gemelos: `leaves.vox.json` (con máscara de `caras`) es de recorte;
+`demo-hojas-sin-caras.vox.json`, mismos 1548 voxels **sin** máscara, no lo es.
+
+Para la excepción está `game.bloques`, con `mc.traspasaLuz` como gancho — `Uint8Array` por id,
+**1 = pasa, 2 = tapa, 0 = lo que diga el defecto** (o `null` = nadie ha dicho nada, lo normal):
+
+```js
+game.bloques.define('hab:vidriera', { luz:'tapa' });   // es de recorte pero SÍ debe dar sombra
+game.bloques.define('hab:reja',     { luz:'pasa' });   // es maciza pero debe dejar pasar la luz
+game.bloques.quitar('hab:vidriera');                    // vuelve al defecto
+```
+
+El `'tapa'` no es adorno: desde que el defecto está encendido, sin él **no habría forma** de decir que
+una vidriera de recorte tiene que sombrear.
+
+Las dos fuentes se combinan en **`mcTablaLuz()`** (primero `mc.recorte`, encima `mc.traspasaLuz`), que
+se lee en **dos sitios y solo dos**: `mcComputeLight` (barrido global) y `mcRelightBox` (incremental).
+Añade el aire (id 0) pase lo que pase y tolera que la paleta haya crecido después. Se construye **una
+por llamada** a propósito: `mc.recorte` lo rehornea `mcBuildPalette` y `mc.traspasaLuz` lo escribe el
+snippet, así que una tabla cacheada se quedaría vieja sin que nadie la invalidara. Que el defecto no se
+quede viejo lo garantiza `mcAddBlock` → `mcMeshAll` → `mcComputeLight`.
+
+⚠️ **Los dos tienen que usar los MISMOS predicados, sin excepciones.** En cuanto difieran en un solo
+`if`, el mundo editado deja de coincidir con el recién cargado — que es exactamente lo que compara
+celda a celda `test_luz_incremental_navegador.js`.
+
+⚠️ **`luz:'pasa'` NO abre la columna de cielo.** Los dos bucles de siembra vertical conservan su
+`if(g[i]!==0) break;`, así que un dosel de hojas **sigue dando sombra** a lo que tiene debajo (medido:
+bajo el dosel 11, al aire libre 15). Es una decisión, no un olvido: si la columna se abriera, un
+bosque dejaría de dar sombra.
+
+**No cuesta nada.** Medido en los dos mundos reales (96×40×96), el barrido de skylight va de 23,6 a
+23,6 ms en `/map/test` y de 20,5 a 16,5 ms en `/map/agents`. Y la fuga está acotada: encender el
+defecto solo sube la luz de **98 celdas de aire de 230 821**, porque el único material de recorte que
+hay en los dos mapas es `leaves`.
+
+Cambiar la lista de excepciones obliga a recalcular la luz y **re-hornearla en las mallas**
+(`mcMeshAll` + `mcRestampAll`), que es lo más caro del snippet. Por eso solo se dispara cuando cambia
+de verdad la **lista de ids** (`luzFirma`, con el `id:valor` para distinguir `pasa` de `tapa`), no el
+array: `reconstruirCache()` también salta cuando la paleta crece por `game.addMaterial`, y comparar
+arrays de distinto largo remallaría el mundo entero por un material que no tiene nada que ver.
+
+Test: `node test_luz_traspasa.js` (24 ok) — el interior de una masa de hojas pasa de 0 a 12 y
+**ninguna** celda de aire pierde luz; el dosel sigue sombreando; el incremental coincide con el global;
+un material de recorte se ilumina **sin declarar nada** y `luz:'tapa'` lo devuelve a 0; y, metiendo la
+cámara en un hueco rodeado de hojas (la foto del dueño), el brillo de pantalla va de **2,4 a 16,9**.
+
+⚠️ Para VER la diferencia hay que estar en un **hueco de aire** rodeado del material, no en el macizo:
+las caras interiores de una masa maciza no se mallan (el greedy solo emite la que da a aire), así que
+desde dentro del macizo no se ve la masa sino el mundo de fuera, y la medida sale idéntica. Es el
+error que dio 46,4 → 46,4 en la primera versión del test.
+
+## 🔴 Redstone — vive FUERA de `app.js`, en `redstone/`
+
+Petición explícita del dueño: **«todo lo de redstone va en ficheros aparte, aunque luego se llamen
+desde otros de scripting»**. Los fuentes son `.js` normales en `redstone/` (editables, con resaltado,
+comparables en git) y `node redstone/make_snippets.js` los publica en `data/snippets/` por
+`POST /api/snippets` — por la API y no escribiendo el `.json` a mano, que es lo que da el respaldo en
+papelera y la escritura atómica. Que un snippet cargue a otro no es nuevo: `agente-nube` ya se traía
+código por `/api/snippets/<id>` y lo corría con `AsyncFunction` en el ámbito global.
+
+| fichero | qué es |
+|---|---|
+| `redstone/redstone.js` | el **motor**: mueve señal. No sabe qué es una antorcha. |
+| `redstone/redstone-arranque.js` | lo que **carga solo** el mundo: motor + tabla `DEFECTOS` de circuitos de serie. |
+| `redstone/redstone-piezas.js` | las **piezas** (cable, palanca, placa, puerta, repetidor, bloque de redstone): circuito + física + clic derecho. |
+| `redstone/redstone-demo-antorcha.js` | el **circuito** de ejemplo: planta la antorcha y te da el bloque rojo. |
+| `redstone/redstone-ejemplos.js` | monta las **nueve parcelas** de `/map/redstone`, cada una con su cartel. |
+| `redstone/montar_ejemplos.js` | lo lanza en un navegador de verdad, lo **acciona y lo comprueba**, y guarda. |
+| `redstone/make_piezas.py` | genera los 14 dibujos de las piezas en `data/habitantes/`. **No pisa un fichero existente sin `--forzar`** (ahí viven los dibujos del dueño). |
+| `data/habitantes/antorcha-apagada.json` | copia de `antorcha.json` con los 12 voxels emisores **sin el `*`**. |
+| `data/habitantes/{cable,placa,palanca,puerta,repetidor}[-on|-abierta].json` | las 10 piezas. El `*` del color encendido no es decorativo: es lo que hace que `mcGlowTocada` indexe la celda y la pieza **alumbre**. |
+
+**Para añadir un material al redstone del mundo se toca la tabla `DEFECTOS` de `redstone-arranque.js`
+y nada más** — ni el motor ni `mundo-autoarranque` se abren.
+
+**El comportamiento cuelga del MATERIAL, igual que `game.bloques`** (misma razón: 442 368 celdas no
+admiten un objeto por voxel). Lo único por celda es el nivel de señal, en un `Map` **disperso** que solo
+tiene entradas donde hay circuito. Y la vecindad es una **cola** drenada en el `rAF` con tope
+(`MAX_POR_DRENADO`), no una llamada recursiva: en recursión, un cable largo se come el frame y un anillo
+de cable cuelga el navegador.
+
+```js
+game.redstone.define('asset:assets/bloque_redstone.vox.json', { emite: 15 }); // fuente
+game.redstone.define('hab:antorcha-apagada', { encendida: 'hab:antorcha' }); // lámpara
+game.redstone.info(x, y, z);   // el descubridor: qué material hay ahí y con cuánta señal
+```
+
+**«Encender» y «alumbrar» son la MISMA operación**, y por eso el sistema de luz no se toca: encender es
+cambiar el id de la celda por el del material encendido, y esa escritura ya pasa por `mcSetBlock` →
+`mcGlowTocada` → `mcComputeBlockLight` (ver «Una antorcha alumbra esté donde esté»). Los dos materiales
+se dan de alta en `define()` **y no al encenderse**: `game.addMaterial` cuesta ~3 873 ms en 512×40×512
+(la paleta se re-hornea y el atlas crece ⇒ `mcMeshAll`), o sea un congelado de 4 s en el primer clic.
+
+⚠️ **`define('apagada', {encendida:'X'})` registra TAMBIÉN `X` en la tabla, con la misma cfg.** Sin eso
+la lámpara se enciende una vez y **no vuelve jamás**: en cuanto la celda cambia de material su clave
+pasa a ser la encendida, la tabla no la reconoce y la celda se cae del circuito. Minecraft registra
+`redstone_lamp` y `lit_redstone_lamp` como dos bloques del mismo comportamiento por esto mismo.
+`quitar()` se lleva el alias con él.
+
+### Un bloque macizo TRANSPORTA la señal (r1.2) — fuerte / débil
+
+Hasta r1.1 una celda sin `cfg` era un **agujero**: `señalQueLlega` la saltaba y ahí se acababa el
+circuito. Desde r1.2 **cualquier bloque de la rejilla que no sea circuito hace de puente**: recibe de
+sus vecinos y alimenta a lo que tenga pegado por las otras cinco caras (REQ-RS4, la regla de
+Minecraft). No hay estado nuevo — la energía del bloque **se calcula al vuelo** en `energiaDeBloque()`
+y no se guarda en `potencia`.
+
+⚠️ **Nunca bloque → bloque.** Un bloque solo mira vecinos *con* `cfg`. Eso acota el coste a un salto y
+evita que un cable suelto energice un muro entero por efecto dominó. Dos bloques en fila **no** llevan
+la señal, y eso es a propósito.
+
+⚠️ **La asimetría FUERTE/DÉBIL es lo que impide que el cambio se coma el modelo de señal.** Un
+**cable** energiza el bloque solo **DÉBILMENTE** y otro cable **no lee** lo débil; todo lo demás
+(antorcha, palanca, repetidor) energiza **FUERTE**, y eso lo lee todo el mundo. Sin esa asimetría dos
+tendidos separados por un bloque se contagiarían **saltándose la pérdida**, y peor: un tendido se
+realimentaría a través del bloque que él mismo alimenta y no bajaría de nivel nunca. Una pieza que no
+es cable (una lámpara) **sí** lee lo débil — de ahí que una lámpara bajo un cable se encienda. Lo que
+llega por un bloque **no paga pérdida**: se sigue cobrando solo en el salto cable→cable.
+
+⚠️ **El aviso salta a DOS celdas a través del bloque, y salta SIEMPRE** (`encolarPuenteando`). Es
+tentador ahorrárselo cuando quien cambia es un bloque normal, pero **«¿era esta celda circuito?» no se
+puede responder después de la escritura**: una *fuente* (una palanca) no deja entrada en `potencia`,
+así que al arrancarla parecía un bloque cualquiera y la lámpara del otro lado del muro se quedaba
+encendida. El filtro que importa sigue en pie — **solo se encola lo que tiene `cfg`**, así que la
+ráfaga del TNT deja la cola vacía igual que antes; lo que sube son lecturas de array (7 → 43), y 600
+escrituras siguen midiendo <1 ms.
+
+Válvula de escape: **`game.redstone.aislante('hab:cristal')`** (y `(clave, false)` para quitarlo,
+`aislante()` para listarlos). Vive en su propia tabla y **no** en `define()` a propósito: un aislante
+no es una pieza de circuito y no debe entrar en la cola ni gastar una entrada de `potencia`.
+
+Para depurar, `game.redstone.info(x,y,z)` añade `vecinos[i].bloque = {fuerte, debil}` en los vecinos
+que son bloques macizos — sin eso, «le llega corriente y no enciende» se mira a ciegas justo en el
+caso nuevo.
+
+Test: **`node test_redstone_bloques.js`** (transporte, fuerte/débil, un solo salto, `aislante()`, el
+despertar a 2 celdas y el coste de la ráfaga). Medido además contra los nueve circuitos reales con
+`node redstone/montar_ejemplos.js`.
+
+### El bloque de redstone (la fuente permanente) — y los dos rojos que no son lo mismo
+
+`asset:assets/bloque_redstone.vox.json`, declarado con **`{ emite: 15 }` y nada más**. Es la pieza más
+corta de la tabla y cada cosa que le falta es deliberada:
+
+- **sin `encendida`/`apagada`** → no tiene dos estados, así que `aplicar()` no le cambia el material
+  nunca y no hay nada que persistir. Una fuente que no se apaga es literalmente eso.
+- **sin `manual`** → no se conmuta con clic; no es una entrada del circuito, es un cimiento.
+- **sin `mira` ni `soloAlFrente`** → reparte 15 por sus **seis** caras. Es el opuesto exacto del
+  repetidor, y es lo que lo hace útil: pegas cable a cualquier lado y arrancas a 15.
+
+⚠️ **Un repetidor ENCIMA de un bloque de redstone no se enciende, y no es un fallo.** Un repetidor
+solo escucha por su espalda (`mira`), y `FRENTE = [0,4,1,5]` es **horizontal**: el `−Y` no entra ahí
+jamás. En Minecraft pasa lo mismo — el bloque de debajo de un repetidor es *solo soporte*, la entrada
+se lee del bloque de **detrás**. Abrir el `−Y` rompería la asimetría que impide que un repetidor se
+realimente por su propia salida, que es lo que costó el BUG-RS2. `info(x,y,z)` ya lo explica solo:
+devuelve `escuchaPor: '−X'` y una `pista` del tipo *«tiene señal por −Y, pero esta pieza solo escucha
+por −X»*.
+
+⚠️ **No confundir con `asset:assets/red_concrete.vox.json`**, que es **decoración y no emite nada**.
+Hasta 2026-08-06 sí emitía: `redstone/redstone-arranque.js` lo traía en su tabla `DEFECTOS` con
+`{ power: 15 }`, o sea que **cualquier pared roja de cualquier mapa era una fuente permanente** y no
+había forma de mirar un circuito y saber de dónde salía la señal. Se quitó de `DEFECTOS`. Si hoy un
+hormigón rojo enciende algo es porque alguien le ha pegado un cable y está **haciendo de puente**,
+como cualquier otro bloque macizo desde r1.2 — y por eso **no** se declara aislante: el puente es el
+comportamiento general de los bloques, no algo suyo. Para distinguirlos de un vistazo el bloque de
+redstone va **moteado** y el hormigón es **liso** — se generan los dos con `node assets/make_blocks.js`.
+
+Test: **`node test_redstone_bloque_fuente.js`** (las seis caras, que no tiene estado, detrás sí /
+debajo no, y que el `red_concrete` no emite pero sigue haciendo de puente).
+
+### El vocabulario de `define()` (r1.1) — y por qué es Turing-completo
+
+`define()` es un **intérprete de reglas**, no una lista de piezas: cada pieza del mundo es una
+combinación de estas propiedades, y añadir una no abre el motor.
+
+| propiedad | qué hace | la usa |
+|---|---|---|
+| `emite: 0..15` | es una fuente mientras esté encendida | palanca, placa, antorcha, repetidor |
+| `conduce: {perdida}` | es cable: se queda con el **máximo** de sus vecinas menos la pérdida | cable |
+| `encendida` / `apagada` | el par de materiales; **el estado ES la clave de la rejilla**, no hay nada que persistir | todas |
+| `invertida` + `umbral` | enciende con señal **por debajo** del umbral ⇒ NOT | antorcha |
+| `retardo: 0..64` | el cambio espera N pasadas ⇒ **TIEMPO** | repetidor |
+| `manual` | la celda es una **ENTRADA**: la pone el jugador con `conmutar()`, no la señal | palanca, placa |
+| `pulso: ms` | se suelta sola pasados N ms | placa, botón |
+| `mira` | escucha **solo por su espalda**, y no emite por ahí; el lado sale del giro de la clave (`FRENTE[rot]`) | antorcha |
+
+**`mira` no es cosmético: es lo que hace posible la MEMORIA.** Sin él una antorcha leería el mismo
+cable que ella alimenta, se realimentaría a sí misma y un anillo de inversores sería un oscilador en
+vez de un biestable. Como el lado sale del **giro**, no hay tabla que mantener — y por eso `aplicar()`
+**arrastra el giro** al encender (`'hab:antorcha@3'` → `'hab:antorcha-on@3'`): si no, la pieza se
+enderezaría sola al encenderse y dejaría de escuchar por donde escuchaba. Por lo mismo `encendidaEn()`
+compara por **base** (`claveBase`), no por clave exacta.
+
+**El flanco de bajada del cable tiene DOS mitades, y la segunda se llama REPESCA.** Un cable se queda
+con el máximo de sus vecinas menos la pérdida, así que al quitar la fuente cada celda ve a su vecina
+con el valor viejo, calcula uno menos y **se alimenta a sí misma**. La primera mitad es no fiarse de
+una bajada: `nivel < antes` ⇒ la celda cae a **0** y avisa, y el tendido se desploma entero hasta que
+una fuente de verdad lo rellena. Eso funciona cuando la fuente se ha ido *de verdad*, y falla justo
+cuando no: si el desplome lo provoca un botón que se suelta en un tendido que **otra** fuente sigue
+alimentando, la celda cae a 0 y ya **nadie la vuelve a mirar** — las vecinas avisan cuando *cambian*,
+y la vecina que sigue teniendo el valor bueno no cambia. Quedaba un cable con `recibe=0` y su propio
+recálculo diciendo `llega=12`, para siempre. Por eso el cable que se tira a 0 **teniendo señal real**
+se anota en `repesca` y se vuelve a encolar **cuando la cola se vacía**: para entonces el desplome ha
+terminado y las vecinas presentan su valor definitivo. Se veía en el biestable del ejemplo 6: al
+soltar el botón de RESET el anillo entero se moría y el bit se le olvidaba.
+
+**¿Turing-completo?** Sí, con la misma letra pequeña que Minecraft, y hacen falta tres cosas que están:
+(1) **juego de puertas completo** — `invertida` da el NOT y el cable da el OR, luego NOR, y NOR sola
+genera cualquier booleana (no hay que añadir AND/XOR: se construyen); (2) **tiempo** — sin `retardo`
+todo se estabiliza dentro de la misma pasada y una realimentación es un bucle combinacional que el
+guardia de oscilación corta, con `retardo` es un **reloj**; (3) **memoria** — dos inversores cruzados =
+biestable. La letra pequeña: la cinta son `mc.dim.x·y·z` celdas, o sea **finita** — autómata
+linealmente acotado, la misma salvedad que se le pone a Minecraft, a una FPGA o a cualquier ordenador
+real. El bloque de cabecera de `redstone.js` lo explica entero.
+
+### Las piezas (`redstone-piezas.js`) — cero líneas de `app.js`
+
+Cable, palanca, placa de presión, puerta y repetidor. Las tres mitades de una pieza salen de sitios
+que ya existían:
+
+- **circuito** → `game.redstone.define(...)`, todas con `precargar:false`.
+- **física** → `game.bloques.define(k, { atravesable:true })` y `alPisar` (v1.29) para que la placa se
+  hunda al pisarla.
+- **gesto** → un envoltorio de `mcUseRight` **dentro del snippet**. `conmutar()` devuelve `false` sin
+  protestar cuando la celda no es manual, así que el clic derecho **no se pierde nunca**: si no había
+  palanca debajo, se pone bloque como siempre.
+
+`encender(x,y,z,on)` sí protesta (una vez) si la celda no es `manual` — porque ahí sí es un error de
+quien escribe el circuito.
+
+**El enganche es un envoltorio de `mcSetBlock`**, que es el embudo de poner, romper, pintar,
+deshacer/rehacer, `setVoxel` y la carga diferida de una textura. Lo que **no** pasa por ahí es generar
+o cargar el mundo entero (escriben `mc.grid` directo) — y ahí no queremos notificaciones: 10⁷ celdas se
+revisan al final, no una a una. Dos detalles que no se ven en el diff:
+
+- Reejecutar el snippet **desenvuelve** el envoltorio anterior por `_orig` en vez de apilar otro; si no,
+  cada recarga multiplicaría el trabajo por escritura.
+- Salida rápida por `hayCircuito`: sin materiales declarados el envoltorio es una llamada de más y nada
+  más (una ráfaga de TNT de 1000 bloques no puede pagar un `Map.set` por vecino). La bandera se declara
+  **arriba, con el resto del estado**: declarada después del envoltorio que la lee funcionaba solo por
+  el izado de `var` (valía `undefined`).
+
+Un drenado entero re-malla **una sola vez**, con la caja envolvente de todas las celdas que cambiaron —
+`mcRemeshAround` acepta dos esquinas desde el arreglo de BUG-TNT1. Un circuito cuesta su caja, no una
+pasada por lámpara.
+
+### Se carga solo, y por eso tiene que costar cero
+
+`node redstone/make_snippets.js` publica los tres snippets **y parchea `mundo-autoarranque`** entre dos
+marcadores (`// ==REDSTONE-ARRANQUE==`), que es lo que lo hace re-ejecutable sin acumular copias. Ese
+snippet es del dueño y lo edita en vivo: **se inserta el bloque, no se reescribe el fichero**. El
+`fetch` del bloque **no se espera** a propósito — no puede retrasar la entrada al Mundo.
+
+La consecuencia es que esto corre **en todos los mapas**, así que las tres cosas que costaban poco
+pasaron a tener que costar **nada**:
+
+- **`precargar:false`** en los circuitos de serie. Dar de alta un material que ese mundo no usa cuesta
+  un `mcMeshAll` **por carga y a cambio de nada**. Sin precarga el coste es cero: si el material no
+  está en la paleta, ninguna celda puede tener su id, así que el circuito no existe. Si aparece más
+  tarde (el dueño lo coge de la galería), `cargarYReintentar()` carga lo que falte **la primera vez que
+  haya que encender algo**, una sola vez y avisando por `toast`.
+  ⚠️ Ese reintento va **forzado**: `drenar()` apunta la potencia *antes* de llamar a `aplicar()`, así
+  que al volver la celda ya tiene su nivel y `nivel === antes` la descartaría — la señal habría llegado
+  y el bloque no habría cambiado nunca.
+- **`encolarVecinos` filtra antes de encolar.** Solo entran celdas que son circuito (o que lo eran y
+  hay que limpiarles la señal). Sin el filtro, una explosión de 1000 bloques serían 7000 `Map.set` y un
+  drenado de 7000 celdas **para no hacer nada**; con él son 7 lecturas de array por bloque y la cola se
+  queda vacía. Es semánticamente idéntico: `drenar()` ya descartaba las celdas sin cfg.
+- **`repasarMundo()`** en el arranque, porque un mapa puede traer el circuito ya montado en disco y
+  `potencia` nace vacía — una lámpara guardada encendida cuya fuente ya no está se quedaría encendida
+  para siempre. Barrer `mc.grid` cuesta ~60 ms en 512×40×512 y **no se puede pagar en cada carga**: la
+  guarda es que si ningún material del circuito está en la paleta no hay nada que buscar y se sale sin
+  tocar la rejilla (un bucle sobre la paleta, ~50 iteraciones). El repaso arranca con `forzar` por el
+  mismo motivo que el reintento.
+
+Test: `node test_redstone_arranque.js` (20 ok). Mide **deltas**, no valores absolutos, y usa materiales
+**ajenos elegidos en caliente**: `/map/test` ya tiene el circuito del dueño montado de verdad, así que
+afirmar «la paleta no tiene la antorcha» ahí no probaría nada.
+
+Test: `node test_redstone_antorcha.js` (20 ok) — inyecta `redstone/redstone.js` **desde el fichero
+fuente**, no desde el snippet publicado, para que falle cuando se rompa el motor y no cuando alguien
+olvide re-publicarlo. Cubre los dos sentidos (encender **y** apagar, dos veces seguidas), que la
+diagonal no cuente, que `quitar()` desmonte, y que sin circuito 200 escrituras no encolen nada.
+
+Test: `node test_redstone_dsl.js` (29 ok) — el del **vocabulario**, también desde el fuente. Prueba lo
+que de verdad hay que demostrar: cable con pérdida y flanco de bajada, que una `manual` no se la lleve
+el drenado, NOR completo, que `retardo` convierta la realimentación en un **reloj** (y que sin él el
+guardia de oscilación la corte rápido en vez de colgar), `pulso`, y el **biestable**. El biestable se
+prueba con SET desde el principio y midiendo lo único que importa —que al **retirar** la fuente se
+quede donde lo dejaron, y que RESET lo deje en el otro estado—: arrancar el anillo en seco es su punto
+metaestable y con el mismo `retardo` los dos inversores bascularían al unísono. Un biestable real
+tampoco elige solo al darle corriente.
+
+### El mapa de ejemplos (`/map/redstone`)
+
+`node redstone/montar_ejemplos.js` **construye, acciona y comprueba** las nueve parcelas de
+`redstone/redstone-ejemplos.js`, y luego guarda. No es un test aparte: es el propio montador el que
+verifica, porque **un circuito mal orientado se ve igual de bonito y no hace nada**. Reglas que se
+pagaron caras:
+
+- **Los lazos realimentados (5 reloj, 6 memoria, 8 XOR) necesitan un repetidor de VUELTA.** El cable
+  pierde 1 por bloque y muere a los 15; un lazo que le da la vuelta a una parcela de 26×16 mide más
+  que eso, así que **no cierra**: la señal llega a cero antes de volver. El reloj no oscilaba y el
+  biestable no se acordaba.
+- **Un reloj se mide contando CAMBIOS, no estados distintos.** `new Set(muestras).size > 1` lo cumple
+  también un circuito que cambia **una** vez y se queda quieto — que es exactamente lo que pasaba:
+  se estaba midiendo el pulso de soltar el freno. La prueba pasaba y el reloj no existía.
+- **Las piezas giradas son otra entrada de paleta** (`hab:repetidor@2`), no la misma con un atributo:
+  si no se precargan en `CLAVES`, salen roca.
+- **Las parcelas no se mudan de sitio.** Las notas de los carteles van indexadas por coordenada, así
+  que mover una parcela deja su nota vieja colgada en la bandeja del dueño para siempre. Las calles
+  nuevas se abren **delante** (z menor); `FILAS = [30, 52, 72]`.
+- **Ningún cable flota en el aire.** El motor lo permite (dos celdas separadas por un hueco no se
+  tocan, así que un «puente» por arriba resuelve un cruce en dos líneas), pero es justo lo que en
+  Minecraft no se ve nunca y el dueño lo cazó a la primera. Los cruces se rodean **por el suelo**
+  aunque salga más largo que 15 y haya que pagar un repetidor de vuelta (ejemplo 8), y un cable que
+  sube va **pegado a una pared** que lo sujete (ejemplo 9).
+- **La puerta son dos celdas pero UNA puerta:** `hab:puerta` lleva `conduce: {perdida: 1}`, así que
+  se alimenta la hoja de abajo y la señal sube sola. Antes hacía falta un cable para cada hoja, y el
+  de la de arriba salía flotando a media altura. ⚠️ **La pérdida tiene que ser 1**: con `perdida: 0`
+  las dos hojas se sostienen la una a la otra —sin gradiente ninguna baja nunca— y la puerta **no se
+  cierra** al soltar la placa. Lo cazó «se cierra sola al soltarse la placa» en el montador.
+
+## 🔠 La fuente del juego (`--font-game`) es solo del Mundo
+
+Los textos que se leen **jugando** van en **Pixeloid Sans** (`assets/fonts/`, licencia SIL OFL en
+`Pixeloid-OFL.txt`): el visor de notas, el panel de la nota, los toast del modo Mundo, el
+fps/vox flotante, las teclas de la barra rápida y el rótulo de un cartel. **La UI del editor sigue con
+la del sistema**, que es la que aguanta formularios densos — la de pixel art es muy ancha.
+
+⚠️ **Solo los múltiplos de 9 salen nítidos.** Pixeloid tiene 1836 unidades por em y su píxel de
+diseño mide 204, o sea `font-size/9`; a 13px o a 10px las letras caen entre rejilla y empastan. Por
+eso *todos* los cuerpos de `--font-game` son `9px` y la jerarquía se hace con peso y color, no con el
+tamaño (el escalón siguiente, 18px, es el doble). Lo mismo obliga a `MC_NOTE_TEXT_MIN=9` en `app.js`
+y a que la búsqueda de tamaño de `mcNoteTexture` baje **de 9 en 9**.
+
+⚠️ **Y obliga a que el lienzo del rótulo NO tenga un tamaño fijo: se elige por texto.** Con el escalón
+atado a 9 y el lienzo fijo, el cuerpo se redondea siempre hacia abajo, y eso se paga entero en tamaño
+de letra: en la tabla del cartel (2,14:1) el cuerpo que llena la caja es 25,2 px sobre un lienzo de
+256, pero solo valen 9/18/27… así que se horneaba a **18 → un 29 % más pequeño de lo que cabía**.
+`mcNoteTexture` lo resuelve al revés, en dos pasos:
+
+1. **Mide la razón**, no el cuerpo. El ajuste es invariante de escala, así que busca por bisección —a
+   `MC_NOTE_TEXT_REF=1024`, donde no se dibuja nada: `measureText` no depende del lienzo— la razón
+   continua `cuerpo/alto-de-lienzo` con la que el texto llena la caja.
+2. **Estira el lienzo para que un múltiplo de 9 caiga justo en esa razón**: coge el mayor múltiplo de
+   9 que quepa bajo los topes (`MC_NOTE_TEXT_H=384` de alto, `MC_NOTE_TEXT_WMAX` de ancho, el ancho
+   sale del aspecto de la tabla) y pone el alto en `cuerpo/razón`. Re-comprueba en la caja definitiva
+   y baja de 9 en 9 si el redondeo a entero de márgenes e interlineado se lo come.
+
+Medido en la tabla real: una nota de 271 caracteres pasa de ocupar 0,070 del alto a **0,096 (+36 %)**;
+los mensajes cortos ya estaban cerca del óptimo y suben un 1-2 %. El tope de alto es 384 y no 256
+porque a más lienzo, más múltiplos de 9 donde elegir y más píxeles de lienzo por píxel de diseño (4 en
+vez de 2), que es lo que se ve al acercarse. La clave de la caché es `texto|aspecto` **y no
+`texto|alto`**, justamente porque el alto ya es una consecuencia del texto.
+
+Vino a sustituir a Press Start 2P por petición del dueño («parece más compacta») y lo es de verdad:
+es **proporcional** — la `A` gasta 0.67 em y la `i` 0.22 — frente al **1.0 em de TODO carácter** en
+Press Start 2P. Los ficheros de Press Start 2P siguen en `assets/fonts/` sin referenciar.
+
+⚠️ Cuatro trampas al tocarlo en `style.css`: (1) el bloque que aplica `--font-game` tiene que ir
+**DESPUÉS** de las reglas de `.mc-note*`, o gana la que se declaró luego; (2) `.mc-note textarea`
+usa la taquigrafía `font:`, que **también reinicia la familia**; (3) el `:root` lleva
+`font-synthesis:none`, así que la negrita **no existe** si falta la cara `@font-face` de peso 700; y
+(4) el mismo nombre lo pide `app.js` como `MC_GAME_FONT` para hornear el rótulo de los carteles: si
+cambia aquí, cambia allí.
+
+## 📝 Una nota se ve como un CARTEL de verdad
+
+Petición del dueño: «reemplaza la forma que sale para las notas/posits por el asset "cartel" que he
+creado». Cada nota de `mc.notes` planta **`assets/cartel.vox.json`** (poste + tabla, 2×2 celdas de
+1/16 de canto) **encima** de su bloque, en vez del post-it amarillo que se dibujaba a mano; y el
+cartel responde a la **tecla `N`** igual que el bloque anotado (ver / editar / borrar).
+
+**Los carteles NO son datos del mundo: se DERIVAN de `mc.notes`.** Van marcados `efimera`, así que
+`mcStructuresDoc` no los guarda y `mundo.json` sigue llevando **solo notas** — no hay dos fuentes de
+verdad ni forma de que un cartel se quede huérfano en el fichero. Se sincronizan solos
+(`mcSyncNoteSigns`), o sea que **quien escriba en `mc.notes` planta su cartel sin enterarse**: el
+panel de la `N`, un snippet o un agente que va dejando notas.
+
+- **Apuntar al cartel NO es apuntar a la nota**, y ése es el nudo: el cartel ocupa 2×2 celdas
+  **encima** del bloque anotado. `mcNoteAnchor(celda)` es la vuelta —la celda misma si está anotada,
+  o el bloque del cartel que la contiene— y es lo que hace que la `N` abra **esa** nota en vez de una
+  nueva en el aire, y que el visor de texto se encienda mirando el cartel, que es justo lo que uno
+  mira. Lo usan `mcOpenNote` y `mcUpdateNoteView`.
+- ⚠️ **El rayo hay que pedirlo con `mcRaycast(alcance, true)`**: sin `hitStruct` una estructura fina
+  no cuenta y el rayo **atraviesa el cartel**, así que la `N` anotaba la pared del fondo.
+- ⚠️ **El cartel es `atravesable`** (clave en su `.vox.json`). Si cortara el paso, anotar el bloque
+  que pisas te dejaría encerrado y un agente que va dejando notas se levantaría un muro a su espalda.
+  Sigue siendo apuntable, rompible y visible en rayos-X — es exactamente para lo que está el par
+  `bits`/`bitsAim` (ver más arriba).
+- **Se plantan por tandas** (`MC_NOTE_SIGN_LOTE`, 8 por repaso) y con tope (`MC_NOTE_SIGN_MAX`, 64):
+  cada cartel es una malla y **un draw call**, y estampar veinte de golpe congelaría el cuadro. Lo que
+  se pase del tope se queda con el **post-it de siempre**, que sigue dibujándose para las notas **sin**
+  cartel (`conCartel` en el overlay).
+- **Las sincronizaciones se ENCOLAN, no se descartan** (`mcNoteSignQ`). Estampar es asíncrono; con una
+  bandera de «ocupado» una nota escrita mientras se planta otra se quedaba sin cartel hasta el
+  siguiente repaso, y un `await mcSyncNoteSigns()` volvía sin haber hecho nada — que fue justo lo que
+  hizo fallar el interruptor en el test.
+- El bucle paga un chequeo **barato** cada 500 ms (`mcNoteSignsDesfasados`, que recorre estructuras y
+  no notas) y solo entonces sincroniza de verdad.
+- Interruptor: **`game.noteSigns = false`** retira los carteles y devuelve el post-it (persistido en
+  `vf_mcNoteSigns`).
+
+En **`/map/redstone`** las diez notas ya montadas son carteles: `redstone-ejemplos.js` cuelga la nota
+de la **losa del suelo** y el Mundo planta el cartel encima, así que ya no se levanta un poste de
+tablones a mano. ⚠️ Al mover una nota hay que **borrar la vieja** (`delete mc.notes[…]`): una nota
+sobrevive a que le quiten el bloque y se quedaría flotando —con su cartel— en la bandeja del dueño.
+
+Test: `node test_notas_cartel.js` (en `/map/test`, sin persistir nada) — que la nota planta el cartel
+y que va `efimera` y fuera de `mcStructuresDoc`, que las 4 celdas del cartel resuelven a la nota y el
+aire de al lado no, que no corta el paso, que la `N` abre **esa** nota con su texto y su «Borrar», el
+interruptor en los dos sentidos, y que borrar la nota se lleva el cartel sin dejar la estructura
+suelta. `node redstone/montar_ejemplos.js` comprueba además que las 10 notas del mapa plantan sus 10
+carteles y que **ninguno** entra en el documento.
+
+### El texto de la nota, escrito en la tabla
+
+Segunda petición: «me gustaría ver el contenido de la nota sobre el cartel cuando sea posible, de muy
+lejos no haría falta». El texto se **hornea en una textura** y se pega como **calcomanía** sobre la
+cara de la tabla que da al ojo (`mcDrawNoteTexts`, una pasada propia justo antes de `mcDrawPreview`,
+con `depthMask` apagado: un muro por delante lo tapa, pero el rótulo no escribe profundidad).
+
+- **La tabla no se declara en ninguna parte: se DERIVA de la pieza estampada** (`mcNoteBoardRect`,
+  cacheada en la instancia por `key|rot|origen`). Lee el bitset fino de la malla —**`bitsAim`**, la
+  ocupación real, porque el cartel es `atravesable` y su `bits` de colisión son ceros— que ya viene en
+  orientación de mundo, o sea que **el giro no hay que aplicarlo otra vez**. De ahí saca el eje normal
+  (el horizontal delgado, ≤ 4 voxels finos), y llama tabla a las filas **anchas de arriba**, hasta la
+  primera que baja del 70 % del ancho máximo: el poste. Si los dos ejes horizontales son gruesos, eso
+  no es un cartel y **no se rotula** — y si alguien redibuja `cartel.vox.json`, el rótulo se
+  re-encuadra solo.
+- **Fuente del juego**: `MC_GAME_FONT` = `--font-game` de `style.css` (Pixeloid Sans, en
+  `assets/fonts/`). ⚠️ Es un `@font-face`: hornear antes de que llegue dejaría la de reserva **pegada
+  en la textura** hasta recargar, así que se espera a `document.fonts.load` y **se tira la caché**
+  cuando está lista. Las dos constantes tienen que decir lo mismo.
+- El tamaño de letra **lo fija la caja**, no un número mágico: un texto corto se lee de lejos y uno
+  largo encoge, como un cartel de verdad (bisección + lienzo a medida, ver arriba). Lo que no cabe ni
+  a la mínima se recorta con `…` — Pixeloid **sí** trae el U+2026, que gasta un carácter en vez de
+  tres en un cartel ya justo; con Press Start 2P no lo traía y había que usar `...`.
+- **El rótulo releva al visor de debajo de la mira** (`mc._noteTextDrawn` → `mcUpdateNoteView`), pero
+  solo si se lee **entero y a tamaño legible**: se mide en **píxeles de pantalla por letra**
+  (`MC_NOTE_TEXT_LEGIBLE`), no en «¿cupo?». Una parrafada cabe encogida hasta ser un borrón, y ahí el
+  visor es lo único que salva — pasa con las notas largas de `/map/redstone`.
+- Caché LRU de texturas (`MC_NOTE_TEXT_CACHE`, 24) por `texto|aspecto`, con `deleteTexture` al desalojar
+  y al cerrar el Mundo.
+- Tunables: **`game.noteText`** (apaga el rótulo; el cartel queda en blanco y se lee apuntando) y
+  **`game.noteTextDist`** (14 bloques, escala con `game.playerScale`; el último cuarto se desvanece y
+  más allá no se dibuja — «de muy lejos no haría falta»). Persistidos y en `game.dumpVars()`.
+
+### El panel DOM de la nota (≠ el cartel 3D)
+
+Lo de arriba es el **cartel del mundo**. El diálogo de la tecla `N` (`#mc-note`) y el visor que sale
+al apuntar (`#mc-noteview`) son **DOM**, y su tamaño sale de dos variables CSS con fallback en la
+propia regla, `--note-fs` (18px) y `--note-w` (720px). El alto del `textarea` **no es un número
+suelto**: es `min(calc(var(--note-fs) * 18), 46vh)`, o sea 10 líneas del cuerpo actual, así que subir
+la letra agranda la caja sola.
+
+- **`game.noteFont`** ⚠️ **redondea a múltiplo de 9** y topa en 9..45. El píxel de diseño de Pixeloid
+  es `font-size/9`: un 20 saldría borroso y nadie lo ataría a haber tocado esto. Escalones reales:
+  9 · 18 · 27 · 36 · 45. El 9 era el valor de antes de REQ-CART2 y es el que resultó ilegible.
+- **`game.noteWidth`** (240..1600) mueve el ancho del diálogo y, con él, el `max-width` del visor
+  (60 %). Los dos persisten y salen en `game.dumpVars()`.
+
+Las notas son **la excepción** a la regla de «todo a 9px» del bloque `--font-game` de `style.css`, y
+está escrito allí: las notas de los agentes son volcados largos que hay que leer enteros.
+La media query de 680px **ya no toca el cuerpo** — el móvil dejó de ser un caso especial cuando 18
+pasó a ser el valor general. Guardián: `node test_notas_panel.js`.
 
 ## Convenciones
 
@@ -1323,5 +2276,16 @@ de las mallas de 3 844 chunks. Subir el tope es una decisión de presupuesto de 
 - El formato de export es `{format:"voxelforge-1", size, meta, voxels:{...}}`; import acepta ese
   objeto (`voxels` como mapa `"x,y,z" -> hex`).
 - Idioma de UI y comentarios: **español**.
+- **Las capturas de un ticket se guardan en disco, no se dejan en el chat.** Cuando el dueño abre un
+  ticket adjuntando imágenes, van a `data/tickets/<ID>/` con un `contexto.md` al lado (fecha, uuid del
+  mensaje y el enunciado literal), y el ticket de `PLAN.md` las enlaza por nombre de fichero. El
+  motivo es de calendario: un ticket se abre hoy y se resuelve semanas después, cuando la conversación
+  donde venían ya no está en contexto — y una captura descrita de memoria no es la captura. Se
+  rescatan con `python3 guardar_imagenes_ticket.py <ID> [--uuid <prefijo>]`, que las saca del
+  transcript de la sesión (`~/.claude/projects/-root/*.jsonl`, donde Claude Code las deja en base64)
+  sin tener que pedírselas otra vez al dueño; `--listar` enseña los últimos mensajes con imagen. Si un
+  mensaje abre **varios** tickets, las imágenes se guardan **una sola vez** y los demás apuntan a esa
+  carpeta. `data/tickets/` está exceptuado en `.gitignore` a propósito: es autoría, como
+  `data/agentes/`, no estado de runtime.
 - Al ampliar el MVP (p. ej. hacer reales las pestañas Habitaciones/Mapa), mantener el mismo
   `state.voxels`/serialización como fuente de verdad y añadir vistas nuevas sin duplicar el modelo.

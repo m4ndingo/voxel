@@ -61,7 +61,7 @@ const nVoxels = id => Object.keys(JSON.parse(fs.readFileSync(FICH(id), 'utf8')).
   p.on('pageerror', e => errores.push('EXCEPCION ' + e.message));
 
   let alCargar = null, clavesRefrescadas = null, tras = null, trasRecarga = null, guardarComo = null;
-  let renombrado = null, aceptado = null;
+  let renombrado = null, aceptado = null, caras = null;
   try {
     assert(creado.id === ID, 'crear la pieza con id explícito devolvió ' + JSON.stringify(creado));
     const voxelsAntes = nVoxels(ID);
@@ -134,6 +134,55 @@ const nVoxels = id => Object.keys(JSON.parse(fs.readFileSync(FICH(id), 'utf8')).
     aceptado = await renombrarYGuardar(true);             // Aceptar = reescribe la de siempre
     aceptado.voxels = nVoxels(ID);
     aceptado.esperados = tras.voxelsAhora - 5;
+
+    // 6) Las CARAS: la máscara por voxel tiene que sobrevivir al disco y a las transformaciones del
+    //    editor. Lo que se vigila aquí no es que funcione, sino que un dibujo SIN máscaras siga
+    //    saliendo exactamente igual que antes de que esto existiera.
+    await p.evaluate((id) => loadFromUrl('assets/' + id + '.vox.json', id), ID);
+    await p.waitForTimeout(800);
+    caras = await p.evaluate(() => {
+      const r = {}, ord = () => JSON.stringify([...state.caras].sort());
+      r.sinMascaraNiAparece = currentVox().caras === undefined && state.caras.size === 0;
+
+      setCaraMask(1, 1, 1, 12); setCaraMask(2, 2, 2, 3);
+      r.doc = currentVox().caras;
+      // La máscara es del OBJETO: el que no se guarda es el 0, porque en un dibujo con marcas un voxel
+      // sin entrada ya significa «ninguna cara». El 63 sí se guarda: son las seis marcadas a mano, que
+      // no es lo mismo que no haber marcado nada.
+      r.elCeroNoSeGuarda = (setCaraMask(3, 3, 3, 0), !state.caras.has('3,3,3'));
+      r.el63SiSeGuarda = (setCaraMask(3, 3, 3, 63), state.caras.get('3,3,3') === 63);
+      setCaraMask(3, 3, 3, 0);   // fuera otra vez: (3,3,3) no tiene voxel y no sobreviviría a los giros
+
+      const antes = ord();
+      for (let i = 0; i < 4; i++) rotateModel('x', 1);
+      r.giro4Identidad = ord() === antes;
+      rotateModel('x', 1);
+      r.giro1Cambia = ord() !== antes;                    // si no cambiara, lo de arriba no probaría nada
+      for (let i = 0; i < 3; i++) rotateModel('x', 1);
+      r.vueltaAlSitio = ord() === antes;
+
+      // Borrar el voxel se lleva su máscara; deshacer la trae de vuelta.
+      edit(() => setVoxel(1, 1, 1, null));
+      r.borrarQuitaMascara = !state.caras.has('1,1,1');
+      undo();
+      r.deshacerLaDevuelve = state.caras.get('1,1,1') === 12;
+      redo();
+      r.rehacerLaVuelveAQuitar = !state.caras.has('1,1,1');
+      undo();
+
+      // Encoger la rejilla recorta las máscaras que se quedan fuera.
+      setCaraMask(10, 10, 10, 5);
+      edit(() => resizeGrid(8, 8, 8));   // setSize solo cambia las dimensiones; el recorte lo hace resizeGrid
+      r.recorteQuitaLasDeFuera = !state.caras.has('10,10,10') && state.caras.has('1,1,1');
+      return r;
+    });
+    // ida y vuelta por disco de verdad: guardar, releer el .vox.json y volver a cargarlo
+    await p.evaluate(() => save());
+    await p.waitForTimeout(800);
+    caras.enDisco = JSON.parse(fs.readFileSync(FICH(ID), 'utf8')).caras;
+    await p.evaluate((id) => loadFromUrl('assets/' + id + '.vox.json', id), ID);
+    await p.waitForTimeout(800);
+    caras.trasReleer = await p.evaluate(() => Object.fromEntries(state.caras));
   } finally {
     await b.close();
     for (const id of [ID, ID_BIFURCADO, ID_RENOMBRADO])
@@ -197,6 +246,32 @@ const nVoxels = id => Object.keys(JSON.parse(fs.readFileSync(FICH(id), 'utf8')).
     assert(aceptado.idDespues === ID, 'el editor se quedó en ' + JSON.stringify(aceptado.idDespues));
     assert(aceptado.voxels === aceptado.esperados,
       'assets/' + ID + '.vox.json quedó con ' + aceptado.voxels + ' voxels, esperaba ' + aceptado.esperados);
+  });
+
+  test('un dibujo sin caras no menciona `caras` por ninguna parte', () => {
+    assert(caras.sinMascaraNiAparece, 'el documento arrastra `caras` sin haberlas puesto');
+    assert(caras.elCeroNoSeGuarda, 'se guardó una máscara 0; la ausencia ya significa «ninguna»');
+    assert(caras.el63SiSeGuarda, 'se perdió una máscara 63: las seis marcadas a mano no son «sin marcar»');
+  });
+
+  test('las caras sobreviven al giro (4 giros = identidad, 1 giro no)', () => {
+    assert(caras.giro1Cambia, 'un solo giro dejó las máscaras igual: no se están permutando');
+    assert(caras.giro4Identidad, '4 giros no devolvieron las máscaras al sitio');
+    assert(caras.vueltaAlSitio, '8 giros no devolvieron las máscaras al sitio');
+  });
+
+  test('las caras entran en el historial y se recortan con la rejilla', () => {
+    assert(caras.borrarQuitaMascara, 'borrar el voxel dejó su máscara huérfana');
+    assert(caras.deshacerLaDevuelve, 'deshacer no restauró la máscara');
+    assert(caras.rehacerLaVuelveAQuitar, 'rehacer no volvió a quitarla');
+    assert(caras.recorteQuitaLasDeFuera, 'encoger la rejilla dejó máscaras fuera de ella');
+  });
+
+  test('las caras van y vuelven del disco', () => {
+    assert(caras.enDisco && caras.enDisco['1,1,1'] === 12 && caras.enDisco['2,2,2'] === 3,
+      'el .vox.json guardó ' + JSON.stringify(caras.enDisco));
+    assert(caras.trasReleer['1,1,1'] === 12 && caras.trasReleer['2,2,2'] === 3,
+      'al releer quedó ' + JSON.stringify(caras.trasReleer));
   });
 
   test('los assets del dueño siguen todos en el índice', () => {

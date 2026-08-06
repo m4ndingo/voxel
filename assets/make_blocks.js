@@ -96,6 +96,17 @@ const BLOCKS = {
       const spark = r()<0.06;
       return spark ? jitter('#6a4bd0',24,r) : mix('#140f24','#241a3e', r()*0.6);
     } },
+  // Fuente permanente de redstone. Tiene que distinguirse de un vistazo del hormigón rojo
+  // (red_concrete), que es decoración y NO da corriente: por eso el moteado brillante y no
+  // un rojo liso — si los dos parecen el mismo bloque, no hay forma de mirar un circuito y
+  // saber de dónde sale la señal.
+  bloque_redstone: { name:'Bloque de redstone', icon:'🟥', role:'Bloque · fuente permanente (redstone block)',
+    color:(x,y,z,r)=>{
+      const t = r();
+      if(t<0.10) return jitter('#ff5a4a',18,r);          // chispas
+      if(t<0.30) return jitter('#d02020',22,r);          // grano claro
+      return mix('#6e0c0c','#8e1414', r()*0.7);          // masa oscura
+    } },
 };
 
 // --- Escribe cada bloque + un índice mock (formato de entrada del registro real) ---

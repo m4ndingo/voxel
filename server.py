@@ -3,7 +3,7 @@
    Uso: python3 server.py [puerto]   (por defecto 8500)
    Almacén: data/habitantes/<id>.json  (formato vox export)."""
 import http.server, socketserver, json, os, re, sys, datetime, shutil, time, urllib.parse
-import gzip, threading
+import gzip, threading, base64, binascii
 import mundos                                              # listado de /map/: estadísticas + miniatura cenital
 import voxfmt                                              # formato de mundo voxelworld-2 (cabecera + .vox denso)
 
@@ -15,6 +15,7 @@ WORLDFILE = os.path.join(BASE, 'data', 'mundo.json')       # mundo sandbox 3D (R
 WORLDS = os.path.join(BASE, 'data', 'worlds')             # mundos con nombre: /map/<nombre> -> data/worlds/<slug>.json (persistentes)
 SNIPS = os.path.join(BASE, 'data', 'snippets')             # gestor de snippets de código (data/snippets/<id>.json)
 AGENTS = os.path.join(BASE, 'data', 'agentes')             # agentes articulados (data/agentes/<id>.json) — el documento, no el motor
+FOTOS = os.path.join(BASE, 'data', 'fotos')                # fotos del Mundo (tecla F): <n>_<mapa>_<fecha>.png + .json con la ficha
 # Snippets que NO se pueden borrar desde la UI. 'mundo-autoarranque' lo busca app.js POR ESE ID al
 # entrar al Mundo (openWorld), así que borrarlo no rompe nada visible al momento: simplemente el
 # Mundo deja de tener bloques con comportamiento y no hay ningún error que lo delate. Editarlo y
@@ -25,6 +26,7 @@ os.makedirs(TRASH, exist_ok=True)
 os.makedirs(WORLDS, exist_ok=True)
 os.makedirs(SNIPS, exist_ok=True)
 os.makedirs(AGENTS, exist_ok=True)
+os.makedirs(FOTOS, exist_ok=True)
 
 DEFAULT_MAP = {'cols': 8, 'rows': 8, 'cells': {}}
 # Mundo vacío por defecto: sin voxels => el cliente genera terreno plano (mcGenFlat)
@@ -212,6 +214,55 @@ def list_all():
     out.sort(key=lambda h: h.get('savedAt', ''), reverse=True)   # más recientes primero
     return out
 
+# ---- Fotos del Mundo (tecla F) ----------------------------------------------------------------
+# Cada foto son DOS ficheros hermanos con el mismo nombre: el .png (con la ficha ya quemada en la
+# imagen, para que sobreviva a copiar/pegar) y un .json con esa misma ficha en crudo. El .json existe
+# para que la galería —y quien lea el disco— pueda ordenar, filtrar y volver a las coordenadas sin
+# tener que leer la imagen.
+FOTO_MAX_BYTES = 24 * 1024 * 1024     # una captura 4K en PNG no llega a 12 MB; el doble es margen de sobra
+RE_FOTO = re.compile(r'^(\d{4,})_([a-z0-9-]+)_(\d{8}-\d{6})$')   # {4,} y no {4}: la foto 10000 sigue siendo una foto
+
+def foto_nueva(mapa):
+    """Reserva un nombre de foto libre y devuelve (id, ruta_png). O_EXCL y no «max+1» a secas: el
+    servidor es multihilo y dos F seguidas se pisarían el fichero."""
+    mapa = re.sub(r'[^a-z0-9]+', '-', (mapa or 'default').lower()).strip('-') or 'default'
+    sello = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    n = 0
+    for fn in os.listdir(FOTOS):
+        m = RE_FOTO.match(fn[:-4]) if fn.endswith('.png') else None
+        if m:
+            n = max(n, int(m.group(1)))
+    while True:
+        n += 1
+        idd = f'{n:04d}_{mapa}_{sello}'
+        fp = os.path.join(FOTOS, idd + '.png')
+        try:
+            os.close(os.open(fp, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return idd, fp
+        except FileExistsError:
+            continue
+
+def list_fotos():
+    out = []
+    for fn in os.listdir(FOTOS):
+        m = RE_FOTO.match(fn[:-4]) if fn.endswith('.png') else None
+        if not m:
+            continue
+        idd = fn[:-4]
+        fp = os.path.join(FOTOS, fn)
+        try:
+            tam = os.path.getsize(fp)
+        except OSError:
+            continue
+        try:
+            ficha = json.load(open(os.path.join(FOTOS, idd + '.json'), encoding='utf-8'))
+        except Exception:
+            ficha = {}                                   # un .png sin su .json sigue siendo una foto válida
+        out.append({'id': idd, 'n': int(m.group(1)), 'mapa': m.group(2),
+                    'url': '/data/fotos/' + fn, 'bytes': tam, 'ficha': ficha})
+    out.sort(key=lambda f: f['n'], reverse=True)          # por número y no por texto: '10000' es posterior a '9999'
+    return out
+
 # ---------------------------------------------------------------------------------------------
 # Compresión. `data/mundo.json` son 5,3 MB de JSON con la misma clave repetida 81.000 veces: gzip lo
 # deja en 262 KB (×20). Medido desde un móvil (20 Mbps, 40 ms de ida y vuelta) eso son ~2,1 s de la
@@ -374,6 +425,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if path_only.startswith('/map/'):
             self.path = '/index.html'
             return super().do_GET()
+        if path_only in ('/fotos', '/fotos/'):                    # galería de las fotos que saca la tecla F
+            self.path = '/fotos.html'
+            return super().do_GET()
+        if path_only == '/api/fotos':
+            return self._send(200, list_fotos())
         if path_only == '/api/mundos':                            # listado de /map/ (cache por mtime en data/_thumbs/)
             try:
                 return self._send(200, mundos.listar())
@@ -477,6 +533,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             atomic_dump(d, MAPFILE)
             return self._send(200, {'ok': True})
         ruta_post = urllib.parse.urlparse(self.path).path
+        if ruta_post == '/api/fotos':                             # tecla F en el Mundo: guarda la captura + su ficha
+            # El tope se mira ANTES de leer: si no, un cuerpo enorme ya se habría tragado la memoria
+            # cuando fuéramos a rechazarlo. `_send` drena lo que quede en el socket (keep-alive).
+            if int(self.headers.get('Content-Length', 0) or 0) > FOTO_MAX_BYTES:
+                return self._send(413, {'error': 'la foto pesa demasiado'})
+            d = self._read()
+            png = d.get('png') if isinstance(d, dict) else None
+            if not isinstance(png, str) or not png:
+                return self._send(400, {'error': 'falta png (base64)'})
+            png = png.split(',', 1)[1] if png.startswith('data:') else png
+            try:
+                crudo = base64.b64decode(png, validate=True)
+            except (binascii.Error, ValueError):
+                return self._send(400, {'error': 'png no es base64 válido'})
+            if not crudo.startswith(b'\x89PNG\r\n\x1a\n'):         # que lo que se guarda con .png sea un PNG
+                return self._send(400, {'error': 'eso no es un PNG'})
+            ficha = d.get('ficha') if isinstance(d.get('ficha'), dict) else {}
+            ficha['guardadaEn'] = now_iso()
+            idd, fp = foto_nueva(ficha.get('mapa'))
+            with open(fp, 'wb') as f:                              # foto_nueva ya lo creó vacío con O_EXCL: aquí solo se rellena
+                f.write(crudo)
+            ficha['id'] = idd
+            atomic_dump(ficha, os.path.join(FOTOS, idd + '.json'))
+            return self._send(200, {'ok': True, 'id': idd, 'url': '/data/fotos/' + idd + '.png',
+                                    'bytes': len(crudo)})
         if ruta_post == '/api/mundo/edits':                       # poner/quitar bloques: seek + 2 bytes por celda
             # Este es el camino que arregla la congelación. NO se lee ni se reescribe el mundo entero:
             # el cuerpo son las celdas que han cambiado, [[x,y,z,'asset:assets/roca.vox.json'], ...],
@@ -734,6 +815,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return self._send(404, {'error': 'no existe'})
 
     def do_DELETE(self):
+        mf = re.match(r'^/api/fotos/(\d{4,}_[a-z0-9-]+_\d{8}-\d{6})$', urllib.parse.urlparse(self.path).path)
+        if mf:
+            png = os.path.join(FOTOS, mf.group(1) + '.png')
+            if not os.path.exists(png):
+                return self._send(404, {'error': 'no existe esa foto'})
+            to_trash(png)                                          # a papelera, como todo lo demás
+            to_trash(os.path.join(FOTOS, mf.group(1) + '.json'))
+            return self._send(200, {'ok': True})
         sid = self._snip_id()
         if sid:
             if sid in SNIPS_PROTEGIDOS:

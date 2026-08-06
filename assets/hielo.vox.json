@@ -10,7 +10,8 @@
     "type": "textura",
     "role": "Bloque · hielo (ice)",
     "icon": "🧊",
-    "description": "Hielo — bloque de construcción 16³ (textura cristalina homogénea)."
+    "description": "",
+    "alias": "ice"
   },
   "voxels": {
     "0,0,0": "#95c2f0",

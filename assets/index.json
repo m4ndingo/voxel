@@ -159,7 +159,9 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/tronco.vox.json"
+    "file": "assets/tronco.vox.json",
+    "description": "",
+    "alias": "oak"
   },
   {
     "id": "arena",
@@ -213,13 +215,15 @@
   },
   {
     "id": "white_whool",
-    "name": "White Whool",
+    "name": "White Wool",
     "role": "Bloque · lana blanca (white whool)",
     "icon": "🧶",
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/white_whool.vox.json"
+    "file": "assets/white_whool.vox.json",
+    "description": "",
+    "alias": "white_wool"
   },
   {
     "id": "red_concrete",
@@ -230,6 +234,16 @@
     "group": "Bloques de construcción",
     "size": 16,
     "file": "assets/red_concrete.vox.json"
+  },
+  {
+    "id": "bloque_redstone",
+    "name": "Bloque de Redstone",
+    "role": "Bloque · fuente permanente (redstone block)",
+    "icon": "🟥",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/bloque_redstone.vox.json"
   },
   {
     "id": "snow",
@@ -263,7 +277,9 @@
       "y": 16,
       "z": 16
     },
-    "file": "assets/lava.vox.json"
+    "file": "assets/lava.vox.json",
+    "description": "",
+    "alias": "lava"
   },
   {
     "id": "tejado",
@@ -301,7 +317,9 @@
       "y": 16,
       "z": 16
     },
-    "file": "assets/cubo-trans.vox.json"
+    "file": "assets/cubo-trans.vox.json",
+    "description": "",
+    "alias": "cubo_trans"
   },
   {
     "id": "cubo-liso",
@@ -367,7 +385,9 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/hielo.vox.json"
+    "file": "assets/hielo.vox.json",
+    "description": "",
+    "alias": "ice"
   },
   {
     "id": "hielo-pista-de-patinaje",
@@ -590,5 +610,123 @@
     "file": "assets/hormig-n-verde-hojas.vox.json",
     "description": "",
     "alias": "green_concrete"
+  },
+  {
+    "id": "hierba-caras",
+    "name": "Hierba Caras",
+    "role": "Bloque · green_concrete / oak_leaves",
+    "icon": "🟩",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hierba-caras.vox.json",
+    "description": "Hormigón verde mate 16³ (ideal para estructuras sólidas o follaje de árboles)."
+  },
+  {
+    "id": "hierba-caras-2",
+    "name": "Hierba Caras 2",
+    "role": "Bloque · green_concrete / oak_leaves",
+    "icon": "🟩",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hierba-caras-2.vox.json",
+    "description": "Hormigón verde mate 16³ (ideal para estructuras sólidas o follaje de árboles)."
+  },
+  {
+    "id": "leaves",
+    "name": "Leaves",
+    "role": "Bloque · green_concrete / oak_leaves",
+    "icon": "🟩",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/leaves.vox.json",
+    "alias": "leaves",
+    "description": ""
+  },
+  {
+    "id": "demo-hojas-sin-caras",
+    "name": "Hojas SIN caras (demo del antes)",
+    "role": "Bloque · copia de leaves sin la clave `caras`",
+    "icon": "🟩",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/demo-hojas-sin-caras.vox.json",
+    "alias": "demo-hojas-sin-caras",
+    "description": "Solo para la zona de pruebas de /map/test: el cubo verde macizo de antes del arreglo."
+  },
+  {
+    "id": "hierba-alta",
+    "name": "Hierba Alta",
+    "role": "Bloque · mata de hierba",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/hierba-alta.vox.json"
+  },
+  {
+    "id": "flor-amarilla",
+    "name": "Flor amarilla",
+    "role": "Bloque · hormigón amarillo (yellow concrete)",
+    "icon": "🟡",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 15,
+      "z": 8
+    },
+    "file": "assets/flor-amarilla.vox.json",
+    "description": "Flor amarilla",
+    "alias": "flor_amarilla"
+  },
+  {
+    "id": "flor-roja",
+    "name": "Flor roja",
+    "role": "Bloque · hormigón amarillo (yellow concrete)",
+    "icon": "🟡",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 15,
+      "z": 8
+    },
+    "file": "assets/flor-roja.vox.json",
+    "alias": "flor_roja",
+    "description": "Hormigón Amarillo — bloque de construcción 16³ (textura lisa y mate)."
+  },
+  {
+    "id": "cartel",
+    "name": "Cartel",
+    "role": "Bloque · madera de roble (oak planks)",
+    "icon": "🪵",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 1,
+      "y": 32,
+      "z": 32
+    },
+    "file": "assets/cartel.vox.json",
+    "description": "Cartel",
+    "alias": "sign"
   }
 ]
