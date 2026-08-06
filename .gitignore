@@ -4,6 +4,9 @@ data/*
 # Los documentos de los agentes articulados SÍ se versionan: son autoría, no runtime.
 # (Un comentario al final de la línea NO vale aquí: pasaría a formar parte del patrón.)
 !data/agentes/
+# Las capturas que adjunta el dueño al abrir un ticket TAMBIÉN se versionan: un ticket se resuelve
+# semanas después, cuando el chat donde venían ya no existe. Las rescata guardar_imagenes_ticket.py.
+!data/tickets/
 data/habitantes/
 data/habitantes_trash/
 data/worlds/

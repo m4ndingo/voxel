@@ -81,7 +81,9 @@ function montar(opciones = {}) {
     mcStructColl: (s) => geom.get(s),
   };
   vm.createContext(sandbox);
-  vm.runInContext(extraer('mcPushBoxTris') + extraer('mcFineBoxHit') + extraer('mcFineSolidAt') +
+  // mcPushBoxEdges, no mcPushBoxTris: desde REQ-XR1 el volumen son ARISTAS. Si algún día vuelve a
+  // haber relleno hay que cambiar las dos cosas a la vez, el extraer() y el VBOX de aquí abajo.
+  vm.runInContext(extraer('mcPushBoxEdges') + extraer('mcFineBoxHit') + extraer('mcFineSolidAt') +
                   extraer('mcXrayVolume'), sandbox);
 
   // La version INGENUA de antes, punto por punto, como referencia de lo que hay que dibujar.
@@ -99,7 +101,7 @@ function montar(opciones = {}) {
   // Las rojas (0.95, 0.2, 0.2) son bloques de la rejilla y aqui no pintan nada.
   sandbox.dibujadas = () => {
     const a = []; sandbox.mcXrayVolume(a);
-    const ESTR = 7, VBOX = 36, out = new Set();
+    const ESTR = 7, VBOX = 24, out = new Set();   // 12 aristas × 2 vértices (era 36 = 12 tris × 3)
     for (let i = 0; i < a.length; i += ESTR * VBOX) {
       if (Math.abs(a[i + 3] - 1) > 1e-6 || Math.abs(a[i + 4] - 0.55) > 1e-6) continue;
       out.add(Math.round(a[i] * T) + ',' + Math.round(a[i + 1] * T) + ',' + Math.round(a[i + 2] * T));

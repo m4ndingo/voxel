@@ -9,7 +9,9 @@
     "name": "Cubo Trans",
     "type": "textura",
     "role": "Bloque básico 16³",
-    "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir."
+    "description": "",
+    "icon": "🧱",
+    "alias": "cubo_trans"
   },
   "voxels": {
     "0,0,0": "#4ab8d924",

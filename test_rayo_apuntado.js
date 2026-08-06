@@ -62,6 +62,9 @@ function montar(opciones = {}) {
   vm.createContext(sandbox);
   vm.runInContext(
     extraer('mcSolid') + extraer('mcFineBoxHit') + extraer('mcFineSolidAt') +
+    // El apuntado va por sus propias sondas (leen bitsAim, no bits); el mcStructColl de juguete de arriba
+    // solo trae `bits`, que es justo el caso «g fabricado por un tercero» que el `||` tiene que aguantar.
+    extraer('mcAimBoxHit') + extraer('mcAimSolidAt') +
     extraer('mcRaycast') + extraer('mcStructRayHit') + extraer('mcStructCellSolid'), sandbox);
   return sandbox;
 }

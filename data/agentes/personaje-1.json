@@ -105,6 +105,23 @@
         "fase": 180
       },
       "rot": 0
+    },
+    {
+      "nombre": "antorcha",
+      "pieza": "hab:antorcha",
+      "en": [
+        0.375,
+        0.5625,
+        -0.8125
+      ],
+      "articula": {
+        "pivote": 1,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": -5,
+        "fase": 0,
+        "eje": "x"
+      }
     }
   ],
   "seguir": {
@@ -124,7 +141,7 @@
     "suavidad": 1
   },
   "id": "personaje-1",
-  "savedAt": "2026-08-04T12:19:43",
+  "savedAt": "2026-08-04T20:35:42",
   "empuje": {
     "fuerza": 16
   }

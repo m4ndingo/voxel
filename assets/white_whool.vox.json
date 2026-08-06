@@ -2,11 +2,12 @@
   "format": "voxelforge-1",
   "size": 16,
   "meta": {
-    "name": "Lana Blanca",
+    "name": "White Wool",
     "type": "textura",
     "role": "Bloque · lana blanca (white wool)",
     "icon": "🧶",
-    "description": "Lana Blanca — bloque de construcción 16³ (textura)."
+    "description": "",
+    "alias": "white_wool"
   },
   "voxels": {
     "0,0,0": "#dcdcdc",

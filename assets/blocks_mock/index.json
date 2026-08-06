@@ -88,5 +88,14 @@
     "type": "textura",
     "size": 16,
     "file": "assets/blocks_mock/obsidiana.vox.json"
+  },
+  {
+    "id": "bloque_redstone",
+    "name": "Bloque de redstone",
+    "role": "Bloque · fuente permanente (redstone block)",
+    "icon": "🟥",
+    "type": "textura",
+    "size": 16,
+    "file": "assets/blocks_mock/bloque_redstone.vox.json"
   }
 ]

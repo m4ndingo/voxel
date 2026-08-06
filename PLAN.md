@@ -71,6 +71,37 @@ Objetos/inventario · combate · misiones · guardado de partida · editor de pu
 
 ---
 
+## 🎫 Tickets ABIERTOS — índice
+
+Se acumulan aquí y el dueño va diciendo cuáles se resuelven y en qué orden, según complejidad.
+Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
+
+| ticket | qué es | pinta | decisiones |
+|---|---|---|---|
+| [PERF-MC3](#-perf-mc3) | abrir un mundo VACÍO cuesta 2,2 s; el 81 % es bajar la paleta EN SERIE | medio | — |
+| [BUG-SNP1](#-bug-snp1) | «no existe el material X» miente, llena la consola y PIERDE la definición | medio | — |
+| [REQ-PICK1](#-req-pick1) | el selector de bloque/textura: ancho, nombres, fuente, menú contextual y filtros | medio | ✅ partido en **A** (entra ya) / B / C |
+| [REQ-MAP1](#-req-map1) | Alt+M = pantalla de mapas conmutable sin perder el mundo abierto | medio | — |
+| [REQ-NAV1](#-req-nav1) | la barra superior se reduce a `[Galería] [🌍 Mundo] [⋯]` | medio | ✅ Mundo fuera, **Mapa y Jugar dentro** |
+| ~~[REQ-XR1](#-req-xr1)~~ | ~~rayos-X tapa lo que marca: inservible para capturas~~ | ✅ resuelto 2026-08-06 | solo aristas: del 92,2 % de pantalla tapada al 4,9 % |
+| ~~[REQ-XR2](#-req-xr2)~~ | ~~rayos-X: una línea más en la etiqueta con el **power** del bloque~~ | ✅ resuelto 2026-08-06 | `⚡ recibe → saca` en las piezas y `⚡ n débil` en los bloques que hacen de puente; el 0 no se pinta |
+| ~~[BUG-RS2](#-bug-rs2)~~ | ~~los repetidores de redstone girados no funcionan~~ | ✅ resuelto 2026-08-06 | el giro estaba BIEN; lo que fallaba era que el repetidor emitía por 5 lados, y los 3 «rotos» miraban a otro lado |
+| [REQ-RS3](#-req-rs3) | crear el **pistón** de redstone y plantarlo en `/map/test` para probarlo | ? sin acotar | ~~dependencia de BUG-RS2~~ — despejada |
+| ~~[REQ-CART2](#-req-cart2)~~ | ~~la ventana de editar nota (tecla `N`) es diminuta y su letra también~~ | ✅ resuelto 2026-08-06 | 720px y 18px de serie + `game.noteFont`/`game.noteWidth` por consola |
+| ~~[REQ-RS4](#-req-rs4)~~ | ~~un bloque que recibe energía debe **energizarse** y alimentar lo que tenga pegado~~ | ✅ resuelto 2026-08-06 | r1.2: fuerte/débil, `aislante()`, `test_redstone_bloques.js` |
+| ~~[REQ-RS5](#-req-rs5)~~ | ~~el **bloque de redstone** (fuente permanente); un repetidor encima no se activaba~~ | ✅ resuelto 2026-08-06 | pieza nueva + `red_concrete` **estaba declarado fuente** en `DEFECTOS` (quitado). Repetidor encima = solo soporte, como en Minecraft |
+| ~~[BUG-GAL1](#-bug-gal1)~~ | ~~editar el cable de redstone creó una pieza **nueva** en vez de reemplazar la vieja~~ | ✅ resuelto 2026-08-06 | Guardar enrutaba por `meta.type`, no por la galería de la que salió la pieza |
+| ~~[BUG-GAL2](#-bug-gal2)~~ | ~~el botón «Ficha» solo sale en una de las dos copias del cable~~ | ✅ resuelto 2026-08-06 | la ficha era solo de assets; ahora también de habitantes, diciendo que su única clave es `hab:<id>` |
+| ~~[BUG-RS5](#-bug-rs5)~~ | ~~el cable de redstone modificado no conduce~~ | ✅ resuelto 2026-08-06 | era consecuencia de BUG-GAL1, como decía el ticket: el dibujo acabó en `asset:` y el circuito es `hab:` |
+| [BUG-ROT1](#-bug-rot1) | `R` y `Shift+R` no alcanzan las 24 orientaciones: hay colocaciones imposibles | ? sin acotar | — |
+| [PERF-MC2](#-perf-mc2) | sub-chunk culling de estructuras | grande | — |
+
+La columna «pinta» es una **impresión al redactar, no una estimación medida** — varias se escribieron
+sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo que el dueño cerró el
+2026-08-06 al revisar la cola; el detalle y sus consecuencias están en cada ticket.
+
+---
+
 ## Incidencias — todas RESUELTAS (2026-07-20)
 
 ### ✅ BUG-DT1 · `room.doorTrim` recorta de más: parte muebles del centro y atraviesa muros/objetos lejanos — ✅ done (2026-07-20)
@@ -299,6 +330,32 @@ la superficie 3D sobre la que cae; donde su huella coincide con un objeto más a
 - Con el personaje junto a un mueble bajo, su sombra se ve **sobre la tapa** del mueble (y idealmente
   bajando por la cara que da a la luz), no cortada al llegar a él.
 
+### ✅ BUG-TNT1 · El snippet «Explosión TNT 🧨» tarda ~40 s en mundos grandes — ✅ done (2026-08-05)
+**Reportado** por el dueño con su log: explosión 1 = 1054 bloques en 387,20 ms, explosión 2 = 773 bloques
+en **21 398,60 ms**. Y con la teoría correcta de su parte: «podría ser porque se actualiza el mapa cada
+vez que se borran voxels generando mucho retraso porque los fps caen a 0, pero solo es una teoría».
+
+**Causa raíz** — confirmada midiendo, no supuesta. El snippet anima la onda con un
+`beginBatch()`/`endBatch()` **por anillo**, o sea por fotograma, y `mcFlushBuild` remataba cada lote con
+**`mcMeshAll()`**: skylight global + los **1024 chunks** del mundo. El coste iba con el **volumen del
+mundo**, no con el tamaño del cráter — 1054 bloques en 17×17 columnas disparaban 10 barridos completos.
+Medido en 512×40×512: 41 535 ms de explosión, de los cuales **35 789 ms eran los 10 `mcMeshAll`**.
+No era regresión de nada reciente: la lava no tiene colores emisivos, así que el índice `mc._glowCeldas`
+de la antorcha ni entra.
+
+**Arreglo** — la ráfaga apunta su caja en planta (`mcBuildBox`) y el flush re-malla solo eso, con vuelta
+a `mcMeshAll()` cuando la caja más su halo pasa de media planta (`mcCajaCompensa`). Las tres funciones de
+la edición de un bloque aceptan una segunda esquina opcional y **sin ella se comportan igual que antes**,
+que es lo que deja intacto el camino del clic. Detalle en `CLAUDE.md` §«…y una ráfaga de script tampoco».
+
+**Resultado** (512×40×512, SwiftShader ≈10× una GPU): explosión 2 de **36 209 ms y 9 `mcMeshAll`** a
+**5 689 ms y 0**. Los 9 flushes suman **304 ms** (4 chunks cada uno en vez de 1024). Lo que queda es
+tiempo de fotograma, no de edición: ese mundo ya cuesta 196 ms/frame en reposo con SwiftShader.
+
+**Verificado**: `test_luz_incremental_navegador.js` (19 ok, compara celda a celda contra el barrido
+global), `test_luz_en_rejilla.js`, `test_luz_al_estampar.js`, `test_luz_traspasa.js`,
+`test_setvoxel_autocarga.js` (21 ok), `test_flor_en_rejilla.js`, `test_clic_derecho_rejilla.js`.
+
 ### ✅ BUG-TR1 · A veces al cruzar de sala la pantalla se queda NEGRA hasta el siguiente clic — ✅ done (2026-07-20)
 **Resuelto**: la carrera estaba en `playTick`, que **decrementaba `play.fade` durante la transición**
 (carga async) sin repintar (el bloque de render exige `!transitioning`). Si `playLoadRoom` tardaba, el
@@ -403,7 +460,877 @@ al terreno exige conservar el alpha en `buildTexFaces`, marcar bloques translúc
 de cada chunk en opaco+alpha (y dejar de pelar caras contra vecinos translúcidos) y una segunda pasada ordenada
 de atrás hacia delante. Toca el camino caliente del render ⇒ pendiente de decisión.
 
+### ✅ BUG-DBG2 · En el Mundo, `game.showFPS()` conmuta también el contador de voxels y `game.showVoxels()` no hace nada — ✅ hecho 2026-08-06
+**Reportado** 2026-08-06 por el dueño: «la función `game.showFPS()` muestra tanto los fps como los
+voxels (conmuta on/off), debería de ser solo para los fps; la función `game.showVoxels()` no parece
+hacer nada».
+
+**Síntoma**
+En el modo Mundo los dos medidores flotantes (`#mc-fps` «— fps» y `#mc-vox` «— vox») van pegados: se
+encienden y se apagan juntos con `game.showFPS()`. `game.showVoxels(true/false)` no cambia nada en
+pantalla, aunque el valor sí se guarda y sí sale en `game.dumpVars()` — o sea que parece rota.
+
+**Causa raíz** (leída, no supuesta)
+`updateWorldMeters` (`app.js:5654`) rige **los dos** medidores con la misma variable:
+```js
+const ef=$('#mc-fps'); ... ef.hidden=!(_showFPS && mc.active);
+const ev=$('#mc-vox'); ... ev.hidden=!(_showFPS && mc.active);   // ← debería ser _showVox
+```
+El comentario de encima ya lo confiesa («Reusa `game.showFPS` (`_showFPS`)»). El estado `_showVox`
+existe, se persiste (`vf_showVox`) y funciona en los **otros dos** modos —`#e3-vox` en el editor 3D
+(`app.js:2420`, `4734`) y `#play-vox` en Play (`4742`)—, pero el Mundo nunca lo mira.
+
+**Segunda mitad, más callada**: `applyShowFPS`/`applyShowVox` (`4726`/`4732`) llaman a
+`updatePlayMeters()` pero **no** a `updateWorldMeters()`. Hoy no se nota porque `mcTick` la llama en
+cada frame (`app.js:9504`), así que el cambio entra al fotograma siguiente; pero es exactamente la
+asimetría que REQ-DBG1 quitó para Play, y deja el medidor desincronizado con el bucle parado.
+
+**Arreglo propuesto**
+1. `#mc-vox` pasa a regirse por `_showVox` en `updateWorldMeters`.
+2. `applyShowFPS` y `applyShowVox` llaman también a `updateWorldMeters()`, para que los tres modos
+   (editor 3D, Play, Mundo) obedezcan a los dos toggles por igual — el **principio que fija REQ-DBG1**:
+   *cualquier toggle de depuración tiene el mismo efecto en todos los modos*.
+
+**⚠️ Cambio de comportamiento visible que hay que avisar**
+`_showVox` **nace en `false`** y `_showFPS` en `true`. Hoy, en el Mundo, el contador de vox sale porque
+va colgado del de FPS; después del arreglo **desaparecerá** hasta que se pida `game.showVoxels(true)`.
+Es lo correcto y es lo que pide el dueño, pero el que abra el Mundo mañana verá un medidor menos.
+
+**De paso (decidir, no urgente)**: `#mc-vox` del Mundo no cuenta voxels sino **caras (quads)** dibujadas
+por la GPU —lo dice su propio `title` en `index.html:502`, y `game.voxels` se rellena desde `mc.quads`—.
+La etiqueta «vox» miente un poco; renombrarla a «quads» o dejarla como está es decisión del dueño.
+
+**Verificación esperada**
+- Prueba de navegador nueva (hoy **ningún** test toca los medidores): con el Mundo abierto,
+  `game.showVoxels(true)` enseña **solo** `#mc-vox`; `game.showFPS(false)` apaga **solo** `#mc-fps`; las
+  cuatro combinaciones se ven bien y sobreviven a recargar (localStorage).
+- Y el mismo cuadro de cuatro combinaciones en editor 3D y en Play, para que quede fijada la simetría.
+
 ---
+
+**RESUELTO** 2026-08-06. Dos líneas de `app.js` y un test que no existía:
+
+1. `updateWorldMeters` (`app.js:5656`): `#mc-vox` pasa de `_showFPS` a **`_showVox`**.
+2. `applyShowFPS` (`:4729`) y `applyShowVox` (`:4736`) llaman también a `updateWorldMeters()`, no solo
+   a `updatePlayMeters()`. Con esto los tres modos —editor 3D, Play y Mundo— obedecen los dos toggles,
+   que es el principio que fijó REQ-DBG1.
+
+⚠️ **Corrección al propio ticket**: el fragmento que cité al diagnosticar decía
+`const ev=$('#mc-vox'); ... ef.hidden=...` — o sea, apuntaba a **dos** errores (variable equivocada
+*y* elemento equivocado). El código real siempre puso `ev.hidden`; el error era **solo** `_showFPS` en
+vez de `_showVox`. La causa estaba bien identificada, pero la transcripción del ticket no era fiel, y
+un fragmento citado de memoria en un ticket puede mandar a arreglar algo que no está roto.
+
+**Cambio visible avisado**: `_showVox` nace en `false`, así que en el Mundo **el contador de vox ya no
+sale de partida**. Se pide con `game.showVoxels(true)` y se recuerda entre sesiones.
+
+**Verificado** — `node test_medidores_depuracion.js` nuevo, 14 ok: las cuatro combinaciones en el
+Mundo, que ninguno de los dos interruptores toque al otro, que el cambio se vea **sin esperar al
+siguiente frame** (era la segunda mitad, la callada), que sobrevivan a recargar, y el mismo cuadro en
+el editor 3D. Play quedó fuera del test: entrar en el modo pide montar una sala y el bug no estaba
+ahí; los dos toggles ya lo cubrían vía `updatePlayMeters`.
+
+**Sigue abierto para el dueño** (no urgente): `#mc-vox` cuenta **quads**, no voxels — su propio `title`
+lo dice. Renombrar la etiqueta o dejarla es decisión suya.
+
+### ✅ REQ-OSD1 · Poder ocultar los botones «Código» y «Cerrar» del Mundo (y que no salgan por defecto) — ✅ hecho 2026-08-06
+**Reportado** 2026-08-06 por el dueño: «los botones de "código" y "cerrar" en el modo mapa se pueden
+ocultar, estaría bien algo en plan `game.showOSDbuttons(false)`; por defecto que no se muestren».
+
+**Estado actual**
+`.mc-actions` (`index.html:503-506`, `style.css:670`) fija en la esquina superior derecha del Mundo
+`#mc-code-btn` («🧩 Código», atajo **Alt+C**) y `#mc-close` («✕ Cerrar», atajo **Esc**). Están siempre
+visibles mientras el Mundo está abierto, tapan esa esquina del mundo y **salen en las fotos** (tecla F
+/ 📷). Ningún test los pulsa, y `closeWorld` sigue enganchado al `onclick` aunque el botón no se vea.
+
+**Propuesta**
+Tunable `game.showOSDbuttons`, con la **misma forma** que `game.showFPS`/`game.showVoxels`: getter que
+devuelve una función invocable con `valueOf`, así que valen `game.showOSDbuttons(false)` y
+`game.showOSDbuttons = false`. Persistido (`vf_showOSD`) y listado en `game.dumpVars()`. Oculta
+`.mc-actions` entera; **por defecto `false`**, como pide el dueño.
+
+**⚠️ Riesgo que hay que resolver ANTES de poner el defecto en `false`**
+En **táctil no hay teclado**: `#mc-touch` (`index.html:495-499`) solo trae el stick, saltar y foto. Sin
+el botón «Cerrar» y sin Esc, **un móvil se queda sin salida del Mundo** — y el dueño juega en móvil
+(390 px). Hay que elegir una:
+- **(a)** el defecto oculto solo aplica con teclado; en táctil los botones siguen saliendo;
+- **(b)** un botón de salir dentro de `#mc-touch`, que es donde ya vive lo táctil;
+- **(c)** una zona/gesto de rescate que los devuelva (tocar la esquina, dos dedos…).
+Recomendación: **(b)**, y si no, (a). (c) es lo que menos se descubre solo.
+
+**✅ DECIDIDO** (dueño, 2026-08-06): «en móvil que se muestre el botón cerrar». Es una **(a) parcial**,
+y es mejor que la (b) que yo proponía: no se inventa un botón nuevo, se conserva el que ya existe y ya
+está en su sitio. Regla exacta:
+
+| | `🧩 Código` | `✕ Cerrar` |
+|---|---|---|
+| con teclado | oculto por defecto | oculto por defecto (queda **Esc**) |
+| táctil | oculto por defecto | **siempre visible**, pase lo que pase con el defecto |
+
+El detector ya existe y **no hay que inventarlo**: `MC_TOUCH` (`app.js:10018`) =
+`matchMedia('(pointer:coarse)').matches || navigator.maxTouchPoints>0`.
+
+⚠️ Consecuencia que hay que respetar: en táctil, `game.showOSDbuttons(false)` **no** puede esconder
+`#mc-close`, o volvemos al encierro. Si algún día se quiere de verdad, que sea un tunable aparte y
+explícito; el defecto nunca deja el móvil sin salida.
+
+**Verificación esperada**
+- `game.showOSDbuttons(false)` esconde los dos botones y `true` los devuelve; sobrevive a recargar; sale
+  en `game.dumpVars()`.
+- Con los botones ocultos: **Esc** sigue cerrando el Mundo y **Alt+C** sigue abriendo los snippets.
+- En viewport táctil de 390 px, `✕ Cerrar` **se ve** con el defecto puesto, y cerrar funciona tocándolo.
+- Una foto (F) del Mundo con el defecto puesto no lleva botones encima.
+
+---
+
+**RESUELTO** 2026-08-06. `game.showOSDbuttons`, con el mismo patrón callable+setter que `showFPS`
+(`app.js`, junto a `applyShowVox`): estado `_showOSD` en `false` de fábrica, persistido en
+`vf_showOSD`, y `updateOSDbuttons()` como único sitio que toca el `hidden` de los dos botones. Sale en
+`game.dumpVars()`.
+
+⚠️ **Corrijo la decisión que yo mismo anoté esta mañana: el detector NO es `MC_TOUCH`, es
+`mcTouchOn`.** Al implementarlo apareció que ya existe `game.touchControls` (`app.js`, junto a
+`MC_TOUCH`), que arranca en `MC_TOUCH` pero el dueño puede forzar en los dos sentidos y se persiste en
+`vf_mcTouch`. Es lo que decide si salen los mandos táctiles. Colgar «Cerrar» de la constante cruda
+dejaba las dos cosas diciendo lo contrario en un portátil táctil: mandos táctiles apagados (o sea,
+teclado) pero botón de cerrar forzado; o peor, mandos encendidos a mano en escritorio y el botón
+escondible. Ahora `game.touchControls` re-aplica `updateOSDbuttons()` al cambiar, así que **la salida
+del Mundo siempre coincide con el mando que el dueño está usando**.
+
+**Verificado** — `node test_botones_osd.js` nuevo, 19 ok, en **dos contextos de navegador** porque el
+defecto depende del dispositivo: escritorio (los dos ocultos de partida, conmutan, persisten, `Esc`
+sigue cerrando y `Alt+C` sigue abriendo los snippets sin los botones) y táctil de 390 px (`✕ Cerrar`
+visible de partida, `showOSDbuttons(false)` **no** puede esconderlo, `🧩 Código` sí, y apagar
+`touchControls` lo vuelve escondible). El caso «`showOSDbuttons(false)` no puede esconder Cerrar» es
+el que impide que el móvil se quede encerrado.
+
+### ⬜ PERF-MC3 · Abrir un mundo VACÍO cuesta 2,2 s, y el 81 % es bajar la paleta EN SERIE — ⬜ todo
+**Reportado** 2026-08-06 por el dueño: «cargo `/map/empty`, que no tiene ni un voxel, y se tira en
+"Preparando bloques (0/15)…" un buen rato, cosa que no tiene sentido; quiero saber qué pasa».
+
+**Medido** (no supuesto). `game.loadReport()` del dueño, host remoto, `/map/empty` = 0 voxels,
+0 estructuras, 0 notas → **2178 ms** en total:
+
+| fase | ms | % |
+|---|---|---|
+| **Paleta: assets + rasterizar caras** | **1775,2** | **81,5** |
+| Red: descargar mundo | 310,5 | 14,3 |
+| Bake de mundo vacío | 30,9 | 1,4 |
+| WebGL: contexto + shaders | 36,0 | 1,7 |
+| resto (lista, atlas→GPU, hotbar) | ~0,7 | 0 |
+
+Y dentro de la paleta: **15 de 15 bloques hubo que descargarlos (1774 ms), EN SERIE** — `roca` 868 ms,
+`hierba` 162, `tierra` 149, `adoquin` 141, `tablones` 141, `red_concrete` 138, `arena` 136… y los ocho
+`hab:*` de redstone entre **2,6 y 5,7 ms cada uno**.
+
+**Contraste en local** (sonda Playwright, caché fría, localhost ⇒ latencia ≈ 0, paleta de 7): la fase
+de paleta sigue costando **328,9 ms**, entre 4,7 y 87,3 ms por bloque. O sea que **no es solo la red**:
+una parte gorda es CPU (`JSON.parse` + rasterizar 6 caras). La red multiplica el problema porque va en
+serie.
+
+**Por qué pasa** (las tres causas, separadas)
+1. **Se descarga entero lo que no se usa.** El `.vox.json` de un bloque por defecto pesa **78–103 KB**
+   (`roca` 78 KB, `red_concrete` 103 KB; ~600 KB entre los siete) porque lleva sus 4096 voxels con
+   color. De todo eso, para el atlas se usan **6 caras de 16×16 px** ≈ 1,5 KB de píxeles. Los `hab:*`
+   pesan 2–4 KB y por eso van a 3–6 ms: la diferencia es el tamaño del documento, no el número de
+   pasos. Y el mundo está **vacío**: no hay ni un voxel de ninguno de esos bloques.
+2. **En serie.** `mcBuildPaletteImpl` (`app.js:6189`) es un `for` con `await getTexDef(b.key)` dentro:
+   15 idas y vueltas una detrás de otra. El propio informe ya lo dice en su última línea.
+3. **El cartel dice «0/15» porque el aviso llega tarde.** `onProgress` se llama en `app.js:6218`,
+   **después** de terminar el bloque, y con `bi+1`. El primero (`roca`, 868 ms) transcurre entero con el
+   cartel en `0/15`; y el nombre que se enseña es el del bloque **ya terminado**, no el que se está
+   bajando. Por eso parece un cuelgue: el número no se mueve justo mientras más se trabaja.
+
+**De paso, descargas que nadie pidió** (visto en la sonda, pendiente de averiguar quién las hace):
+durante la carga se piden **`/api/habitantes` tres veces** y `/assets/madera.vox.json` +
+`/assets/hierba-alta.vox.json`, que **no están en la paleta** de ese mundo.
+
+**Propuestas, por relación ganancia/riesgo**
+1. *(barato, hazlo ya)* **Avisar ANTES de empezar cada bloque**, no después: el cartel diría
+   «(0/15) roca ⬇» mientras la baja. Una línea, y el síntoma reportado —«se queda en 0/15»— desaparece
+   aunque no se toque el rendimiento.
+2. **Paralelizar las descargas** con un tope de concurrencia (6–8): traer los documentos a la vez y
+   rasterizar después en serie (el canvas del atlas es compartido). 15 idas y vueltas → 2–3 tandas.
+3. **Cargar la paleta perezosamente**: los 6 bloques por defecto están para poder *construir* (son la
+   hotbar), no porque el mundo los use. El mundo podría abrirse ya y completarse la hotbar detrás.
+4. *(de fondo)* Que el servidor sirva **las caras ya rasterizadas** — un `.faces.png` por asset, o un
+   `/api/atlas?keys=…` que devuelva el atlas entero de un GET. Quita a la vez la transferencia y el
+   `JSON.parse`. Y/o caché de caras entre sesiones (IndexedDB por clave+mtime): un atlas de bloque son
+   6×16×16 px, cabe de sobra.
+
+**Verificación esperada**
+- Con caché fría en el host remoto, `game.loadReport()` enseña la fase de paleta **por debajo de
+  ~400 ms**, y el total de `/map/empty` por debajo de ~800 ms.
+- El cartel de carga **nunca se queda más de ~300 ms en el mismo número**, y el nombre que enseña es el
+  del bloque en curso.
+- Prueba de navegador que abra el Mundo y compruebe que las peticiones de assets **se solapan** en el
+  tiempo (hoy son estrictamente consecutivas), y que la paleta resultante es la misma de antes.
+- Averiguado y anotado quién pide `/api/habitantes` tres veces y los dos assets de fuera de la paleta.
+
+### ⬜ BUG-SNP1 · «no existe el material X» miente, llena la consola y PIERDE la definición — ⬜ todo
+**Reportado** 2026-08-06 por el dueño, junto al anterior: «en la consola hay mucha información, alguna
+que no tiene sentido». Al abrir `/map/empty` salen **diez `console.warn` con traza de pila completa**:
+`hab:escalera`, `asset:assets/diana.vox.json`, `hielo`, `hielo-pista-de-patinaje`, `cabeza`, `brazo`
+(desde `mundo-autoarranque`) y `hab:cable-on`, `hab:placa-on`, `hab:puerta-abierta`, `hab:boton-on`
+(desde el snippet de redstone). Diez trazas ahogan el informe de carga, que es lo único útil que hay ahí.
+
+**El mensaje miente.** Todos esos materiales **existen** en el servidor: `data/habitantes/escalera.json`,
+`assets/diana.vox.json`, `assets/hielo.vox.json`, `assets/hielo-pista-de-patinaje.vox.json`,
+`assets/cabeza.vox.json`, `assets/brazo.vox.json`. Lo que ocurre es otra cosa: `resolver()` valida
+contra `clavesConocidas()` = **la paleta del mundo ABIERTO**, y la paleta solo lleva lo que está
+*colocado* (+ hotbar + los 6 por defecto). En un mundo vacío no está casi nada, así que un mundo vacío
+es precisamente el que más se queja. El texto sugiere un error de escritura cuando el problema es
+«todavía no hay ninguno puesto».
+
+**Y no es solo ruido: se pierde el comportamiento.** `define()` hace `return null` **sin guardar nada**
+cuando `resolver()` falla. Pero la paleta **crece** al colocar un material nuevo — y para entonces la
+definición ya se tiró. Consecuencia concreta: en `/map/empty`, si colocas una `hab:escalera` **no tendrá
+su comportamiento** en toda la sesión, aunque el autoarranque intentó dárselo al abrir. Eso convierte un
+aviso cosmético en un fallo funcional silencioso.
+
+**Dónde vive** ⚠️ Esto **NO es `app.js`**: `resolver`/`define` están en
+`data/snippets/mundo-autoarranque.json` y los `define` de las piezas en el snippet de redstone. Se
+editan en los ficheros de `redstone/` y se publican con `redstone/make_snippets.js`; recordar que el
+snippet tiene **dos copias vivas** y que el dueño lo edita en vivo (ver CLAUDE.md).
+
+**Propuesta**
+- **Aplazar en vez de rechazar**: si la clave no está en la paleta *todavía*, guardar la config en una
+  tabla de pendientes y aplicarla cuando aparezca (ya hay invalidación por `mc.blockKey.length`). Es lo
+  que arregla la pérdida de comportamiento.
+- **Distinguir los dos casos en el aviso**: «no está en este mundo (aún)» → `console.log` discreto o
+  nada; «no existe en ninguna parte» (typo de verdad) → el warn de ahora, con su sugerencia. Ojo: hoy
+  ni siquiera se puede distinguir sin preguntar al servidor, así que quizá el criterio sea más simple:
+  avisar solo si `resolver()` no encuentra **ni una clave parecida**.
+- **Sin traza**: `console.warn` arrastra la pila entera; para un aviso de configuración sobra.
+
+**Verificación esperada**
+- Abrir `/map/empty` deja la consola con el informe de carga y **cero** avisos de `define`.
+- Colocar una `hab:escalera` en `/map/empty` ⇒ tiene su comportamiento sin volver a definir nada.
+- `game.bloques.define('hab:eskalera', …)` (typo de verdad) **sigue** avisando y sugiriendo la clave buena.
+- `game.bloques.lista()` en `/map/empty` refleja lo definido, incluido lo que está en espera.
+
+### ⬜ REQ-PICK1 · El selector de bloque/textura de una ranura: ancho, nombres, fuente, menú y filtros — ⬜ todo
+**Reportado** 2026-08-06 por el dueño, cinco cosas sobre el mismo panel (`#mc-picker`, el que sale al
+asignar material a una ranura de la hotbar): (a) se aprovecha poco el espacio y hay que hacer scroll,
+podría ser más ancha; (b) los nombres salen cortados —«no distingo entre puerta abierta o puerta
+cerrada, solo entra el *puerta*»—; (c) no usa la fuente del juego; (d) menú contextual con botón
+derecho sobre la textura, con «ver ficha» y «editar material»; (e) filtros para elegir por familia
+(los de redstone) o por propiedades.
+
+**Estado actual, medido**
+- El selector tiene **87 entradas**: 54 assets de tipo `bloque`/`textura` (de 58 en `assets/index.json`)
+  + 33 habitantes de esos mismos tipos (de 37). Se pintan **todas de golpe**, sin filtro ni buscador
+  (`mcOpenPicker`, `app.js:8835-8853`).
+- Ventana `width:min(880px,95vw); max-height:86vh` y rejilla
+  `repeat(auto-fill, minmax(74px,1fr))` (`style.css:675-679`) ⇒ ~10 por fila, ~9 filas: **el scroll está
+  garantizado** aunque la ventana ya usa casi toda la pantalla a lo ancho. El espacio que sobra es el
+  **vertical** de cada celda, no el horizontal de la ventana.
+- `.mo-name` es `font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis`
+  (`style.css:471` + `678`) **y lleva el icono delante** (`${c.icon} ${esc(c.name)}`, `app.js:8847`),
+  que se come 2-3 caracteres más. En una celda de 74 px entran ~9-10 caracteres.
+- Cuantificado: **41 de los 87 nombres pasan de 9 caracteres**, 30 pasan de 12 y 14 de 15. Y hay **10
+  prefijos ambiguos** al cortar por 9 — `repetidor…` (repetidor / repetidor-on), `Cabeza de…`,
+  `Brazo de…`, `Pierna de…`, `Torso de…`, `Hormigón…`, `Hierba Ca…`, `Cubo Tran…`, `tejado…`,
+  `Taberna…`. El caso que reporta el dueño (`puerta` vs `puerta-abierta`) es exactamente éste.
+- `.mo-name`/`.mo-badge` **no** están en el bloque de `--font-game` (`style.css:709-720`): usan la
+  fuente del sistema.
+- **No hay `oncontextmenu`**: lo único que hace una celda es `o.onclick=()=>mcAssignSlot(…)`
+  (`app.js:8851`).
+
+**⚠️ (b) y (c) ya NO tiran en direcciones opuestas** — lo hacían cuando `--font-game` era Press Start
+2P, que gasta 1.0 em por carácter y a 9px habría dado 126px para `puerta-abierta`, cortando **más**
+nombres. Desde el cambio a **Pixeloid Sans** (proporcional, media de 5.6px por minúscula a 9px) las
+medidas reales son: `puerta` 33px, `puerta-abierta` **72px**, `repetidor-on` 62px, `Hierba Camino`
+68px, `Cabeza de zombi` 82px, `Cubo Transparente` 95px — o sea que en la celda de 74px la mayoría casi
+entra ya, y lo que falta es sitio para el icono de delante. ⚠️ La restricción que lo sustituye:
+**Pixeloid solo es nítida en múltiplos de 9** (`font-size/9` es su píxel de diseño), así que **no** se
+puede bajar `.mo-name` a 8px para que quepa más — o 9px, o 18px (ver «🔠 La fuente del juego» en
+`CLAUDE.md`). La combinación que cumple las dos:
+celda más ancha (p. ej. `minmax(110px,1fr)`), nombre en **dos líneas**
+(`white-space:normal` + `-webkit-line-clamp:2`) a 9px; y el `title` del elemento con el
+nombre completo para el hover. Ampliar la ventana a `min(1200px,96vw)` da aire, pero **por sí solo no
+arregla el corte**, porque el corte lo produce el ancho de la CELDA, no el de la ventana.
+
+**(d) Menú contextual** — viable sin pelearse con el Mundo: `mcOpenPicker` ya hace `exitPointerLock()`,
+así que dentro del selector el clic derecho está libre (hay que `preventDefault()` para que no salga el
+del navegador, y cerrarlo con Esc / clic fuera).
+- **«ver ficha»**: casi todos los datos ya se calculan — clave exacta, `badge` (`mcMatKind`,
+  `app.js:7661`), tamaño y nº de celdas (`mcStructCells`, que el selector ya llama para el badge), y del
+  documento salen `atravesable`, `caras`, `blockLike` y si emite luz.
+- **«editar material»**: hoy la única vía es la galería del editor (`openHabitantes`, `app.js:1889`).
+  ⚠️ **Pregunta abierta**: salir del Mundo para editar **pierde la sesión** (y volver cuesta lo que dice
+  PERF-MC3). Propongo abrir el editor en **pestaña nueva** (`window.open`) y dejar el Mundo vivo; si el
+  dueño prefiere navegar en la misma, que al menos guarde antes.
+
+**(e) Filtros — ⚠️ regla de arquitectura que NO se puede saltar.** `app.js` **no sabe qué es
+«redstone»**: el comportamiento vive en los snippets (CLAUDE.md §0). Meter una lista de claves de
+redstone en `app.js` sería exactamente lo que la regla prohíbe. El precedente exacto de cómo se hace es
+**`mcXrayExtra`** (`app.js:7670`): el snippet aporta una función y `app.js` solo la pinta. Traducido
+aquí:
+- `app.js` ofrece filtros por lo que **sí** sabe: `badge` (bloque / textura / guardada), origen
+  (`asset:` vs `hab:`), y «ocupa más de una celda» (estructura) — que ya lo calcula.
+- Punto de extensión (`mcPickerTags` o similar) para que el snippet de redstone etiquete sus piezas y
+  aparezca el filtro «redstone» sin que `app.js` sepa qué significa.
+- **Y primero, un buscador por texto**: es lo más barato de todo y lo que más scroll quita (87 → 3 al
+  teclear «puerta»). Recomiendo empezar por ahí, antes que por los filtros.
+
+**✅ DECIDIDO** (delegado en mí por el dueño, 2026-08-06). El ticket son cinco cosas de tamaños muy
+distintos metidas en uno; **se parte en tres, y solo el primero entra en la cola ahora**:
+
+| | qué entra | por qué va junto |
+|---|---|---|
+| **PICK1-A** | buscador por texto + celda a `minmax(110px,1fr)` + nombre en **dos líneas** a 9px + `title` con el nombre entero + fuente del juego + ventana a `min(1200px,96vw)` | es (a)+(b)+(c)+buscador, y **son una sola pasada de DOM/CSS sobre `mcOpenPicker` y `.mo-name`, con una sola ronda de verificación a 390 px**. Partirlo obligaría a repetir esa ronda tres veces |
+| **PICK1-B** | menú contextual: «ver ficha» + «editar material» | es una **superficie de interacción nueva** (contextmenu, cierre por Esc/clic fuera, `preventDefault`). No comparte nada con A salvo el fichero |
+| **PICK1-C** | filtros por familia/propiedades | necesita **inventar el punto de extensión** `mcPickerTags` **y** tocar el snippet de redstone para que etiquete. Es el único que no se puede terminar solo desde `app.js` |
+
+**Orden: A ahora, B y C esperan.** El razonamiento, para que se pueda discutir y no haya que fiarse:
+
+1. **A resuelve el dolor que el dueño describió con sus palabras.** Lo que reportó fue «hay que hacer
+   scroll» y «no distingo puerta abierta de puerta cerrada». El buscador mata el scroll (87 → 3) y la
+   celda ancha + dos líneas matan la ambigüedad en los 10 prefijos ambiguos medidos. B y C son cosas
+   que estarían **bien**, no cosas que hoy molesten.
+2. **A no arrastra ninguna pregunta abierta.** B sí: «editar material» choca con perder la sesión del
+   Mundo. C sí: hay que diseñar un contrato de extensión, y los contratos mal puestos se quedan.
+3. **A es el único de los tres que abarata a los otros dos.** Con buscador y filtro de texto ya
+   escritos, C se reduce a añadir un origen de etiquetas más al mismo filtrado, en vez de a inventarlo.
+
+**Y la pregunta abierta de B, decidida también para que no vuelva a bloquear**: «editar material» abre
+el editor en **pestaña nueva** (`window.open`), y el Mundo se queda vivo en la suya. Cambiar de página
+cuesta la sesión entera del Mundo y, encima, volver cuesta los 2,2 s de PERF-MC3; una pestaña nueva no
+cuesta ninguna de las dos cosas. Si el dueño prefiere navegar en la misma, entonces hay que guardar
+antes sí o sí.
+
+**Verificación esperada** (los puntos de B y C quedan aparcados con sus tickets)
+- Con la ventana y la celda nuevas: **ningún** nombre de los 87 sale ambiguo; `puerta` y
+  `puerta-abierta` se distinguen a simple vista, y el `title` enseña el nombre entero.
+- El texto del selector va en la fuente del juego **sin** perder legibilidad (comprobar los 14 nombres
+  de más de 15 caracteres, que son el caso peor).
+- Clic derecho sobre una celda abre el menú con las dos opciones; Esc y clic fuera lo cierran; el menú
+  del navegador no sale.
+- «editar material» **no** tira abajo el Mundo abierto.
+- Buscador y filtros reducen la lista, y `app.js` **no** contiene ni una clave de redstone.
+- Todo lo anterior comprobado también en **viewport de 390 px**, donde `95vw` deja la ventana estrecha
+  y el problema del corte es peor.
+
+### ⬜ REQ-MAP1 · Alt+M = pantalla de mapas conmutable, sin perder el mundo abierto — ⬜ todo
+**Reportado** 2026-08-06 por el dueño: «quiero que Alt+M me muestre la pantalla de elección de mapas,
+si es posible que sea conmutable, sin perder el que tengo actualmente; una segunda vez a Alt+M cierra
+la pantalla para seguir donde estaba; esto desde cualquier parte de la app».
+
+**Estado actual**
+La pantalla de elección de mapas es **`/map/`** (sin nombre), una **página aparte** servida por el
+servidor (`server.py:421-424`, `mundos.listar()` con estadísticas y miniatura cenital). Llegar a ella
+es una **navegación completa**: se pierde el mundo abierto y volver cuesta la recarga entera de la SPA
+—con los ~2 s que documenta PERF-MC3—. No hay ningún atajo de teclado para ella.
+
+**Lo bueno: el servidor ya está hecho.** `GET /api/mundos` (`server.py:433`) devuelve el listado con
+las miniaturas cacheadas en `data/_thumbs/`. Esto es **solo cliente**: un overlay que pinte ese JSON.
+
+**Precedente exacto a copiar: Alt+C y Alt+A** (`app.js:3196-3217`), que ya resuelven «conmutable desde
+cualquier parte, incluido el Mundo». De ahí salen las cautelas, que están comentadas en el propio
+código y **no** hay que redescubrir:
+- mirar `e.code` (tecla física) porque con Alt pulsado `e.key` llega compuesto en varios teclados, y
+  excluir Ctrl/⌘ para no pisar AltGr;
+- ir **antes** del corte de Mundo y del de `input/textarea`, para que cierre igual con el foco dentro;
+- `exitPointerLock()` al abrir, que en el Mundo el ratón está capturado.
+- `m` **no está asignada a nada** hoy (a diferencia de la `a` de Alt+A, que es andar a la izquierda), así
+  que aquí no hace falta `stopImmediatePropagation`. Comprobarlo igualmente al implementar.
+- Añadir el overlay a la **guardia de teclas del Mundo** (`app.js:9922`, la lista de modales abiertos):
+  si no, el jugador **sigue andando por detrás** mientras elige mapa.
+- Cerrar también con **Esc**, como los demás modales (`app.js:3192`, `3224`, `3227`).
+
+**«Sin perder el que tengo actualmente»** — dos mitades que conviene no confundir:
+1. **Abrir/cerrar el overlay** no toca `mc.*`: el mundo sigue vivo detrás y al cerrar se continúa donde
+   se estaba. Esto es lo que pide el dueño y es barato.
+2. **Elegir otro mapa** sí es un cambio de mundo. Opciones: (a) navegar a `/map/<otro>` —simple y
+   honesto, pero paga la recarga—; (b) cambiar el mundo **en caliente** sin recargar la página. (b) es
+   bastante más trabajo (soltar VBOs, paleta, estructuras, agentes, snippets) y es donde se esconden las
+   fugas. **Recomiendo (a)**, y que **guarde antes de irse**; (b) solo si al dueño le sigue molestando.
+
+**Móvil**: no hay tecla Alt. El dueño juega en móvil (≈390 px), así que hace falta una entrada
+equivalente —un botón—; encaja con REQ-OSD1, que está decidiendo justo qué botones se ven en el Mundo.
+
+**Verificación esperada**
+- Alt+M abre el overlay desde el editor, desde el Mapa, desde Play y desde el Mundo; segundo Alt+M lo
+  cierra y se sigue exactamente donde se estaba (misma posición y vista en el Mundo).
+- Con el overlay abierto, **el jugador no se mueve** aunque se tecleen WASD, y Esc cierra.
+- El listado sale de `/api/mundos` (mismas miniaturas y estadísticas que `/map/`), sin recargar la SPA.
+- Abrir y cerrar el overlay 20 veces no cambia `game.fps` ni deja peticiones colgando.
+- Elegir otro mapa guarda el actual antes de irse.
+
+---
+
+---
+
+### ⬜ REQ-NAV1 · La barra superior se reduce a tres botones: [Galería] [Mapa] [⋯] — ⬜ todo
+**Reportado** 2026-08-06 por el dueño: «todas las opciones "Objeto / Habitantes / Objetos /
+Habitaciones / Texturas / Mapa / ▶ Jugar / 🌍 Mundo / 🧩 Código / 🦴 Agentes / Nuevo / Guardar /
+Guardar como… / Exportar / Importar" pasan a estar dentro de un botón "..." que solamente las muestra
+cuando se hace clic en él, menos "Objeto / Habitantes / Objetos / Habitaciones / Texturas" que pasa a
+ser un botón visible junto a "..." llamado "Galería" que une todo lo que contienen igual que hace la
+galería dentro del mapa. También sale fuera de "..." mapa, por lo que solamente quedan 3 botones
+visibles: [Galería] [Mapa] y [...]».
+
+**Estado actual** — la barra son **quince** botones en dos grupos hermanos de `index.html`:
+`<nav class="tabs" id="tabs">` (líneas 22-32, las diez pestañas) y `<div class="actions">` (34-41, las
+cinco acciones de fichero). Un único manejador delegado en `#tabs` (`app.js:3151-3163`) reparte por
+`dataset.tab`.
+
+**El hallazgo que abarata el ticket: la «Galería» ya existe, sin saberlo.** Las cuatro pestañas que el
+dueño quiere unir llaman **a la misma función con distinto filtro** (`app.js:3153-3156`):
+
+```js
+if(t.dataset.tab==='habitantes'){   openHabitantes('habitante');  return; }
+if(t.dataset.tab==='objetos'){      openHabitantes('objeto');     return; }
+if(t.dataset.tab==='habitaciones'){ openHabitantes('habitacion'); return; }
+if(t.dataset.tab==='texturas'){     openHabitantes('textura');    return; }
+```
+
+`openHabitantes(kind)` (`app.js:1889`) ya pinta **un solo modal** (`#hab-modal`, `index.html:254`)
+sobre **una sola rejilla** (`#hab-grid`), mezclando ya las dos fuentes —`/api/habitantes` y
+`assets/index.json`— y filtrando por `habBucket(h.type)` (`app.js:1885`), con sus rótulos en
+`HAB_TITLE`/`HAB_EMPTY` (1886-87) y el bucket vivo en `habKind` (1888). O sea que **«Galería» no es
+una vista nueva: es la que hay, con un selector de bucket dentro y sin el filtro fijado desde fuera.**
+El trabajo real es el selector (4 pastillas o un «Todo») y decidir el bucket por defecto.
+
+**⚠️ «Objeto» no cabe en Galería, y es el único punto del ticket que no se sostiene solo.** Las otras
+cuatro abren un overlay; `objeto` **no abre nada**: cae al final del manejador (`app.js:3162`) y solo
+marca `is-active` porque **es el lienzo del editor**, el fondo sobre el que se abren todos los demás.
+Metida dentro de «Galería» no habría forma de volver al lienzo salvo cerrando la galería. Lo coherente
+con lo que pide el dueño —tres botones— es que **cerrar la Galería (✕ o Esc) SEA volver a Objeto**, y
+que no haga falta entrada propia. Conviene confirmarlo antes de implementar.
+
+**«Igual que hace la galería dentro del mapa» es el ASPECTO, no el contenido.** La del mapa es
+`mcOpenPicker` (`app.js:8852`), que arma su lista con `mcBuildCatalog` (`assets/index.json` +
+`/api/habitantes`) pero **solo de `bloque` y `textura`** — dos de los cuatro buckets. La Galería nueva
+tiene que cubrir los cuatro (habitantes y objetos incluidos), así que es un **superconjunto**: sirve de
+modelo la presentación (rejilla única, icono, badge, miniatura) pero no se puede reutilizar su lista.
+Nota: son **dos catálogos distintos alimentados por las mismas dos fuentes**; unificarlos de verdad es
+otro ticket, y arrastra el `mcKindCache` de rayos-X (`app.js`, `mcMatKind`).
+
+**Entradas duplicadas que hay que reconciliar de paso** — el panel derecho ya tiene sus propios botones
+«Galería ▤»: `#btn-habitantes` (`index.html:243`) y `#btn-habitaciones` (245). Si la barra pasa a tener
+un botón «Galería», esos dos quedan como atajos redundantes al mismo modal. Decidir: se quedan (llevan
+al bucket concreto) o se quitan.
+
+**Lo que se rompe y hay que tocar a la vez**
+- **`test_panel_agentes.js:46`** hace `p.click('[data-tab="agentes"]')`. Si «🦴 Agentes» se va dentro
+  del `⋯`, ese clic deja de encontrar el botón: hay que abrir el menú primero o cambiar el test.
+  Los otros tres tests que tocan galerías (`test_ficha_material.js:58`, `test_galeria_assets.js:57`,
+  `test_guardar_pieza.js:73`) llaman `openHabitantes('textura')` **por evaluate**, así que **sobreviven
+  intactos** — buena señal de por dónde debe entrar el test nuevo.
+- **Alt+C y Alt+A siguen funcionando** aunque sus botones se escondan: cuelgan de `window` mirando
+  `e.code` (`app.js:3200` y `3209`), no del DOM del botón. Es un argumento a favor del ticket, no en
+  contra — pero entonces **Código y Agentes pierden su única pista visible**, así que el menú `⋯` debe
+  mostrar el atajo junto al nombre.
+- **CSS**: `.tabs` (`style.css:62`) y `.actions` (74), más la media query `≤980px` (785-787) que hoy
+  existe **solo** para que las diez pestañas fluyan a una fila propia y `▶ Jugar` se empuje al extremo.
+  Con tres botones esa media query sobra casi entera. **Esto es la mayor ganancia del ticket**: el dueño
+  juega a ~390 px, donde hoy la barra come dos o tres filas de pantalla.
+
+**Decisiones que quedan abiertas para el dueño** (no las cierro yo)
+1. ¿Cerrar la Galería vuelve a «Objeto», o «Objeto» va también dentro del `⋯`?
+2. ¿La Galería abre en un bucket concreto o en un «Todo» mezclado de los cuatro?
+3. `▶ Jugar` y `🌍 Mundo` son las dos de uso más frecuente y las más caras de alcanzar con dos clics.
+   ¿Seguro que van dentro del `⋯`? El enunciado dice que sí; lo dejo anotado por si al usarlo molesta.
+
+**✅ DECIDIDO** (dueño, 2026-08-06): «Jugar dentro de "...", y Mundo fuera; solo 3 botones
+`[Galería] [Mundo] [⋯]`».
+
+⚠️ **Esto CAMBIA el enunciado original del ticket, y hay que leerlo así y no como un matiz.** El
+reporte decía «también sale fuera de "..." **mapa**, por lo que solamente quedan 3 botones visibles:
+[Galería] [**Mapa**] y [...]». La decisión sustituye ese tercer botón:
+
+| | enunciado original | decidido |
+|---|---|---|
+| botón 2 | `🗺 Mapa` | **`🌍 Mundo`** |
+| `🗺 Mapa` | visible | **dentro del `⋯`** |
+| `▶ Jugar` | dentro del `⋯` | dentro del `⋯` (sin cambio) |
+
+Es coherente con la pregunta 3 que dejé abierta: de las dos caras de alcanzar, la que se salva es
+`Mundo`, no `Jugar`. Queda entonces: **fuera** `Galería`, `🌍 Mundo`, `⋯`; **dentro del `⋯`**
+`🗺 Mapa`, `▶ Jugar`, `🧩 Código`, `🦴 Agentes`, `Nuevo`, `Guardar`, `Guardar como…`, `Exportar`,
+`Importar` — y `Objeto` según la decisión 1, que **sigue abierta**.
+
+Las decisiones **1 y 2 siguen sin respuesta** y no bloquean empezar: la 1 tiene un defecto razonable
+(cerrar la Galería vuelve a Objeto, que es el lienzo de fondo) y la 2 también (abrir en el bucket que
+se usó la última vez). Se implementan así y se corrigen si al usarlo molesta.
+
+**Verificación esperada**
+- La barra muestra exactamente **tres** botones —`Galería`, `🌍 Mundo`, `⋯`—; `⋯` abre un menú con las
+  restantes (Mapa y Jugar **incluidos**) y se cierra con Esc, con un clic fuera y con un segundo clic
+  en `⋯`.
+- «Galería» abre `#hab-modal` y desde dentro se puede pasar por los cuatro buckets sin cerrarla, con
+  el mismo contenido que hoy dan las cuatro pestañas por separado (mismo recuento por bucket).
+- Todo lo que hoy funciona sigue funcionando desde el menú: Nuevo, Guardar, Guardar como…, Exportar e
+  **Importar** — ojo, Importar es un `<label>` con un `<input type=file>` dentro (`index.html:39-41`),
+  no un `<button>`: al moverlo hay que comprobar que el diálogo de fichero sigue abriéndose.
+- Alt+C y Alt+A siguen abriendo Código y Agentes con el menú cerrado.
+- A **390 px** la barra ocupa **una sola fila**, y a 1280 px no hay regresión.
+- `node test_panel_agentes.js` en verde (adaptado), y los tres de galería **sin tocar**.
+
+---
+
+### ✅ REQ-CART1 · El cartel como monitor: sobra aire, las letras tienen que crecer — ✅ hecho 2026-08-06
+**Reportado** 2026-08-06 por el dueño, con captura anotada (recuadro rojo = lo que ocupa el texto hoy,
+recuadro verde = la tabla disponible, flechas = el aire que sobra por los cuatro lados): «hay mucho
+aire en los carteles/notas/posits, quiero que se aproveche mejor el espacio, que las letras sean más
+grandes; imagínate que el cartel es como un monitor, queremos leer el mensaje de lejos sin necesidad
+de pegarnos a él».
+
+**Reflexión** — este ticket llega **justo después** de subir el tamaño 1,5× ese mismo día (de `size=9`
+a `27`, aprovechamiento del alto del 39-52 % al 59-74 %). Que siga sobrando aire después de esa mejora
+es la información importante: **lo que queda no es una constante mal elegida, es estructural**. Y el
+encuadre del dueño —«como un monitor»— reencuadra el objetivo: no es «letras un poco más grandes», es
+**legibilidad a distancia**, que es una métrica distinta y que no depende solo del cuerpo de la letra.
+
+**Las tres cosas que sospecho, por orden de sospecha** (de lo que recuerdo de haber tocado
+`mcNoteTexture` y `mcBoardRect` hoy; **nada de esto está verificado para este ticket**):
+1. **Dos márgenes anidados que se suman.** `MC_NOTE_TEXT_PAD` recorta la tabla en **voxels finos**
+   antes de nada, y luego `mcNoteTexture` vuelve a meter un **5 % de margen** por dentro del lienzo.
+   Son dos recortes independientes sobre la misma caja y **compuestos** explican bastante bien el aire
+   de la captura. Sospecho que es el grueso del ticket y el arreglo más barato.
+2. **El tope de tamaño `H/2.5`.** Limita la letra a ~2,5 líneas de alto pase lo que pase; un mensaje
+   corto no puede llenar la tabla aunque le sobre sitio.
+3. **Composición ciega a la forma.** El algoritmo busca «el mayor cuerpo con el que cabe TODO» y
+   centra; nunca reconsidera el reparto. La última línea suele quedar corta (se ve en la captura), o
+   sea que hay hueco que no se está repartiendo.
+
+**La restricción que no se puede saltar** — la fuente del juego (Pixeloid) solo es nítida en
+**múltiplos de 9** (su píxel de diseño es `font-size/9`, ver «🔠 La fuente del juego» en `CLAUDE.md`).
+Eso obliga a que la escalera de tamaños sea discreta, así que «crecer un poco» no existe: se crece un
+escalón entero o nada. De ahí que el lienzo se dimensione por el alto (`MC_NOTE_TEXT_H`), que es lo
+que hace fino el escalón. Cualquier propuesta tiene que respetar esto o el rótulo sale borroso, que es
+peor que pequeño.
+
+**«Leer de lejos» no es solo el cuerpo de la letra** — hay al menos dos cosas más en juego, y conviene
+mirarlas juntas o el ticket se queda a medias:
+- `game.noteTextDist`, la distancia a partir de la cual el rótulo **deja de dibujarse**;
+- `MC_NOTE_TEXT_LEGIBLE`, el umbral de px por letra por debajo del cual se cede al visor de la mira;
+- y el filtrado de la textura, que hoy es `LINEAR`: para una fuente de píxeles ampliada, `NEAREST`
+  mantiene el borde duro y puede leerse mejor de lejos que un `LINEAR` emborronado. **Sin comprobar.**
+
+**Tensión que hay que resolver, no esconder** — un texto largo y letras grandes son incompatibles en
+una tabla 4:1. Hoy se resuelve encogiendo hasta que cabe. Alternativas que el dueño tendría que elegir:
+recortar antes con «…» y fiar el resto al visor de la mira; o que el cartel **crezca** con el texto;
+o dos tamaños según se mire de cerca o de lejos. **Es una decisión suya, no la cierro yo.**
+
+**Verificación esperada**
+- Sobre la misma nota de la captura, el texto ocupa una fracción claramente mayor del recuadro verde,
+  y el aire de los cuatro lados baja a un marco fino y parejo.
+- Se lee el mensaje desde una distancia a la que hoy no se lee (medir con `game.tp` a una distancia
+  fija antes y después, misma nota, misma resolución).
+- El rótulo sigue **nítido**: el cuerpo elegido sigue siendo múltiplo de 9.
+
+---
+
+**RESUELTO** 2026-08-06. La unidad de medida es `frac` = alto del cuerpo en fracción del alto de la
+tabla (lo que ya guarda `mcNoteTexture` para decidir si el rótulo se lee). La tabla real es de
+**1,875 × 0,875 = aspecto 2,143**, no 4:1.
+
+⚠️ **Aviso metodológico, porque casi cuesta el ticket**: la primera sonda hacía
+`typeof mcBoardRect==='function' ? mcBoardRect(s) : null` con un `aspecto = 4` de reserva. La función
+se llama **`mcNoteBoardRect`**, así que la rama nunca se cumplía y *todas* las medidas salieron contra
+una tabla imaginaria de 4:1. Un `typeof` con reserva silenciosa convierte un nombre mal escrito en
+números plausibles. Si una sonda tiene reserva, que **avise** cuando la use.
+
+De las tres sospechas, **la 1 y la 2 eran ciertas pero menores**, y la 3 no era el problema:
+
+| | ancho | alto |
+|---|---|---|
+| tabla en voxels finos | 32 | 16 |
+| tras `MC_NOTE_TEXT_PAD=2` por lado | 28 (−12,5 %) | **12 (−25 %)** |
+| más el 5 % del lienzo por lado | ×0,90 | ×0,90 |
+| **utilizable antes de escribir una letra** | 78,8 % | **67,5 %** |
+
+Se arreglaron (`PAD` 2→1, margen del lienzo 5 %→2 %, tope `H/2.5` → `altoU/1.25`, que es el mayor
+cuerpo con el que UNA línea cabe de alto), y eso llevó los mensajes **cortos** a su óptimo (0,35–0,46).
+Pero la nota larga **no se movió de 0,070**, y ahí estaba el ticket de verdad.
+
+**La causa era la rejilla de múltiplos de 9 contra un lienzo de tamaño fijo.** Con el alto clavado en
+256, el cuerpo que llena la caja es 25,2 px, pero solo valen 9/18/27… así que se horneaba a 18: **un
+29 % de tamaño tirado al redondear**, y ninguna constante que tocar lo recuperaba. La salida es
+invertir la dependencia — **el lienzo no es un dato, es una incógnita**:
+
+1. El ajuste es invariante de escala, así que lo que se mide no es un cuerpo sino una **razón**
+   `cuerpo/alto-de-lienzo`: bisección (~10 pruebas, no 40) a `MC_NOTE_TEXT_REF=1024`, donde no se
+   dibuja nada porque `measureText` no depende del lienzo.
+2. Luego se coge el mayor **múltiplo de 9** que quepa bajo los topes y se estira el lienzo a
+   `cuerpo/razón`, con re-comprobación en la caja definitiva (los márgenes y el interlineado se
+   redondean a entero, y a poco lienzo eso mueve el resultado). El tope de alto sube de 256 a **384**:
+   no cambia el tamaño de la letra —la razón manda— pero da más múltiplos donde elegir y 4 píxeles de
+   lienzo por píxel de diseño en vez de 2, que es lo que se nota al acercarse.
+
+La clave de la caché pasa de `texto|WxH` a `texto|aspecto`, porque el tamaño ya es consecuencia del texto.
+
+**Medido** (tabla real, 2,143):
+
+| texto | antes | después | |
+|---|---|---|---|
+| nota larga, 271 caracteres | 0,0703 | **0,0957** | **+36 %** |
+| «PUESTO 4 · hierba» | 0,3516 | **0,3835** | +9 % |
+| «SALIDA →» | 0,4219 | **0,4297** | +2 % |
+| «PELIGRO» | 0,4570 | **0,4622** | +1 % |
+
+**Sobre la tensión que dejé sin cerrar** (texto largo vs. letras grandes): no hubo que pedirle al
+dueño que eligiera. Era una falsa disyuntiva mientras se tirase un 29 % en el redondeo; recuperado
+eso, la nota de 271 caracteres se lee entera a 2,5 m sin recortar ni agrandar el cartel. La decisión
+sigue disponible si algún día aparece un texto que de verdad no quepa.
+
+**Lo que NO se tocó**: `game.noteTextDist`, y el filtro sigue en `LINEAR`. Con 4 píxeles de lienzo por
+píxel de diseño el borde ya sale duro; `NEAREST` queda como idea si alguna vez se ve borroso.
+
+**Verificado** — `node test_notas_cartel.js` en verde (23 ok), con dos casos nuevos: la nota larga
+normal aprovecha la tabla (`frac ≥ 0,09`) y por tanto releva al visor de la mira desde 2,5 m. El caso
+«una parrafada encogida NO releva al visor» **cambió de fixture y hay que saber por qué**: con 40
+repeticiones el rótulo pasó de 6,9 px a 13,5 px de pantalla por letra, o sea que **ya se lee** y
+relevar al visor es lo correcto; el borrón que ese caso vigila hay que buscarlo ahora en 120
+repeticiones (8,2 px, por debajo de `MC_NOTE_TEXT_LEGIBLE=10` y sin llegar al recorte). Capturas a
+1280 px y a 390 px, con nota larga y corta.
+- `node test_notas_cartel.js` en verde.
+- Comprobado también a **390 px** (el dueño lee en móvil) y en un cartel con nota corta y otra larga.
+
+---
+
+### ✅ REQ-XR1 · Rayos-X tapa lo que marca: para capturas no sirve — ✅ done (2026-08-06)
+**Reportado** 2026-08-06 por el dueño: «el modo rayos-X crea unas cajas que tapan totalmente lo que hay
+debajo y para capturas de pantalla es poco útil, debería de verse algo de lo que hay por detrás; por
+ejemplo en la captura no se ve que hay 3 repetidores de redstone que no funcionan al estar girados».
+**Precisión del dueño**: son **las cajas blancas** que envuelven cada bloque, no las etiquetas rojas.
+
+**Reflexión** — la contradicción está en el nombre: una herramienta que se llama «rayos-X» y que
+**opaca**. El overlay ya usa alfa (0.38), así que el fallo no es que no se pensara en la
+transparencia: es que el alfa está aplicado **por caja** y la escena apila muchas cajas. Es un
+problema de *composición*, no de elegir mejor un número, y por eso subir/bajar el 0.38 no lo arregla
+—sube o baja el punto en que se satura, pero satura igual—. La pista de que la solución es otra: lo
+que el dueño quiere ver son **los bordes** (qué pieza es y cómo está puesta), no el relleno.
+
+**Lo que sé sin haberlo medido a fondo** (`mcXrayVolume`, `app.js:7765`, y el dibujo en `~:7614`):
+- Pinta **un cubo macizo de 12 triángulos —las 6 caras— por celda ocupada**, con `mcPushBoxTris`.
+- Se dibuja con `DEPTH_TEST` desactivado y mezcla de alfa constante a **0.38**.
+- El barrido de rejilla es `7×5×7 = 245` celdas alrededor del jugador, más los voxels finos de las
+  estructuras que solapan el AABB del jugador.
+- Como el alfa es por capa y no por volumen, la opacidad se **compone**: `1 − 0.62^k`. Dos o tres
+  bloques en la línea de visión ya rondan el 85-94 %, y una fila de suelo satura a blanco.
+
+**Direcciones a considerar** (ninguna decidida):
+1. **Aristas en vez de relleno** — dibujar solo el contorno de cada caja (`gl.LINES`, que el fichero ya
+   usa para el fantasma verde). Es lo que más se parece a lo que el dueño describe y de paso quita la
+   mayor parte del coste de relleno.
+2. **Una capa, no k** — pintar el volumen en una sola pasada, sin acumular (p. ej. quedarse con el
+   contorno del conjunto, o marcar profundidad para no repintar la misma columna).
+3. **Un tunable de consola** (`game.xrayAlpha`), que es lo que el dueño suele pedir para valores
+   estéticos discutibles, y que aquí sirve **además** como válvula para capturas.
+4. **Filtrar el ruido**: el suelo (`hierba` y compañía) es lo que más satura y es justo lo que nunca
+   se está mirando; marcar solo lo que no es terreno haría el resto casi solo.
+
+**No verificado** — cuánto de la saturación viene de las cajas de rejilla frente a las de estructura
+fina, ni si el culling de caras está activo en esa pasada (si no lo está, cada caja aporta **dos**
+capas en vez de una y eso duplica el problema). Comprobarlo al abordarlo, no antes.
+
+**Medido después** (misma escena de la captura del dueño, 1280×720): la pasada de rayos-X toca el
+**37,1 %** de los píxeles y sube la luminancia media de esa zona de **103,8 a 191,9**. Y sí:
+`CULL_FACE` está **desactivado** en la pasada, así que cada caja aporta **dos** capas —la cara de
+entrada y la de salida—, o sea que el exponente real no es el número de bloques sino su doble. Eso
+explica que sature tan rápido.
+
+**✅ DECIDIDO** (dueño, 2026-08-06): **«solo líneas»** → dirección **1**, aristas con `gl.LINES`, sin
+relleno. Consecuencias que se siguen de la decisión y no hace falta volver a preguntar:
+
+- Las direcciones **2 y 4 quedan descartadas** por innecesarias: sin relleno no hay nada que componer
+  ni que saturar, así que ni «una capa en vez de k» ni filtrar el terreno tienen ya trabajo que hacer.
+  El suelo dejará de ser un muro blanco y pasará a ser una rejilla de aristas.
+- La **3** (`game.xrayAlpha`) deja de tener sentido con ese nombre: no habrá alfa de relleno. Si hace
+  falta una válvula, que sea sobre las **líneas** (grosor/color/opacidad), y solo si al usarlo se ve
+  la necesidad. No se inventa por adelantado.
+- El fantasma verde ya usa `gl.LINES` en este mismo fichero, así que **hay precedente que copiar** en
+  vez de camino nuevo: mismo patrón de programa y de estado de GL.
+- ⚠️ El riesgo se **invierte**: el problema deja de ser «tapa» y pasa a ser «no se ve». Un contorno de
+  1 px sobre terreno claro puede perderse, y una maraña de aristas de 245 celdas puede ser ruido. Hay
+  que comprobarlo **en captura**, que es el uso que motivó el ticket, y a 390 px.
+
+**Qué se hizo** — dos líneas de `app.js` y ni una decisión nueva:
+- `mcXrayVolume` (`~:7830`) emite `mcPushBoxEdges` en vez de `mcPushBoxTris`, en las **dos** ramas
+  (celdas de `mc.grid` en rojo y voxels finos de estructura en naranja).
+- La llamada (`:7638`) manda el volumen a `xrayLines` en vez de a `xray`. A la pasada de triángulos
+  —que sigue existiendo con su alfa 0.38— **solo le queda el marcador de impacto del rayo**.
+
+Y un detalle que no estaba en el ticket y sí importa: las cajas de rejilla pasan a las cotas
+**exactas** de la celda. Antes iban con margen (`x+0.03 … x+0.97`) para que dos cubos vecinos no
+hicieran z-fighting, pero con aristas ese margen se ve: dos celdas pegadas dibujarían **dos líneas
+paralelas separadas 0,06** donde tiene que verse una. Con las cotas exactas la arista compartida cae
+en la misma recta y se funde. Eso es lo que evita que un suelo sea la maraña que temía el ticket.
+
+**Medido** (mismo encuadre, de pie en el circuito de `data/mundo.json`, 1280×720 — capturas en
+`data/tickets/REQ-XR1/`):
+
+| | píxeles que toca | luminancia de esa zona |
+|---|---|---|
+| antes (relleno) | **92,2 %** | 107,7 → 85,8 |
+| después (aristas) | **4,9 %** | 106,3 → 110,9 |
+
+De ese 4,9 % **casi la mitad no es el volumen**: son 20 090 px del marcador de impacto del rayo, que
+sale enorme porque la cámara de la medición está a medio bloque de lo que apunta.
+
+⚠️ **Para verlo hay que plantarse en el sitio.** El volumen son 7×5×7 celdas alrededor de los **pies**;
+mirando al horizonte no entra nada en cuadro y parece que rayos-X no hace nada. Me costó tres intentos
+de medición averiguarlo, así que queda escrito aquí y en `data/tickets/REQ-XR1/contexto.md`.
+
+**Lo que NO hizo falta** — la válvula sobre las líneas (grosor/color/opacidad) que el ticket dejaba
+condicionada a «solo si al usarlo se ve la necesidad». No se ve: el contorno se distingue sobre hierba
+clara y sobre plataforma gris en las capturas. Y el grosor **no era una opción real** de todos modos:
+`gl.lineWidth` está topado a 1 en Chrome/ANGLE.
+
+**Verificado**
+- `node test_rayos_x_lineas.js` — **nuevo**, y comprobado que FALLA (3 casos) si se devuelve
+  `mcPushBoxTris`: cota por arriba (no tapa) **y por abajo** (se sigue viendo), que es el riesgo
+  invertido que el ticket señalaba.
+- `node test_rayos_x.js` (11 ok) — hubo que tocarlo: extrae las funciones **verbatim** por texto, así
+  que pasa a extraer `mcPushBoxEdges` y su `VBOX` baja de 36 a 24. Está anotado en el propio test.
+- `node test_rayo_apuntado.js` (12 ok) sin cambios.
+
+---
+
+### ✅ REQ-XR2 · Rayos-X: que la etiqueta diga también el **power** del bloque — ✅ done (2026-08-06)
+**Pedido** 2026-08-06 por el dueño: «nuevo ticket: añadir en rayos-x una línea que indique el power
+del bloque».
+
+**Por qué hacía falta**: es lo único de un circuito que **no se ve mirándolo**. La clave dice si una
+lámpara está encendida, pero no con cuánto; un cable a 1 y otro a 14 son el mismo bloque en pantalla.
+Hasta ahora había que ir celda por celda con `game.redstone.info(x,y,z)`; con rayos-X puestos el
+tendido entero se lee de un vistazo y se ve **dónde muere** la señal.
+
+**La pregunta que el ticket dejaba abierta** era qué poner en los bloques que **no** son circuito
+—¿nada, `—`, o el 0/15 que reciben por el puente de r1.2?—. Decidido: **el 0 no se pinta**. El volumen
+de rayos-X son ~245 celdas, y un `⚡ 0` en cada piedra del entorno es ruido que además reabre justo el
+problema de REQ-XR1. Lo que sí se pinta es el puente cuando de verdad lleva algo, y **marcando la
+energía débil como tal** — porque un cable no la lee, y «le llega 12 débil, la lámpara de al lado
+enciende y el cable no» era exactamente el tipo de misterio que costó el falso diagnóstico de REQ-RS5.
+
+**Lo que sale ahora** (medido sobre el circuito del dueño en `/map/default`, 14 de 28 etiquetas):
+
+```
+267,15,262  cable-on@12      ⚡ 15          pieza de circuito: lo que recibe
+266,16,262  cable-on@12      ⚡ 13          tres saltos después: se ve la pérdida
+267,16,262  repetidor-on@12  ⚡ 13 → 15     recibe ≠ saca: por eso el tendido de después no se acorta
+269,16,262  repetidor-on@6   ⚡ 0 → 15      no recibe nada y aun así entrega 15
+267,14,262  asset hierba     ⚡ 15 débil    no es circuito: hace de PUENTE (r1.2), y en débil
+```
+
+**Tres cambios, y el reparto es el de siempre — el motor no sabe qué es redstone**:
+
+1. **`app.js`** (3 líneas) — el enganche pasa a `mcXrayExtra(clave, s, x, y, z)`: sin la **celda** no
+   se puede decir nada por celda, y la señal es por celda. Van sueltas y no en un array a propósito:
+   esto corre una vez por etiqueta y frame (~250), y un array por llamada es basura para el GC a
+   60 fps. Los enganches viejos de dos argumentos siguen valiendo tal cual.
+2. **`style.css`** (1 línea) — `white-space:pre-line` en `.mc-xlbl-extra`, contra el `nowrap` del
+   padre. Capacidad genérica, no de redstone: el hueco lo llenan varios enganches encadenados y cada
+   uno pide su renglón.
+3. **`redstone/redstone.js`** — **envuelve** `window.mcXrayExtra` en vez de asignarlo. Ésa es la parte
+   con letra pequeña: `mundo-autoarranque` lo asigna a pelo (`window.mcXrayExtra = etiquetaRayosX`), y
+   si el motor hiciera lo mismo borraría la línea de comportamientos y giros sin que nadie se entere.
+   Encadenar funciona porque el orden es fijo — el snippet asigna en su línea 3189 y arranca redstone
+   en la 3366 — y si el snippet se re-ejecuta y borra el envoltorio, vuelve a cargar redstone y se
+   rehace solo. Sello `_redstone` para no apilarse cuando el que se re-ejecuta es el motor.
+
+**Lo que NO se tocó**: el `mundo-autoarranque.json` del dueño (se edita en vivo) y las cajas de
+rayos-X de REQ-XR1. La línea es DOM, así que no añade ni un vértice.
+
+**Verificación** — `node test_rayos_x_power.js` (20 casos, nuevo). Lo que fija, además del texto:
+que la etiqueta **coincide con `game.redstone.info()`** (si un día divergen, es un fallo y no dos
+opiniones), que las dos líneas conviven (`velocidad ×2\n⚡ 15`), que una estructura fina **no** lleva
+línea, que llamar con dos argumentos no revienta, y —espiando el enganche durante una vuelta real de
+`mcUpdateXrayLabels`— que las ~100 etiquetas llegan **todas** con `(x,y,z)`: sin eso el fallo sería
+invisible desde una llamada a mano. Sin regresiones en `test_rayos_x.js` (11 ok),
+`test_rayos_x_lineas.js`, `test_redstone_arranque.js` y `test_redstone_bloque_fuente.js`.
+
+Capturas y el guion que las saca: `data/tickets/REQ-XR2/` (`antes.png` / `despues.png` + recortes
+legibles; `captura.js` se ejecuta desde `/root/voxel`).
+
+---
+
+### ✅ BUG-RS2 · Los repetidores de redstone girados no funcionan — ✅ done (2026-08-06)
+**Resuelto**, pero **no era lo que decía el título**. El diagnóstico prescrito por el ticket se montó
+tal cual (`test_redstone_giro.js`, 21 casos) y devolvió tres respuestas:
+
+1. **El giro está BIEN mapeado.** Los cuatro giros escuchan exactamente por su espalda: `@0`→−X,
+   `@1`→−Z, `@2`→+X, `@3`→+Z, que es lo que dice `FRENTE=[0,4,1,5]`, y esa tabla concuerda con lo que
+   `mcRotXZ` (app.js:5860) le hace de verdad al dibujo (rot 1 lleva +X a +Z). **No hay vuelco**: los
+   cinco de la foto tienen los bits 2-3 a cero.
+2. **La reproducción mínima del ticket PASA en los cuatro giros.** Palanca → cable → repetidor@n →
+   cable → cable propaga a 15 con su retardo, con n = 0, 1, 2 y 3. Los repetidores girados funcionan.
+3. **Lo que el dueño vio no era una avería.** Los cinco repetidores de la foto están en
+   `/map/test` en `(64..68, 15, 63)`, hombro con hombro en una fila a lo largo de X, con **un cable
+   encendido pegado a los cinco por −Z** (la fila de `hab:cable-on@1` de `z=62`) y con los giros
+   `@1 @2 @3 @0 @1`. De los cuatro giros, **solo `@1` da la espalda a −Z**. Y encendidos están
+   exactamente los dos `@1`. O sea: el motor hizo lo correcto en los cinco, y los tres «rotos» son
+   los tres que están mirando a otro lado. La lectura «no funcionan **al estar girados**» era una
+   coincidencia: entre los apagados hay uno SIN girar (`repetidor`, rot 0) y entre los encendidos los
+   dos girados.
+
+**Lo que sí estaba mal, y era la tercera hipótesis del propio ticket** — el repetidor emitía por
+**cinco** lados en vez de solo por delante. `mira:true` solo prohibía emitir hacia atrás, que es la
+regla de la ANTORCHA (está pegada a un bloque, escucha por ahí y alumbra los otros cinco; de eso vive
+el anillo de antorchas que hace de memoria), no la del repetidor. Consecuencia real: dos repetidores
+puestos hombro con hombro se alimentaban **de costado**, así que la propia fila del dueño se habría
+contagiado entera en cuanto uno se encendiera.
+
+- **Arreglo**: capacidad nueva `soloAlFrente` en el motor (`redstone/redstone.js`, en `salidaDe`), que
+  es más estrecha que `mira`: no emite por ningún lado que no sea el frente. La lleva
+  `'hab:repetidor'` y **no** la lleva `'hab:inversor'`, a propósito. De paso `atrasDe` pasa a
+  derivarse de un `frenteDe` explícito, en vez de al revés.
+- **Y el arreglo que de verdad evita el próximo ticket**: `game.redstone.info(x,y,z)` ahora dice
+  `escuchaPor`, `emitePor` y, cuando la pieza tiene corriente pegada por un lado que no es el suyo,
+  una `pista` en cristiano («tiene señal por −Z, pero esta pieza solo escucha por +X: gírala con R
+  hasta que su espalda dé al cable»). Sin eso, una pieza girada que no enciende es indistinguible de
+  una pieza rota — que es exactamente cómo nació este ticket.
+- **Verificación**: `node test_redstone_giro.js` (21 ok, incluye §D con la fila del dueño reproducida
+  celda a celda) + `test_redstone_arranque.js`, `test_redstone_dsl.js` y `test_redstone_antorcha.js`
+  en verde. Snippets republicados con `node redstone/make_snippets.js`.
+- **Pendiente para el dueño**: la fila de `/map/test` sigue como estaba (no se toca lo plantado). Si
+  quiere que los cinco enciendan, hay que girarlos a `@1` con R; lo que no había forma de saber es
+  que ése era el problema, y ahora `info()` lo dice.
+
+**Reportado** 2026-08-06 por el dueño, en la misma captura que REQ-XR1: «hay 3 repetidores de redstone
+que no funcionan al estar girados». En las etiquetas de rayos-X de esa captura se leen las cuatro
+variantes conviviendo: `repetidor` (sin giro), `repetidor@2`, `repetidor@3` y `repetidor-on@1`.
+
+**Reflexión** — que en la misma foto haya un `repetidor-on@1` (girado **y** encendido) junto a otros
+girados que no arrancan sugiere que el giro no se pierde del todo, sino que **algo depende de él y no
+debería, o al revés**. En este motor el giro **vive dentro de la clave** (`clave@n` en `mc.grid`), y
+ése es un sitio donde ya nos hemos tropezado antes: toda tabla indexada por la clave BASE se salta las
+giradas si no se normaliza. Los dos sospechosos naturales son **por dónde escucha** la pieza y **por
+dónde emite**, que es justo lo que el giro decide.
+
+**Dónde vive** — el motor es el snippet `data/snippets/redstone.json` (~648 líneas); la definición de
+la pieza está en `data/snippets/redstone-piezas.json`:
+`'hab:repetidor': { emite: 15, encendida: 'hab:repetidor-on', retardo: 2, mira: true }`.
+⚠️ Es **snippet, no `app.js`**: el arreglo va ahí, y `data/snippets/mundo-autoarranque.json` se edita
+**en vivo** (ver CLAUDE.md).
+
+**Lo que ya vi de pasada y acota la búsqueda** — el snippet **sí** contempla el giro en varios sitios
+(`claveBase()` para heredar la config de la pieza sin girar, `oriDe()`/`rotDe()` para leer el sufijo,
+`conOri()` para no perder la orientación al cambiar de material, y `atrasDe()` con una tabla `FRENTE`
+para deducir la espalda). O sea que **no es que nadie lo pensara**; es un fallo dentro de esa
+maquinaria. Candidatos, sin comprobar:
+- la tabla `FRENTE` y su emparejado `^1`: si el ciclo de 90° no coincide con el que aplica `mcRotXZ` al
+  dibujo, la pieza **escucha por un lado distinto del que aparenta** y parece muerta;
+- `mira:true` solo prohíbe emitir **hacia atrás**; un repetidor de verdad emite **solo hacia delante**;
+- el **vuelco** (Shift+R, bits 2-3 del sufijo) frente al **giro** (bits 0-1): el propio código avisa de
+  que una pieza volcada calcula su espalda en horizontal y «parece rota sin estarlo». Puede que los
+  tres del dueño estén volcados, no girados — **la primera cosa a descartar**.
+
+**Reproducción mínima que hay que montar al abordarlo** (no antes): cuatro circuitos idénticos
+—palanca → cable → repetidor → cable → lámpara— con el repetidor en `@0`, `@1`, `@2` y `@3`, en
+`/map/test`, y ver cuáles propagan. Eso separa en un minuto «giro mal mapeado» de «vuelco» de
+«dirección de emisión».
+
+**Verificación esperada**
+- Los cuatro giros de un repetidor propagan la señal hacia donde apunta el dibujo.
+- Un repetidor **no** emite hacia atrás ni por los lados, en ninguno de los cuatro giros.
+- El retardo (`retardo: 2`) es el mismo en las cuatro orientaciones.
+- Si el problema resulta ser el vuelco, el aviso de `avisaUnaVez` sale en el toast (no en consola) y
+  se explica cómo enderezar la pieza.
 
 ---
 
@@ -421,6 +1348,75 @@ de atrás hacia delante. Toca el camino caliente del render ⇒ pendiente de dec
 - ✅ **t1 · notas post-it en un bloque** (M–L) — hecho 2026-07-22 (tecla N: crear/ver/editar; marcador flotante + texto al mirar; persiste en `mundo.json`).
 - ✅ **t7 · iluminación interior más oscura (pasillos) automática** — hecho 2026-07-22 (oclusión por techo en el meshing; `game.interiorDark`).
 - ✅ **t8 · límites del mundo modificables en vivo** — hecho 2026-07-22 (`mcResizeWorld` / `game.resizeWorld(x,y,z)` + `game.worldSize`).
+
+---
+
+## 🔴 Redstone (REQ-RS) — en curso 2026-08-05
+
+**Petición del dueño:** «quiero que todo lo de redstone vaya en ficheros aparte aunque luego sean
+llamadas desde otros de scripting para que sea más fácil mantenerlo». De ahí `redstone/`, con los `.js`
+como fuente y `redstone/make_snippets.js` publicándolos en `data/snippets/`. El precedente de que un
+snippet cargue a otro ya existía (`agente-nube` lo hace por `/api/snippets/<id>`).
+
+**Las tres decisiones de arquitectura** (del dueño, contra un primer boceto de clase por voxel):
+1. **Una instancia por voxel no cabe** — 96×48×96 = 442 368 celdas. El comportamiento cuelga del
+   **material** (una entrada por tipo, como `game.bloques`); lo único por celda es el nivel de señal,
+   en un `Map` **disperso**. Un mundo sin redstone gasta cero.
+2. **La vecindad es una COLA**, no una llamada recursiva: un cable largo en recursión se come el
+   frame y un anillo cuelga. Se drena en el `rAF` con tope por pasada.
+3. **Encendida y apagada son DOS MATERIALES** (como `redstone_lamp`/`lit_redstone_lamp`), dados de
+   alta en `define()` y no al encenderse: dar de alta un material cuesta ~3 873 ms en 512×40×512.
+
+**Orden acordado:** luces de rejilla → señal → cable.
+
+- ✅ **rs1 · luces de rejilla** — ya estaba hecho (el arreglo de la antorcha: una pieza fina en
+  `mc.grid` siembra luz por `mc._glowCeldas`). Encender = cambiar el id de la celda, y la luz va
+  detrás sola porque `mcSetBlock` → `mcGlowTocada` → `mcComputeBlockLight`. Guardado por
+  `test_luz_en_rejilla.js`.
+- ✅ **rs2 · señal y propagación** — `redstone/redstone.js` (`r1.0`). `game.redstone.define/quitar/
+  lista/info/revisar/tick/revisarCaja`. Se engancha envolviendo `mcSetBlock`, que es el embudo de
+  poner/romper/pintar/deshacer/`setVoxel`; el envoltorio se desenvuelve por `_orig` al reejecutar en
+  vez de apilarse. Sin materiales declarados sale por `hayCircuito` y no cuesta nada.
+  Demo pedida por el dueño (**«una antorcha que siempre esté apagada y que al ponerle un bloque de
+  redstone se encienda, hazlo en el mapa test»**): `redstone/redstone-demo-antorcha.js` +
+  `data/habitantes/antorcha-apagada.json` (copia de `antorcha.json` sin los 12 voxels emisores; la
+  original **no se toca**). Verificado con `test_redstone_antorcha.js` (20 ok).
+  Dos fallos encontrados al montarla, los dos de ida y vuelta:
+  · `define()` no registraba la **variante encendida** en la tabla → al cambiar de material la celda
+  dejaba de ser circuito y la antorcha no se apagaba nunca. Ahora entra como alias de la misma cfg.
+  · `hayCircuito` se declaraba **después** del envoltorio que lo lee: funcionaba de casualidad por el
+  izado de `var` (valía `undefined`, o sea falso).
+- ✅ **rs2b · que se cargue solo** (pedido por el dueño: «me gustaría que por defecto todo lo de
+  redstone se cargue solo»). `redstone/redstone-arranque.js` + `make_snippets.js` parchea
+  `mundo-autoarranque` entre marcadores (idempotente, sin reescribir el fichero del dueño). Como pasa
+  a correr en **todos los mapas**, lo que costaba poco tuvo que pasar a costar **nada**: circuitos de
+  serie con `precargar:false` (+ carga perezosa al primer encendido), `encolarVecinos` filtrando antes
+  de encolar (1000 `setVoxel` = 3,8 ms y cola vacía) y `repasarMundo()` con guarda por paleta.
+  Verificado con `test_redstone_arranque.js` (20 ok) y, por ser el guardián del autoarranque,
+  `test_bloques_comportamiento.js` (373 ok), más `test_luz_incremental_navegador.js` (19 ok) y
+  `test_setvoxel_autocarga.js` (21 ok).
+- ✅ **rs3 · cable y las piezas** (`r1.1`) — pedido del dueño: **«si de paso creas algún nuevo
+  componente redstone mejor, me faltan cables, placas de presión, puertas e interruptores»**. El cable
+  es lo que se dijo: `max(vecinos) − perdida` dentro de `señalQueLlega()`, sin que el resto se entere.
+  Las cinco piezas (cable, palanca, placa, puerta, repetidor) viven en `redstone/redstone-piezas.js` y
+  son **combinaciones** del vocabulario, no motor: `redstone-piezas.js` no añade ni una línea a
+  `app.js` — la física sale de `game.bloques` (`atravesable`, `alPisar`, v1.29) y el clic derecho de un
+  envoltorio de `mcUseRight` dentro del propio snippet. Los 10 dibujos los genera
+  `redstone/make_piezas.py` (nunca pisa un fichero existente sin `--forzar`).
+  Al motor solo le hicieron falta **dos ideas nuevas**, y son justo las que faltaban para que el
+  sistema sea Turing-completo: `retardo` (TIEMPO: la realimentación deja de ser un bucle combinacional
+  y pasa a ser un **reloj**) y `manual` (ENTRADA: la celda la pone el jugador, no la señal). Más
+  `pulso` (la placa se suelta sola) y `mira` (escuchar solo por la espalda, con el lado sacado del
+  giro de la clave), que es **lo que hace posible la memoria**: sin él un anillo de inversores se
+  realimenta a sí mismo y oscila en vez de acordarse.
+  Verificado con `test_redstone_dsl.js` (29 ok, incluido un biestable con SET/RESET que sobrevive a
+  que le quiten la fuente) + `test_redstone_antorcha.js` (20 ok) y `test_redstone_arranque.js` (20 ok).
+  Dos fallos encontrados al montarlo:
+  · una pieza **recién puesta** se quedaba apagada: el atajo «nivel igual → nada que hacer» comparaba
+  solo la señal, y lo que había cambiado era el otro lado de la ecuación (el material). Arreglado con
+  el conjunto `estrenadas`, que también tuvo que colarse por delante del dedup de `retardo`.
+  · al encenderse, una pieza girada se **enderezaba sola** y dejaba de escuchar por donde escuchaba:
+  ahora `aplicar()` arrastra el giro y `encendidaEn()` compara por base.
 
 ---
 
@@ -446,6 +1442,283 @@ layout/shader (solo cambia si fusiona) => el switch no puede descuadrar el VBO. 
 en navegador (Taberna/Herreria con textura completa por voxel, sin costuras; `game.voxels` cae mucho pegado a
 una pared; `game.structGreedy=false` recupera el render actual).
 
+### ✅ REQ-CART2 · La ventana de editar nota (tecla `N`) es diminuta y su letra también — ✅ done (2026-08-06)
+**Reportado** 2026-08-06 por el dueño, con captura: «cuando se edita una nota con "n" la ventana que
+aparece es muy pequeña, apenas deja leer la nota y las letras son demasiado pequeñas también». En la
+captura se ve el diálogo «📄 Nota del bloque» con un `textarea` que muestra **4 líneas y media** de una
+nota de agente mucho más larga, con barra de desplazamiento, sobre una ventana que ocupa una franja
+estrecha de la pantalla.
+
+**Redactado sin investigar** (regla del dueño para «nuevo ticket»). Lo de abajo es contexto que ya
+tenía de haber trabajado esta semana en la fuente y en los carteles, **no** una exploración nueva.
+
+**⚠️ Esto NO es REQ-CART1, aunque lo parezca.** REQ-CART1 (cerrado hoy) era el rótulo **dentro del
+mundo 3D**: texto horneado a una textura GL y estirado sobre la tabla del cartel. Esto es el **panel
+DOM** de editar/ver la nota: `.mc-note` / `.mc-noteview` / `.mc-note textarea` en `style.css`, HTML
+normal. **No comparten ni una línea de código.** Lo único que comparten es la fuente del juego, y ahí
+sí hay una restricción heredada que manda:
+
+⚠️ **Pixeloid Sans solo es nítida en múltiplos de 9** (`font-size/9` es su píxel de diseño; ver «🔠
+fuente del juego» en `CLAUDE.md`). Hoy esos paneles están a **9px en escritorio** y 18px en la media
+query de móvil. O sea que **no hay tamaño intermedio**: el salto es 9 → **18px**, el doble. Eso es
+seguramente la mitad del ticket, y explica por qué se ve tan pequeño en escritorio y no en móvil: el
+móvil ya está al doble.
+
+**Las dos quejas son dos arreglos distintos y conviene no mezclarlos**
+1. **«La ventana es muy pequeña»** — es el ancho/alto del diálogo y las filas del `textarea`. Se
+   arregla en CSS, y **no** depende de la fuente.
+2. **«Las letras son demasiado pequeñas»** — es el salto 9 → 18px. Subir la letra **sin** agrandar la
+   ventana empeoraría lo primero (menos líneas visibles aún), así que el orden importa: primero la
+   caja, luego la letra.
+
+**Nota de por qué duele justo aquí** — las notas de los **agentes** son largas (la de la captura es un
+volcado con causa, cotas y coordenadas), y son precisamente las que hay que leer enteras para depurar.
+
+**Las preguntas del ticket, resueltas sin preguntar** — eran tres («¿18px también en escritorio?»,
+«¿redimensionable?», «¿aplica al visor?») y son **estética discutible**, o sea justo lo que no se
+decide en una ronda de preguntas sino con un valor de serie razonable y una perilla de consola.
+Así que: **sí a 18 en escritorio**, **sí al visor** (es la misma queja: se lee mientras juegas), y
+**no a un diálogo redimensionable** — el `textarea` ya trae su tirador, y guardar el tamaño del
+diálogo es estado de UI nuevo para algo que se ajusta una vez. Lo que sí recuerda el tamaño es la
+perilla.
+
+**Qué se hizo**
+- `style.css` — el cuerpo de `.mc-note textarea`, `.mc-note-head` y `.mc-noteview` pasa a
+  `var(--note-fs,18px)`; el ancho del diálogo a `min(var(--note-w,720px),94vw)` (era `min(420px,92vw)`);
+  el alto del `textarea` deja de ser un `80px` fijo y sale del cuerpo — `min(calc(--note-fs * 18), 46vh)`,
+  o sea **10 líneas** de `line-height:1.8`, con tope para no comerse un móvil apaisado.
+- La media query de 680px ya no fuerza `font-size:18px` ni `width:94vw`: **eran el caso general**
+  desde este ticket. Solo le queda el padding.
+- `app.js` — `game.noteFont` y `game.noteWidth`, al lado de `noteAlpha`/`noteSigns`/`noteText`, con
+  el mismo patrón: getter/setter sobre `mc`, `localStorage` (`vf_mcNoteFont`/`vf_mcNoteWidth`) y
+  aplicación en vivo escribiendo las dos variables CSS en `documentElement`.
+
+⚠️ **`game.noteFont` redondea a múltiplo de 9** (y topa en 9..45) en vez de aceptar el número que le
+den. No es capricho: el píxel de diseño de Pixeloid es `font-size/9`, así que un 20 saldría borroso y
+nadie lo relacionaría con haber tocado esto. Los escalones reales son 9 · 18 · 27 · 36 · 45.
+
+**El «primero la caja, luego la letra» se resolvió solo**: como el alto del `textarea` se deriva del
+cuerpo, subir la letra agranda la caja a la vez y no hay orden que respetar. Subir a 27 sigue dando
+10 líneas, en un diálogo más alto.
+
+**Verificado** — `node test_notas_panel.js` (nuevo) y `node test_notas_cartel.js`, los dos en verde.
+Medido en la captura de `data/tickets/REQ-CART2/`: **4,5 → 9,9 líneas** sin desplazar, con la nota de
+agente larga entrando entera. A 390px sin regresión (367px de ancho, textarea a 322px de 844).
+
+---
+
+### ✅ REQ-RS4 · Un bloque que recibe energía debe energizarse y alimentar lo que tenga pegado — ✅ resuelto 2026-08-06
+**Reportado** 2026-08-06 por el dueño, con captura: «para redstone, los bloques que reciben energía de
+redstone deben energizarse, por lo tanto, una antorcha pegada a un bloque que recibe energía como el
+de la imagen debería encenderse; salvo que se haya indicado como bloque aislante, que de momento no
+hay». En la captura: una columna de bloques morados con **polvo de redstone rojo** subiendo por la
+cara, la caja de selección puesta, y **una antorcha plantada encima** que está **apagada**.
+
+**Redactado sin investigar** (regla del dueño para «nuevo ticket»).
+
+**Qué pide, dicho con precisión** — hoy la energía parece vivir **solo en las piezas de redstone**
+(polvo, repetidor, antorcha). Lo que se pide es el concepto de Minecraft de **bloque energizado**: un
+bloque cualquiera —tierra, piedra, ese morado— **adquiere estado** al recibir energía, y ese estado
+alimenta a su vez lo que tenga pegado. La antorcha de la captura no está tocando polvo: está tocando
+un **bloque** que sí lo toca.
+
+**⚠️ Esto no es «una pieza más»: cambia el modelo de propagación.** Y es la diferencia con REQ-RS3:
+- Deja de haber una red de piezas de redstone y pasa a haber una red donde **cualquier bloque puede
+  ser un nodo**. El barrido de vecinos ya no puede limitarse a las claves de redstone.
+- Aparece **estado por celda** en bloques que hoy no tienen ninguno (`energizado: sí/no`, y quizá con
+  nivel). Dónde vive ese estado —y si se guarda en `mundo.json` o se recalcula al cargar— es la
+  decisión de diseño gorda del ticket.
+- ⚠️ **Riesgo de coste**: si cualquier bloque puede energizarse, el barrido crece con el mundo y no
+  con el número de piezas de redstone. Hay que acotarlo (¿solo bloques adyacentes a algo de redstone?)
+  o se paga en cada tick.
+- Minecraft distingue **energizado fuerte** (por un repetidor/bloque alimentado directamente) de
+  **débil** (por polvo), y de esa distinción depende justo lo que la captura enseña. Merece la pena
+  decidir si copiamos esa regla o inventamos una más simple, **sabiendo** que la simple dará
+  resultados distintos a los que el dueño espera de Minecraft.
+
+**El «bloque aislante» que el dueño menciona** — dice explícitamente «de momento no hay», o sea que
+**no hay que implementarlo ahora**, pero sí dejar el hueco. El sitio natural es el mismo por el que ya
+se le dan propiedades a un material desde scripting: `game.bloques.define('hab:loquesea',
+{ aislante:true })`, hermano de `atravesable`. Eso encaja con la regla de CLAUDE.md §0: el motor
+expone la capacidad, el snippet decide qué material la tiene.
+
+**Relación con los otros dos de redstone** (importa para el orden)
+- **BUG-RS2** (los girados no funcionan): sigue siendo el más urgente de los tres. Si la propagación
+  ya falla con un repetidor girado, ampliarla a todos los bloques amplía el fallo.
+- **REQ-RS3** (pistón): un pistón se activa por energía, así que **este ticket es más fundamental** —
+  y probablemente hay que hacer éste **antes** que el pistón, no después.
+
+**Verificación esperada**
+- La escena de la captura: la antorcha **se enciende** cuando el polvo alimenta el bloque de debajo, y
+  se apaga al cortar la señal.
+- Un bloque energizado alimenta también polvo/repetidores pegados, no solo antorchas.
+- Un bloque **sin** nada de redstone cerca no se energiza jamás (ni cuesta tiempo de tick).
+- El estado sobrevive —o se recalcula bien— al guardar y releer el mundo.
+- Sin regresión en los `test_redstone_*.js` existentes ni en los fps del Mundo.
+
+**✅ Resuelto (2026-08-06) — motor `r1.2`, en `redstone/redstone.js`. Sin tocar `app.js`.**
+
+El ticket temía dos cosas que al final **no** hicieron falta:
+
+- **No hay estado nuevo por celda.** La energía de un bloque **se calcula al vuelo** desde sus seis
+  vecinos (`energiaDeBloque`), así que no hay nada que persistir en `mundo.json` y el punto de
+  «sobrevive al guardar y releer» sale gratis: al recargar se recalcula igual.
+- **No hay barrido global.** Un bloque solo mira vecinos que **tienen `cfg`**, o sea **nunca
+  bloque → bloque**. Eso acota el coste a un salto y evita el efecto dominó de un cable suelto
+  energizando un muro entero. Precio explícito y a propósito: **dos bloques en fila no llevan la
+  señal**, igual que en Minecraft.
+
+**Lo que sí hubo que decidir, y es la pieza que sostiene todo: FUERTE / DÉBIL.** El **cable**
+energiza el bloque solo **débilmente** y otro cable **no lee lo débil**; todo lo demás (antorcha,
+palanca, repetidor) energiza **fuerte**, y eso lo lee todo el mundo. Sin esa asimetría dos tendidos
+separados por un bloque se contagiarían **saltándose la pérdida**, y peor: un tendido se
+realimentaría a través del bloque que él mismo alimenta y no bajaría de nivel nunca. Una pieza que no
+es cable (una lámpara) **sí** lee lo débil, que es lo que enciende una lámpara colgada bajo un cable.
+
+**El fallo que casi se cuela.** El aviso a los vecinos tiene que saltar a **dos** celdas a través del
+bloque, y la primera versión se lo ahorraba cuando quien cambiaba «no era circuito» — para que una
+ráfaga de mil bloques (un TNT) no costara 36 lecturas por voxel. No funciona: **«¿era esta celda
+circuito?» no se puede responder después de la escritura**, porque una *fuente* (una palanca) no deja
+entrada en `potencia`. Al arrancar la palanca parecía un bloque cualquiera y **la lámpara del otro
+lado del muro se quedaba encendida**. Ahora salta siempre; el filtro que de verdad importaba sigue en
+pie (**solo se encola lo que tiene `cfg`**), así que la cola sigue vacía en una ráfaga y lo único que
+sube son lecturas de array: 7 → 43 por escritura, **600 escrituras en 0,9 ms**.
+
+**El «bloque aislante» del ticket, hecho.** Está en `game.redstone.aislante(clave)` y no en
+`game.bloques.define(…, {aislante:true})` como se apuntó al redactarlo: la tabla de materiales de
+redstone ya vive en el motor, y meter el aislante en `define()` lo convertiría en pieza de circuito
+—entraría en la cola y gastaría una entrada de `potencia`— para no hacer nada. `aislante(clave,
+false)` lo quita, `aislante()` los lista.
+
+**Depuración:** `game.redstone.info(x,y,z)` añade `vecinos[i].bloque = {fuerte, debil}` en los
+vecinos que son bloques macizos. Sin eso, «le llega corriente y no enciende» se mira a ciegas justo
+en el caso nuevo.
+
+**Verificado**
+- `node test_redstone_bloques.js` — **nuevo**, todo ok: transporte por el muro (el caso literal de la
+  captura: una antorcha pegada al muro pasa de ver 0 a ver 15), fuerte/débil en los dos sentidos, dos
+  muros en fila que no conducen, `aislante()` de ida y vuelta, el despertar a 2 celdas al **poner** y
+  al **quitar** la fuente, y el coste de la ráfaga.
+- `test_redstone_dsl.js` · `test_redstone_antorcha.js` · `test_redstone_arranque.js` ·
+  `test_redstone_giro.js` — todo ok (los avisos de oscilación de `giro` ya salían antes: se comprobó
+  desactivando la función).
+- `test_bloques_comportamiento.js` — 373 ok, 0 fallos.
+- `node redstone/montar_ejemplos.js` — **los nueve circuitos reales**, montados sobre el suelo (que
+  es donde el transporte por bloques podía romperlos), accionados uno a uno: todo ok.
+
+---
+
+### ✅ REQ-RS5 · El bloque de redstone (fuente permanente) — ✅ resuelto 2026-08-06
+
+**Reportado** 2026-08-06 por el dueño, con captura: un repetidor gris encima de un bloque rojo grande
+sobre hierba, con los dos pines apagados. «el repetidor encima de un bloque de redstone deberia
+activarse». Luego, ya con el diagnóstico delante: **«añade el bloque de redstone, y que no se active
+con red_concrete los elementos de redstone»**.
+
+**Lo que resultó ser** — el bloque de la foto es `asset:assets/red_concrete.vox.json`, hormigón
+**decorativo**, en `data/mundo.json` (263,15,263). Dos cosas distintas, y me equivoqué en la primera:
+
+1. **`red_concrete` estaba declarado FUENTE.** `redstone/redstone-arranque.js` lo traía en su tabla
+   `DEFECTOS` con `{ power: 15 }`, así que **en todos los mapas cualquier pared de hormigón rojo daba
+   15 por sus seis caras**. Eso es lo que el dueño veía. Mi primer diagnóstico —«es el puente de r1.2
+   desde un cable pegado»— **era falso**, y lo defendí incluso después de que él insistiera con una
+   segunda captura («veo que tanto redstone como redconcrete siguen dando potencia»). Tenía razón
+   las dos veces. Además este mismo `CLAUDE.md` y `redstone.js` usaban `red_concrete` como **ejemplo
+   de fuente** en sus cabeceras, o sea que la confusión venía documentada de origen.
+2. **El repetidor no escucha hacia abajo.** `señalQueLlega` filtra por `atrasDe()`, y `FRENTE =
+   [0,4,1,5]` es horizontal: el `−Y` no entra nunca. **Verificado que Minecraft hace lo mismo** — el
+   bloque de debajo de un repetidor es *solo soporte*; la entrada se lee del de **detrás**. Se lo
+   dije al dueño con la fuente delante y aceptó la regla de Minecraft.
+
+**Qué se hizo**
+- `assets/make_blocks.js` + `assets/bloque_redstone.vox.json` + entrada en `assets/index.json`.
+  Moteado a propósito, para que **no se confunda de un vistazo con el hormigón rojo liso**.
+- `redstone/redstone-piezas.js`: `'asset:assets/bloque_redstone.vox.json': { emite: 15 }`. Nada más —
+  sin pareja encendida/apagada (no tiene dos estados, así que `aplicar()` no le toca el material),
+  sin `manual` y **sin `mira`**, o sea 15 por las seis caras.
+- `redstone/redstone-arranque.js`: **fuera** la entrada `red_concrete` de `DEFECTOS`, con un comentario
+  en su sitio que dice qué había y por qué se quitó (si no, vuelve).
+- `redstone/redstone-demo-antorcha.js`: su `FUENTE` apunta ya al bloque de redstone, y es ése el que
+  te deja en la hotbar.
+
+**Coste de la migración** — al dejar de emitir, 10 celdas de hormigón rojo que alimentaban piezas se
+quedan sin fuente: 6 en `data/mundo.json` (262,15,253 · 271,15,262 · 263,15,263 · 271,16,263 ·
+272,16,264 · 271,17,264) y 4 en `data/worlds/test.json` (52,15,51 · 59,15,53 · 60,15,53 · 66,15,60).
+`cubes.json`, `lab.json` y `redstone.json` tienen hormigón rojo pero ninguno tocando circuito. Se
+arreglan **sustituyendo esas celdas por el bloque de redstone**; no se ha tocado ningún mundo del
+dueño.
+
+**Lo que NO se hizo, y por qué** — no se abrió el `−Y` del repetidor (rompería la asimetría que evita
+que se realimente por su propia salida: BUG-RS2), y **no se declaró `red_concrete` aislante**: el
+puente de r1.2 es el comportamiento de *cualquier* bloque macizo, no algo suyo, y aislarlo sería
+tratar el síntoma. Lo que había que quitar era la declaración de fuente, y eso es lo que se quitó.
+
+**Verificado**
+- `node test_redstone_bloque_fuente.js` — nuevo: las seis caras a 15, sin estado, detrás sí / debajo
+  no (y que `info()` lo *explica* en vez de parecer roto), y que `red_concrete` no emite pero **sigue
+  haciendo de puente**. La primera versión de este test **daba verde con el fallo puesto**, porque
+  solo miraba `redstone-piezas.js`; ahora lee `redstone-arranque.js` **de disco** y comprueba contra
+  `game.redstone.lista()` en vivo que `red_concrete` no está entre los circuitos.
+- Sin regresiones: `test_redstone_bloques`, `test_redstone_dsl`, `test_redstone_antorcha`,
+  `test_redstone_arranque`, `test_redstone_giro`, `test_galeria_assets` — todos en verde.
+
+---
+
+### ⬜ REQ-RS3 · Crear el pistón de redstone y plantarlo en `/map/test` — ⬜ todo
+**Reportado** 2026-08-06 por el dueño: «crear "pistón" redstone y añadirlo a mapa test para probarlo».
+
+**Redactado sin investigar** (regla del dueño para «nuevo ticket»): lo de abajo es lo que sé de haber
+trabajado en la zona, **no** una exploración. Todo lo que lleva «¿?» hay que comprobarlo al abordarlo.
+
+**Qué es** — la pieza de redstone que, al recibir señal, **empuja** el bloque (o los bloques) que tiene
+delante una celda en la dirección a la que mira. Es la primera pieza de redstone que **mueve el mundo**
+en vez de solo propagar señal: hasta ahora todo el redstone es estado, no geometría.
+
+**Por qué esto no es «un repetidor más»** — y es lo que hace que la pinta esté sin acotar:
+- ⚠️ **Es todo orientación.** Un pistón sin dirección no es nada. Y hay un ticket abierto que dice que
+  **las piezas de redstone giradas no funcionan** (BUG-RS2). Empezar el pistón antes de entender RS2
+  es construir encima de lo que ya está roto: **lo razonable es resolver BUG-RS2 primero, o al menos
+  su diagnóstico**, que además es barato (plantar `@0/@1/@2/@3` y ver cuáles propagan).
+- ⚠️ **Mover un bloque cruza la frontera de los dos sitios donde vive un material** (CLAUDE.md): lo
+  macizo 16³ está en `mc.grid` y lo que tiene forma está en `mc.structures`. Un pistón que empuja tiene
+  que saber mover **las dos cosas**, y no es el mismo código. ¿Empuja solo rejilla en v1?
+- ⚠️ **Y REQ-RS4 es probablemente anterior a esto.** Un pistón se activa **por energía**, y REQ-RS4
+  cambia el modelo de propagación (cualquier bloque puede energizarse). Hacer el pistón antes obliga a
+  rehacerle la entrada después.
+- ⚠️ **El comportamiento va en los snippets, no en `app.js`** (CLAUDE.md §0). Pero «empujar» puede
+  necesitar una **capacidad** nueva del motor. Si hace falta, el patrón es el de siempre: `app.js`
+  expone la capacidad, el snippet decide el comportamiento (`mc.sunExtra`, `mcXrayExtra`,
+  `mc.atraviesa`). Hay que resistir la tentación de meter «pistón» en `app.js`.
+
+**Decisiones que necesita el dueño** (ninguna la cierro yo)
+1. ¿**Pistón normal** solo, o también **pegajoso** (que al retraerse se trae el bloque)? Recomiendo
+   normal en v1: el pegajoso duplica los casos.
+2. ¿Cuántos bloques empuja en fila? (Minecraft: 12). Recomiendo **1** en v1.
+3. ¿La **cabeza extendida** es un bloque propio, o el pistón cambia de forma? Esto decide si son dos
+   claves (`piston` / `piston-on`, como `repetidor`/`repetidor-on`) o una con estado.
+4. ¿**Animación** de extensión, o instantáneo? Instantáneo es mucho más barato y probablemente basta.
+5. ¿Qué pasa con lo que **no es un bloque** delante: el jugador, un agente, una nota? Lo más simple y
+   defendible es «no empuja nada que no sea bloque, y si hay un agente el pistón no actúa».
+6. ¿Qué pasa si delante hay **hueco**, **borde del mundo** o algo **atravesable** (`hierba`)?
+
+**Dónde caerá, sin haberlo abierto** — el comportamiento en la familia de snippets de redstone
+(`data/snippets/redstone*.json`); el aspecto, un asset en `assets/`. Hay tests hermanos ya escritos
+(`test_redstone_*.js`) que sirven de molde.
+
+**«Añadirlo a mapa test»** — la instalación de prueba va a **`/map/test`**, que es donde van todas las
+pruebas del Mundo, y **no se borra al terminar**. Ojo: existe además un `/map/redstone` con montaje de
+redstone; si el dueño lo prefiere ahí, que lo diga — el enunciado dice `test`.
+
+**Verificación esperada**
+- Un pistón plantado en `/map/test`, alimentado desde una palanca/antorcha, **empuja** el bloque de
+  delante una celda; al cortar la señal se retrae (y el bloque **no** vuelve, si es normal y no pegajoso).
+- Funciona en **las cuatro orientaciones** — es el criterio que lo separa de BUG-RS2.
+- Empujar contra el borde, contra hueco y contra un bloque irrompible no rompe nada ni pierde bloques.
+- El mundo guardado y releído conserva lo que el pistón movió.
+- Sin regresión en los `test_redstone_*.js` que ya existen.
+
+---
+
 ### ⬜ PERF-MC2 · Sub-chunk culling de estructuras — ⬜ todo
 Partir la malla fina de cada estructura en sub-bloques (p.ej. 16^3 de mundo) con su propio AABB, para que pegado
 a una pared mirando hacia fuera la mayoria de sub-bloques caigan **fuera del frustum** y no se dibujen. Complemento
@@ -454,7 +1727,181 @@ culling real (la pared tapa el resto) queda como mejora posterior mas compleja.
 
 ---
 
+### ✅ BUG-GAL1 · Editar el cable de redstone creó una pieza NUEVA en vez de reemplazar la vieja — ✅ resuelto 2026-08-06
+**Capturas** — `data/tickets/BUG-GAL1/` (`01.png` galería con las dos tarjetas, `02.png`
+la ficha de `asset:assets/cable.vox.json`, `03.png` las dos piezas en el Mundo) + `contexto.md`.
+
+**Reportado** 2026-08-06 por el dueño, con tres capturas: «he querido modificar el cable de redstone
+por una forma más interesante y en lugar de reemplazar el actual se ha creado uno nuevo, cosa que no
+debería de haber pasado, además parece que se llama igual viendo los rayos-X».
+
+**Lo que se ve en las capturas** (esto es observación, no diagnóstico):
+- En la galería conviven **dos tarjetas**: «**cable asset**» —rotulada `Bloque · cable · del juego` y
+  `🎮 Asset del juego`, con miniatura de una cruz roja OSCURA en volumen— y «**cable**» —rotulada
+  `textura · 112 vox`, fechada `05 ago 21:55`, con miniatura de una cruz roja BRILLANTE y plana.
+- La ficha que sí abre dice: `Tipo textura · Grupo Bloques de construcción · Rol Bloque · cable ·
+  Tamaño 16×16×16 · Fichero assets/cable.vox.json`, clave `asset:assets/cable.vox.json`, y «nombres
+  que ya funcionan hoy: `cable · id`, `cable · rótulo`».
+- En el Mundo se ven **las dos piezas a la vez**, una al lado de la otra: la cruz plana brillante y la
+  cruz oscura en volumen.
+
+**Reflexión** — que las dos respondan a «cable» y que una sea `textura` y la otra `Asset del juego`
+apunta a que hay **dos registros distintos para el mismo nombre corto**, y que el guardado desde el
+editor entró por el camino de «alta» y no por el de «reemplazo». La ficha del 2026-08-04 dejó escrito
+que un asset responde a **cuatro** claves (id, rótulo, basename y `meta.alias`); si el editor guarda
+resolviendo por una y el registro indexa por otra, un guardado «encima» se convierte en un duplicado
+sin que nadie proteste. Eso encaja también con el «parece que se llama igual en rayos-X»: si las dos
+entradas comparten rótulo, el overlay no puede distinguirlas.
+
+**Lo que NO he verificado** (por la regla de «nuevo ticket = anotar, no investigar»): cuál de las dos
+es la vieja y cuál la nueva, qué endpoint usó el guardado, si hay dos ficheros en `assets/` o uno
+solo con dos entradas de paleta, y si el duplicado es del disco o solo del índice en memoria. Todo eso
+es lo primero que hay que mirar al abordarlo, y hasta entonces el ticket no afirma causa.
+
+**Verificación esperada** — guardar una modificación de un asset existente lo **reemplaza**; no
+aparece una segunda tarjeta; y si de verdad hiciera falta crear una pieza nueva, el nombre corto no se
+puede repetir (o se rechaza, como ya se rechaza pisar un alias de fábrica, o se desambigua).
+
+**Resuelto 2026-08-06.** La pregunta que el ticket dejaba abierta —«cuál es la vieja y cuál la nueva,
+qué endpoint usó el guardado»— tenía respuesta en el disco: **dos ficheros de verdad**, no dos
+entradas de paleta. `data/habitantes/cable.json` (112 vox, la cruz gorda, de ayer 21:55) y
+`assets/cable.vox.json` (44 vox, la cruz irregular que el dueño redibujó, de hoy 12:10).
+
+La causa es **una línea**: `save()` decidía el destino por `state.meta.type` —`'textura'` →
+`/api/assets`— en vez de por la galería **de la que salió el dibujo**. El cable es un habitante de
+tipo `textura`, así que cargarlo y darle a Guardar lo mandaba a `assets/`, con el mismo `id`, dejando
+el original intacto: de ahí las dos tarjetas y el «se llama igual». `serverId` recordaba el **id**
+pero no el **espacio de nombres**, y un id sin espacio de nombres no identifica nada — `cable` existía
+como habitante y como asset a la vez. Peor: `mcIndexAssets` registra el nombre corto de cada asset, así
+que el duplicado **secuestró la clave `cable`** para todos los scripts.
+
+Arreglo: `serverKind` (`'hab'|'asset'|null`) viaja junto a `serverId` —se pone al cargar, sobrevive al
+`localStorage`, y `vaAAssets()` enruta por él; el tipo solo decide cuando **no hay origen**, o sea en un
+dibujo nuevo. `saveAs()` va por el mismo sitio, así que una copia nace en la galería de su original.
+
+**Datos** — el dibujo nuevo se movió a donde el dueño quería que estuviera (`hab:cable`), y el
+duplicado se retiró con `DELETE /api/assets/cable`, que lo deja en la papelera y libera el nombre
+corto. Respaldo previo de las tres piezas en `data/habitantes_trash/1786012950832__*`.
+
+**Verificado** — `test_galeria_namespace.js` (nuevo, 8 ok): reproduce el caso exacto —un habitante de
+tipo `textura` que se carga, se modifica y se guarda— y comprueba que **no** aparece el asset gemelo.
+Se confirmó que la prueba **falla contra el código viejo** (2 fallos: «aparecio
+assets/zz-test-namespace.vox.json» y el voxel nuevo sin llegar al habitante). Sin regresión en
+`test_galeria_assets` (7 ok), `test_guardar_pieza` (17 ok), `test_redstone_arranque`,
+`test_redstone_dsl` y `test_redstone_giro`.
+
+---
+
+### ✅ BUG-GAL2 · El botón «Ficha» solo sale en una de las dos copias del cable — ✅ resuelto 2026-08-06
+**Capturas** — las tres del mensaje están en `data/tickets/BUG-GAL1/` (los tres tickets salen del
+mismo mensaje, así que las imágenes se guardan UNA vez). La que importa aquí es `01.png`: se ve una
+tarjeta con `📋 Ficha` y la otra sin él.
+
+**Reportado** 2026-08-06 por el dueño, en el mismo mensaje que BUG-GAL1: «solamente el nuevo tiene
+ficha, el original no tiene ficha y debería tenerla».
+
+En la captura, la tarjeta «cable asset» ofrece `Cargar · 📋 Ficha · Renombrar · Borrar`, y la tarjeta
+«cable» solo `Cargar · Renombrar · …` — sin `Ficha`. Va **aparte** de BUG-GAL1 a propósito: aunque el
+duplicado desaparezca, sigue siendo una pregunta legítima por qué una pieza de la galería se queda sin
+ficha, y la respuesta probablemente no es la misma (la ficha se introdujo el 2026-08-04 y puede estar
+condicionada al tipo de entrada — `textura` vs `Asset del juego` — más que a la duplicación).
+
+**No verificado**: qué condición decide pintar el botón, ni si la ficha de la tarjeta sin botón se
+podría abrir igualmente por URL.
+
+**Verificación esperada** — toda pieza de la galería enseña su ficha, con su clave de scripting
+copiable, sea del juego o importada.
+
+**Resuelto 2026-08-06.** Iba aparte de BUG-GAL1 con razón: **no** era la duplicación. La sospecha
+apuntada en el ticket («condicionada al tipo de entrada más que a la duplicación») era la correcta, y
+la condición resultó ser aún más simple de lo previsto — no había condición ninguna: el botón
+`📋 Ficha` estaba escrito **solo** en el bucle que pinta los assets, y el de habitantes no lo tenía. O
+sea que **ningún** habitante ha tenido ficha nunca, no solo el cable.
+
+No bastaba con añadir el botón, porque la ficha estaba escrita entera en forma de asset: clave
+`'asset:'+a.file`, `fichaClaves()` derivando nombres del basename, y el alias por
+`PATCH /api/assets/<id>`. Un habitante **no** pasa por `mcIndexAssets`, así que su id, su rótulo y su
+basename **no valen como clave**: la única que funciona es `hab:<id>`. Enseñar las otras habría sido
+peor que no enseñar nada — es justo el error que dejó el cable roto (ver BUG-RS5).
+
+Arreglo: `fichaKind` (`'asset'|'hab'`); para un habitante la ficha dice su clave entera, y la mitad
+editable del formulario (nombre corto, icono, Guardar) **se esconde** en vez de fingir que se puede
+editar, porque el servidor solo deja renombrarlos.
+
+**Verificado** — `test_galeria_namespace.js`: la tarjeta ofrece `Cargar · 📋 Ficha · Renombrar ·
+Borrar`, la ficha enseña `hab:<id>` y el ejemplo copiable, y **no** ofrece alias ni Guardar.
+
+---
+
+### ✅ BUG-RS5 · El cable de redstone modificado no conduce — ✅ resuelto 2026-08-06
+**Capturas** — en `data/tickets/BUG-GAL1/` (mismo mensaje). La buena aquí es `03.png`: las dos
+cruces plantadas juntas en el Mundo, la brillante plana y la oscura en volumen.
+
+**Reportado** 2026-08-06 por el dueño, cerrando el mismo mensaje: «y lo que es peor, el modificado no
+funciona».
+
+**Reflexión** — el motor de redstone no conoce piezas por su forma sino por su **clave**, y el
+circuito del cable está declarado sobre `'hab:cable'` (`redstone/redstone-piezas.js`). La pieza de la
+ficha se llama `asset:assets/cable.vox.json`. Son **dos espacios de nombres distintos** (`hab:` =
+galería de habitantes, `asset:` = empotrado), así que una cruz nueva guardada como `asset:…` no está
+en la tabla del circuito y se comportaría exactamente así: se ve, se pone, y no conduce nada. Si eso
+se confirma, BUG-RS5 es **consecuencia** de BUG-GAL1 y se cierra con él; si no, es un fallo aparte.
+
+**No verificado**: con qué clave quedó guardada la pieza nueva, ni si el dueño editó la de `hab:` o la
+de `asset:`. Es lo primero que hay que mirar, y se responde en un minuto con `game.redstone.info()`
+encima del cable que no funciona — que desde BUG-RS2 ya dice `escuchaPor`/`emitePor` y, si la celda ni
+siquiera es circuito, `esCircuito:false`.
+
+**Verificación esperada** — cambiarle el dibujo a una pieza de redstone no le quita el circuito: el
+cable modificado conduce igual que el de antes.
+
+**Resuelto 2026-08-06 — era consecuencia de BUG-GAL1**, exactamente como el ticket sospechaba, y la
+prueba estaba en la captura que el propio dueño adjuntó: `02.png` es la ficha del dibujo nuevo y dice
+`asset:assets/cable.vox.json`. El circuito se declara sobre `'hab:cable'`
+(`redstone/redstone-piezas.js`), así que la pieza nueva **nunca fue un circuito**: era un dibujo
+bonito, colocable y mudo. No hubo que tocar ni una línea del motor de redstone.
+
+Al arreglar el enrutado (BUG-GAL1), el dibujo del dueño se movió a `hab:cable`, que es donde el
+circuito lo busca. Como `cable-on` seguía siendo la cruz gorda de 112 vox, el cable **habría cambiado
+de forma al encenderse**, así que se le aplicó la forma nueva heredando el color emisivo que ya usaba
+(`*#ff2d2d`): solo cambia la forma, no la paleta.
+
+**Verificado** — `test_redstone_arranque`, `test_redstone_dsl` y `test_redstone_giro` en verde con el
+dibujo nuevo ya instalado. Falta la confirmación visual del dueño en su mundo.
+
+---
+
+### ⬜ BUG-ROT1 · `R` y `Shift+R` no alcanzan todas las orientaciones: hay colocaciones imposibles — ⬜ todo
+
+**Reportado** 2026-08-06 por el dueño: «el modo "r" de rotar y mayúsculas + "r", con "r" se debería de
+ir rotando la figura en las 6 posiciones posibles, por ejemplo, una losa plana pasaría por las 6 caras
+hasta volver de nuevo a la 1ª, con mayúsculas+r debería de rotar en las 4 posibles posiciones de esa
+cara, es decir, sobre su plano. Si no es de esta manera resulta imposible colocar un objeto en todas
+las rotaciones posibles tal y como está actualmente».
+
+**Lo que pide** — separar el giro en **dos ejes de mando**, que juntos dan las 24 orientaciones de un
+cubo: `R` elige **qué cara va abajo** (ciclo de 6, una losa plana recorre sus 6 caras y vuelve a la
+primera) y `Shift+R` **gira sobre esa cara** (ciclo de 4, en su plano). 6 × 4 = 24.
+
+**Por qué importa** — no es comodidad: el dueño dice que tal y como está **hay colocaciones que no se
+pueden alcanzar**, o sea que parte del espacio de orientaciones es inaccesible desde el teclado.
+
+**Sin investigar** (política de tickets nuevos). Lo primero al abordarlo es medir **cuántas
+orientaciones distintas alcanzan hoy** `R` y `Shift+R` en el editor y en el Mundo, y compararlo con
+24 — el ticket no afirma todavía cuál de las dos teclas está mal, ni si el límite está en el mando
+(las teclas) o en el modelo (`rot` con solo 4 valores en `mcRotXZ`, que gira **solo en XZ**). Ojo a
+que el giro vive en la clave (`clave@n`) para lo que está en `mc.grid`: ampliar el rango de `rot`
+toca el formato del mundo, no solo el teclado.
+
+**Verificación esperada** — desde cualquier orientación, `R` seis veces devuelve la pieza a la de
+partida; `Shift+R` cuatro veces también; y las 24 combinaciones son alcanzables y distintas.
+
+---
+
 ## Bitácora
+- 2026-08-06 · ⚡ **Un muro también lleva corriente: bloques macizos como puente (redstone r1.2)** (dueño: «los bloques que reciben energía de redstone deben energizarse, por lo tanto, una antorcha pegada a un bloque que recibe energía como el de la imagen debería encenderse; salvo que se haya indicado como bloque aislante»). Hasta r1.1 una celda sin `cfg` era un **agujero**: `señalQueLlega` la saltaba y el circuito se acababa ahí, así que la antorcha de la captura —pegada a un bloque, no al polvo— no tenía forma de enterarse. El ticket temía **estado nuevo por celda** (`energizado` en `mundo.json`) y **un barrido que ya no puede limitarse a las claves de redstone**; no hizo falta ninguno de los dos: la energía del bloque **se calcula al vuelo** desde sus seis vecinos y **nunca se encadena bloque → bloque**, lo que acota el coste a un salto y evita el dominó de un cable suelto energizando un muro entero (precio explícito: dos bloques en fila no conducen, igual que en Minecraft). Lo que sostiene todo es la asimetría **FUERTE/DÉBIL**: el **cable** energiza el bloque solo débilmente y otro cable **no lee lo débil**; sin eso, dos tendidos separados por un bloque se contagiarían **saltándose la pérdida** y un tendido se realimentaría a través del bloque que él mismo alimenta, sin bajar nunca de nivel. Una lámpara (que no es cable) sí lee lo débil, y por eso se enciende colgada bajo un cable. **El error que casi se cuela**: el aviso a vecinos tiene que saltar **dos** celdas a través del bloque, y la primera versión se lo ahorraba cuando quien cambiaba «no era circuito», para que un TNT de mil voxels no costara 36 lecturas cada uno — pero **«¿era esta celda circuito?» no se puede responder después de la escritura**, porque una *fuente* (una palanca) no deja entrada en `potencia`; al arrancarla parecía un bloque cualquiera y la lámpara del otro lado del muro **se quedaba encendida**. Ahora salta siempre y el filtro que de verdad importaba sigue en pie (solo se **encola** lo que tiene `cfg`): la cola sigue vacía en una ráfaga y lo único que sube son lecturas de array, 7 → 43, con **600 escrituras en 0,9 ms**. El «bloque aislante» que pedía el dueño quedó en `game.redstone.aislante(clave)` y no en `game.bloques.define(…, {aislante:true})` como se apuntó al redactar el ticket: la tabla de materiales de redstone ya vive en el motor, y meterlo en `define()` lo convertiría en pieza de circuito —cola y entrada de `potencia`— para no hacer nada. `info()` enseña ahora `vecinos[i].bloque = {fuerte, debil}`, sin lo cual «le llega corriente y no enciende» se mira a ciegas justo en el caso nuevo. Todo en `redstone/redstone.js`, **sin tocar `app.js`**. Verificado con `test_redstone_bloques.js` (nuevo), los cuatro `test_redstone_*` de antes, `test_bloques_comportamiento.js` (373 ok) y —lo que de verdad medía el riesgo— los **nueve circuitos reales** de `redstone/montar_ejemplos.js`, que van montados **sobre el suelo**, que es donde el transporte por bloques podía romperlos: todo ok.
+- 2026-08-06 · 🔌 **El lío del cable: un id sin espacio de nombres no identifica nada** (dueño: «he querido modificar el cable de redstone por una forma más interesante y en lugar de reemplazar el actual se ha creado uno nuevo… además parece que se llama igual viendo los rayos-X, solamente el nuevo tiene ficha… y lo que es peor, el modificado no funciona»). Tres quejas, **una sola línea de causa**. El disco lo dijo todo antes de teorizar: dos ficheros de verdad, `data/habitantes/cable.json` (112 vox, la cruz gorda, de ayer) y `assets/cable.vox.json` (44 vox, la cruz irregular que él redibujó, de hoy a las 12:10). `save()` elegía destino por `state.meta.type` —`'textura'` → `/api/assets`— **en vez de por la galería de la que salió el dibujo**; y como el cable es un habitante de tipo `textura`, cargarlo y darle a Guardar lo escupía a `assets/` con el mismo `id`, dejando el original intacto. `serverId` recordaba el **id** pero no el **espacio de nombres**, y ahí está el fondo del asunto: `cable` existía a la vez como habitante y como asset, o sea que el id solo no identificaba nada. Las otras dos quejas caen de ahí: el «no funciona» es que el circuito se declara sobre `'hab:cable'` y la copia era `asset:assets/cable.vox.json` —la propia captura `02.png` del dueño lo decía, no hizo falta tocar el motor de redstone—, y encima el duplicado **secuestró el nombre corto `cable`** para todos los scripts, porque `mcIndexAssets` registra el basename de cada asset. Lo de la ficha resultó ser **otro bug**, y por eso iba aparte: el botón `📋 Ficha` estaba escrito solo en el bucle que pinta assets, así que **ningún habitante ha tenido ficha nunca**. No bastó con añadirlo, porque la ficha estaba escrita entera en forma de asset (clave `'asset:'+file`, nombres derivados del basename, alias por `PATCH /api/assets`) y un habitante **no pasa por `mcIndexAssets`**: su id y su rótulo **no valen como clave**, solo `hab:<id>`. Ofrecérselos habría sido mentir, que es exactamente el error que dejó el cable mudo — así que para habitantes la ficha enseña su clave entera y **esconde** la mitad editable en vez de fingir que se puede editar. Arreglo: `serverKind` (`'hab'|'asset'|null`) viaja junto a `serverId`, sobrevive al `localStorage`, y `vaAAssets()` enruta por él; el tipo solo decide cuando **no hay origen**, o sea en un dibujo nuevo. Verificado con `test_galeria_namespace.js` **nuevo** (8 ok), que además se comprobó **contra el código viejo** para asegurar que de verdad detecta el fallo (2 fallos: aparece el asset gemelo y el voxel nuevo no llega al habitante); sin regresión en `test_galeria_assets` (7), `test_guardar_pieza` (17) y los tres de redstone. Los datos del dueño se recolocaron con respaldo previo en `data/habitantes_trash/1786012950832__*`: su dibujo nuevo pasó a `hab:cable`, `cable-on` recibió la misma forma heredando el color emisivo que ya usaba (si no, el cable **cambiaba de forma al encenderse**) y el duplicado se retiró por `DELETE /api/assets/cable`, que lo deja en la papelera y libera el nombre corto. Nota aparte: `test_ficha_material` tiene **1 fallo previo** («un nombre corto nuevo resuelve sin recargar la página»), comprobado que ya venía de antes y no lo causa este cambio.
+- 2026-08-05 · 🔦 **La antorcha vuelve a alumbrar: la luz de bloque también se siembra desde la rejilla** (dueño: «jumper ya funciona, pero la antorcha no ilumina, mira las fotos de la galería #10 y #11», y luego «todo esto funcionaba cuando era una estructura, ha dejado de iluminar al pasar a setVoxel»). Las dos fotos son una A/B perfecta: en la #10 la antorcha está puesta en `51,6,59` del mapa `test` y **se ve encendida**, pero el pasillo está exactamente igual de negro que en la #11, donde no hay antorcha. El dueño tenía razón y el motivo es de nacimiento: `mcComputeBlockLight` se escribió cuando una pieza luminosa **solo podía existir estampada suelta**, así que sembraba recorriendo `mc.structures` y leyendo sus `emitCells` — desde que el clic derecho mete en `mc.grid` todo lo que cabe en su celda, la antorcha ya no está en esa lista y **no existe como foco**. Mismo patrón que el giro en la clave: la pieza no cambió, cambió por dónde entra. Medido antes de tocar nada, con la misma antorcha en la misma celda: rejilla `hasGlow=false` y luz `[0,0,0,0]`; estructura `hasGlow=true` y luz `[15,11,9,7]`. **No hubo que inventar luz nueva**: la geometría fina de la rejilla ya trae `emitCells:[0,0,0]` y `emitDir:[0,4,0]` horneados, que es justo lo que consume la siembra, así que el arreglo es *dónde mirar* — `siembra(cx,cy,cz,ed,k)` sale a función y se llama desde las **dos** fuentes. Lo que sí costó pensar es **encontrarlas**: barrer `mc.grid` entera en cada edición son ~60 ms en 512×40×512 (extrapolado de 2,07 ms medidos en 96³) y la luz se recalcula en **cada bloque puesto o roto**, o sea que la solución ingenua devolvía el lag que se quitó el 2026-08-04. De ahí un índice disperso (`mc._glowCeldas`) que solo se rehace de cero cuando cambia *qué materiales emiten* (`mc._glowFirma`: paleta nueva o geometría recién horneada) o la rejilla entera (`mc._glowRef`: cargar/redimensionar), y que se corrige celda a celda en `mcGlowTocada` **después** de escribir. ⚠️ `mcDirty` **no vale de embudo** aunque lo llamen todos los caminos: se corta sola cuando el guardado ya está marcado entero (`p.full`). Dos efectos laterales obligados: `mcRecomputeHasGlow` mira también la rejilla (si no, quitar una estructura apagaba una antorcha que sigue puesta), y `mcAgentSetBlock` ya no puede saltarse el BFS en un sólido→sólido si la celda gana o pierde emisor (pintar una antorcha encima de piedra). Verificado con `test_luz_en_rejilla.js` **nuevo** (17 ok: rejilla y estructura dan el **mismo perfil** `[15,11,9,7]`, romperla devuelve el pasillo a `[0,0,0,0]`, una flor fina no emisiva sigue sin encender nada, y 20 ediciones seguidas = **0 re-barridos**), más `test_luz_al_estampar` (9), `test_luz_incremental_navegador` (19), `test_luz_traspasa`, `test_flor_en_rejilla`, `test_clic_derecho_rejilla`, `test_atlas_estructuras` (13), `test_suelo_al_estampar` y `test_bloques_comportamiento` (**373 ok, 0 fallos**). Falta la confirmación visual del dueño en su mundo.
 - 2026-08-04 · 🏷️ **Ficha de textura y nombre corto para scripting** (dueño: «el script que he creado "Construye Montañas" hace uso de una textura llamada "Hormigón Verde / Hojas"… la cargo con `game.addMaterial("hormig-n-verde-hojas")`… me parece innecesario, podría deducirse solo… necesito saber desde el editor y la galería cuál es el nombre bueno para usar en los scripts»). Lo primero fue **descartar el bug que no era**: con el registro caliente en el navegador, `hormig-n-verde-hojas` **ya resolvía** (`addMaterial` → id 9, clave `asset:assets/hormig-n-verde-hojas.vox.json`), o sea que su script era correcto — él ya lo había dicho. Lo que faltaba era otra cosa: (a) **descubrir** el nombre bueno, porque desde el editor y la galería solo se ve el rótulo, y (b) **declarar uno corto propio**, porque la textura la generó otro programa como `green_concrete` y ese nombre no valía aquí. Ahora un asset responde a **cuatro** claves —id, rótulo, basename y el nuevo `meta.alias`— y la **ficha** (botón 📋 en la tarjeta de la galería) las lista todas, enseña la clave exacta `asset:assets/<id>.vox.json` copiable y deja editar alias/icono/descripción. El alias **no puede pisar un alias de fábrica** (decisión del dueño: rechazar y avisar), y eso se valida en las dos puntas: `validar_alias`/`ALIAS_FIJOS` en el servidor devuelve 409 con motivo legible («"stone" ya es un material de fábrica»), y el cliente lo vuelve a comprobar contra `MC_MAT_ALIAS_FIJOS` al indexar, así que un servidor desactualizado no puede corromper un material de fábrica. Dos trampas que costaron su rato: los dos mapas de materiales son de **solo-acumular**, así que cambiar el alias dejaba el anterior valiendo para siempre (`mcAliasPrevio` borra el viejo); y `POST /api/assets` vuelca el `.vox.json` **entero**, de modo que **guardar la textura desde el editor le borraba el alias** —el editor no tiene campo para él— así que el POST ahora hereda `alias`/`icon`/`description` del fichero existente antes de volcar. De paso, el aviso de material desconocido de `mcResolveMat` sale también por **toast**: era `console.warn` a secas, y desde el móvil un muro entero de roca por un nombre mal escrito se ve exactamente igual que «el script no hace nada». Verificado con `test_ficha_material.js` (11 ok) y `test_galeria_assets.js` (7 ok).
 - 2026-08-04 · 🥶 **El editor se pintaba entero dos veces al arrancar** (dueño: «cuando se refresca la página apareces en el modo editor, funciona durante 1s todo rápido pero de golpe todo se congela, tienen que pasar varios segundos hasta que el frontend responde»). El arranque hacía `render(); resizeEdit();` y **acto seguido** `setMode('3d')`. `setMode` ya pinta lo suyo de forma síncrona (`resizeEdit3d` + `drawEdit3d` + `drawIso`), y `render()` no pinta al momento: encola un rAF que vuelve a hacer `drawEdit` + `drawIso` + `updateInfo` + `drawEdit3d`. O sea que el modelo se rasterizaba **dos veces enteras**, y la segunda caía un frame más tarde — de ahí el «primer segundo va fino y luego se congela»: el rAF todavía no había entrado. Encima `resizeEdit()` dibujaba el lienzo 2D que `setMode('3d')` oculta en la línea siguiente. Ahora el arranque solo hace `updateInfo()` y deja pintar a `setMode`; volver a Capas pasa por `setMode`, que llama a `resizeEdit()` por su rama, así que el lienzo 2D se dimensiona y se pinta cuando de verdad se ve (comprobado: 890×765 y con contenido al pulsar Capas, en la ida y vuelta y tras redimensionar). De paso, `updateInfo()` ya no vuelve a partir las claves de los N voxels para sacar la bbox: se la pide a `voxParsed()`, que la calcula y la **cachea**.
   Lo que despistaba: en un escritorio rápido **no se reproduce** (0 ms de bloqueo), y tampoco depende del móvil ni del DPR. La matriz de sondas lo dejó claro — es **CPU lenta × tamaño del dibujo restaurado de localStorage**; con la CPU frenada ×6 y un dibujo de 48 171 voxels, A/B de 5 repeticiones intercaladas: bloqueo total 2651 → **1743 ms** y la peor congelación 2157 → **1446 ms**, sin solape entre las dos series. Lo que queda es trabajo real que se ve (`drawEdit3d` ~610 ms, la miniatura `drawIso` ~390 ms). Se probó apartar `drawIso` un frame con un rAF y **no compra nada** (1518 vs 1503 ms: el rAF se encadena al mismo bloqueo sin dejar pintar en medio), así que se descartó en vez de dejar un truco que no mide.
@@ -638,3 +2085,27 @@ Pantalla nueva aparte del editor: 1ª persona, WASD + ratón, terreno plano, con
 - 2026-08-03 · 👊 **El clic izquierdo sobre un agente es un GOLPE: ya no se rompe, sale despedido** (dueño: «algo raro pasa si hago clic sobre el zombie en su cuerpo, el bloque desaparece y deja de funcionar el zombie», y sobre qué poner en su lugar: «que sea darle un empujón... si el agente mecanizado recibe [botón izquierdo] se le empuja hacia atrás como ocurre en Minecraft cuando se ataca a un npc», «el npc salta hacia atrás desplazándose»). **El fallo era doble y la segunda mitad explica el «deja de funcionar»**: `mcBreak` retira ENTERA la primera estructura del rayo y, si es `efimera`, además sin historial y sin guardar (`app.js:6426`) — que es justo lo que son las piezas de un agente —; y como la única pieza **sólida** de un rig es su **raíz** (las extremidades no tienen colisión, v1.18), lo que el rayo encontraba al apuntar «a su cuerpo» era el torso, o sea que el clic se llevaba **el único sitio del que el motor tira**: quedaban cinco miembros congelados en el aire. **Arreglo: ese clic ahora empuja.** Se envuelve `mcBreak` desde la librería (**cero líneas de `app.js`**, §0) repitiendo SU MISMO rayo — mismo ojo, mismo paso de 1/16, mismo alcance — para saber qué gana: si lo primero que toca es pieza de agente, el clic **se come ahí** (tampoco se rompe el terreno de detrás); cualquier otra cosa va al original y se rompe como siempre. **El empujón es una velocidad que se frena sola, no un teletransporte**, y de ahí salen gratis las dos cosas que lo hacen parecer un golpe de Minecraft: se para contra una pared (mueve la raíz por `moverRaiz` → `asentar`, la misma colisión que un paso) y el bicho **vuelve solo**, porque el que persigue sigue persiguiendo mientras vuela. **Lo único que no se podía hacer por las bravas es el brinco**: con `ejes:'xz'`, `asentar()` REESCRIBE la Y de la raíz desde el suelo cada vez que la pieza se mueve — pero solo cuando se mueve —, así que un `g.y` a secas se borraría al andar y se **acumularía** en los frames parado (zombie al cielo); va aparte en `alto`, se descuenta ANTES de andar y se vuelve a sumar después. Y el empujón se aplica **después** de medir el avance a propósito: salir despedido no le hace pedalear las piernas. Nuevo en el documento del agente, opcional: `empuje:{ fuerza:8, freno:0.15, salto:4.5 }`, más `game.esqueletos.empujar(rig[, fuerza[, dx, dz]])` (sin dirección, lo aleja del jugador). De regalo, el huérfano: si a un rig le desaparece la raíz por otro camino, se **retiran sus piezas sueltas y se da de baja** — con una condición que distingue eso de un `mcRestampAll`, donde faltan TODAS a la vez y lo correcto es esperar. Solo `data/snippets/mundo-autoarranque.json` (**v1.25**). Verificado: **14 casos nuevos** en `test_bloques_comportamiento.js` §17 (el clic no llega al rompedor de `app.js` y no se lleva ninguna pieza, se aleja +0.556 y brinca 0.469 sin salir volando, vuelve a su distancia y el empujón se acaba solo, un clic al suelo **sí** rompe — si el envoltorio se comiera todos los clics el mundo entero sería irrompible sin que nadie lo notara —, un muro a la espalda para el empujón con fuerza 40, y las dos mitades del huérfano); suite entera **23 ficheros, 0 fallos** (338 en éste, eran 324). **Sonda en Chromium real** (borrada antes de commitear) llamando a **`mcDoAction(0)`**, que es el camino que app.js se hace a sí mismo al hacer clic — lo único que el mundo de juguete no puede probar es que `window.mcBreak = env` intercepte esa llamada —: `mcBreak._golpe = v1.25`, **54 estructuras antes y 54 después** del clic con las 6 piezas intactas, distancia 1.2 → **2.086** con un brinco de **0.297** y vuelta a 1.2, `emp` limpio, un clic al suelo rompiendo **1 bloque** como siempre, y `quitar()` dejando 48. **Límites, a propósito**: el empujón avanza eje a eje y **sin sub-paso**, igual que andar, así que un golpe fuerte contra una pared pegada lo deja quieto en vez de aplastarlo contra ella; y el golpe **no hace daño** ni tiene animación de dolor — no hay vida ni combate.
 - 2026-08-03 · 🧊 **Los agentes articulados pisan el mismo suelo que tú: hielo, trampolín, barro y bordes** (dueño: «hace falta también que los agentes articulados respeten las físicas de los bloques, ya sean de salto, velocidad, etc.»). Las conductas de `game.bloques.define` estaban escritas **solo para el jugador** —son envoltorios de `mcPlayerStep` que tocan `mc.speed`, `mc.vel[1]` y `mc._deslizVel`—, así que un zombie sobre hielo iba igual de lento, el trampolín no le hacía nada y un borde no le hacía caer: andaba por encima de la tabla de materiales. Ahora se lee **esa misma tabla** desde sus pies, con `sueloDe(aabb, g)`: medio voxel **bajo** su caja, en el centro de la huella, con la **misma identidad de flanco** (celda + clave de material) que `pieEn` usa para ti — sin eso, un trampolín rebotaría cada frame. Va **encendida por defecto** (`fisica:{ marcha, desliza, impulso, cae, placas, peso, caida }`, o `fisica:false` para apagarla entera): un agente que ignora el suelo que pisa es el fallo, no la conducta normal. Cuatro conductas y las cuatro reutilizan lo que ya existe: **`marcha`** multiplica su paso por el `velocidad` del bloque; **`cae`** convierte en altura sobre el suelo (`mov.alto`) el salto hacia abajo que `asentar()` daba **de golpe** al cambiar de columna, con la misma `GRAVEDAD` (22) que tú, y `caida` son los bloques que se atreve a bajar; **`impulso`** lo lanza dividido por `peso`; **`desliza`** lo deja rodando al dejar de andar, con el `deslizamiento` del material como **τ** del frenado exponencial. **`alPisar` se queda apagado a propósito** (`placas:false`): los `alPisar` ya escritos llaman a `game.tp(...)`, o sea que un zombie pisando una placa **te teletransportaría a ti**. **Trepar (escaleras) se queda fuera y no es un olvido**: `trepableEnColumna()` está atado a las claves de `mc.pos` y hay que extraerlo para que acepte una caja cualquiera — es el único de los cinco que empieza de cero, y va aparte. Dos cosas que costaron: el patinaje **no se veía** aunque el estado se registraba bien, porque copiar el modelo del jugador (velocidad residual amortiguada) no encaja con un bicho cuya posición la reescribe `asentar()` — hay que modelar el **deslizamiento como posición perseguida**, no como velocidad; y medir la caída como `g.y + alto` **cuenta doble**, porque `g.y` entre frames ya la lleva incorporada. El camino del jugador queda **byte a byte igual**: la física entra por un parámetro opcional al final que solo pasan los esqueletos, así que `seguir` por material no cambia de comportamiento. Solo `data/snippets/mundo-autoarranque.json` (**v1.26**) — **cero líneas de `app.js`** (§0). Verificado: **§18 nueva** en `test_bloques_comportamiento.js` (velocidad ×1/×2/×0.5 → **2.20 / 4.40 / 1.10** bloques; caída de 4 medida **en vuelo** (0.214) y al posarse (4.00); `impulso:12` subiendo **3.17**, que es `12²/(2·22)`; y el patinazo de hielo pasándose de largo, **1.199** frente a **0.716** en seco, con 1200 frames de asentamiento para ver que τ=1.2 converge); suite entera **23 ficheros, 696 ok, 0 fallos** (eran 338 en éste, ahora 357). ⚠️ **Aviso de método**: los dos fallos de `test_panel_agentes.js` que aparecieron por el camino **no eran regresión** sino contención de recursos por lanzar la suite en paralelo (Chromium + SwiftShader); en secuencial da 18 ok estable. Las pruebas de navegador **se ejecutan de una en una**. Queda pendiente el mock de capacidades del panel (`agentes_propuesta.html`, aprobado y sin implementar), que es donde se editarán estos campos.
 - 2026-08-04 · 🎛️ **El panel de Agentes enseña TODAS las capacidades, una tarjeta cada una** (dueño: «implementar de verdad el panel de capacidades del mock»). Es el mock `agentes_propuesta.html` llevado al panel real. El formulario enseñaba **4 de los ~20 parámetros** del bicho entero y `empuje` (v1.25) y `fisica` (v1.26) **no aparecían por ninguna parte** aunque el agente las tuviera: se podía tener algo encendido que el panel no sabía contar. Ahora el bloque «El bicho entero» son **tarjetas plegables**, una por capacidad (`seguir` 👁, `andar` 🚶, `empuje` 👊, `fisica` 🧊, `cuerpo` 🧱), más las dos por pieza que ya existían (`articula` 🔩, `mirar` 👀, que gana su `suavidad`); plegada dice si está encendida y con qué valores, abierta saca todos sus parámetros. Bajo el preview hay una fila de **chips** con lo mismo resumido. Tres reglas que no son cosméticas: **(1)** los valores que salen cuando el documento no trae la clave son los que la librería va a usar de verdad, en **gris cursiva** (`.def`) — un campo vacío o a 0 mentiría, porque `distancia:0` significa «se te echa encima» y es lo contrario de «no lo he tocado»; **(2)** **abrir el panel no engorda el documento**: una capacidad encendida en su valor por defecto se guarda SIN la clave, tocar un campo escribe solo esa clave y apagar-y-encender la borra, o sea que los defectos siguen viviendo en un único sitio, que es la librería; **(3)** **el panel no ofrece lo que la librería va a rechazar** — `objetivo` solo da «el jugador» y «un punto fijo» (seguir a otra CLAVE de material busca la instancia más cercana y un rig no es una instancia), y «trepa por las escaleras» sale **deshabilitada** porque todavía no existe para un agente: quitarla de la lista haría pensar que se olvidó. Apagar una capacidad sin clave de apagado se escribe con sus valores neutros (`empuje` off = `{fuerza:0, salto:0}`, `andar` off = `{cadencia:0}`); `seguir` off sí es `false` y la tarjeta avisa de que la librería **se niega a plantarlo**. Dos detalles que se descubrieron montándolo: qué tarjetas quedan abiertas tiene que vivir en `agAbiertas` y **no en el DOM**, porque el formulario se reconstruye entero en cada tecla; y `agCargar` no llevaba billete, así que **dos agentes seguidos podían pisarse** (la prueba leía el perro creyendo leer el zombie) — ahora lleva `agCargaId`, el mismo patrón que `agPrepId`. `app.js` + `style.css` + `index.html`; **la librería no se toca**. Verificado: `test_panel_agentes.js` pasa de 18 a **30 ok** (los defectos en gris, que tocar escribe solo su clave, que apagar-encender la borra, el interruptor de trepar bloqueado, el resumen plegado, los chips y el objetivo de punto fijo), y la suite entera en secuencial **23 ficheros, 706 ok, 0 fallos**. Revisado a ojo en escritorio y en **390 px**: cada tarjeta plegada ocupa una línea, así que el bicho entero cabe en el móvil sin scroll infinito. Pendiente del mock: el botón **👊 empujón** del preview, que pide que `game.esqueletos.pose()` acepte un ladeo — eso es librería, no panel.
+- 2026-08-05 · 🌿 **Pintar solo algunas caras de un voxel (`caras`) y que la hierba se atraviese (`atravesable`)** (dueño: «una cosa que hace minecraft y que nosotros aun no hacemos es pintar solamente algunas caras de los voxels de los objetos, por ejemplo para crear un bloque en plan hierba como el de la imagen que te paso» + «que "atravesable" sea algo tambien configurable para otros bloques o estructuras desde scripting»). Hasta hoy **un voxel se dibujaba siempre como un cubo de 6 caras**, así que no había forma de decir «de éste solo quiero la +X y la −X» — que es exactamente lo que convierte un voxel en un **plano**, y una mata de hierba en cruz en algo dibujable. Ahora hay una **máscara por voxel**, entero 0..63, clave de primer nivel `caras` en el `.vox.json` (mismo patrón que `pivotes`: sobrevive al guardado sin tocar `server.py`). El dueño eligió la máscara **en vez de** un tipo de render «cruz» sabiendo el precio, y por eso sirve además para banderas, carteles y paneles sueltos. **Criterio de aceptación de las nueve fases y guardián de todas ellas**: un asset **sin** `caras` produce el mismo nº de caras en el VBO, el mismo `bits`, la misma colisión, el mismo apuntado y **la misma imagen píxel a píxel** (`test_caras_pegadas.js`).
+  - **La permutación al girar se DERIVA numéricamente, nunca de una tabla** (`facePerm(fn)` en el editor, `mcFacePerm(tilt,yaw,…)` en el Mundo): se pasa el vector normal de cada cara por **la misma transformación afín** que mueve las coordenadas y se busca el índice que coincide. Es *la* diferencia con los pivotes, que solo mueven puntos. Una tabla escrita a mano se desincroniza la primera vez que alguien toque `rotateModel` o `mcRotXZ`; el invariante que lo fija es «4 giros = identidad» más la coincidencia contra un voxel testigo pasado por `mcRotXZ`. `CUBE_FACES` (editor) y `MC_FACES` (Mundo) **coinciden índice a índice** —el cambio de ejes ya está dentro de la tabla, `asset +Z` = `mundo +Y`—, así que el entero viaja del editor al Mundo **sin traducir**.
+  - ⚠️ **La máscara es del OBJETO, no del voxel**, y confundirlo es el bug: con `state.caras` **vacío** todo se ve entero, pero en cuanto hay **una sola** marca, lo que no está marcado se oculta. De ahí dos lecturas — `caraMask` = *lo que se pinta* (63 si el objeto no tiene marcas) y `caraMaskRaw` = *lo que está guardado* (0 si no hay entrada). El render lee la primera; la herramienta edita con la segunda. No se guarda el 0; **el 63 sí**, porque «las seis a mano» no es «sin marcar».
+  - **Tres sitios de render en el editor, no dos.** `renderEdit3dScene` **inlinea** `g.front[fi]` y `occ.has(...)` en vez de llamar a `faceVis3d`, así que parchear solo `faceVis3d`/`faceVisIso` habría dejado un bug visible **justo en los modelos pequeños** (por debajo de `BIG3D=15000`), o sea en casi todos los assets del proyecto. Los tres van en el mismo cambio. Herramienta **🃏 «Caras» (tecla `A`)** calcada de 📍: izquierdo marca, derecho desmarca, Shift+clic las seis, **derecho sobre el botón de la herramienta borra todas las marcas del objeto**, y el botón alterna «Marcadas»/«Ocultas» — una cara oculta **se sigue pudiendo clicar**, así que ocultarla nunca es irreversible.
+  - **Un bitset hacía DOS trabajos, y por eso ahora son dos.** `g.bits` respondía a la vez «¿me frena?» (`mcFineSolidAt`→`mcCollidesWorld`) y «¿hay materia aquí?» (`mcStructCellSolid`, `mcStructRayHit`, `mcStructAt`, `mcBreak`, `mcXrayVolume`). Una mata tiene que contestar **no** a la primera y **sí** a la segunda o no se podría romper de un clic. Se parte en `bits` = colisión y **`bitsAim` = ocupación real**, que por defecto es **la MISMA referencia** (cero memoria, cero divergencia: mientras nadie sea atravesable el comportamiento es idéntico y se verifica por ausencia de cambios). ⚠️ **`bits` nunca es `null`** — atravesable es un `Uint8Array` de **ceros** —, porque `data/snippets/mundo-autoarranque.json` **re-implementa el bucle leyendo `g.bits`** (`golpe`, `claveFinaEn`, el barrido de `trepable`) con un `if(!g || !g.bits) continue`: con `null` la hierba desaparecería también del apuntado. Por lo mismo `mcFineBoxHit`, `mcFineSolidAt` y `mcStructColl` quedan **byte-idénticas** y la capa de apuntado va **encima** de ellas.
+  - **`atravesable` se declara por dos vías que producen la MISMA forma**, así que `app.js` no necesita saber de cuál vino: el **documento** (`"atravesable": true` + casilla en la tarjeta *Objeto*) y el **snippet** (`game.bloques.define('hab:hierba',{atravesable:true})`, que envuelve `mcStructColl` y clona el `g`; `quitar()` lo deshace). **No se deriva de la máscara**, y los dos casos reales dicen por qué: el tallo de la mata es un voxel normal de 6 caras y debe atravesarse igual, mientras que una vidriera enmascarada tiene que seguir chocando — derivarlo daría lo contrario en ambos. En **terreno** `mcSolid` **no se parchea** (lo comparten mallado, rayo de apuntar y romper/poner): va por otra pregunta sobre la misma rejilla, `mcSolidWalk`, que lee dos arrays por id de bloque, los dos `null` mientras nadie sea atravesable (`mc.atraviesa`, del snippet, y `mc.atraviesaDoc`, horneado por `mcBuildPalette`). Es el patrón `mc.sunExtra`/`mcXrayExtra`: **`app.js` expone la capacidad, el snippet decide el comportamiento**.
+  - 🔁 **El giro que dio el dueño a mitad de camino, y que cambió el diseño** (dueño: «la solucion no parece ser buena / eficiente, busca otra mejor, en el script "Construye Montañas" hice el cambio `//setVoxel(...)` → `game.stamp("leaves", ...)`, se me colgó el javascript 10 veces»). Tenía razón y el número lo dice: **cada `game.stamp` es una entrada de `mc.structures` = UN draw call** y una línea en `mundo.json`. Medido con 200 hojas (`test_stamp_scripting.js`): **`setVoxel` = 60 ms y 0 draw calls extra**; `game.stamp` = **385 ms y 200 draw calls**; con 2000, ~2,4 s — el bosque de su script. La salida no era optimizar el estampado sino **abrir el camino del terreno**, o sea que una hoja pueda ser un **BLOQUE**, como en Minecraft. Tres piezas: (1) `buildTexFaces` respeta `caras` — cara apagada ⇒ texel con **alpha 0** ⇒ textura de **recorte** y `discard` en el shader (⚠️ manda el **primer** voxel de la columna, encendido o apagado: seguir buscando detrás rellenaría el agujero con la cara opuesta de la cáscara); (2) **un bloque de recorte no tapa** — `mcTapaCara` es la **tercera** pregunta sobre la misma rejilla (`mcSolid`=«¿hay materia?», `mcSolidWalk`=«¿me frena?», `mcTapaCara`=«¿tapa esta cara?»), separada otra vez por un array, **`mc.recorte`**, leído en **un solo sitio** (el mallado del chunk) para que `mcSolid` siga byte-idéntico; sin esto, por los agujeros de una copa se ve el **vacío**. Medido sobre una copa de 311 bloques: **+15,8 % de vértices, los MISMOS 36 draw calls y el mismo ms/frame** — el culling de chunk cambia el tamaño del VBO, no el número de llamadas; (3) `mc.atraviesaDoc` vale también en la rejilla. Resultado: `caras` y `atravesable` **ya no son motivo de aviso** en `setVoxel`; lo que avisa se reduce a lo que de verdad no cabe en una celda — la **FORMA** (`rec.pielCubre`, calculado con las tres proyecciones 16×16) y la **transparencia real**. Y el aviso sale **por toast además de por consola**: el dueño construye desde el móvil, donde un `console.warn` es indistinguible de «el script no hace nada».
+  - ⚠️ **Dos piezas con máscara pegadas: el envés se hunde `mc.carasInset` (0,08 voxels finos)** (dueño: «se pegan las caras, no hay prioridad de cuál se pinta antes, hay un efecto de mezcla de texturas»). Una cara enmascarada se emite **dos veces** (`dosCaras`) o el plano desaparece al mirarlo por detrás — pero eso rompe al árbitro de siempre: cuando dos estructuras comparten plano, el empate lo deshace el **culling de traseras** y sobrevive la que mira a la cámara; una cara de dos lados hace que **las dos** miren a la cámara a la misma profundidad y con `depthFunc(LESS)` gana **el orden de estampado**. **No es parpadeo** (no baila al mover la cámara) y por eso `game.structBias` no lo arregla: las dos son estructura y llevan el mismo sesgo. El desempate es geométrico — el **anverso se queda EXACTO** en el plano del voxel (así un asset sin `caras` no cambia ni un vértice) y el **envés se mete hacia dentro de su propio voxel**, que lo **acerca** al que lo mira. `mc.carasInset = 0` lo apaga.
+  - **Un 16³ macizo con `caras` deja de ser `blockLike`** y pasa a estructura fina a propósito, pero el motivo **cambió**: ya no es que el terreno pierda la máscara (desde `mc.recorte`/`mcTapaCara` la respeta), sino que **lo que se pone A MANO se prefiere fiel** — como bloque son 6 texturas agujereadas y **nada detrás**, mientras que la pieza fina enseña sus voxels de dentro. Poner una pieza y levantar un bosque no son la misma decisión.
+  - **Límites conocidos y aceptados, no pendientes**: `drawIso`, `drawIsoSlicedBig`, la vista 2D de Capas y la ficha de material enseñan la pieza «llena»; y un prado de miles de matas **estampadas** son miles de draw calls — para eso está `setVoxel`.
+  - **El entregable: `assets/hierba-alta.vox.json`** (153 voxels: dos planos cruzados de 70 con máscara `12` = ±X y `48` = ±Z, más los 13 de la línea de cruce con `60`, y `atravesable:true`). Verificado en Chromium real contra el Mundo del dueño, con **todas las escrituras cortadas**: se estampa, y desde los cuatro lados la **diferencia de píxeles** con y sin la mata desde el mismo sitio da **5909 / 5548 / 5934 / 5577** (sur/norte/este/oeste) — contar «píxeles verdes» sobre un prado no vale de nada, que ya es todo verde; `mcRaycast(6,true)` la devuelve desde los cuatro; y andando contra ella con `w` durante 70 frames de física **se cruza** (5,83 bloques de avance, sin frenar). El mundo quedó con sus **48 estructuras** de siempre.
+  - **Pruebas**: `test_caras_mascara.js` (35 ok, contrato y permutación) · `test_caras_render.js` (28) · `test_herramienta_caras.js` (28) · `test_caras_mundo.js` (26) · `test_caras_pegadas.js` (15, **el guardián**) · `test_atravesable.js` (41) · `test_stamp_scripting.js` (45) = **218 ok, 0 fallos**; más los cuatro que este trabajo tocaba de refilón, todos en verde: `test_guardar_pieza.js` (17), `test_rayo_apuntado.js` (12), `test_bloques_comportamiento.js` (373), `test_atlas_estructuras.js` (13), `test_rayos_x.js` (11).
+  - 🧪 **Método — dos sondas mías dieron un falso negativo y una dejó basura en el mundo del dueño, y las dos lecciones valen para la próxima**. (1) La primera medición decía que la mata **no se veía desde el este ni el oeste** y que **no se podía apuntar desde ningún lado**. Las dos eran **fallos de la sonda**, no del motor: la mirada del motor es `d = (−sin yaw, sin pitch, −cos yaw)`, así que mis cámaras de este/oeste **retrataban el horizonte opuesto**; y `mcRaycast` devuelve `{cell,normal,dist,fina,point}` — **no hay `.struct`**, o sea que mi comprobación era `undefined` siempre. Lo que zanjó el primer punto fue **preguntarle al mallador en vez de a la pantalla**: contar las caras del VBO por dirección de mundo daba **116 en cada una de ±X y ±Z**, o sea que la geometría estaba bien y el que miraba mal era yo. Antes de creerse una medición de píxeles conviene tener una medición **de datos** que la contradiga o la confirme. (2) ⚠️ **El glob `'**/api/mundo**'` NO corta el guardado.** `game.stamp` guarda por **`POST /api/mundo/cabecera?map=<mapa>`** desde voxelworld-2, y con el patrón por glob que usan los tests del repo (`'**/api/mundo'`) ese POST **sale de verdad**: mis sondas dejaron plantadas 4 matas y una losa de 200 bloques de hierba en `data/worlds/agents.json`/`.vox` del dueño. Restaurado desde `data/habitantes_trash/` y verificado de vuelta en las 48 estructuras documentadas (`Counter({'hab:cubo-trans':38,'hab:lampara-pegada':6,'hab:antorcha':4})`). **Toda sonda contra `:8500` corta por PREDICADO** sobre `new URL(u).pathname` (`/^\/api\/(mundo|habitantes|assets|agentes)/`), que cubre `/edits` y `/cabecera`, y anota lo cortado para poder **comprobar que cortó**. El hueco sigue abierto en los tests del propio repo.
+- 2026-08-05 · 🚨 **Corrección de la entrada anterior: el bloque scripteado NO se parece a la pieza estampada** (dueño: una captura de las dos vías lado a lado, «scripteado» arriba y «a mano» abajo, con el veredicto: «me estas timando»). Y tenía razón. En la entrada de arriba escribí «hacer **fiel** el camino del terreno»; lo que esa frase probaba de verdad era que **la silueta** coincide, no que el resultado se parezca. Medido sobre `assets/leaves.vox.json` (1548 voxels): **cero columnas vacías** en los tres ejes, y las 6 caras proyectadas salen **72-93 % opacas** (agujeros: 17/20 arriba-abajo, 38/22 en X, 41/72 en Y, sobre 256 texels) — **todos** por máscara, ninguno por columna vacía. O sea: un **cubo verde con cuatro agujeros** frente a una pieza estampada que enseña sus voxels de dentro. La foto no admite discusión.
+  - **El motor hace lo documentado; el error es de criterio.** `rec.pielCubre` decide si `setVoxel` avisa, y responde «**¿cabe la silueta?**» cuando la pregunta que importa es «**¿se parece?**». Un dibujo volumétrico y **denso** —justo un follaje— cubre sus 16×16 columnas en los tres ejes, así que **pasa el test y no avisa**: el aviso se calló precisamente en el único asset donde hacía falta. Lo que hace bonito a un follaje es **lo de dentro**, y una proyección sobre 6 caras no tiene dentro.
+  - **La medición que faltaba.** Las nueve fases se validaron con `hierba-alta`, que son **dos planos cruzados**: ahí la máscara lo hace *todo* y las dos vías coinciden. Un asset **volumétrico** nunca se comparó vía-a-vía, y es el caso que el dueño ejecutó. Comparar la vía nueva solo contra el asset que la vía nueva sabe dibujar es no haberla comparado.
+  - ~~**Camino de arreglo, y es de AUTORÍA, no de `app.js`**~~ — **esta conclusión era falsa**, y la corrige la entrada de abajo. Se llegó a ella midiendo la textura horneada y culpando al dibujo sin preguntarse antes si el horneado estaba bien.
+
+- 2026-08-05 · ✅ **El «cubo verde» era UNA LÍNEA de `app.js`, no el asset.** Antes de rediseñar `leaves.vox.json` toqué a leer `buildTexFaces` (`app.js:1044`), que es quien hornea las 6 texturas de un bloque de terreno. Al recorrer cada columna buscando el primer voxel opaco hacía `const m = caras ? caras[ck] : undefined; if(typeof m!=='number' || ((m>>fi)&1)) hex=cc;` — o sea, un voxel **sin entrada** en `caras` se tomaba como «pinta las seis». Pero el contrato del proyecto, el que sí siguen `caraMask` y `mcStructGeom`, es **al revés**: con `caras` presente en el documento, **la ausencia de entrada significa 0, no 63**. Por eso los voxels de dentro del follaje —que en la pieza fina no pintan nada— al proyectarse **tapaban todos los agujeros de la cáscara**. Arreglo: `const m = caras ? (Number.isInteger(caras[ck]) ? caras[ck] : 0) : MASK_ALL;`.
+  - **Medido en `assets/leaves.vox.json`, opacidad de las 6 caras:** antes **85-93 %**, ahora **42,2 / 45,3 / 35,5 / 38,7 / 38,3 / 34,0 %**, y `hueco` pasa a `true` (⇒ textura de recorte ⇒ el shader del terreno hace `discard`). La cifra «72-93 %» de la entrada anterior salía de una sonda que además arrastraba el mismo error de criterio.
+  - **En pantalla, con la cámara a 5 bloques y un recuadro central de 64 px:** por las hojas puestas con `setVoxel` se ve **11,8 % de cielo** a través; por el mismo dibujo sin `caras`, **0 %**. Las puestas con `game.stamp` dan 5,5 % y **278 colores** frente a 55, que es la profundidad real de los voxels: las dos vías ya se parecen, la fina sigue teniendo más detalle, y eso es lo esperado.
+  - **Verificado sin tocar nada más:** `test_caras_mascara.js` (35 ok), `test_caras_pegadas.js` (15 ok — el guardián píxel a píxel), `test_caras_mundo.js`, `test_caras_render.js`, `test_stamp_scripting.js` y `test_atravesable.js`, todos en verde.
+  - **Lección de método, que es la que importa:** medí la textura horneada, vi que estaba casi opaca y concluí que el dibujo estaba mal. Nunca comprobé si **quien la hornea** respetaba el contrato que yo mismo había escrito tres fases antes. Un número malo no dice de quién es la culpa; antes de culpar al dato hay que releer al productor del dato.
+  - **Entregable visible:** `monta_zona_caras.js` deja plantada en `/map/test` una fila de cinco puestos con nota post-it al lado de cada uno (hojas por `setVoxel`, hojas por `game.stamp`, el «antes» sin `caras`, la mata en cruz atravesable, y un muro para probar `game.bloques.define(…,{atravesable:true})` a mano). Se deja puesto a propósito. `assets/demo-hojas-sin-caras.vox.json` existe solo para ese A/B.

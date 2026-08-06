@@ -64,6 +64,9 @@
           </select>
         </label>
         <p class="role" id="meta-role" hidden></p>
+        <label class="meta-sw" title="En el Mundo se ve, da sombra, se apunta y se rompe igual que cualquier otra pieza, pero el jugador la cruza sin frenarse: es lo que hace que una mata de hierba se pise en vez de ser un muro. No tiene que ver con «Caras» — un tallo de seis caras también puede atravesarse, y una vidriera con caras quitadas sigue chocando.">
+          <input type="checkbox" id="meta-atravesable" /> <span>Atravesable (no choca)</span>
+        </label>
         <label class="field">
           <span>Tamaño (X × Y × Z)</span>
           <div class="size-row">
@@ -93,6 +96,7 @@
           <button class="tool" data-tool="select" title="Seleccionar (S) · en 3D y por capas">🔲<span>Selección</span></button>
           <button class="tool" data-tool="extrude" title="Extruir la selección (X) · solo 3D">⤢<span>Extruir</span></button>
           <button class="tool" data-tool="pivot" title="Pivote (P): punto de articulación por el que el Mundo engancha la pieza al girarla. Clic pone, clic encima quita. El número es su orden, y es el que se elige desde el snippet (por defecto, el 1).">📍<span>Pivote</span></button>
+          <button class="tool" data-tool="caras" title="Caras (A): elige qué caras se ven. Marcar es decir qué SÍ se pinta, y la regla es de TODO el objeto: mientras no haya ninguna marca se ve entero, pero en cuanto marcas una cara, cualquier otra sin marcar se oculta y solo queda lo marcado. La cara bajo el cursor se resalta en rojo: arrastra con el botón IZQUIERDO para marcarla y con el DERECHO para desmarcarla. Shift+clic marca las seis de ese voxel de golpe, y el botón derecho sobre ESTE botón borra todas las marcas del objeto, que vuelve a verse entero. El botón de la barra alterna entre ver en rojo las caras sin marcar (en 3D y en Capas) y ocultarlas para ver la pieza como se verá en el Mundo; ocultas se siguen pudiendo clicar, así que ocultar una cara nunca es irreversible. Dejando solo dos caras opuestas, el voxel se convierte en un plano (mata de hierba, bandera, cartel). Funciona en las dos vistas: en 3D apuntando a la cara, y en Capas repartiendo cada celda en seis zonas (los 4 bordes son los lados, el punto del centro la de debajo y el resto la de arriba), que es la forma de llegar a las caras que en 3D quedan tapadas por el propio objeto.">🃏<span>Caras</span></button>
         </div>
       </section>
 
@@ -148,6 +152,11 @@
           <button class="btn sm" id="zoom-in" title="Acercar (+)">+</button>
           <button class="btn sm" id="zoom-reset" title="Ajustar (0)">Ajustar</button>
         </div>
+        <!-- Solo aparece si el dibujo tiene alguna cara apagada (o estás con la herramienta): un
+             botón más en la barra no le sirve de nada a un asset sin máscara, que son casi todos. -->
+        <div class="view-ctrl" id="ctrl-caras" hidden>
+          <button class="btn sm" id="btn-caras-ver" title="Caras sin marcar: en rojo o realmente ocultas">🟥 Marcadas</button>
+        </div>
         <div class="view-ctrl" id="ctrl-hist">
           <button class="btn sm" id="btn-undo" title="Deshacer (Ctrl+Z)" disabled>↩ Deshacer</button>
           <button class="btn sm" id="btn-redo" title="Rehacer (Ctrl+Y)" disabled>↪ Rehacer</button>
@@ -169,6 +178,7 @@
           <button class="tool" data-tool="erase" title="Borrar (E)">🩹<span>Borrar</span></button>
           <button class="tool" data-tool="fill"  title="Relleno (G)">🪣<span>Relleno</span></button>
           <button class="tool" data-tool="pivot" title="Pivote (P): clic sobre un voxel pone el punto de articulación en su celda (clic encima quita)">📍<span>Pivote</span></button>
+          <button class="tool" data-tool="caras" title="Caras (A): arrastra con el izquierdo para marcar la cara resaltada en rojo y con el derecho para desmarcarla; en cuanto hay una marca, lo que no esté marcado se oculta. En Capas la cara se elige por zonas dentro de la celda: los 4 bordes son los lados, el punto del centro la de debajo y el resto la de arriba. Shift+clic marca las seis de ese voxel, y el derecho sobre este botón borra todas las marcas del objeto">🃏<span>Caras</span></button>
         </div>
         <div class="rot-float" id="rot-float" hidden>
           <button class="btn sm" id="e3-rot-left" title="Rotar">⟲</button>
@@ -279,11 +289,11 @@
         </section>
 
         <section class="ficha-sec">
-          <h3>Nombre corto</h3>
-          <div class="ficha-copy">
+          <h3 id="ficha-alias-h3">Nombre corto</h3>
+          <div class="ficha-copy" id="ficha-alias-wrap">
             <input type="text" id="ficha-alias" placeholder="green_concrete" autocapitalize="off" autocorrect="off" spellcheck="false">
           </div>
-          <p class="ficha-hint">Minúsculas, números y <code>_</code>. Déjalo vacío para quitarlo.</p>
+          <p class="ficha-hint" id="ficha-alias-hint">Minúsculas, números y <code>_</code>. Déjalo vacío para quitarlo.</p>
           <p class="ficha-error" id="ficha-error" hidden></p>
           <div class="ficha-copy">
             <input type="text" id="ficha-ejemplo" readonly>
@@ -291,7 +301,7 @@
           </div>
         </section>
 
-        <section class="ficha-sec">
+        <section class="ficha-sec" id="ficha-sec-icono">
           <h3>Icono y descripción</h3>
           <div class="ficha-copy">
             <input type="text" id="ficha-icon" maxlength="4" placeholder="🟩">
@@ -485,6 +495,7 @@
     <div class="mc-touch" id="mc-touch" hidden>
       <div class="mc-stick" id="mc-stick"><div class="mc-stick-knob" id="mc-stick-knob"></div></div>
       <button class="mc-tbtn" id="mc-tjump" type="button" title="Saltar">⤒</button>
+      <button class="mc-tbtn foto" id="mc-tfoto" type="button" title="Sacar foto (tecla F)">📷</button>
     </div>
     <div class="mc-hotbar" id="mc-hotbar"></div>
     <div class="fps-float mc-float" id="mc-fps" hidden title="FPS reales del modo Mundo">— fps</div>

@@ -119,10 +119,13 @@ function montar(opciones) {
   global.mcIdx = (x, y, z) => idx(x, y, z);
   global.mcInside = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < DIM.x && y < DIM.y && z < DIM.z;
   global.mcStructColl = (s) => GEOM[s.key] || null;
-  // Calco de mcFineBoxHit (app.js:4935): ¿alguna estructura ocupa la caja fina dada?
-  const finaEnCaja = (fx0, fy0, fz0, fx1, fy1, fz1) => {
+  // Calco de mcFineBoxHit (app.js:4935): ¿alguna estructura ocupa la caja fina dada? Va como GLOBAL
+  // porque en app.js lo es, y el snippet la envuelve; escondida en un const local, envolverColision()
+  // se rendia («typeof !== function») y el mundo de juguete no probaba ningun envoltorio.
+  const finaEnCaja = global.mcFineBoxHit = (fx0, fy0, fz0, fx1, fy1, fz1) => {
     for (const s of structures) {
-      const g = GEOM[s.key]; if (!g) continue;
+      // Por mcStructColl, no por GEOM: es de ahi de donde cuelgan el desplazamiento y `atravesable`.
+      const g = global.mcStructColl(s); if (!g) continue;
       const d = g.fdim;
       const x0 = Math.max(fx0 - s.ox * T, 0), x1 = Math.min(fx1 - s.ox * T, d[0] - 1); if (x0 > x1) continue;
       const y0 = Math.max(fy0 - s.oy * T, 0), y1 = Math.min(fy1 - s.oy * T, d[1] - 1); if (y0 > y1) continue;
@@ -139,7 +142,13 @@ function montar(opciones) {
     for (let x = Math.floor(px - HW); x <= Math.floor(px + HW); x++)
       for (let y = Math.floor(py); y <= Math.floor(py + PH - 1e-4); y++)
         for (let z = Math.floor(pz - HW); z <= Math.floor(pz + HW); z++)
-          if (global.mcInside(x, y, z) && grid[idx(x, y, z)]) return true;
+          if (global.mcInside(x, y, z)) {
+            // Calco de mcSolidWalk (app.js): «¿me frena al andar?» es OTRA pregunta que mcSolid, y lo
+            // unico que las separa es mc.atraviesa — el array que ESCRIBE el snippet y que app.js
+            // solo consulta. Sin materiales atravesables (null) esto es exactamente lo de antes.
+            const id = grid[idx(x, y, z)];
+            if (id && !(mc.atraviesa && mc.atraviesa[id])) return true;
+          }
     // Y a resolucion FINA contra las estructuras, igual que mcCollides (app.js:4965).
     if (structures.length &&
         finaEnCaja(Math.floor((px - HW) * T), Math.floor(py * T), Math.floor((pz - HW) * T),
@@ -864,6 +873,58 @@ console.log('\nvelocidad: multiplica la marcha MIENTRAS se pisa el bloque');
   const r = correr({ velocidad: 100 }, 12);
   t('un factor absurdo se recorta a 40 u/s en vez de atravesar paredes',
     Math.abs(r.avance - 40 * 12 / 60) < 1e-9 && r.w.mc.onGround, r.avance.toFixed(3) + ' bloques');
+}
+
+// ── 10b. `atravesable`: se ve y se rompe, pero no frena ─────────────────────────────────────────
+// La tercera via de `atravesable` (las otras dos son la casilla del editor y la clave del .vox.json):
+// encenderlo desde la consola sobre CUALQUIER material. Como un material vive en uno de dos sitios,
+// son dos mecanismos distintos y hay que probar los dos:
+//   · bloque de terreno (mc.grid) → mc.atraviesa, el UNICO gancho nuevo en app.js (mcSolidWalk);
+//   · estructura fina             → el envoltorio de mcStructColl, cero lineas de app.js.
+// Que se crucen andando de verdad lo prueba test_atravesable.js §4 contra el Mundo vivo. Aqui se
+// prueba lo que este snippet controla: que produce las formas EXACTAS que app.js sabe leer, y que
+// quitar() las deshace sin dejar rastro.
+console.log('\natravesable desde la consola: game.bloques.define({ atravesable:true })');
+{
+  const w = montar({ sinPlaca: true });
+  const EN_LA_PARED = [12.5, 6, 11];      // el AABB del jugador solapa la pared de escalera de z=11
+  const EN_EL_SUELO = [12.5, 3.5, 5];     // y aqui solapa el suelo de roca, que nadie define
+  t('sin ningun define, mc.atraviesa es null (coste cero)', !w.mc.atraviesa);
+  t('la pared frena, claro', global.mcCollides(...EN_LA_PARED));
+
+  w.sinRuido(() => w.game.bloques.define('hab:escalera', { atravesable: true }));
+  t('define enciende el id de ESE material en mc.atraviesa',
+    w.mc.atraviesa instanceof Uint8Array && w.mc.atraviesa[2] === 1);
+  t('...y solo el suyo', !w.mc.atraviesa[1] && !w.mc.atraviesa[3] && !w.mc.atraviesa[4]);
+  t('la pared deja de frenar', !global.mcCollides(...EN_LA_PARED));
+  t('el suelo, que no se definio, sigue sosteniendo', global.mcCollides(...EN_EL_SUELO));
+  t('lista() lo cuenta', /atravesable/.test(JSON.stringify(w.sinRuido(() => w.game.bloques.lista()))));
+
+  w.sinRuido(() => w.game.bloques.quitar('hab:escalera'));
+  t('quitar() vacia el gancho...', !w.mc.atraviesa || !w.mc.atraviesa[2]);
+  t('...y la pared vuelve a frenar', global.mcCollides(...EN_LA_PARED));
+}
+{
+  // La otra mitad: la escalera como ESTRUCTURA FINA, que no esta en mc.grid y por tanto no tiene
+  // ningun id que encender. Todo el efecto sale del envoltorio, y la forma que devuelve tiene que ser
+  // la misma que produce un .vox.json con "atravesable" — si divergieran habria dos caminos que
+  // mantener, y app.js solo sabe leer uno.
+  const w = montar({ fina: true, sinPlaca: true });
+  const s = w.mc.structures[0];
+  const g0 = global.mcStructColl(s);
+  t('sin define, el envoltorio devuelve el bitset de verdad', !!g0 && g0.bits.some(v => v === 1));
+
+  w.sinRuido(() => w.game.bloques.define('hab:escalera', { atravesable: true }));
+  const g1 = global.mcStructColl(s);
+  t('con define sale un clon, no el original', g1 !== g0);
+  t('bits a ceros y del mismo tamano (NUNCA null: el propio snippet recorre g.bits)',
+    g1.bits instanceof Uint8Array && g1.bits.every(v => v === 0) && g1.bits.length === g0.bits.length);
+  t('bitsAim conserva la ocupacion real: se sigue apuntando y rompiendo', g1.bitsAim.some(v => v === 1));
+  t('lo demas se hereda en vivo del original (fdim)', g1.fdim === g0.fdim);
+  t('el clon se cachea por clave|rot, no uno por sondeo', global.mcStructColl(s) === g1);
+
+  w.sinRuido(() => w.game.bloques.quitar('hab:escalera'));
+  t('quitar() devuelve el ORIGINAL, no otro clon', global.mcStructColl(s) === g0);
 }
 
 // ── 11. Mirar: la pieza gira hacia el jugador ───────────────────────────────────────────────────
