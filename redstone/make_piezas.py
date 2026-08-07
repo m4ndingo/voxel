@@ -61,13 +61,45 @@ def palanca(color, arriba):
     return v
 
 
-def puerta(abierta):
-    """Puerta: hoja de 2 voxels de grosor. Abierta gira al lateral y deja el hueco libre."""
-    if abierta:
-        return caja({}, 0, 1, 0, 15, 0, 15, MADERA)      # replegada contra la jamba
-    v = caja({}, 0, 15, 0, 15, 7, 8, MADERA)             # cerrada: tapa el vano
-    caja(v, 12, 13, 7, 8, 6, 9, HIERRO)                  # tirador
+ALTO_PUERTA = 24        # 16 se quedaba baja: se pasa por debajo agachando la cámara
+
+
+def puerta_hoja():
+    """La hoja CERRADA entera, tal como se ve puesta: 24 voxels de alto, o sea celda y media.
+
+       No cabe en un 16³, y ahí está BUG-RS6: mcCabeEnRejilla exige w/h/d ≤ 1 celda, así que una
+       pieza de 16×16×24 deja de poder entrar en mc.grid, el clic derecho la estampa como estructura
+       suelta y una estructura NO es una celda de rejilla — o sea que deja de ser redstone. Por eso
+       el dibujo se hace entero aquí y se PARTE en dos piezas de una celda cada una (ver partir())."""
+    v = caja({}, 0, 15, 0, ALTO_PUERTA - 1, 7, 8, MADERA)
+    caja(v, 12, 13, ALTO_PUERTA // 2 - 1, ALTO_PUERTA // 2, 6, 9, HIERRO)   # tirador, a media altura
     return v
+
+
+def abatir(v):
+    """Abre la hoja: la gira 90° sobre la jamba (x=0), que es lo que hace una puerta de verdad.
+
+       Es un GIRO del dibujo cerrado, no un dibujo aparte, y eso importa: así la abierta hereda el
+       grosor, el tirador y los colores de la cerrada. Dibujarlas por separado se desincroniza a la
+       primera —de hecho ya pasó: el dueño subió la cerrada a 24 y la abierta se quedó en 16."""
+    ys = [int(k.split(',')[1]) for k in v]
+    y0 = min(ys) if ys else 0
+    fuera = {}
+    for k, c in v.items():
+        x, y, z = (int(t) for t in k.split(','))
+        fuera['%d,%d,%d' % (y - y0, x, z)] = c       # la anchura pasa a ser profundidad y al revés
+    return fuera
+
+
+def partir(v, piso):
+    """El trozo del dibujo que cae en la celda `piso` (0 = abajo), con la altura re-basada a 0..15."""
+    lo, hi = piso * 16, piso * 16 + 15
+    fuera = {}
+    for k, c in v.items():
+        x, y, z = (int(t) for t in k.split(','))
+        if lo <= z <= hi:
+            fuera['%d,%d,%d' % (x, y, z - lo)] = c
+    return fuera
 
 
 def inversor(color):
@@ -108,6 +140,34 @@ def repetidor(color):
     return v
 
 
+def piston(extendido):
+    """Pistón: cuerpo de piedra con la placa de madera en la cara de DELANTE (+X), que es por donde
+       empuja. La marca del frente es obligatoria por lo mismo que en el inversor y el repetidor: la
+       dirección sale del giro de la clave (`@n`) y sin dibujo que la enseñe no hay forma de saber
+       hacia dónde va a empujar uno ya puesto.
+
+       ⚠️ NO llega a 16³ macizo a propósito. Con 4096 voxels el Mundo lo mete en mc.grid como bloque
+       (blockLike) y lo dibuja proyectando 6 caras planas: la placa esculpida —lo único que distingue
+       el frente— se perdería. Con el marco rehundido son 3856 y sigue siendo geometría de verdad."""
+    v = caja({}, 0, 11, 0, 15, 0, 15, PIEDRA)            # el cuerpo
+    if extendido:
+        caja(v, 11, 11, 1, 14, 1, 14, ROJO_ON)           # la boca, ya vacía y encendida
+    else:
+        caja(v, 12, 15, 1, 14, 1, 14, MADERA)            # la placa, rehundida en su marco
+    return v
+
+
+def piston_cabeza():
+    """La cabeza del pistón extendido, que ocupa la celda de DELANTE como un bloque propio: lleva la
+       placa en su cara +X (la de fuera) y el vástago que la une al cuerpo cruzando la celda."""
+    v = caja({}, 12, 15, 1, 14, 1, 14, MADERA)           # la placa, en el extremo de fuera
+    caja(v, 0, 11, 6, 9, 6, 9, HIERRO)                   # el vástago, de vuelta hasta el cuerpo
+    return v
+
+
+_HOJA = puerta_hoja()
+_HOJA_ABIERTA = abatir(_HOJA)
+
 PIEZAS = {
     'cable':           cable(ROJO_OFF),
     'cable-on':        cable(ROJO_ON),
@@ -115,15 +175,48 @@ PIEZAS = {
     'placa-on':        placa(ROJO_ON, True),
     'palanca':         palanca(MADERA, False),
     'palanca-on':      palanca(ROJO_ON, True),
-    'puerta':          puerta(False),
-    'puerta-abierta':  puerta(True),
+    # Una puerta son CUATRO piezas porque son DOS celdas (abajo/arriba) por DOS estados. Las cuatro
+    # salen del mismo dibujo de 24: partir() las corta y abatir() las abre. Quien las mantiene juntas
+    # en el mundo es el snippet (redstone-piezas.js), que mueve las dos en la misma pasada.
+    'puerta':              partir(_HOJA, 0),
+    'puerta-alta':         partir(_HOJA, 1),
+    'puerta-abierta':      partir(_HOJA_ABIERTA, 0),
+    'puerta-alta-abierta': partir(_HOJA_ABIERTA, 1),
     'repetidor':       repetidor(ROJO_OFF),
     'repetidor-on':    repetidor(ROJO_ON),
     'inversor':        inversor(ROJO_OFF),
     'inversor-on':     inversor(ROJO_ON),
     'boton':           boton(MADERA, False),
     'boton-on':        boton(ROJO_ON, True),
+    'piston':          piston(False),
+    'piston-on':       piston(True),
+    'piston-cabeza':   piston_cabeza(),
 }
+
+
+def guardar(nombre, voxels, ahora=None):
+    """Escribe una pieza en la galería. Lo usa también partir_puerta.py, que reparte el dibujo del
+       dueño en varias celdas: el respaldo y la escritura atómica tienen que ser los mismos."""
+    ruta = os.path.join(DIR, nombre + '.json')
+    doc = {
+        'format': 'voxelforge-1',
+        'size': {'x': 16, 'y': 16, 'z': 16},
+        'meta': {'name': nombre, 'type': 'textura'},
+        'voxels': voxels,
+        'savedAt': ahora or datetime.datetime.now().replace(microsecond=0).isoformat(),
+    }
+    # Rehacer una pieza PISA un habitante del dueño, así que antes se copia a la papelera con el
+    # mismo formato que usa el servidor (data/habitantes_trash/<ms>__<nombre>.json). Si alguien
+    # había retocado la pieza a mano, la versión anterior sigue estando.
+    if os.path.exists(ruta):
+        os.makedirs(PAPELERA, exist_ok=True)
+        respaldo = os.path.join(PAPELERA, '%d__%s.json' % (time.time() * 1000, nombre))
+        shutil.copyfile(ruta, respaldo)
+    tmp = ruta + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(doc, f, separators=(',', ':'))
+    os.replace(tmp, ruta)              # atómico: el servidor puede estar leyendo la galería
+    print('  ✓ %-20s %4d voxels' % (nombre, len(voxels)))
 
 
 def main():
@@ -131,27 +224,9 @@ def main():
     for nombre, voxels in PIEZAS.items():
         ruta = os.path.join(DIR, nombre + '.json')
         if os.path.exists(ruta) and not FORZAR:
-            print('  = %-16s ya existe (--forzar para rehacerlo)' % nombre)
+            print('  = %-20s ya existe (--forzar para rehacerlo)' % nombre)
             continue
-        doc = {
-            'format': 'voxelforge-1',
-            'size': {'x': 16, 'y': 16, 'z': 16},
-            'meta': {'name': nombre, 'type': 'textura'},
-            'voxels': voxels,
-            'savedAt': ahora,
-        }
-        # Rehacer una pieza PISA un habitante del dueño, así que antes se copia a la papelera con el
-        # mismo formato que usa el servidor (data/habitantes_trash/<ms>__<nombre>.json). Si alguien
-        # había retocado la pieza a mano, la versión anterior sigue estando.
-        if os.path.exists(ruta):
-            os.makedirs(PAPELERA, exist_ok=True)
-            respaldo = os.path.join(PAPELERA, '%d__%s.json' % (time.time() * 1000, nombre))
-            shutil.copyfile(ruta, respaldo)
-        tmp = ruta + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(doc, f, separators=(',', ':'))
-        os.replace(tmp, ruta)          # atómico: el servidor puede estar leyendo la galería
-        print('  ✓ %-16s %4d voxels' % (nombre, len(voxels)))
+        guardar(nombre, voxels, ahora)
     print('Listo. Claves en el Mundo: ' + ', '.join('hab:' + k for k in PIEZAS))
 
 

@@ -40,7 +40,9 @@ const entrada = () => leerIdx().find(a => a.id === ID);
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc)
   });
 
-  const b = await chromium.launch();
+  // Sin los args de SwiftShader el arranque se cuela ~9 s en el WebGL por software y las esperas
+  // fijas de este test se quedan cortas: es el mismo lanzamiento que usa el resto de la suite.
+  const b = await chromium.launch({ args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'] });
   const p = await b.newPage();
   const errores = [];
   p.on('pageerror', e => errores.push('EXCEPCION ' + e.message));
@@ -66,9 +68,18 @@ const entrada = () => leerIdx().find(a => a.id === ID);
         .querySelector('[data-a=ficha]').click());
       await p.waitForFunction(() => !document.querySelector('#ficha-modal').hidden, null, { timeout: 5000 });
     };
+    // Se espera a que guardarFicha TERMINE, no 1,2 s a ojo: el primer guardado es el mas lento de
+    // todos (rebaja assets/index.json y repinta la galeria entera en frio) y la espera fija se le
+    // quedaba corta — fallaba el PRIMER alias y salian verdes los siguientes, que enmascara el fallo.
+    // Las dos senales de fin son el toast y el aviso de error; se limpian antes para no leer la vieja.
     const guardar = async () => {
+      await p.evaluate(() => {
+        document.querySelector('#toast').textContent = '';
+        document.querySelector('#ficha-error').hidden = true;
+      });
       await p.evaluate(() => document.querySelector('#ficha-save').click());
-      await p.waitForTimeout(1200);
+      await p.waitForFunction(() => document.querySelector('#toast').textContent.startsWith('Ficha guardada')
+        || !document.querySelector('#ficha-error').hidden, null, { timeout: 20000 });
     };
     const escribir = (sel, v) => p.evaluate(([s, x]) => { document.querySelector(s).value = x; }, [sel, v]);
     // Los DOS mapas, porque son dos caminos distintos: MC_MAT_ALIAS es el que mira setVoxel

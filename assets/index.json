@@ -1,29 +1,5 @@
 [
   {
-    "id": "alis",
-    "name": "Alis la Duplicadora",
-    "role": "Maestra de Forja del Exponente",
-    "type": "personaje",
-    "size": 32,
-    "file": "assets/alis.vox.json"
-  },
-  {
-    "id": "chef",
-    "name": "El Cocinero del Sabor SQL",
-    "role": "Chef de la Taberna 'Inyección'",
-    "type": "personaje",
-    "size": 32,
-    "file": "assets/chef.vox.json"
-  },
-  {
-    "id": "analista",
-    "name": "El Analista de Espectro",
-    "role": "Sintonizador Forense",
-    "type": "personaje",
-    "size": 32,
-    "file": "assets/analista.vox.json"
-  },
-  {
     "id": "taberna",
     "name": "Taberna",
     "role": "Habitación",
@@ -551,7 +527,8 @@
       "y": 15,
       "z": 15
     },
-    "file": "assets/cabeza-de-personaje.vox.json"
+    "file": "assets/cabeza-de-personaje.vox.json",
+    "description": "Pieza articulable del zombie. Generada por make_zombie.js."
   },
   {
     "id": "brazo-de-personaje",

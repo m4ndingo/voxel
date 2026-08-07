@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-// REDSTONE · PIEZAS — cable, placa de presión, puerta, palanca, botón, repetidor y bloque de redstone
+// REDSTONE · PIEZAS — cable, placa, puerta, palanca, botón, repetidor, inversor, pistón y bloque
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 //
 // Las piezas van APARTE del motor porque no son motor: el motor sabe de señal (quién emite, quién
@@ -13,17 +13,20 @@
 //   palanca      la enciende el jugador y se queda  redstone: manual  +  clic derecho (aquí abajo)
 //   botón        igual pero se suelta sola          redstone: manual + pulso
 //   placa        se enciende al pisarla             redstone: manual + pulso  +  bloques: alPisar
-//   puerta       se abre con señal y se cruza       redstone: encendida  +  bloques: atravesable
+//   puerta       se abre con señal y se cruza; son  redstone: alRecibirSeñal (aquí abajo)
+//                DOS celdas que se mueven juntas    +  bloques: atravesable
 //   repetidor    reemite a 15 con retraso           redstone: retardo + mira
 //   inversor     luce cuando NO le llega señal      redstone: invertida + mira
 //   bloque de    entrega 15 por sus seis caras y    redstone: emite (y nada más)
 //   redstone     no se apaga nunca
+//   pistón       empuja un bloque una celda         redstone: alRecibirSeñal (aquí abajo)
 //
-// O sea: CERO maquinaria nueva. Las dos únicas cosas que no existían eran el tiempo (`retardo`) y la
-// idea de que una celda pueda ser una ENTRADA (`manual`), y las dos están en el motor porque las dos
-// son señal. La puerta es el ejemplo más claro de dónde está la frontera: que se ABRA es redstone
-// (cambio de material), que se CRUCE es física (game.bloques.atravesable), y ninguna de las dos
-// mitades sabe de la otra.
+// O sea: CERO maquinaria nueva salvo en las dos piezas que MUEVEN MATERIA —el pistón y la puerta—,
+// que son las que usan `alRecibirSeñal`, el hueco que el motor deja para lo que él no sabe hacer.
+// Las dos únicas cosas que no existían eran el tiempo (`retardo`) y la idea de que una celda pueda
+// ser una ENTRADA (`manual`), y las dos están en el motor porque las dos son señal. La puerta es el
+// ejemplo más claro de dónde está la frontera: que se ABRA es redstone (cambio de material), que se
+// CRUCE es física (game.bloques.atravesable), y ninguna de las dos mitades sabe de la otra.
 //
 // ⚠️ Todo con precargar:false — esto corre en TODOS los mapas (ver la cabecera de redstone-arranque).
 // ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -34,6 +37,291 @@
   if (typeof window.game === 'undefined' || !game.redstone) return;
 
   var MS_PULSO = 1200;   // lo que aguantan pisada la placa y pulsado el botón
+
+  // ── 0. el pistón ───────────────────────────────────────────────────────────────────────────
+  // La única pieza que no se monta combinando capacidades del motor: las demás encienden, conducen
+  // o esperan, y ésta MUEVE MATERIA. Por eso es la primera que usa `alRecibirSeñal`, que es el único
+  // hueco que el motor deja para que una pieza haga algo que él no sabe hacer.
+  //
+  // ⚠️ Va con DOS define(), uno por material, en vez de con `encendida`. No es un capricho: con
+  // `encendida` el motor cambia el bloque ÉL (redstone.js:448) antes de avisar, así que un pistón
+  // que no puede extenderse —contra el borde del mundo, o con dos bloques delante— ya se habría
+  // pintado abierto, y devolverlo a su sitio no aguanta: escribir la celda la vuelve a encolar como
+  // «estrenada» (redstone.js:265) y la siguiente pasada la re-abre saltándose el atajo de
+  // `nivel === antes`. Registrando los dos materiales por separado, `apagada` es cada uno sí mismo,
+  // el motor no toca nada, y quien decide si se extiende es el callback — que es quien sabe si cabe.
+  var CABEZA = 'hab:piston-cabeza';
+
+  function baseDe(k) { var i = k ? k.lastIndexOf('@') : -1; return i < 0 ? (k || '') : k.slice(0, i); }
+  // La postura ENTERA, sin recortar: son 24 y no 16 (mcOriNorm manda). Quedarse con cuatro bits no
+  // deja el pistón «casi bien», lo convierte en otro pistón: el puesto mirando arriba se acostaba
+  // (BUG-RS7). Un sufijo que no sea una postura conocida se lee como «sin girar», nunca como otra.
+  function oriDe(k) {
+    var i = k ? String(k).lastIndexOf('@') : -1;
+    if (i < 0) return 0;
+    var n = +String(k).slice(i + 1);
+    if (!isFinite(n)) return 0;
+    return (typeof mcOriNorm === 'function') ? mcOriNorm(n) : ((n >= 0 && n <= 23) ? (n | 0) : 0);
+  }
+
+  // Hacia dónde empuja. NO sale de una tabla escrita a mano: es el +X del dibujo —donde está la
+  // placa— pasado por la postura con mcOriPerm, que usa la MISMA composición con la que app.js gira
+  // la geometría al estampar. Una tabla a mano se desincroniza de lo que se ve la primera vez que
+  // alguien toque el giro; esto no puede. Con las 24 posturas el empuje ya puede ser vertical.
+  var CARA_DIR = [[0,1,0], [0,-1,0], [1,0,0], [-1,0,0], [0,0,1], [0,0,-1]];   // MC_FACES, en orden
+  function frenteDe(ori) {
+    if (typeof mcOriPerm === 'function') return CARA_DIR[mcOriPerm(ori)[2]];   // MC_FACES[2] = +X
+    var a = mcRotXZ(1, 0, ori & 3, 2, 2), o = mcRotXZ(0, 0, ori & 3, 2, 2);    // respaldo: solo horizontal
+    return [a[0] - o[0], 0, a[1] - o[1]];
+  }
+
+  var avisados = {};
+  function unaVez(k, msg) {
+    if (avisados[k]) return; avisados[k] = true;
+    if (typeof toast === 'function') toast(msg);   // por toast, no por consola: el dueño juega en el móvil
+  }
+
+  // Ningún material del snippet se precarga (`precargar: false`, más abajo): dar de alta uno rehornea
+  // paleta y atlas, y eso no lo puede pagar el arranque de los mundos que no tienen circuito. En la
+  // rejilla solo está lo COLOCADO, así que el cuerpo abierto y la cabeza no existen hasta la primera
+  // extensión de la partida. Se cargan aquí y la extensión se reintenta sola al llegar — extender es
+  // idempotente, así que llegar tarde no rompe nada. Es lo mismo que hace cargarYReintentar() del
+  // motor para las piezas que sí usan `encendida`.
+  var cargando = {};
+  function idDe(base, ori, reintentar) {
+    var k = ori ? base + '@' + ori : base, id = mc.name2id[k];
+    if (id) return id;
+    if (!cargando[k] && typeof game.addMaterial === 'function') {
+      cargando[k] = true;
+      game.addMaterial(k).then(function () { cargando[k] = false; reintentar(); },
+        function (e) { cargando[k] = false; unaVez('mat:' + k, 'no he podido cargar «' + k + '»: ' + e.message); });
+    }
+    return 0;
+  }
+
+  // El motor solo re-malla lo que ha tocado ÉL (redstone.js:421), y aquí las celdas que cambian están
+  // una y dos casillas más allá: sin esto el bloque se mueve en la rejilla y en pantalla no pasa nada.
+  function remallar(celdas) {
+    var x0 = celdas[0][0], x1 = x0, z0 = celdas[0][2], z1 = z0;
+    for (var i = 1; i < celdas.length; i++) {
+      var c = celdas[i];
+      if (c[0] < x0) x0 = c[0]; else if (c[0] > x1) x1 = c[0];
+      if (c[2] < z0) z0 = c[2]; else if (c[2] > z1) z1 = c[2];
+    }
+    mcRemeshAround(x0, z0, x1, z1);
+    if (typeof mcScheduleSave === 'function') mcScheduleSave();
+  }
+
+  // El pistón mueve materia, y quien está delante también es materia (BUG-RS9). Sin esto la cabeza
+  // se escribía DENTRO del jugador y el solape lo resolvía la auto-curación de mcUpdate, que tira de
+  // mcUnstick — y mcUnstick solo sabe buscar salida HACIA ARRIBA: el primer hueco de aire sobre la
+  // cabeza recién extendida es justo la cota de montarse encima, así que el pistón te aupaba en vez
+  // de empujarte. Es el mismo problema, y la misma solución, que mcAgentShove con las embestidas.
+  //
+  // No hace falta saber la caja del jugador ni la forma de la cabeza: se le pregunta a mcCollides,
+  // que ya sabe las dos cosas y además a la escala del jugador. Por eso esto va DESPUÉS de escribir
+  // los bloques: antes, las celdas barridas son aire y no habría contra qué chocar.
+  function apartar(d, chocabaAntes, celdas) {
+    apartarJugador(d, chocabaAntes);
+    apartarAgentes(d, celdas);
+  }
+
+  function apartarJugador(d, chocabaAntes) {
+    if (chocabaAntes) return;                    // ya venía embutido de antes: no lo hemos hecho nosotros
+    if (typeof mcCollides !== 'function' || !mc.pos) return;
+    var p = mc.pos;
+    if (!mcCollides(p[0], p[1], p[2])) return;   // no estaba en medio
+    // El barrido son dos celdas como mucho (la cabeza y lo que empuja), pero un jugador grande es
+    // más ancho que su celda, así que el tope escala con él. Sale en el primer hueco, no recorre esto.
+    var paso = 1 / MC_TILE, tope = 2 + 2 * (mc.scale || 1);
+    for (var t = paso; t <= tope + 1e-6; t += paso) {
+      var nx = p[0] + d[0] * t, ny = p[1] + d[1] * t, nz = p[2] + d[2] * t;
+      if (mcCollides(nx, ny, nz)) continue;
+      p[0] = nx; p[1] = ny; p[2] = nz;
+      if (d[1] && mc.vel) { mc.vel[1] = 0; mc.onGround = false; }   // te levanta él, no tu caída
+      return;
+    }
+    // Aplastado contra la pared de enfrente: se queda donde está y ya lo desatasca mcUpdate. Mejor
+    // eso que colarlo DENTRO de la pared, que es un sitio del que no se sale andando.
+  }
+
+  // Y lo mismo para los agentes articulados (BUG-AG1): también son cuerpos. Aquí ni siquiera había
+  // un mal desenlace que corregir — la cabeza se escribía DENTRO del bicho y nadie se daba por
+  // enterado, que es literalmente «no se ven afectados por los pistones».
+  //
+  // Con `mc.pos` bastaba mcCollides; aquí no hay nada equivalente, porque la caja de un agente son
+  // estructuras estampadas y su colisión es asunto de la librería. Así que se pregunta y se manda por
+  // la API (enCaja / desplazar) en vez de leerle las tripas: la pieza no sabe —ni tiene por qué— cómo
+  // se mueve una raíz.
+  function apartarAgentes(d, celdas) {
+    var E = window.game && game.esqueletos;
+    if (!E || typeof E.enCaja !== 'function' || typeof E.desplazar !== 'function') return;
+    if (!celdas || !celdas.length) return;
+    var x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (var i = 0; i < celdas.length; i++) {
+      var c = celdas[i];
+      x0 = Math.min(x0, c[0]); y0 = Math.min(y0, c[1]); z0 = Math.min(z0, c[2]);
+      x1 = Math.max(x1, c[0] + 1); y1 = Math.max(y1, c[1] + 1); z1 = Math.max(z1, c[2] + 1);
+    }
+    var pillados = E.enCaja(x0, y0, z0, x1, y1, z1);
+    if (!pillados.length) return;
+    // Distancias CRECIENTES desde donde está, y se acepta el primer hueco — exactamente el barrido
+    // del jugador de arriba. No vale encadenar pasitos de 1/16 comprobando cada uno: cuando esto
+    // corre, la cabeza ya está escrita y él ya está embutido en ella, así que el primer pasito
+    // tampoco cabe y el bucle se rendía en el primer intento. Los agentes salían sin empujar.
+    var paso = 1 / MC_TILE, tope = 3 * MC_TILE;
+    for (var k = 0; k < pillados.length; k++) {
+      var rig = pillados[k];
+      for (var t = 1; t <= tope; t++) {
+        if (E.desplazar(rig, d[0] * paso * t, d[1] * paso * t, d[2] * paso * t)) break;
+      }
+      // Si no cabe en ninguna, está aplastado contra la pared de enfrente: se queda donde está,
+      // igual que el jugador. Colarlo DENTRO de la pared sería peor.
+      //
+      // Y el «shock» (BUG-AG5): el empujón es de un tiro, pero el bicho anda cada frame, así que
+      // volvía sobre sus pasos y se comía el desplazamiento — o, andando CONTRA la cabeza recién
+      // salida, la trataba como un escalón y se subía encima. Un rato sin andar y el pistón gana.
+      // Se aturde AUNQUE no haya cabido: ahí es cuando más falta hace, porque si no se pasaría el
+      // rato empotrándose contra la pared de enfrente.
+      //
+      // La duración vive aquí, en la PIEZA, no en el motor de agentes: la librería solo pone la
+      // capacidad (§0). Se lee en cada empujón, así que game.redstone.shockPiston = 0 lo apaga y
+      // 2 lo alarga, desde la consola y sin recargar.
+      if (typeof E.aturdir === 'function') E.aturdir(rig, shockPiston());
+    }
+  }
+  // El valor por defecto es el que pidió el dueño: «por ejemplo un segundo».
+  function shockPiston() {
+    var v = game.redstone.shockPiston;
+    return (typeof v === 'number' && isFinite(v) && v >= 0) ? v : 1;
+  }
+
+  // Extender o recoger. Se llama con el estado que TOCA, no con el que hay, y comprueba el mundo
+  // antes de escribir: así vale igual para el flanco de la señal y para el reintento de la carga.
+  function accionar(x, y, z, extender) {
+    if (!mcInside(x, y, z)) return;
+    var clave = mc.blockKey[mc.grid[mcIdx(x, y, z)]] || '';
+    if (baseDe(clave) !== 'hab:piston' && baseDe(clave) !== 'hab:piston-on') return;   // ya no hay pistón
+    var ori = oriDe(clave), d = frenteDe(ori);   // empuja hacia donde MIRA, en las 24 posturas
+    var ax = x + d[0], ay = y + d[1], az = z + d[2];        // donde va la cabeza
+    var bx = ax + d[0], by = ay + d[1], bz = az + d[2];     // donde va lo empujado
+    // ⚠️ Empuja lo que hay en mc.grid, que es una celda con un id. Una ESTRUCTURA estampada
+    // (mc.structures) ocupa varias celdas y no vive en la rejilla: delante del pistón se ve como aire
+    // y la cabeza se le mete dentro. Límite conocido de la v1, no un descuido.
+    var reintentar = function () { accionar(x, y, z, extender); };
+    var idCuerpo = idDe(extender ? 'hab:piston-on' : 'hab:piston', ori, reintentar);
+    if (!idCuerpo) return;                                   // aún no está en la paleta: se reintenta sola
+    var tocadas = [];
+
+    if (extender) {
+      var idCab = idDe(CABEZA, ori, reintentar);
+      if (!idCab) return;                                    // aún no está en la paleta: se reintenta sola
+      if (!mcInside(ax, ay, az)) return;                     // contra el borde del mundo no se abre
+      var enA = mc.grid[mcIdx(ax, ay, az)];
+      if (enA === idCab) return;                             // ya estaba extendido
+      // Se mira ANTES de escribir nada: si el jugador ya venía embutido en algo, no es el pistón
+      // quien lo ha metido ahí y no le toca a él sacarlo (ver apartar()).
+      var chocaba = (typeof mcCollides === 'function' && mc.pos)
+        ? mcCollides(mc.pos[0], mc.pos[1], mc.pos[2]) : true;
+      if (enA) {
+        // v1: UN bloque, UNA celda. Si detrás no hay hueco, el pistón NO se extiende — como en
+        // Minecraft, y por eso el cuerpo tampoco cambia de material: abierto sin cabeza se vería roto.
+        if (!mcInside(bx, by, bz) || mc.grid[mcIdx(bx, by, bz)]) return;
+        mcSetBlock(bx, by, bz, enA);                         // no hace falta vaciar A: la cabeza la pisa
+        tocadas.push([bx, by, bz]);
+      }
+      mcSetBlock(ax, ay, az, idCab);
+      tocadas.push([ax, ay, az]);
+    } else {
+      // Un pistón NORMAL no tira de lo que empujó, solo recoge SU cabeza. Y solo si la cabeza sigue
+      // ahí: si alguien la ha roto y ha puesto otra cosa, esa otra cosa se respeta.
+      if (!mcInside(ax, ay, az)) return;
+      if (baseDe(mc.blockKey[mc.grid[mcIdx(ax, ay, az)]]) !== CABEZA) return;
+      mcSetBlock(ax, ay, az, 0);
+      tocadas.push([ax, ay, az]);
+    }
+
+    // Al abrirse, `tocadas` son exactamente las celdas que acaban de volverse macizas: la cabeza y,
+    // si empujó algo, la celda a la que fue a parar. Se copian AQUÍ, antes de meter la del cuerpo,
+    // que no es barrido (ahí ya había pistón).
+    var barridas = extender ? tocadas.slice() : null;
+
+    if (mc.grid[mcIdx(x, y, z)] !== idCuerpo) { mcSetBlock(x, y, z, idCuerpo); tocadas.push([x, y, z]); }
+    // Con la geometría ya en su sitio (cabeza y cuerpo): a quien se haya quedado dentro, se le empuja.
+    if (extender) apartar(d, chocaba, barridas);
+    if (tocadas.length) remallar(tocadas);
+  }
+
+  // `alRecibirSeñal` salta con CUALQUIER cambio de nivel, y un 15 → 14 no es un flanco: el pistón ya
+  // estaba fuera y tiene que quedarse fuera. Lo que cuenta es cruzar el umbral.
+  function empujar(celda, nivel, antes) {
+    var ahora = nivel >= 1, era = antes >= 1;
+    if (ahora !== era) accionar(celda.x, celda.y, celda.z, ahora);
+  }
+
+  // ── 0 bis. la puerta de dos celdas ─────────────────────────────────────────────────────────
+  // Una puerta de una celda se cruza agachando la cámara, así que el dueño subió su dibujo a 24 de
+  // alto. Y con eso dejó de ser redstone (BUG-RS6). No es culpa del circuito: mcCabeEnRejilla exige
+  // que una pieza quepa en UNA celda para poder entrar en mc.grid, y 24 son celda y media. Lo que no
+  // cabe lo estampa el clic derecho como ESTRUCTURA suelta, y una estructura no tiene celda, ni
+  // vecinos, ni señal — no hay dónde enchufarla.
+  //
+  // La salida NO es enseñarle redstone a las estructuras: son un draw call cada una y el dueño las
+  // descartó por lentas. Es apilar DOS CELDAS de rejilla, `hab:puerta` abajo y `hab:puerta-alta`
+  // encima (las parte redstone/partir_puerta.py del mismo dibujo), con la condición que puso él:
+  // tienen que moverse AL UNÍSONO. Media puerta abierta es peor que una puerta lenta.
+  //
+  // «Al unísono» aquí es literal: la misma pasada, la misma llamada a mcRemeshAround, un fotograma.
+  // Por eso la mitad de arriba NO es una pieza de redstone —no tiene señal propia, no conduce, no
+  // hace cola— sino un material normal que escribe la de abajo. Y por eso la de abajo va con DOS
+  // define() en vez de con `encendida`, igual que el pistón y por lo mismo: si el motor le cambiara
+  // el bloque ÉL antes de avisar (redstone.js:448), la hoja de abajo ya estaría abierta mientras la
+  // de arriba espera a que su material acabe de cargar. Decidiendo aquí, si falta algo no se mueve
+  // NINGUNA de las dos y se reintenta entero.
+  //
+  // Esto jubila el apaño anterior, que era darle `conduce` a la puerta para que la hoja de arriba se
+  // alimentase de la de abajo. Costaba un `perdida: 1` obligatorio (con 0 las dos hojas se sostenían
+  // la una a la otra y la puerta no se cerraba jamás), abría con un tick de diferencia y al final
+  // justo del alcance abría solo la mitad. Ya no hace falta, y encima una puerta de Minecraft
+  // tampoco conduce señal.
+  var ES_BAJA = { 'hab:puerta': 1, 'hab:puerta-abierta': 1 };
+  var ES_ALTA = { 'hab:puerta-alta': 1, 'hab:puerta-alta-abierta': 1 };
+
+  function claveEn(x, y, z) {
+    return mcInside(x, y, z) ? (mc.blockKey[mc.grid[mcIdx(x, y, z)]] || '') : '';
+  }
+
+  function moverPuerta(x, y, z, abrir) {
+    if (!ES_BAJA[baseDe(claveEn(x, y, z))]) return;   // ya no hay puerta ahí: la han roto o cambiado
+    var ori = oriDe(claveEn(x, y, z));
+    var reintentar = function () { moverPuerta(x, y, z, abrir); };
+    // La orientación se ARRASTRA a las dos hojas: una puerta puesta con '@3' se abre en '@3', y la
+    // mitad de arriba tiene que girar con ella o queda cruzada sobre el vano.
+    var idAbajo = idDe(abrir ? 'hab:puerta-abierta' : 'hab:puerta', ori, reintentar);
+    if (!idAbajo) return;                             // aún no está en la paleta: se reintenta sola
+
+    // Arriba solo se toca si de verdad hay media puerta. Una puerta de una sola celda sigue siendo
+    // legítima —es la de antes— y lo que el dueño haya puesto ahí encima no se pisa: esto MUEVE una
+    // puerta, no la construye.
+    var ay = y + 1, idArriba = 0;
+    if (ES_ALTA[baseDe(claveEn(x, ay, z))]) {
+      idArriba = idDe(abrir ? 'hab:puerta-alta-abierta' : 'hab:puerta-alta', ori, reintentar);
+      if (!idArriba) return;                          // ⚠️ sin la de arriba no se mueve NINGUNA
+    }
+
+    var tocadas = [];
+    if (mc.grid[mcIdx(x, y, z)] !== idAbajo) { mcSetBlock(x, y, z, idAbajo); tocadas.push([x, y, z]); }
+    if (idArriba && mc.grid[mcIdx(x, ay, z)] !== idArriba) {
+      mcSetBlock(x, ay, z, idArriba); tocadas.push([x, ay, z]);
+    }
+    if (tocadas.length) remallar(tocadas);
+  }
+
+  // Mismo umbral que el pistón: 15 → 14 no es un flanco, la puerta ya estaba abierta.
+  function abrirPuerta(celda, nivel, antes) {
+    var ahora = nivel >= 1, era = antes >= 1;
+    if (ahora !== era) moverPuerta(celda.x, celda.y, celda.z, ahora);
+  }
 
   // ── 1. la señal ────────────────────────────────────────────────────────────────────────────
   var CIRCUITOS = {
@@ -47,17 +335,13 @@
     'hab:placa':     { manual: true, emite: 15, encendida: 'hab:placa-on', pulso: MS_PULSO },
 
     // Salidas.
-    // La puerta ocupa DOS celdas pero es UNA puerta, y `conduce` es lo que hace que las dos hojas se
-    // pongan de acuerdo: alimentas la de abajo y la señal sube sola a la de arriba. Sin esto había
-    // que llevarle un cable a cada hoja, y el de la hoja de arriba salía FLOTANDO en el aire a media
-    // altura — algo que en Minecraft no se ve nunca, porque allí una puerta es un solo bloque y se
-    // abre entera.
-    // ⚠️ `perdida` tiene que ser 1, y esto costó un fallo: con 0 las dos hojas se sostienen la una a
-    // la otra para siempre. Sin pérdida no hay gradiente, así que al soltar la placa cada hoja sigue
-    // viendo un 15 en la de al lado y ninguna de las dos baja nunca — una puerta que no se cierra.
-    // El precio de perder 1 es que una puerta al FINAL justo del alcance (le llega un 1) abriría solo
-    // la hoja de abajo; eso se arregla como todo lo demás, con un repetidor.
-    'hab:puerta':    { encendida: 'hab:puerta-abierta', conduce: { perdida: 1 } },
+    // La puerta ocupa DOS celdas pero es UNA puerta: alimentas la de abajo y ella arrastra a la de
+    // arriba en la misma pasada (ver «0 bis»). Los dos materiales van registrados por separado y sin
+    // `encendida` a propósito — quien mueve las dos hojas es el callback, y tiene que poder negarse.
+    // Ojo con quitar cualquiera de los dos: si la puerta abierta dejara de ser circuito se caería de
+    // la cola y no volvería a cerrarse nunca.
+    'hab:puerta':          { alRecibirSeñal: abrirPuerta },
+    'hab:puerta-abierta':  { alRecibirSeñal: abrirPuerta },
 
     // Repetidor: reemite a 15 (recupera el tendido) y llega tarde a propósito. El retraso NO es
     // decoración — es lo que permite realimentar sin que el circuito se resuelva dentro de la misma
@@ -94,6 +378,18 @@
     // nada: si un hormigón rojo enciende algo es porque alguien le ha pegado un cable y hace de
     // puente, como cualquier otro bloque macizo (r1.2). Por eso éste va moteado y aquél es liso.
     'asset:assets/bloque_redstone.vox.json': { emite: 15 },
+
+    // Pistón. Los DOS materiales llevan la misma configuración a propósito: no son «apagado» y
+    // «encendido» de una pareja (para eso está `encendida`), son dos estados que gestiona el callback,
+    // y los dos tienen que seguir siendo circuito o el pistón extendido se caería de la cola y no se
+    // recogería jamás. Sin `encendida`, `apagada` es cada uno sí mismo y el motor no le toca el bloque.
+    // Ver el bloque de arriba para el porqué.
+    //
+    // Sin `mira` ni `soloAlFrente`: un pistón de Minecraft se activa por cualquier lado, incluido el
+    // de atrás y el de arriba; lo único que su giro decide es hacia DÓNDE empuja. Y `emite` a 0 (por
+    // defecto): mueve bloques, no reparte señal.
+    'hab:piston':    { alRecibirSeñal: empujar },
+    'hab:piston-on': { alRecibirSeñal: empujar },
   };
 
   Object.keys(CIRCUITOS).forEach(function (k) {
@@ -107,7 +403,9 @@
   // El cable y la placa son láminas de 1 voxel: sin esto tropiezas con ellas al andar. La puerta
   // abierta se cruza — que es toda la gracia de abrirla.
   if (game.bloques && game.bloques.define) {
-    ['hab:cable', 'hab:cable-on', 'hab:placa', 'hab:placa-on', 'hab:puerta-abierta',
+    // Las DOS hojas de la puerta abierta, o te comes la de arriba con la cabeza al pasar.
+    ['hab:cable', 'hab:cable-on', 'hab:placa', 'hab:placa-on',
+     'hab:puerta-abierta', 'hab:puerta-alta-abierta',
      'hab:boton', 'hab:boton-on']
       .forEach(function (k) { game.bloques.define(k, { atravesable: true }); });
 
@@ -121,7 +419,7 @@
   }
 
   // ── 3. el gesto ────────────────────────────────────────────────────────────────────────────
-  var VERSION = 'piezas-1.2';
+  var VERSION = 'piezas-1.4';
   var ALCANCE = 6;
 
   // ⚠️ Apuntar a una palanca NO se puede dejar en manos de game.aim(). El rayo del motor trabaja en
@@ -207,6 +505,6 @@
   }
 
   console.log('[redstone] piezas: ' + Object.keys(CIRCUITOS).length
-    + ' (cable, palanca, botón, placa, puerta, repetidor, inversor, bloque de redstone)'
+    + ' (cable, palanca, botón, placa, puerta, repetidor, inversor, pistón, bloque de redstone)'
     + ' · clic derecho o CENTRAL conmuta las manuales');
 })();

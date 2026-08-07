@@ -43,6 +43,8 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
   });
 
   await p.goto(URL, { timeout: 60000 });
+  // REQ-NAV1 · «🦴 Agentes» ya no está en la barra: vive dentro del menú «⋯», que hay que abrir antes.
+  await p.click('#btn-mas');
   await p.click('[data-tab="agentes"]');
   await p.waitForFunction('window.game && game.esqueletos && typeof agDoc !== "undefined" && agDoc && !document.querySelector("#ag-modal").hidden',
     null, { timeout: 60000 });
@@ -116,6 +118,7 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     nom.value = 'ZZ prueba panel'; nom.dispatchEvent(new Event('change', { bubbles: true })); await pausa();
     await opcion('dibujo', clave('torso-perro'));
     await num('detección (bloques)', 11);
+    await num('campo de visión (°)', 90);
     await num('se para a (bloques)', 3.5);
     await num('velocidad (bloques/s)', 2.4);
     await num('pasos por bloque', 1.8);
@@ -129,6 +132,7 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     await conmutar('mirar', true);
     await num('alcance (bloques)', 9);
     await num('tope del cuello (±°)', 55);
+    await num('tope arriba y abajo (±°)', 40);
 
     document.querySelector('#ag-add').click(); await pausa();
     await num('nombre', 'pata');
@@ -297,6 +301,9 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
   test('seguir: detección, distancia y velocidad', () =>
     assert(r.doc.seguir && r.doc.seguir.deteccion === 11 && r.doc.seguir.distancia === 3.5
         && r.doc.seguir.velocidad === 2.4, JSON.stringify(r.doc.seguir)));
+  // BUG-AG10 · el campo de visión: la detección dejó de ser una esfera y esto es lo que lo escribe.
+  test('seguir: campo de visión', () =>
+    assert(r.doc.seguir && r.doc.seguir.vision === 90, JSON.stringify(r.doc.seguir)));
   test('andar: pasos por bloque', () => assert(r.doc.andar && r.doc.andar.cadencia === 1.8, JSON.stringify(r.doc.andar)));
   test('cuerpo: la caja de choque a medida', () =>
     assert(r.doc.cuerpo && r.doc.cuerpo.ancho === 0.5 && r.doc.cuerpo.fondo === 1 && r.doc.cuerpo.alto === 1.25,
@@ -305,6 +312,9 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     const c = r.doc.piezas[0];
     assert(c.mirar && c.mirar.alcance === 9, JSON.stringify(c.mirar));
     assert(c.mirar.limites.y[0] === -55 && c.mirar.limites.y[1] === 55, 'límites ' + JSON.stringify(c.mirar.limites));
+    // BUG-AG9 · el cono vertical, y sobre todo que escribir uno NO borre el otro: el setter de
+    // antes hacía `mir.limites = {y:[...]}` y el segundo campo se llevaba por delante al primero.
+    assert(c.mirar.limites.x[0] === -40 && c.mirar.limites.x[1] === 40, 'límites ' + JSON.stringify(c.mirar.limites));
     assert(!r.doc.raiz.mirar, 'la raíz no lleva mirar: hacia dónde encara lo decide la persecución');
   });
   test('articula: eje, pivote y desfase', () => {
@@ -374,10 +384,13 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     assert(/1\.8/.test(r.resumenes.andar), r.resumenes.andar);
     assert(/0\.5/.test(r.resumenes.cuerpo) && /1\.25/.test(r.resumenes.cuerpo), r.resumenes.cuerpo);
   });
-  test('los chips del preview cuentan las 6 capacidades', () => {
-    assert(r.chips.length === 6, r.chips.join(' | '));
+  // 7 desde REQ-MNT2 («te lleva encima»). El número va a mano a propósito: si alguien añade una
+  // capacidad y no la cuenta aquí, el chip se le puede quedar sin salir y nadie se entera.
+  test('los chips del preview cuentan las 7 capacidades', () => {
+    assert(r.chips.length === 7, r.chips.join(' | '));
     assert(r.chips.some(c => /te ve a 11/.test(c)), r.chips.join(' | '));
     assert(r.chips.some(c => /pisa como tú/.test(c)), r.chips.join(' | '));
+    assert(r.chips.some(c => /🧍/.test(c)), r.chips.join(' | '));
   });
 
   console.log('\n  el preview');

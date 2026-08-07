@@ -36,9 +36,18 @@ def mensajes_con_imagen():
                 except ValueError:
                     continue
                 m = d.get('message') or {}
-                if m.get('role') != 'user':
+                a = d.get('attachment') or {}
+                # Un mensaje que el dueño manda MIENTRAS estoy trabajando no se guarda como un turno
+                # suyo: queda encolado y el transcript lo anota como `attachment.queued_command`, con
+                # el mismo contenido (misma lista de bloques) colgando de `prompt`. Sin esta rama, un
+                # ticket abierto sobre la marcha se llevaba la captura del mensaje ANTERIOR — pasó con
+                # BUG-AG3, que salió con la captura de BUG-RS9.
+                if a.get('type') == 'queued_command':
+                    c = a.get('prompt')
+                elif m.get('role') == 'user':
+                    c = m.get('content')
+                else:
                     continue
-                c = m.get('content')
                 if not isinstance(c, list):
                     continue
                 imgs = [b for b in c if isinstance(b, dict) and b.get('type') == 'image']
