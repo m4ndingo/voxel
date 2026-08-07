@@ -84,6 +84,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | [REQ-PICK1](#-req-pick1) | el selector de bloque/textura: ancho, nombres, fuente, menú contextual y filtros | medio | ✅ partido en **A** (entra ya) / B / C |
 | ~~[BUG-RS9](#-bug-rs9)~~ | ~~el pistón **no empuja al jugador**: te subes encima de la cabeza extendida~~ | ✅ cerrado 2026-08-07 | era `mcUnstick`, que solo busca salida hacia arriba |
 | [BUG-RS10](#-bug-rs10) | el pistón **no empuja estructuras** (sí bloques, sí jugador, sí agentes) | 🟡 abierto 2026-08-07 | **el caso de la captura ya no ocurre** (era [BUG-STR1](#-bug-str1)): el pistón empuja `mc.grid` y no mira `mc.structures`, y eso está escrito como límite conocido de la v1. Preguntar al dueño si aún le molesta antes de tocar nada |
+| [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
 | ~~[BUG-STR1](#-bug-str1)~~ | ~~`hab:cubo-trans` acaba como **estructura fina** y no como **bloque** de rejilla~~ | ✅ cerrado 2026-08-07 | no era la válvula ni «el cubo es hueco»: era el **alpha**. Un macizo translúcido ya entra en `mc.grid` con geometría real y pasada de BLEND; `mcRecFina` es ahora la fuente única de esa regla |
 | [REQ-MNT2](#-req-mnt2) | marcar desde el **editor de agentes** qué pieza es **montable**, sin `game.esqueletos.montable(…)` a mano | ✅ cerrado 2026-08-07 | Casilla «te lleva montado» por pieza (también en la raíz); la marca vive en el **documento** y la aplica el snippet al plantar. La API queda como válvula por instancia |
 | ~~[BUG-AG1](#-bug-ag1)~~ | ~~los **agentes articulados** no los empuja el pistón ni pueden pisar placas~~ | ✅ cerrado 2026-08-07 | eran **tres** fallos; BUG-AG2 hacía falta pero no bastaba |
@@ -2345,6 +2346,48 @@ repetidas. Salen 24, y salen **en el orden que hacía falta**:
 - Sin regresión: `test_atlas_estructuras.js` (píxel a píxel de lo estampado), `test_caras_mundo.js`,
   `test_caras_mascara.js`, `test_clic_derecho_rejilla.js` y `test_bloques_comportamiento.js` (384 ok,
   uno de ellos ejercita el snippet ya parcheado).
+
+---
+
+### 🟡 REQ-RS11 · Las piezas de redstone, en carpeta propia — 🟡 abierto 2026-08-07
+
+**Abierto 2026-08-07.** El dueño hizo un `pull` desde otra máquina y las piezas de redstone no
+estaban:
+
+> «no entiendo qué sentido tiene la carpeta habitantes, muévelas a redstone y súbelas»
+
+**Ya está hecha la mitad urgente** (que viajen): las 22 piezas están exceptuadas en `.gitignore` y
+versionadas, 336 KB. Un clon nuevo ya abre el mundo con su redstone. Esto es **la otra mitad**:
+separarlas de verdad.
+
+⚠️ **Lo que impide moverlas sin más, y es el motivo de que esto sea un ticket y no un `mv`:**
+`hab:` **no es una ruta, es un espacio de nombres**, y está **grabado dentro de los mundos
+guardados**. `server.py:11` lo ata a una sola carpeta (`STORE = data/habitantes`) y `app.js:3450`
+resuelve la clave con `fetch('/api/habitantes/' + key.slice(4))`. Referencias vivas hoy:
+
+| dónde | refs a `hab:<pieza de redstone>` |
+|---|---|
+| `data/mundo.json` | 88 |
+| `data/worlds/` (test 65, redstone 44, cubes 34, favicon 25, agents 10, fps 10, lab 8, empty 1) | 197 |
+| código versionado (`redstone-ejemplos.js` 92, `test_redstone_dsl.js` 54, `redstone-piezas.js` 40, …) | ~450 |
+
+O sea: **cambiar la clave no es una opción** — dejaría 285 bloques de mundos reales sin material. La
+carpeta se puede mover, la clave no.
+
+**El camino, entonces:** `data/redstone/` versionada, y el namespace `hab:` **servido desde las dos
+carpetas**. Hay que tocar listar / cargar / guardar / renombrar / borrar en `server.py` y las
+miniaturas de `mundos.py`.
+
+**Sin decidir, y hay que preguntar al dueño:** qué pasa si **editas** una pieza de redstone desde el
+editor — ¿se escribe en la carpeta versionada (y entonces el editor ensucia el repo) o se copia a
+`data/habitantes/` y esa gana (y entonces hay dos verdades)? Y si al listar la galería siguen
+saliendo mezcladas o en un grupo aparte.
+
+**Nota aparte, sin resolver:** el código versionado también referencia otras 9 claves `hab:` que
+**tampoco viajan** (`agua`, `agua-profunda`, `cristal`, `cubo-trans`, `escalera`, `likelava`,
+`like-water`, `rejilla`, `tejado`, ~630 KB). Las usan tests como `test_cubo_translucido.js` o
+`test_escalera_inercia.js`. No se han versionado porque el encargo era el redstone; decidir si
+entran.
 
 ---
 

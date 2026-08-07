@@ -7,7 +7,43 @@ data/*
 # Las capturas que adjunta el dueño al abrir un ticket TAMBIÉN se versionan: un ticket se resuelve
 # semanas después, cuando el chat donde venían ya no existe. Las rescata guardar_imagenes_ticket.py.
 !data/tickets/
-data/habitantes/
+# La galería (data/habitantes/) es runtime: son los dibujos del dueño y pesa 5,7 MB. PERO las piezas
+# de redstone que viven ahí NO son runtime: las genera redstone/make_piezas.py, el código versionado
+# las nombra por clave (`hab:cable` y compañía, ~450 referencias) y los mundos guardados las tienen
+# grabadas dentro. Sin ellas, un clon recién hecho abre el mundo con el redstone en blanco.
+#
+# ⚠️ La clave `hab:` la resuelve server.py contra ESTA carpeta, así que las piezas no se pueden mover
+# a otro sitio sin romper los mundos: 285 bloques de data/mundo.json y data/worlds/ las referencian.
+# Separarlas de verdad (carpeta propia + el namespace servido desde dos sitios) es REQ-RS11.
+#
+# Para volver a incluir ficheros hay que re-incluir ANTES la carpeta: si el directorio sigue
+# excluido, git no baja a mirar dentro y las excepciones de abajo no llegan a evaluarse nunca.
+!data/habitantes/
+data/habitantes/*
+# La lista es la de PIEZAS en redstone/make_piezas.py, más las tres que ese script NO genera
+# (antorcha, antorcha-apagada y lampara-pegada: están dibujadas a mano).
+!data/habitantes/antorcha.json
+!data/habitantes/antorcha-apagada.json
+!data/habitantes/boton.json
+!data/habitantes/boton-on.json
+!data/habitantes/cable.json
+!data/habitantes/cable-on.json
+!data/habitantes/inversor.json
+!data/habitantes/inversor-on.json
+!data/habitantes/lampara-pegada.json
+!data/habitantes/palanca.json
+!data/habitantes/palanca-on.json
+!data/habitantes/piston.json
+!data/habitantes/piston-cabeza.json
+!data/habitantes/piston-on.json
+!data/habitantes/placa.json
+!data/habitantes/placa-on.json
+!data/habitantes/puerta.json
+!data/habitantes/puerta-abierta.json
+!data/habitantes/puerta-alta.json
+!data/habitantes/puerta-alta-abierta.json
+!data/habitantes/repetidor.json
+!data/habitantes/repetidor-on.json
 data/habitantes_trash/
 data/worlds/
 *.log
