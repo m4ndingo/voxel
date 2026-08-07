@@ -78,23 +78,48 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
-| [PERF-MC3](#-perf-mc3) | abrir un mundo VACÍO cuesta 2,2 s; el 81 % es bajar la paleta EN SERIE | medio | — |
-| [BUG-SNP1](#-bug-snp1) | «no existe el material X» miente, llena la consola y PIERDE la definición | medio | — |
+| ~~[PERF-MC3](#-perf-mc3)~~ | ~~abrir un mundo VACÍO cuesta 2,2 s; el 81 % es bajar la paleta EN SERIE~~ | ❌ cerrado 2026-08-07 | lo hecho se queda (383 → 63 ms en local, el cartel ya no miente); las propuestas 3 y 4 **no se hacen**: en el enlace del dueño el cuello es la RED, no el motor |
+| ~~[BUG-SNP1](#-bug-snp1)~~ | ~~«no existe el material X» miente, llena la consola y PIERDE la definición~~ | ✅ resuelto 2026-08-06 | lo que no está **todavía** espera en silencio y entra solo al colocarlo; lo que está **mal escrito** sigue avisando |
+| ~~[BUG-SNP2](#-bug-snp2)~~ | ~~`hab:placa-on` se avisa como typo de `hab:palanca-on` (falso positivo de BUG-SNP1)~~ | ✅ resuelto 2026-08-07 | lo que es **de la familia** de algo ya conocido (`placa` ⇒ `placa-on`) espera en silencio; la distancia de edición no se toca |
 | [REQ-PICK1](#-req-pick1) | el selector de bloque/textura: ancho, nombres, fuente, menú contextual y filtros | medio | ✅ partido en **A** (entra ya) / B / C |
+| ~~[BUG-RS9](#-bug-rs9)~~ | ~~el pistón **no empuja al jugador**: te subes encima de la cabeza extendida~~ | ✅ cerrado 2026-08-07 | era `mcUnstick`, que solo busca salida hacia arriba |
+| [BUG-RS10](#-bug-rs10) | el pistón **no empuja estructuras** (sí bloques, sí jugador, sí agentes) | 🟡 abierto 2026-08-07 | **el caso de la captura ya no ocurre** (era [BUG-STR1](#-bug-str1)): el pistón empuja `mc.grid` y no mira `mc.structures`, y eso está escrito como límite conocido de la v1. Preguntar al dueño si aún le molesta antes de tocar nada |
+| ~~[BUG-STR1](#-bug-str1)~~ | ~~`hab:cubo-trans` acaba como **estructura fina** y no como **bloque** de rejilla~~ | ✅ cerrado 2026-08-07 | no era la válvula ni «el cubo es hueco»: era el **alpha**. Un macizo translúcido ya entra en `mc.grid` con geometría real y pasada de BLEND; `mcRecFina` es ahora la fuente única de esa regla |
+| [REQ-MNT2](#-req-mnt2) | marcar desde el **editor de agentes** qué pieza es **montable**, sin `game.esqueletos.montable(…)` a mano | ✅ cerrado 2026-08-07 | Casilla «te lleva montado» por pieza (también en la raíz); la marca vive en el **documento** y la aplica el snippet al plantar. La API queda como válvula por instancia |
+| ~~[BUG-AG1](#-bug-ag1)~~ | ~~los **agentes articulados** no los empuja el pistón ni pueden pisar placas~~ | ✅ cerrado 2026-08-07 | eran **tres** fallos; BUG-AG2 hacía falta pero no bastaba |
+| ~~[BUG-AG2](#-bug-ag2)~~ | ~~los **agentes articulados** no respetan el cuerpo real de los bloques: placa de 1 voxel ⇒ suben 16~~ | ✅ cerrado 2026-08-07 | `asentar()` los plantaba en el techo de la celda |
+| ~~[BUG-AG3](#-bug-ag3)~~ | ~~un agente articulado **sin la capacidad «te persigue»** sale roto: piezas sueltas, no mira, no se le empuja~~ | ✅ | eran dos: `quitarEsqueleto` borraba por referencia y perdía las piezas tras un `mcRestampAll`, y apagar «te persigue» se negaba a plantar el rig; ahora es una estatua que te mira |
+| [BUG-AG4](#-bug-ag4) | te subes al **torso** de un agente pero **la cabeza no es sólida**: la traspasas y caes al torso | ✅ hecho | la solidez sigue ahora la **matriz** de cada pieza, no su desplazamiento |
+| [BUG-AG5](#-bug-ag5) | el agente **anda contra el pistón** que lo empuja: no llega al desplazamiento pedido o se sube encima | ✅ hecho | `game.esqueletos.aturdir(rig, s)`; el pistón la usa, `game.redstone.shockPiston` la ajusta |
+| [BUG-AG7](#-bug-ag7) | te **subes solo a los brazos** de un agente al rozarlos; el dueño pide el «unstick» automático apagado | ✅ hecho | `game.autoUnstick = false` por defecto; a mano con la tecla **U**. Era secuela de [BUG-AG4](#-bug-ag4) |
+| ~~[BUG-AG9](#-bug-ag9)~~ | ~~la capacidad **`mirar`** no tiene tope VERTICAL: encima de su cabeza el cuello te sigue apuntando~~ | ✅ resuelto 2026-08-07 | `mirar.limites.x`, defecto `[-70,70]`; fuera del cono la pieza **se rinde** (un rig no cabecea, pinzarlo lo deja de maniquí) |
+| ~~[BUG-AG10](#-bug-ag10)~~ | ~~la capacidad **`seguir`** detecta en **esfera**: te ve por la espalda y arranca a perseguirte~~ | ✅ resuelto 2026-08-07 | `seguir.vision`, defecto 180°; acota **EMPEZAR** y solo tras el jugador — ya persiguiendo manda `deteccion`, así que rodearle no le hace perderte |
+| [REQ-AG12](#-req-ag12) | **`cabalgable`**: montado en él **se queda quieto** y además **lo conduces** — hoy montado te lleva de vuelta al ancla | 🟡 abierto 2026-08-07 | sale de la corrección del dueño en [BUG-AG11](#-bug-ag11): «montado» ≠ «cabalgable». **Sin investigar** |
+| [REQ-AG13](#-req-ag13) | **dibujar el cono de visión** de un agente: hoy no hay forma de VERLO, solo la tabla | 🟡 abierto 2026-08-07 | «tampoco veo su cono» ([BUG-AG11](#-bug-ag11)). Son dos conos distintos, `seguir.vision` y `mirar.limites`. **Sin investigar** |
+| ~~[BUG-AG11](#-bug-ag11)~~ | ~~montado en su cabeza **te sigue viendo**, y con el cuello a 0 se pone a **dar vueltas en círculo**~~ | ✅ resuelto 2026-08-07 | no hay parámetro: `rig.llevando` ⇒ **no te ve** (ni persigue ni encara) + guardia del `atan2(0,0)` para la distancia horizontal ~0. Sí sigue aplicando `volver`: **montado ≠ cabalgable** (dueño) |
+| ~~[BUG-AG8](#-bug-ag8)~~ | ~~`test_esqueleto_navegador.js` falla 3 casos en `/map/agents`: quedan piezas de rig **sin recoger**~~ | ✅ resuelto 2026-08-07 | no había basura ninguna: eran los **49 carteles de las notas**. Fallo del test, motor intacto; **15 ok, 0 fallos** |
+| ~~[REQ-DBG2](#-req-dbg2)~~ | ~~el toast **«Atascado»** no dice **por qué**: hay que poder saber quién te atrapa (casi siempre un agente)~~ | ✅ resuelto | ~~nace del aviso que añadió [BUG-AG7](#-bug-ag7)~~ · dice la pieza Y el agente; `game.atasco()` |
+| ~~[REQ-MNT1](#-req-mnt1)~~ | ~~el `passengers:true` de los NPC-cubo **no existe** para un agente articulado: te subes a la cabeza y se va sin ti~~ | ✅ resuelto 2026-08-07 | `game.esqueletos.montable(id,'cabeza')`; acarreo **rígido** (el giro también te lleva). Cero líneas de `app.js` |
+| [BUG-AG6](#-bug-ag6) | con `escala` puesta, el **preview** del editor de agentes se ve roto; debe verse como siempre | ✅ hecho | `prepararEsqueleto` ya no lee `def.escala`; **revirtió** una decisión de [REQ-AGESC1](#-req-agesc1) |
+| ~~[BUG-ROT2](#-bug-rot2)~~ | ~~las piezas de un esqueleto siguen **recortadas a 16 posturas** (`rot & 15`)~~ | ✅ resuelto 2026-08-07 | `oriDePieza` = `mcOriNorm`: era el **último `& 15`** vivo del repo |
+| [REQ-AGESC1](#-req-agesc1) | **escala del agente** en el editor de agentes: enanos y gigantes del mismo dibujo | ✅ hecho | escalas **libres** (×1,4); la caché por clave+rot **no** hacía falta tocarla |
+| ~~[BUG-RS7](#-bug-rs7)~~ | ~~el pistón no se puede poner **apuntando hacia arriba**: se coloca de lado~~ | ✅ resuelto 2026-08-06 | el circuito lo acostaba al soltarlo; ahora el frente sale de `mcOriPerm` y puede ser `±Y` |
+| ~~[BUG-RS8](#-bug-rs8)~~ | ~~accionar la palanca la **mueve de celda** y le cambia el giro~~ | ✅ resuelto 2026-08-06 | **el mismo fallo que BUG-RS7**: redstone recortaba la postura a 4 bits y hay 24 |
+| ~~[BUG-RS6](#-bug-rs6)~~ | ~~agrandar la puerta a 16×16×24 la convierte en **estructura** y deja de ser redstone~~ | ✅ resuelto 2026-08-06 | la puerta son **dos celdas de rejilla** que se mueven en la misma pasada; muere el apaño de `conduce` |
 | [REQ-MAP1](#-req-map1) | Alt+M = pantalla de mapas conmutable sin perder el mundo abierto | medio | — |
-| [REQ-NAV1](#-req-nav1) | la barra superior se reduce a `[Galería] [🌍 Mundo] [⋯]` | medio | ✅ Mundo fuera, **Mapa y Jugar dentro** |
+| ~~[REQ-NAV1](#-req-nav1)~~ | ~~la barra superior se reduce a `[Galería] [🌍 Mundo] [⋯]`~~ | ✅ resuelto 2026-08-07 | de 15 botones a 3; la cabecera baja a **una fila de 70,6 px** a 390 px; la Galería lo enseña **todo, sin clasificar**; `test_barra_tres_botones.js` **22 ok** |
 | ~~[REQ-XR1](#-req-xr1)~~ | ~~rayos-X tapa lo que marca: inservible para capturas~~ | ✅ resuelto 2026-08-06 | solo aristas: del 92,2 % de pantalla tapada al 4,9 % |
 | ~~[REQ-XR2](#-req-xr2)~~ | ~~rayos-X: una línea más en la etiqueta con el **power** del bloque~~ | ✅ resuelto 2026-08-06 | `⚡ recibe → saca` en las piezas y `⚡ n débil` en los bloques que hacen de puente; el 0 no se pinta |
 | ~~[BUG-RS2](#-bug-rs2)~~ | ~~los repetidores de redstone girados no funcionan~~ | ✅ resuelto 2026-08-06 | el giro estaba BIEN; lo que fallaba era que el repetidor emitía por 5 lados, y los 3 «rotos» miraban a otro lado |
-| [REQ-RS3](#-req-rs3) | crear el **pistón** de redstone y plantarlo en `/map/test` para probarlo | ? sin acotar | ~~dependencia de BUG-RS2~~ — despejada |
 | ~~[REQ-CART2](#-req-cart2)~~ | ~~la ventana de editar nota (tecla `N`) es diminuta y su letra también~~ | ✅ resuelto 2026-08-06 | 720px y 18px de serie + `game.noteFont`/`game.noteWidth` por consola |
 | ~~[REQ-RS4](#-req-rs4)~~ | ~~un bloque que recibe energía debe **energizarse** y alimentar lo que tenga pegado~~ | ✅ resuelto 2026-08-06 | r1.2: fuerte/débil, `aislante()`, `test_redstone_bloques.js` |
 | ~~[REQ-RS5](#-req-rs5)~~ | ~~el **bloque de redstone** (fuente permanente); un repetidor encima no se activaba~~ | ✅ resuelto 2026-08-06 | pieza nueva + `red_concrete` **estaba declarado fuente** en `DEFECTOS` (quitado). Repetidor encima = solo soporte, como en Minecraft |
 | ~~[BUG-GAL1](#-bug-gal1)~~ | ~~editar el cable de redstone creó una pieza **nueva** en vez de reemplazar la vieja~~ | ✅ resuelto 2026-08-06 | Guardar enrutaba por `meta.type`, no por la galería de la que salió la pieza |
 | ~~[BUG-GAL2](#-bug-gal2)~~ | ~~el botón «Ficha» solo sale en una de las dos copias del cable~~ | ✅ resuelto 2026-08-06 | la ficha era solo de assets; ahora también de habitantes, diciendo que su única clave es `hab:<id>` |
 | ~~[BUG-RS5](#-bug-rs5)~~ | ~~el cable de redstone modificado no conduce~~ | ✅ resuelto 2026-08-06 | era consecuencia de BUG-GAL1, como decía el ticket: el dibujo acabó en `asset:` y el circuito es `hab:` |
-| [BUG-ROT1](#-bug-rot1) | `R` y `Shift+R` no alcanzan las 24 orientaciones: hay colocaciones imposibles | ? sin acotar | — |
-| [PERF-MC2](#-perf-mc2) | sub-chunk culling de estructuras | grande | — |
+| ~~[BUG-ESC1](#-bug-esc1)~~ | ~~al montar en una escalera se conserva el movimiento lateral: te mueve solo y te tira~~ | ✅ | colgado mandaba la rama de aire de `app.js` (sin rozamiento ni reescritura desde teclas); agarrado se manda por la de tierra |
+| ~~[BUG-ROT1](#-bug-rot1)~~ | ~~`R` y `Shift+R` no alcanzan las 24 orientaciones: hay colocaciones imposibles~~ | ✅ resuelto 2026-08-06 | eran 16 (faltaba el tercer cuarto de vuelta); `MC_ORI` se **deriva**, y sale agrupada de 4 en 4 ⇒ `ori = cara*4 + giro` es el gesto que pidió el dueño |
+| ~~[PERF-MC2](#-perf-mc2)~~ | ~~sub-chunk culling de estructuras~~ | ❌ cerrado 2026-08-07 | **sin hacer, por decisión del dueño**: nadie ha vuelto a reportar fps bajos por estructuras desde que se midió que el cuello era otro |
 
 La columna «pinta» es una **impresión al redactar, no una estimación medida** — varias se escribieron
 sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo que el dueño cerró el
@@ -604,7 +629,7 @@ visible de partida, `showOSDbuttons(false)` **no** puede esconderlo, `🧩 Códi
 `touchControls` lo vuelve escondible). El caso «`showOSDbuttons(false)` no puede esconder Cerrar» es
 el que impide que el móvil se quede encerrado.
 
-### ⬜ PERF-MC3 · Abrir un mundo VACÍO cuesta 2,2 s, y el 81 % es bajar la paleta EN SERIE — ⬜ todo
+### ❌ PERF-MC3 · Abrir un mundo VACÍO cuesta 2,2 s, y el 81 % es bajar la paleta EN SERIE — ❌ cerrado 2026-08-07 (lo hecho se queda; el resto no se hace)
 **Reportado** 2026-08-06 por el dueño: «cargo `/map/empty`, que no tiene ni un voxel, y se tira en
 "Preparando bloques (0/15)…" un buen rato, cosa que no tiene sentido; quiero saber qué pasa».
 
@@ -667,7 +692,129 @@ durante la carga se piden **`/api/habitantes` tres veces** y `/assets/madera.vox
   tiempo (hoy son estrictamente consecutivas), y que la paleta resultante es la misma de antes.
 - Averiguado y anotado quién pide `/api/habitantes` tres veces y los dos assets de fuera de la paleta.
 
-### ⬜ BUG-SNP1 · «no existe el material X» miente, llena la consola y PIERDE la definición — ⬜ todo
+**Cómo se resolvió (2026-08-06)** — se hicieron las propuestas **1 y 2**. Las 3 y 4 quedan **abiertas
+a propósito** (ver abajo): con lo barato ya sobra para el síntoma reportado, y las otras dos son
+decisiones de arquitectura que no merece la pena tomar sin volver a medir.
+
+- **Las descargas van en tandas** — `mcPrecargarDocs(keys, tope)` (`app.js`, justo encima de
+  `mcBuildPaletteImpl`) suelta las peticiones con un tope de 8 a la vez y **no se espera a que
+  acaben**. El bucle de la paleta **sigue yendo en serie tal cual estaba** —rasteriza sobre un canvas
+  compartido y escribe `mc.palette[id]` en orden, así que no se puede desordenar—, pero cuando le toca
+  el bloque 5 su documento ya está bajando. La pieza que lo hace posible es que **`getRoomData` cachea
+  la PROMESA**, no el resultado: pedir un documento dos veces no lo baja dos veces. Por eso el cambio
+  es de 6 líneas y no una reescritura del bucle.
+  El tope existe porque el navegador solo abre ~6 conexiones por host: soltar 200 de golpe no baja
+  nada antes y sí retrasa al resto de la carga.
+- **El aviso va ANTES del bloque, no solo después** — `onProgress` se llama ahora dos veces por
+  bloque, con un séptimo argumento `empezando`. La de «empezando» lleva `n = bi` (los ya hechos) y el
+  nombre del que **se está bajando**; la de después es la única que trae el `ms` y por tanto la única
+  que entra en el informe de carga. Se acabó el «(0/15)» clavado durante 868 ms enseñando el nombre
+  del bloque anterior.
+- **`/api/habitantes` ×3 — averiguado y arreglado.** No era el Mundo: son **tres inicializadores del
+  editor** que arrancan a la vez, cada uno con su GET (`refreshHabitantesList`, `loadRooms` y
+  `refreshTexturas`, los tres desde `loadServerAssets`). `apiHabitantes()` ahora **comparte la
+  petición en vuelo**, no el resultado: en cuanto llega suelta la promesa, así que un
+  `apiHabitantes()` posterior a guardar o borrar vuelve a preguntar de verdad. Cachear el resultado
+  habría dado listas rancias.
+- **Los dos assets de fuera de la paleta — averiguado, y NO se toca.** `madera.vox.json` y
+  `hierba-alta.vox.json` los pide `renderTexStrip`: es la tira de texturas **del editor**, que se pinta
+  detrás mientras el Mundo carga. No sobran, son de otra pantalla. Lo único que hacían era ocupar dos
+  de las ~6 conexiones del navegador.
+
+**Medido** (localhost, caché fría, contexto nuevo en cada vuelta, paleta de 8; sonda Playwright):
+
+| fase «Paleta: assets + rasterizar caras» | vuelta 1 | vuelta 2 | vuelta 3 |
+|---|---|---|---|
+| **antes** | 356,7 ms | 366,9 ms | 426,2 ms |
+| **después** | 56,0 ms | 78,0 ms | 55,2 ms |
+
+≈ **6×**. Y desmiente la sospecha que traía el ticket: si una parte gorda hubiera sido CPU
+(`JSON.parse` + rasterizar 6 caras), esos 383 ms de media no se habrían caído a 63 — era **espera en
+serie casi entera**, incluso con latencia ≈ 0.
+
+⚠️ **En el host remoto del dueño esto NO está medido.** Ahí el coste eran 1774 ms de idas y vueltas
+consecutivas, así que la mejora debería ser mayor que en local, pero es una previsión, no un dato: la
+verificación de «paleta por debajo de ~400 ms en remoto» **está pendiente de que el dueño abra
+`/map/empty` y mire `game.loadReport()`**.
+
+**Verificación** — `node test_paleta_paralela.js`, 12 ok / 0 fallos, estable en tres vueltas. Mide la
+**forma**, no el reloj: que cada documento de la paleta se pisa en el tiempo con otro, que el **pico de
+peticiones en vuelo es ≥ 4** (yendo en serie sería 1 por definición), que la paleta sale completa **y en
+el mismo orden** (el id de bloque es la posición en `mc.blockKey`, y los mundos guardados llevan ids
+dentro), que el primer cartel ya dice `(0/8) hierba ⬇`, y que `/api/habitantes` se pide una sola vez.
+Deliberadamente **no** compara reloj de pared contra suma de las partes: en localhost cada petición
+dura 2-35 ms y lo que domina es la cola de conexiones del navegador, así que sería una medida que
+aprueba y suspende sola.
+Sin regresiones: `test_informe.js` 34 ok · `test_materiales_en_espera.js` todo ok ·
+`test_atlas_estructuras.js` 13 ok · `test_galeria_assets.js` 7 ok ·
+`test_bloques_comportamiento.js` 384 ok · `test_navegador.js` 15 ok.
+
+**⚠️ Y en el host del dueño NO ha servido de nada** (medido por él el mismo día, `/map/empty`, paleta de
+17): la fase de paleta fue **8955 ms**. La **forma** sí cambió —`hierba` 8813,9 ms y los otros 16 entre 3
+y 22 ms— y eso confirma que el paralelismo llega: el bucle va en serie, así que el primer `await` se come
+la espera de todos y los demás se encuentran el documento hecho. Pero el conjunto tardó **5× más que en
+serie** (1774 ms antes, 15 documentos). Las dos medidas puede que ni sean comparables: en esa carga
+«Red: descargar mundo» costó **1166 ms para un mundo vacío**, o sea que el enlace estaba mucho peor que
+el día de la medida original.
+
+**Medido en su máquina (2026-08-06), y zanja la duda:**
+
+```
+RED · 23 documentos, 192 KB por el cable en 13118 ms de reloj (suma de las partes: 7813 ms).
+      pico de 15 en vuelo a la vez · 15 KB/s efectivos
+```
+
+**El cuello es el ANCHO DE BANDA**, no la latencia: 15 KB/s. Paralelizar ya no puede dar más de sí —lo
+único que queda es **mandar menos bytes**, o sea la propuesta 4.
+
+Pero el número que de verdad enseñó algo fue otro: **23 documentos para una paleta de 17**, y un reloj
+de pared (13118 ms) **mayor** que la suma de las partes (7813 ms). Si de verdad hubiera 15 en vuelo todo
+el rato, la suma tendría que ser mucho **mayor** que el reloj; que sea la mitad significa que en ese
+ventanal hay **huecos**, o sea que no todo salió en la ráfaga inicial. Los seis de más eran **las
+miniaturas de las galerías**: `refreshHabitantesList` y la lista de habitantes pedían cada documento con
+un `fetch` pelado y `cache:'no-store'`, **sin pasar por `getRoomData`** — el mismo documento que ya
+estaba bajando para la paleta, otra vez, y una tercera para la otra galería. La línea de al lado sí
+usaba `getRoomData` para los assets; solo los `hab:` se habían quedado fuera. Arreglado (dos líneas), y
+ahora el informe **canta los duplicados solo**, con los KB tirados, para no tener que abrir la pestaña
+de red.
+
+Lo que hay que distinguir es **latencia** (muchas idas y vueltas ⇒ paralelizar gana) de **ancho de
+banda** (demasiados bytes ⇒ paralelizar no gana nada, y encima N descargas gordas a la vez pueden
+saturar un enlace fino y llegar todas al final). Para eso: `game.loadReport()` ahora imprime una línea
+`RED ·` sacada de la **Resource Timing API** (`mcRedDeLaPaleta`), que es la única fuente que sabe cuándo
+salió y cuándo llegó cada petición de verdad — el `ms` que apunta el bucle solo mide su propia espera y
+desde este cambio se concentra entera en el primer bloque, así que **engaña**. La línea da documentos, KB
+por el cable, reloj de pared, suma de las partes, **pico de simultáneas** (en serie sería 1) y KB/s
+efectivos, y dice cuál de los dos cuellos es.
+
+Dato que ya se tiene: la paleta pesa **~718 KB en crudo** (`hierba.vox.json` solo son 78,5 KB para un
+16³ macizo) pero el servidor **ya la sirve con gzip** — 78,5 KB → 20,9 KB —, así que por el cable son
+~126 KB para 8 bloques y del orden de ~280 KB para los 17 suyos. Si resulta que son 280 KB en 9 s, el
+cuello es el ancho de banda a ~31 KB/s y **lo único que ayuda es mandar menos bytes**.
+
+**Lo que queda abierto (propuestas 3 y 4)** — la paleta perezosa y que el servidor sirva las caras ya
+rasterizadas (`.faces.png` / `/api/atlas?keys=…` / caché en IndexedDB). Si la línea `RED ·` del dueño
+dice «ANCHO DE BANDA», la 4 pasa a ser **la** solución y no una optimización más: 6 caras de 16×16 en PNG
+son ~1,5 KB frente a los 20,9 KB del `.vox.json` gzipeado, y encima se ahorra el `JSON.parse`.
+También queda por decidir si el tope de 8 es el bueno en un enlace fino, o conviene bajarlo.
+
+**❌ Cerrado 2026-08-07 por decisión del dueño, con las propuestas 3 y 4 SIN HACER.** Lo entregado se
+queda y no se toca: paleta en tandas de 8 (383 → 63 ms en local), el cartel que ya dice qué bloque está
+bajando **antes** de bajarlo, los tres inicializadores compartiendo la petición en vuelo, los `hab:`
+pasando por `getRoomData` (seis descargas duplicadas menos) y la línea `RED ·` de `game.loadReport()`,
+que es lo que permitió zanjar la duda.
+
+⚠️ **Lo que se acepta al cerrar:** en el enlace del dueño abrir un mundo sigue costando ~9-13 s, y eso
+**no se arregla**. El motivo para cerrarlo igualmente es que la medida dice que el cuello **no está en
+el motor**: 15 KB/s efectivos y 192 KB por el cable = ancho de banda. Todo lo que queda por hacer es
+mandar menos bytes, o sea un formato nuevo servidor↔cliente (`.faces.png` + caché en IndexedDB), que es
+un ticket de obra propia y no la continuación de éste.
+
+**Qué lo reabriría** (entonces sí, como ticket nuevo): que el enlace mejore y la carga siga siendo
+lenta —eso movería el cuello de vuelta al motor—, o que el dueño decida que ~10 s son inaceptables y
+quiera pagar el formato pre-rasterizado. El diagnóstico ya está hecho y medido; no hay que repetirlo.
+
+### ✅ BUG-SNP1 · «no existe el material X» miente, llena la consola y PIERDE la definición — ✅ done (2026-08-06)
 **Reportado** 2026-08-06 por el dueño, junto al anterior: «en la consola hay mucha información, alguna
 que no tiene sentido». Al abrir `/map/empty` salen **diez `console.warn` con traza de pila completa**:
 `hab:escalera`, `asset:assets/diana.vox.json`, `hielo`, `hielo-pista-de-patinaje`, `cabeza`, `brazo`
@@ -693,21 +840,96 @@ aviso cosmético en un fallo funcional silencioso.
 editan en los ficheros de `redstone/` y se publican con `redstone/make_snippets.js`; recordar que el
 snippet tiene **dos copias vivas** y que el dueño lo edita en vivo (ver CLAUDE.md).
 
-**Propuesta**
-- **Aplazar en vez de rechazar**: si la clave no está en la paleta *todavía*, guardar la config en una
-  tabla de pendientes y aplicarla cuando aparezca (ya hay invalidación por `mc.blockKey.length`). Es lo
-  que arregla la pérdida de comportamiento.
-- **Distinguir los dos casos en el aviso**: «no está en este mundo (aún)» → `console.log` discreto o
-  nada; «no existe en ninguna parte» (typo de verdad) → el warn de ahora, con su sugerencia. Ojo: hoy
-  ni siquiera se puede distinguir sin preguntar al servidor, así que quizá el criterio sea más simple:
-  avisar solo si `resolver()` no encuentra **ni una clave parecida**.
-- **Sin traza**: `console.warn` arrastra la pila entera; para un aviso de configuración sobra.
+**Lo que se hizo** — la regla, que es todo el ticket en una línea: **si se parece a algo de la paleta,
+es un typo y se avisa; si no se parece a nada, es que todavía no está en este mundo y se espera en
+silencio.** Sin preguntar al servidor, que era lo que parecía hacer falta.
 
-**Verificación esperada**
-- Abrir `/map/empty` deja la consola con el informe de carga y **cero** avisos de `define`.
-- Colocar una `hab:escalera` en `/map/empty` ⇒ tiene su comportamiento sin volver a definir nada.
-- `game.bloques.define('hab:eskalera', …)` (typo de verdad) **sigue** avisando y sugiriendo la clave buena.
-- `game.bloques.lista()` en `/map/empty` refleja lo definido, incluido lo que está en espera.
+- **`parecidos()`** — distancia de edición acotada (se corta en cuanto pasa del tope, sin calcularla
+  entera), con tope 1 para nombres cortos y 2 a partir de 8 letras: en `cable` un cambio ya es otra
+  palabra, en `escalera` dos siguen siendo el mismo dedo torcido. Medido contra la paleta real de
+  `/map/empty`: `hielo`↔`hierba` = 3 y `diana`↔`arena` = 3 (⇒ esperan), `eskalera`↔`escalera` = 1
+  (⇒ avisa). El filtro por subcadena que ya había sigue yendo primero.
+- **Tabla de pendientes** — lo aplazado se guarda **crudo**, sin normalizar (normalizar depende de la
+  clave resuelta, que es justo lo que falta) y se vuelve a pasar por `define()` intacto cuando el
+  material aparece. La promoción cuelga de `reconstruirCache()` y **solo corre si la paleta cambió de
+  tamaño**, que es la única forma de que aparezca un material nuevo: un `define()` normal no barre la
+  lista de espera para nada.
+- **Un `console.log` por tanda, no uno por material** — `game.bloques: N material(es) en espera`,
+  agrupado con un `setTimeout(…, 0)`. Salen **dos líneas** al abrir `/map/empty` porque son dos
+  snippets independientes (`mundo-autoarranque` y `redstone-piezas`), no once con traza de pila.
+- **`quitar()` y `lista()` se enteran** — lo que espera sale en `lista()` como *en espera*; si no, un
+  material aplazado no aparecería en ningún sitio y desde fuera sería indistinguible de una definición
+  perdida, que es el fallo de partida. Más `game.bloques._pendientes()` para inspeccionar.
+
+**La letra pequeña que costó dos vueltas**: un define que **sí** entra tiene que borrar la espera del
+mismo material, y comparando por clave **resuelta** (lo que espera se guardó con el nombre que
+escribieron: `ladrillo` vs `hab:ladrillo`). Sin eso pasaban las dos cosas: (a) `quitar()` creía que el
+material *solo* esperaba, lo tachaba de la lista y dejaba puesto lo de la tabla —la cabeza se quedaba
+torcida, y así lo cazó `test_bloques_comportamiento.js`—, y (b) promover una espera vieja **pisaba** la
+definición nueva dos líneas después.
+
+**Dónde vive**: `data/snippets/mundo-autoarranque.json`, que **no tiene fuente en el repo** y el dueño
+edita en vivo desde Alt+C. Se aplica con `parche_snp1.py` (idempotente: si ya está, sale sin tocar
+nada). ⚠️ Si el modal está abierto con una copia anterior, su próximo «guardar» se lleva esto por
+delante. `app.js` **no se toca**.
+
+**Verificación** — las cuatro que pedía el ticket, repartidas por donde de verdad se pueden probar:
+
+| lo que pedía el ticket | dónde |
+|---|---|
+| `/map/empty` sin un solo aviso de `define` | `node test_materiales_en_espera.js` (navegador, 7 casos) |
+| colocar el material ⇒ recupera su comportamiento | `test_bloques_comportamiento.js` (mundo de juguete: la paleta crece y la definición entra sola, hasta la caché densa) |
+| un typo de verdad sigue avisando y sugiriendo | `test_bloques_comportamiento.js` (`eskalera` → `hab:escalera`, y **no** se queda esperando) |
+| `lista()` refleja también lo que está en espera | los dos |
+
+`node test_bloques_comportamiento.js` 384 ok / 0 fallos (eran 373; 11 casos nuevos). Sin regresiones en
+`node test_atravesable.js` ni `node test_rayos_x_power.js`, que son los que más apoyan en este snippet.
+
+### ✅ BUG-SNP2 · `hab:placa-on` se avisa como si fuera un typo de `hab:palanca-on` — ✅ resuelto 2026-08-07
+
+**Reportado** 2026-08-06, visto en el log de carga del dueño en `/map/empty`:
+`game.bloques.define: no existe el material "hab:placa-on". ¿Querías "hab:palanca-on"?`
+
+Es un **falso positivo de BUG-SNP1**. `hab:placa-on` existe de verdad (`data/habitantes/placa-on.json`)
+y lo que pasa es lo de siempre: no está *colocado* en `/map/empty`, así que no está en la paleta y
+tendría que **esperar en silencio**. Pero `parecidos()` encuentra `hab:palanca-on`, que sí está en la
+paleta, a **distancia 2** (`placa-on` → `pal**a**ca-on` → `pala**n**ca-on`), y el tope a partir de 8
+letras es 2 ⇒ lo canta como dedo torcido.
+
+O sea que la regla «dos cambios en una palabra larga siguen siendo el mismo dedo torcido» **se rompe
+cuando las dos palabras existen**. Y aquí hay una señal que la heurística no está mirando y que decide
+el caso sin ambigüedad: `placa` **ya está en la paleta**, así que `placa-on` es un sufijo de algo
+conocido, no un typo de otra cosa. Mismo patrón que `cable`/`cable-on`, `boton`/`boton-on`.
+
+⚠️ Esto **no es `app.js`**: vive en `data/snippets/mundo-autoarranque.json`, que el dueño edita en vivo
+(Alt+C) y tiene **dos copias vivas**; se aplica con un parche idempotente, no reescribiendo el fichero.
+
+**Verificación esperada** — `/map/empty` no avisa de `hab:placa-on` (ni de ningún `X-on` cuyo `X` esté
+en la paleta) y sigue apareciendo en `game.bloques._pendientes()`; un typo de verdad (`eskalera`) sigue
+avisando. Caso nuevo en `test_bloques_comportamiento.js` y `test_materiales_en_espera.js` en verde.
+
+**✅ Resuelto 2026-08-07.** `deLaFamilia(corto, conocidas)`: si el nombre pedido es **un nombre conocido
+más un guion** (`placa` ⇒ `placa-on`), se aplaza en silencio **antes** de preguntar por parecidos. Se
+aplica con `parche_snp_familia_material.py`, idempotente.
+
+Lo que **no** se hizo, a propósito: **apretar la distancia de edición**. Era la reacción obvia y habría
+apagado este aviso rompiendo los typos de verdad (`eskalera` está a 1). La familia es una señal
+**distinta y exacta**, y por eso se mira primero y no en vez de.
+
+Dos límites conocidos, los dos a favor de no callar de más:
+- **Un guion no es un salvoconducto.** Si el «padre» no está en la paleta, se sigue avisando: pedir
+  `hab:palanca-on` en un mundo donde solo está `hab:placa` sigue sugiriendo `hab:placa-on`. Solo exime
+  el pariente de algo que **de verdad** está.
+- Si un día alguien escribe mal la parte de después del guion (`hab:placa-onn`) tampoco se cantará,
+  porque el padre existe. Es el precio, y es el lado correcto: aplazar de más es silencio; avisar de
+  más es lo que motivó BUG-SNP1.
+
+**Verificado** — `test_material_familia.js` **nuevo** (21 ok), que saca `resolver`/`parecidos`/
+`nombreCorto`/`deLaFamilia` **verbatim** del snippet y les pone una paleta de mentira: el caso del
+dueño, los cinco pares que existen en el disco (`cable`, `boton`, `puerta`, `antorcha`, `repetidor`),
+que un typo auténtico siga cantando, que el guion sobre un desconocido **no** exima, y que el alias por
+nombre corto y el mundo sin abrir sigan igual. Más `test_materiales_en_espera.js` en verde (8 ok):
+`hab:placa-on` sale entre los 12 en espera de `/map/empty` y no deja ni un aviso.
 
 ### ⬜ REQ-PICK1 · El selector de bloque/textura de una ranura: ancho, nombres, fuente, menú y filtros — ⬜ todo
 **Reportado** 2026-08-06 por el dueño, cinco cosas sobre el mismo panel (`#mc-picker`, el que sale al
@@ -862,7 +1084,7 @@ equivalente —un botón—; encaja con REQ-OSD1, que está decidiendo justo qu�
 
 ---
 
-### ⬜ REQ-NAV1 · La barra superior se reduce a tres botones: [Galería] [Mapa] [⋯] — ⬜ todo
+### ✅ REQ-NAV1 · La barra superior se reduce a tres botones: [Galería] [🌍 Mundo] [⋯] — ✅ resuelto 2026-08-07
 **Reportado** 2026-08-06 por el dueño: «todas las opciones "Objeto / Habitantes / Objetos /
 Habitaciones / Texturas / Mapa / ▶ Jugar / 🌍 Mundo / 🧩 Código / 🦴 Agentes / Nuevo / Guardar /
 Guardar como… / Exportar / Importar" pasan a estar dentro de un botón "..." que solamente las muestra
@@ -968,6 +1190,59 @@ se usó la última vez). Se implementan así y se corrigen si al usarlo molesta.
 - Alt+C y Alt+A siguen abriendo Código y Agentes con el menú cerrado.
 - A **390 px** la barra ocupa **una sola fila**, y a 1280 px no hay regresión.
 - `node test_panel_agentes.js` en verde (adaptado), y los tres de galería **sin tocar**.
+
+**✅ RESUELTO 2026-08-07** — `node test_barra_tres_botones.js` **22 ok, 0 fallos** ·
+`node test_panel_agentes.js` **40 ok** · `node test_galeria_assets.js` **7 ok** ·
+`node test_guardar_pieza.js` **17 ok** · `node test_ficha_material.js` **11 ok**, todos sin fallos.
+
+⚠️ **De paso salieron dos tests que fallaban por el arranque, no por el código.**
+`test_guardar_pieza.js` y `test_ficha_material.js` lanzaban `chromium.launch()` **sin los args de
+SwiftShader** que usa el resto de la suite: así el arranque se cuela **~9 s** en el WebGL por software
+y sus esperas fijas (`waitForTimeout(1200)`) se quedaban cortísimas. Se les puso el lanzamiento de
+siempre, y en `test_ficha_material.js` la espera del guardado pasó a ser **una condición** (el toast
+«Ficha guardada» o el aviso de error, limpiados antes del clic) en vez de contar 1,2 s a ojo — fallaba
+el **primer** alias y salían verdes los siguientes, que es lo que enmascaraba el problema.
+
+Quedó así, y las dos decisiones abiertas se cerraron por el defecto razonable que ya estaba anotado:
+
+- **La barra son tres `.tab`** en `#tabs`: `▤ Galería`, `🌍 Mundo`, `⋯` (`#btn-mas`, con
+  `aria-haspopup`/`aria-expanded`). Las **nueve** restantes viven en `#mas-menu` como `.menu-item`:
+  `🗺 Mapa`, `▶ Jugar`, `🧩 Código`, `🦴 Agentes`, `Nuevo`, `Guardar`, `Guardar como…`, `Exportar`,
+  `Importar`. **Desaparece el grupo hermano `.actions`**: barra y menú son ahora una sola lista.
+- **`irA(tab)` es el router único** que comparten barra y menú, así que una entrada hace lo mismo
+  esté donde esté. El menú se cierra con Esc, con un clic fuera (`pointerdown` en captura) y con un
+  segundo clic en `⋯`. ⚠️ La rama de Esc del menú va **antes** que la de los modales: al revés, Esc
+  cerraría la galería de debajo en vez del menú de encima.
+- **Decisión 1 → cerrar la Galería ES volver a «Objeto»**, y por eso **no hay botón «Objeto»**: el
+  lienzo del editor es el fondo sobre el que se abre todo. Se quitaron las dos líneas muertas de la
+  pestaña `objeto`.
+- **Decisión 2 → la Galería lo enseña TODO.** Se implementó primero con cuatro pastillas de bucket y
+  memoria en `localStorage`, y el dueño lo corrigió el mismo día: **«ir a Galería es mostrar todo lo
+  que hay y punto»** — la clasificación *Habitantes / Objetos / Habitaciones / Texturas* «no tiene
+  sentido en el mapa, ahí solamente se cargan bloques». Así que **fuera las pastillas, fuera
+  `vf.habKind`**: `habKind = null` significa *sin filtro* y `openHabitantes()` abre las **102** piezas
+  de las dos fuentes juntas. El parámetro `kind` **sigue vivo** porque los atajos «Galería ▤» del panel
+  derecho nacen junto a su roster —ahí el filtro sí significa algo— y porque tres tests entran por él.
+  ⚠️ **Las dos fuentes había que fusionarlas ANTES de pintar.** Pintarlas en dos pasadas (assets y
+  luego habitantes, como se hacía) hace que **cada tipo salga dos veces**: los 8 assets de habitación
+  arriba y las 8 del servidor cincuenta tarjetas más abajo. El test lo cazó (`habitante → objeto →
+  habitacion → textura → habitante → objeto → habitacion → textura`). Ahora es **un solo bucle** sobre
+  una lista fusionada y ordenada por `HAB_ORDEN`, con las 86 texturas al final para que no se coman la
+  primera pantalla; cada tarjeta lleva `data-bucket`, que es además lo que hace comprobable el reparto.
+- **Importar sigue siendo un `<label>` con su `input[type=file]#file-importar`** dentro del menú; como
+  `<button>` no abriría ningún diálogo. El test lo comprueba explícitamente.
+- **La ganancia de verdad, medida:** a **390 px** los tres botones caen en **una fila**, `#tabs` no es
+  más alto que un botón (42 px) y **la cabecera entera mide 70,6 px** — donde antes las quince
+  pestañas envolvían en dos o tres filas. La media query `≤980px` existía solo para eso y se reescribió
+  casi entera.
+- **`test_panel_agentes.js`** necesitó dos líneas (`p.click('#btn-mas')` antes de
+  `p.click('[data-tab="agentes"]')`); los tres tests de galería llaman `openHabitantes` por `evaluate`
+  y **no se tocaron**, tal como se había previsto.
+
+⚠️ **Nota para el próximo test que arranque la página:** `state` es un `const` de **nivel superior**
+(`app.js:8`), **no** una propiedad de `window`. Un `waitForFunction('window.state && …')` no se cumple
+jamás y el test muere por timeout con la página perfectamente sana. Se pregunta por el ámbito léxico:
+`typeof state !== "undefined" && typeof openHabitantes === "function"`.
 
 ---
 
@@ -1664,7 +1939,7 @@ tratar el síntoma. Lo que había que quitar era la declaración de fuente, y es
 
 ---
 
-### ⬜ REQ-RS3 · Crear el pistón de redstone y plantarlo en `/map/test` — ⬜ todo
+### ✅ REQ-RS3 · Crear el pistón de redstone y plantarlo en `/map/test` — ✅ hecho (2026-08-06)
 **Reportado** 2026-08-06 por el dueño: «crear "pistón" redstone y añadirlo a mapa test para probarlo».
 
 **Redactado sin investigar** (regla del dueño para «nuevo ticket»): lo de abajo es lo que sé de haber
@@ -1717,13 +1992,73 @@ redstone; si el dueño lo prefiere ahí, que lo diga — el enunciado dice `test
 - El mundo guardado y releído conserva lo que el pistón movió.
 - Sin regresión en los `test_redstone_*.js` que ya existen.
 
+**Cómo se resolvió** (2026-08-06) — **cero líneas de `app.js` y cero líneas del motor.**
+
+Las dos decisiones que el ticket dejaba abiertas las cerró el dueño: **v1 normal, 1 bloque, 1 celda**
+(no pegajoso, sin retardo) y **la cabeza extendida es un bloque propio** que ocupa la celda de delante.
+
+1. **Los dibujos** — `redstone/make_piezas.py` gana `piston(extendido)` y `piston_cabeza()`, y con
+   ellas tres habitantes: `hab:piston` (3856 voxels), `hab:piston-on` (3072) y `hab:piston-cabeza`
+   (976). El marco de la placa va **rehundido a propósito**: a 4096 voxels el Mundo trata la pieza
+   como bloque de rejilla y la dibuja proyectando 6 caras planas, con lo que se perdería la placa de
+   madera — que es lo único que enseña hacia dónde empuja.
+2. **El comportamiento** — `redstone/redstone-piezas.js` (`piezas-1.3`), en `alRecibirSeñal`. Es la
+   primera pieza que **mueve materia** en vez de combinar capacidades del motor, y por eso la primera
+   que usa ese gancho.
+3. **Dónde empuja se DERIVA, no se tabula.** El vector +X (donde el dibujo pone la placa) se pasa por
+   el mismo `mcRotXZ` que gira la geometría al estampar. Una tabla escrita a mano se desincroniza del
+   dibujo — que es exactamente lo que costó BUG-RS2.
+
+**El hallazgo que gobierna el diseño: el pistón NO puede usar `encendida`.** Con `encendida`, el
+motor cambia el bloque **él** (`redstone.js:448`) *antes* de avisar al callback, así que un pistón que
+no puede extenderse ya se habría pintado abierto — y devolverlo a su sitio no aguanta: escribir la
+celda la re-encola como «estrenada» (`redstone.js:265`), lo que salta el atajo `nivel === antes` y la
+siguiente pasada la vuelve a abrir. Solución: **dos `define()`, uno por material**, con la misma
+configuración. Así `apagada` es cada uno sí mismo, el motor no toca el bloque, y quien decide si se
+extiende es el callback — que es el único que sabe si cabe. Los dos siguen siendo circuito, que es lo
+que impide que el pistón extendido se caiga de la cola y no se recoja jamás.
+
+Detalles que costaron su rato: el motor solo re-malla lo que ha tocado **él** (`redstone.js:421`) y
+aquí las celdas que cambian están una y dos casillas más allá, así que el callback llama a
+`mcRemeshAround` por su cuenta; y como ningún material del snippet se precarga, el cuerpo abierto y la
+cabeza no existen en la paleta hasta la primera extensión de la partida — se cargan ahí y la extensión
+se reintenta sola al llegar (es idempotente, llegar tarde no rompe nada).
+
+**Límite conocido de la v1, no un descuido:** empuja lo que hay en `mc.grid`. Una **estructura
+estampada** (`mc.structures`) ocupa varias celdas y no vive en la rejilla: delante del pistón se ve
+como aire y la cabeza se le mete dentro.
+
+**Verificación** — `node test_redstone_piston.js` (nuevo, **TODO OK**): los cuatro giros empujan hacia
+su frente y el bloque **cambia de celda**; volver a alimentarlo abierto no empuja otra vez; al apagar
+recoge su cabeza y **no** tira de lo que empujó; con dos bloques delante o contra el borde del mundo
+**no se abre** y el cuerpo se queda cerrado. Sin regresión: `antorcha`, `arranque`, `bloque_fuente`,
+`bloques`, `dsl` y `giro`, los seis en verde.
+
+**Plantado** — `node redstone/plantar_piston.js` monta palanca → cable → cable → pistón → ladrillo en
+`/map/test` (**x=70..81, z=45..49**, a la derecha de todo lo que ya había), lo acciona para comprobar
+que empuja de verdad, lo deja en posición de partida y guarda. El script **aborta sin tocar nada** si
+la parcela tiene algo que no sea suyo. Cambios en el mapa: 65 celdas, **ninguna fuera de la parcela**,
+y una nota nueva (el cartel); ninguna nota del dueño borrada.
+
 ---
 
-### ⬜ PERF-MC2 · Sub-chunk culling de estructuras — ⬜ todo
+### ❌ PERF-MC2 · Sub-chunk culling de estructuras — ❌ cerrado 2026-08-07 (sin hacer)
 Partir la malla fina de cada estructura en sub-bloques (p.ej. 16^3 de mundo) con su propio AABB, para que pegado
 a una pared mirando hacia fuera la mayoria de sub-bloques caigan **fuera del frustum** y no se dibujen. Complemento
 del greedy (greedy baja las caras por sub-bloque; el sub-chunk baja cuantos sub-bloques se dibujan). Occlusion
 culling real (la pared tapa el resto) queda como mejora posterior mas compleja.
+
+**❌ Cerrado 2026-08-07 por decisión del dueño, sin hacer.** Se abrió por una sospecha razonable —«pegado
+a una estructura bajan los fps»— que **las medidas posteriores desmintieron dos veces**: aquel caso resultó
+ser la colisión fina (`mcCollides` escaneando el AABB con clave string, coste ∝ `playerScale³`), y el de
+la carga lenta resultó ser la red. Los draw calls de estructuras no han vuelto a aparecer como cuello en
+ninguna medición desde entonces, y esto es trabajo grande: partir la malla, un AABB por sub-bloque y
+tocar el camino que más se ejecuta del motor.
+
+**Qué lo reabriría:** una medida —no una sensación— con `game.perf()` por fases que señale al dibujo de
+estructuras. La regla que ya está escrita en CLAUDE.md aplica entera aquí: fps con **DevTools cerrado**, y
+si `game.voxels` SUBE al acercarse a la pared es geometría sin cullar; si no sube, el cuello es otro y
+este ticket seguiría sin ser la respuesta.
 
 ---
 
@@ -1871,7 +2206,79 @@ dibujo nuevo ya instalado. Falta la confirmación visual del dueño en su mundo.
 
 ---
 
-### ⬜ BUG-ROT1 · `R` y `Shift+R` no alcanzan todas las orientaciones: hay colocaciones imposibles — ⬜ todo
+### ✅ BUG-ESC1 · Al montar en una escalera se conserva el movimiento lateral: cuesta subir y te tira — ✅ resuelto
+
+**Reportado** 2026-08-06 por el dueño: «la escalera, cuando se sube y hay movimiento lateral, este se
+conserva, por lo que es difícil subir por ella; es decir, si subo ladeado a ella sin darle a avanzar o
+moverme, por ella se mueve solo el jugador y tiende a caerse. Solamente entrando muy de frente a ella, o
+tras correcciones, se puede reorientar. **Al montar en la escalera no debería de haber ninguna inercia**».
+
+**Síntomas, tal y como los describe** (sin investigar todavía, esto es lo que hay que reproducir):
+1. Se llega a la escalera con velocidad lateral y esa velocidad **sobrevive al enganche**.
+2. Enganchado y **sin tocar ninguna tecla**, el jugador **se mueve solo** y acaba saliéndose / cayendo.
+3. Solo se sube bien entrando **muy de frente**, o corrigiendo a mano mientras se sube.
+
+**Criterio de aceptación:** en el instante en que el jugador engancha la escalera, la velocidad
+horizontal se anula; sin pulsar nada no se mueve ni un float; y se puede subir entrando **de lado**, no
+solo perpendicular. Sin tocar la física del jugador fuera de la escalera (`test_fisica_navegador.js` y
+`test_parkour_navegador.js` tienen que quedar igual).
+
+**Aún por decidir al abordarlo:** si la inercia se corta **al enganchar** (una vez) o **mientras se está
+enganchado** (cada tick). Lo segundo también quita el poder saltar de una escalera con impulso lateral,
+que puede ser un movimiento que el dueño quiera conservar — hay que preguntárselo o medirlo, no elegirlo
+por defecto.
+
+**La causa no estaba en el código de trepar, sino en QUÉ RAMA de `app.js` corre mientras cuelgas.**
+`aplicarTrepado` deja `mc.onGround = false` (colgado no pisas nada, y así la gravedad no se acumula), y
+`app.js` reparte el mando horizontal justo por ese booleano (`app.js:7433`):
+
+```js
+if (mc.onGround || !mc.airControl) { ... }   // la velocidad se REESCRIBE desde las teclas cada frame
+else { ... }                                 // air-strafe estilo Quake: NO la reescribe, y sin rozamiento
+```
+
+O sea que colgado se entraba **siempre** por la rama de aire, que ni reescribe la velocidad desde las
+teclas ni tiene rozamiento: la velocidad lateral con la que llegabas a la escalera se conservaba entera,
+frame tras frame, y te sacaba de ella sin que tocaras nada. Es exactamente lo reportado, y explica los
+tres síntomas de golpe — incluido el 3, porque entrando de frente no hay componente lateral que conservar.
+
+**El arreglo son dos líneas en el envoltorio de `mcUpdate` del snippet** (`parche_snp_escalera_inercia.py`,
+idempotente): agarrado, se le dice a `orig(dt)` que salga por la rama de **tierra**, y nada más.
+
+```js
+if (agarre && !mc.onGround) mc.onGround = true;
+try { orig(dt); } finally { ... }
+```
+
+Se toca **solo** el rato que dura `orig(dt)`: quien decide el `onGround` de verdad sigue siendo la física,
+y `aplicarTrepado` lo vuelve a poner en `false` justo después. Cero líneas de `app.js`.
+
+**Queda decidida la pregunta que dejó abierta el ticket, y sin tener que elegir:** la inercia se corta
+**mientras se está enganchado** (cada tick, que es lo que quería el dueño: «no debería de haber ninguna
+inercia»), y **aun así se conserva el saltar de lado desde la escalera**, porque con espacio pulsado
+`sondearAgarre()` devuelve `null` → no hay agarre → esto no se ejecuta → el impulso lateral es el que
+marquen A/D en ese momento. Está medido en la sección C del test.
+
+**Verificado** — `test_escalera_inercia.js` (nuevo, navegador de verdad, **11 ok / 0 fallos**). Hacía
+falta navegador: el mundo de juguete de `test_bloques_comportamiento.js` tiene un `mcUpdate` de mentira
+que no mueve en horizontal, y el fallo es justo de la rama horizontal del `mcUpdate` de verdad. Sin
+regresiones en lo que toca la misma envoltura: `test_bloques_comportamiento.js` 388 ok,
+`test_parkour_navegador.js` 18 ok, `test_fisica_navegador.js` 18 ok.
+
+⚠️ **El epsilon del banco de pruebas, que casi da un falso verde entero.** Con el jugador pegado a la
+escalera a `+0,2` clavado, el borde del cuerpo (`MC_HW = 0,3`) cae en el límite de celda exacto y
+`floor(pz + HW)` lo mete **dentro** de la celda de la escalera: el jugador «choca» con la escalera en la
+que se apoya, `mcUpdate` se va a su rama de rescate y **no se mueve nada**. Todas las medidas salían
+`0,000`, incluida la de control. Va con `- 1e-3`, igual que el `Z_PEGADO = 11 - 0.3 - 1e-4` que ya tenía
+`test_bloques_comportamiento.js` con la misma nota.
+
+**Qué lo reabriría:** que el dueño note que ahora **cuesta** salirse de la escalera a propósito (el mando
+de tierra es más pegajoso que el del aire), o que aparezca alguna otra situación de «colgado» —agarres
+futuros, escalada de bordes— donde la rama de tierra dé un movimiento raro.
+
+---
+
+### ✅ BUG-ROT1 · `R` y `Shift+R` no alcanzan todas las orientaciones: hay colocaciones imposibles — ✅ resuelto
 
 **Reportado** 2026-08-06 por el dueño: «el modo "r" de rotar y mayúsculas + "r", con "r" se debería de
 ir rotando la figura en las 6 posiciones posibles, por ejemplo, una losa plana pasaría por las 6 caras
@@ -1886,19 +2293,1594 @@ primera) y `Shift+R` **gira sobre esa cara** (ciclo de 4, en su plano). 6 × 4 =
 **Por qué importa** — no es comodidad: el dueño dice que tal y como está **hay colocaciones que no se
 pueden alcanzar**, o sea que parte del espacio de orientaciones es inaccesible desde el teclado.
 
-**Sin investigar** (política de tickets nuevos). Lo primero al abordarlo es medir **cuántas
-orientaciones distintas alcanzan hoy** `R` y `Shift+R` en el editor y en el Mundo, y compararlo con
-24 — el ticket no afirma todavía cuál de las dos teclas está mal, ni si el límite está en el mando
-(las teclas) o en el modelo (`rot` con solo 4 valores en `mcRotXZ`, que gira **solo en XZ**). Ojo a
-que el giro vive en la clave (`clave@n`) para lo que está en `mc.grid`: ampliar el rango de `rot`
-toca el formato del mundo, no solo el teclado.
+**Medido: eran 16, no 24.** El dueño hizo la cuenta él mismo («6 caras tiene un cubo por 4 posibles
+posiciones/rotaciones por cara 24 en total como maximo podria haber») y tenía razón. El esquema viejo
+componía **dos** cuartos de vuelta, `ori = (giro & 3) | ((vuelco & 3) << 2)`, o sea 4×4 = 16 códigos.
+Y ni siquiera son 16 posturas repartidas: con dos ejes, **`+Y` y `−Y` se llevan 4 giros cada una** y
+las otras cuatro caras se quedan con **2**. De ahí las colocaciones imposibles — una pieza tumbada de
+lado solo se podía poner de dos maneras de las cuatro.
 
-**Verificación esperada** — desde cualquier orientación, `R` seis veces devuelve la pieza a la de
-partida; `Shift+R` cuatro veces también; y las 24 combinaciones son alcanzables y distintas.
+**Falta un tercer cuarto de vuelta, y va ANTES del vuelco** (`roll`, sobre Z). Con `roll ∈ {0,1}` el
+producto es 2×4×4 = 32 combinaciones que dan exactamente **24 rotaciones distintas**.
+
+**La tabla se DERIVA, no se escribe a mano** (`MC_ORI` en `app.js`): se recorren las 64 ternas
+`(roll, tilt, yaw)`, se firma cada una por lo que le hace a los tres vectores base y se descartan las
+repetidas. Salen 24, y salen **en el orden que hacía falta**:
+
+- las **16 primeras** son las `(0, tilt, yaw)` en el mismo orden que el esquema viejo, así que
+  `@0..@15` siguen significando **byte a byte lo mismo** y los mundos ya guardados no se mueven ni un
+  grado. Las 8 nuevas se apenden como `@16..@23` (la clave ya admitía dos dígitos: `/@\d{1,2}$/`).
+- de propina quedan **agrupadas de cuatro en cuatro por cara arriba**, o sea que el gesto que pidió el
+  dueño («"r" para elegir la cara y luego shift+r para elegir el giro dentro de esa cara») sale
+  directo: **`ori = cara*4 + giro`**, sin tabla de traducción intermedia. `MC_ORI_CARA` (también
+  derivada) es solo el rótulo del toast: `arriba · −Z · abajo · +Z · +X · −X`.
+
+**Lo demás que se tocó:**
+
+- `mcOriNorm` / `mcOriParts` sustituyen a los `(rot|0)&15` sueltos que había repartidos por `app.js`;
+  el `&15` recortaba en silencio cualquier código nuevo a una postura vieja.
+- `mcStructGeom` pasa a tener **un solo `mueve(x,y,z)`** con las tres pasadas de `mcRotXZ`, que usan
+  **a la vez** el bucle de voxels y `mcFacePerm` (la permutación de normales de la máscara `caras`).
+  Con dos copias de la composición, la máscara y la geometría se desincronizan a la primera.
+- Las medidas: cada cuarto de vuelta impar intercambia los dos ejes de su plano, así que hay tres
+  intercambios encadenados (`bxR/byR` por `roll`, `bzT` por `tilt`), no dos.
+- `mc.previewRot`/`previewTilt` pasan a llamarse **`mc.previewGiro`/`mc.previewCara`**, que es lo que
+  significan ahora.
+- `data/snippets/mundo-autoarranque.json` **calca** esa composición en dos sitios (`caraEnMundo` y
+  `dimsMundo`, para `pivote:'auto'`), así que se parchea con `parche_snp_rot24.py` — idempotente,
+  porque el dueño lo edita en vivo. Pregunta a `mcOriParts` y se queda el calco viejo de red por si
+  corre sin motor.
+
+**Verificado:**
+
+- `node test_posturas_24.js` (16 ok, sin navegador) — 24 posturas distintas con determinante 1 (nada
+  de espejos), 6 caras × 4 giros, `@0..@15` decodifican igual que antes, `R`×6 y `Shift+R`×4 vuelven
+  al punto de partida, y la huella declarada (`mcOriDims`) cuadra con la real en una caja 3×5×7.
+- `node test_posturas_mundo.js` — en Chromium y con una pieza **asimétrica** de verdad
+  (`flor-amarilla`, 52 voxels finos): `mcStructGeom` hornea **24 geometrías distintas**, las 8 nuevas
+  no repiten ninguna de las 16 viejas, y girar no pierde ni inventa un solo voxel. Lleva guardia
+  anti-falso-verde: si la pieza elegida no distinguiera ya las 16 viejas, el test se cae en vez de
+  dar verde. ⚠️ Se lee `g.bitsAim || g.bits` — la flor es `atravesable` y su `bits` va a ceros a
+  propósito.
+- Sin regresión: `test_atlas_estructuras.js` (píxel a píxel de lo estampado), `test_caras_mundo.js`,
+  `test_caras_mascara.js`, `test_clic_derecho_rejilla.js` y `test_bloques_comportamiento.js` (384 ok,
+  uno de ellos ejercita el snippet ya parcheado).
+
+---
+
+### 🔴 BUG-RS10 · El pistón no empuja estructuras — 🔴 abierto 2026-08-07
+
+**Reportado** 2026-08-07 por el dueño, con dos capturas (`data/tickets/BUG-RS10/01.png` y `02.png`):
+
+> «bug, el pistón no empuja estructuras»
+
+En la captura: un cubo de cristal (`hab:cubo-trans`) plantado justo delante de un pistón, con su cable
+de redstone y su botón al lado. La vista de rayos-X del otro pantallazo enseña `pistón@16` y `cable`
+en las celdas de al lado, o sea que el circuito está montado y reconocido.
+
+**Es el que faltaba de la familia.** El empuje del pistón se ha ido arreglando por tipos de cosa
+empujada, uno por ticket: bloques (funciona), el **jugador** ([BUG-RS9](#-bug-rs9), `mcUnstick`), los
+**agentes articulados** ([BUG-AG1](#-bug-ag1), tres fallos a la vez, más `aturdir` en
+[BUG-AG5](#-bug-ag5)). Las **estructuras finas** son la cuarta familia y no se ha tocado nunca. Vale
+la pena mirar si el pistón las ve siquiera: son la mitad del mundo que no está en `mc.grid`, y ése es
+exactamente el olvido que ya mordió en el diagnóstico del atasco (REQ-DBG2, pasada 2b).
+
+**Actualizado 2026-08-07, tras cerrar [BUG-STR1](#-bug-str1).** Se responde a la mitad de lo que estaba
+sin verificar, y **el caso de la captura ya no ocurre**:
+
+- **El pistón no las ve.** Es la primera de las tres hipótesis, y está escrito en el propio código
+  (`redstone/redstone-piezas.js`, `accionar`): *«empuja lo que hay en `mc.grid` […] una estructura
+  estampada ocupa varias celdas y no vive en la rejilla: delante del pistón se ve como aire y la cabeza
+  se le mete dentro. Límite conocido de la v1»*. No es que no sepa moverlas ni que se quede sin
+  remallar: no llega a mirarlas.
+- **El caso de la captura estaba contaminado por BUG-STR1**, como se sospechaba. `hab:cubo-trans` ya no
+  es una estructura sino una celda de rejilla, y el pistón lo empuja: medido con `sonda_str1_piston.js`
+  (antes `enX4:""`, ahora `enX4:"hab:cubo-trans"`). Si el cubo de cristal era todo lo que el dueño
+  quería mover, **este ticket ya no le afecta**.
+- Lo que queda vivo es lo que de verdad *tiene* que ser una estructura: varias celdas (una sala, un
+  árbol), o una pieza con `caras` sobre un macizo. Ahí sigue sin empujarse.
+
+⚠️ **SIGUE SIN VERIFICAR**: si tiene sentido que las empuje (una estructura tiene origen, giro y AABB
+propios: moverla es escribir en `mc.structures` y remallar, no copiar un id de celda a celda), ni qué
+pasa con una que ocupe varias celdas y solo una esté delante del pistón. **Antes de programar nada hay
+que preguntarle al dueño si esto le sigue molestando**, porque el ejemplo que dio ya está resuelto.
+
+---
+
+### ✅ BUG-STR1 · `hab:cubo-trans` se coloca como estructura fina y no como bloque — ✅ cerrado 2026-08-07
+
+**Reportado** 2026-08-07 por el dueño, con captura de rayos-X (`data/tickets/BUG-STR1/01.png`):
+
+> «¿por qué se pinta "cubo-trans" como estructura y no como bloque? ¿no habíamos dicho que íbamos a
+> usar siempre `setVoxel` para colocar bloques o estructuras salvo que `game.useOldStructBuildCall`
+> fuera `true`?»
+
+En la etiqueta de rayos-X de `269,15,263` pone **`estructura · guardada · hab:cubo-trans`**, mientras
+que todas las de alrededor (`cable`, `piston@16`, `boton@8`) ponen **`bloque · guardada`**. La regla
+que cita existe y está escrita en `CLAUDE.md:826` («válvula por si acaso:
+`game.useOldStructBuildCall = true`, persiste en `localStorage`»), así que el camino por defecto
+debería ser el de `setVoxel`.
+
+**Al abrir el ticket se apuntaron dos lecturas posibles. No era ninguna de las dos.**
+
+1. ~~Se colocó por el camino viejo (fallo de enrutado)~~ — no: la válvula estaba apagada, y la decisión
+   se toma **antes** de que `useOldStructBuildCall` llegue a opinar (`mcPlace` pregunta primero a
+   `mcCabeEnRejilla`, que decía «no cabe» y mandaba a `mcStampStruct`).
+2. ~~Un cubo de cristal **hueco** tiene forma, y lo que tiene forma va a `mc.structures`~~ — tampoco:
+   `data/habitantes/cubo-trans.json` son **4096 voxels**, el 16³ **completo**. De hueco, nada.
+
+**Lo que le echaba del terreno era el ALPHA.** Su color es `#4ab8d924` (α = 0x24 ≈ 14 %). `mcStructCells`
+marca `translucido=true`, y eso apagaba `blockLike` **y** hacía que `mcCabeEnRejilla` devolviera `false`.
+De los 16³ del proyecto es el único con alpha: `agua`, `agua-profunda`, `like-water` y `likelava` son
+todos opacos, por eso nadie se había topado con esto.
+
+**Y el motivo de aquella exclusión era cierto a medias.** La **proyección a las 6 caras del cubo** —que
+era el único camino al terreno cuando se escribió— efectivamente no sirve: `buildTexFaces` hornea el
+atlas con `d[o+3]=255`, tira el alpha, y el shader del terreno solo hace recorte binario, así que el
+cubo saldría **macizo**. Pero entrar en `mc.grid` **ya no obliga a proyectarse**: desde `mc.finoRejilla`
+el mallador emite la geometría de verdad dentro de la malla del chunk, y ese flujo tiene **su propia
+pasada con `BLEND`** (`finoAVbo`/`finoACount`, hermana del `aAlpha`/`vAlpha` de las piezas sueltas). La
+regla se quedó vieja: prohibía el terreno entero cuando lo que no vale es una de sus dos mitades.
+
+**El arreglo.** La condición vivía **copiada en tres sitios** (`mcCabeEnRejilla`, `mcEsFinaEnRejilla` y
+el horneado de `mc.finoRejilla` en `mcBuildPalette`), que es justo por lo que pudo quedarse a medias. Se
+recoge en una **fuente única**, `mcRecFina(rec)`, y los tres la llaman:
+
+| pieza | camino dentro de `mc.grid` |
+|---|---|
+| `blockLike` (16³ macizo **y opaco**) | proyección a 6 caras — fiel y cuesta 6 quads |
+| la piel **no** cubre (una flor, una llama) | geometría real (ya era así) |
+| la piel cubre pero es **translúcida** | **geometría real** ← lo que abre este ticket |
+| la piel cubre y tiene `caras` | sigue **fuera** del terreno: una máscara sobre un macizo enseñaría el otro lado, que es otro problema y no se toca |
+
+`blockLike` **no** cambia: sigue en `false` para el translúcido, porque lo que dice es «la proyección es
+fiel», y no lo es.
+
+**La luz, que era la regresión escondida.** Estampado suelto, el cubo no está en `mc.grid` y la luz del
+cielo le pasaba entera; metido en la rejilla sin más, un techo de cristal habría dejado a oscuras lo de
+debajo — peor que antes. `mcBuildPalette` marca ahora `mc.recorte[id]=1` para **toda** celda que se
+dibuje con geometría fina, que es lo que ya afirmaba `mcTapaCara` por su lado (`mc._geoFina`) y lo que
+lee `mcTablaLuz`. `hueco` no se toca: eso enciende el `discard` del shader para **todo** el terreno, y a
+una celda fina el atlas ni se le mira. La válvula del snippet
+(`game.bloques.define(clave,{luz:'tapa'})`) sigue mandando encima.
+
+**Medido con la misma sonda antes y después** (`sonda_str1_piston.js`, camino entero del dueño: ranura +
+clic derecho, y luego un pistón delante):
+
+| | antes | ahora |
+|---|---|---|
+| `mcCabeEnRejilla('hab:cubo-trans')` | `false` | `true` |
+| clic derecho → ¿queda en `mc.grid`? | no | sí |
+| instancias sueltas creadas (draw calls propios) | 1 | **0** |
+| **el pistón lo empuja** | **no** | **sí** |
+| luz bajo un techo de 13×13 | (no aplicaba: no era bloque) | 13, frente a 8 del opaco |
+
+`test_cubo_translucido.js` nuevo (**33 ok**), con el diagnóstico metido como asertos: que son 4096
+voxels y no una cáscara, que lo que tiene es alpha, que la geometría crece en el lote **translúcido**
+del chunk y no en el opaco (+468 de 468), que **sigue chocando** como un cubo entero, y que `hab:agua` y
+`hab:likelava` no se enteran de nada. Sin regresiones en `test_clic_derecho_rejilla.js`,
+`test_flor_en_rejilla.js`, `test_luz_traspasa.js`, `test_luz_al_estampar.js`,
+`test_luz_incremental_navegador.js`, `test_atlas_estructuras.js`, `test_ficha_material.js`,
+`test_caras_mundo.js`, `test_atravesable.js`, `test_piston_empuja.js` y `test_redstone_piston.js`.
+
+⚠️ **Lo que NO se ha hecho.** Un 16³ translúcido cuesta ahora geometría fina (≈800 vértices por celda
+frente a los 36 de un bloque proyectado): sigue sin costar draw calls, pero un muro largo de cristal
+pesa. Dentro del lote translúcido del chunk no hay ordenación por profundidad, igual que ya pasaba con
+cualquier celda fina con alpha. Y **no** se ha tocado `caras` sobre un macizo, que sigue fuera del
+terreno a propósito.
+
+---
+
+### ✅ BUG-RS9 · El pistón no empuja al jugador: te subes encima de la cabeza — ✅ cerrado 2026-08-07
+
+**Reportado** 2026-08-06 por el dueño, con captura (`data/tickets/BUG-RS9/01.png`):
+
+> «funciona ok, una cosa que no funciona bien con el pistón es que si me pongo como jugador delante
+> de él y lo activo, en lugar de empujarme que es lo que ocurriría en la realidad, me subo encima
+> del pistón extendido»
+
+**Sin investigar** (política de tickets nuevos). El pistón hoy mueve **bloques de `mc.grid`** y nada
+más: `accionar()` mira la celda de delante, y si hay un id lo escribe una celda más allá. El jugador
+no es una celda, así que ni se le consulta ni se le mueve — y como la cabeza aparece **dentro** de
+donde él está, la física lo resuelve como resuelve cualquier bloque que aparece bajo los pies:
+subiéndolo encima. Eso es lo que hay que confirmar antes de decidir el arreglo.
+
+Lo que hay que decidir al abordarlo, porque son cosas distintas y solo la primera es «el bug»:
+
+1. **Que empuje al jugador** una celda en la dirección del pistón (y a la vez a lo que haya detrás
+   de él, o se queda dentro de un bloque).
+2. **Qué pasa si no cabe** — en Minecraft el jugador queda aplastado contra la pared, no se teletransporta.
+3. Si esto vale también para los **agentes articulados**, que es [BUG-AG1](#-bug-ag1): probablemente
+   el gancho sea el mismo, y conviene mirar los dos antes de elegir dónde ponerlo.
+
+**Verificación esperada** — ponerse delante de un pistón, activarlo y acabar **una celda más allá**,
+a la misma altura; con una pared detrás, no atravesarla.
+
+#### Cómo se cerró (2026-08-07)
+
+La causa no estaba en el pistón sino en **quién limpiaba el estropicio**. El pistón escribía la
+cabeza dentro del jugador y se desentendía; el solape lo resolvía la auto-curación de `mcUpdate`, que
+tira de `mcUnstick`, y **`mcUnstick` solo sabe buscar salida HACIA ARRIBA**. El primer hueco de aire
+sobre la cabeza recién extendida es exactamente la cota de montarse encima. O sea: el jugador no
+*trepaba*, lo *desatascaban* hacia arriba. Es el mismo fallo que ya tenía resuelto `mcAgentShove`
+para las embestidas de los agentes, y con el mismo razonamiento: un empujón se resuelve **en la
+dirección del empujón**, no por el hueco más cercano.
+
+`apartar(d, chocabaAntes)` en `redstone/redstone-piezas.js`, **cero líneas de `app.js`**. Tres
+decisiones que se ven en el código:
+
+- **Se llama DESPUÉS de escribir los bloques**, no antes. Así no hay que saber ni la caja del jugador
+  ni la forma de la cabeza ni la escala: se le pregunta a `mcCollides`, que ya sabe las tres cosas.
+  Antes de escribir, las celdas barridas son aire y no habría contra qué chocar.
+- **`chocabaAntes`** se mide antes de tocar nada: si el jugador ya venía embutido en algo, no lo ha
+  metido ahí el pistón y no le toca a él sacarlo. Sin esta guarda, cualquier pistón del mundo se
+  convertía en un desatascador a distancia.
+- **Si no cabe, no se mueve** (punto 2 del ticket): se queda donde está y ya lo desatascará
+  `mcUpdate`. Colarlo dentro de la pared de enfrente es peor — de ahí no se sale andando.
+
+El tope del barrido escala con `mc.scale`: un jugador grande es más ancho que su celda y no le basta
+con desplazarse el bloque que se desplaza la cabeza.
+
+**Verificado** — `node test_piston_empuja.js` (nuevo): **TODO OK**. Contra el código anterior da
+**3 FALLO(S)** con exactamente el síntoma del ticket: `en reposo=[15.5, 16.938, 14.5]` — se sube casi
+un bloque (`Δy=0.938`) y no avanza nada (`Δx=0`). El test no se cree el tramo A solo: **B** comprueba
+que a un jugador que está lejos no se le mueve *ni un float* (si no, sería un empujón ciego) y **C**
+que un pistón mirando hacia arriba **sí** le levanta una celda, que eso no es el bug sino un pistón.
+`node redstone/plantar_piston.js` sigue en **TODO OK**.
+
+**Sigue pendiente**: lo mismo para los agentes articulados, que es la otra mitad de
+[BUG-AG1](#-bug-ag1). El sitio ya está: `apartar()` es donde entrará.
+
+---
+
+### ✅ BUG-AG1 · Los agentes articulados no interactúan con el redstone — ✅ cerrado 2026-08-07
+
+**Reportado** 2026-08-06 por el dueño, en el mismo mensaje que [BUG-RS9](#-bug-rs9) (misma captura),
+con una corrección suya inmediatamente después — **«quería decir agentes articulados, no
+automatizados»**:
+
+> «los agentes [articulados] no se ven afectados por los pistones y deberían y tampoco pueden
+> presionar placas de redstone»
+
+**Sin investigar** (política de tickets nuevos). Son **dos** capacidades que hoy solo tiene el
+jugador, y conviene medir si es un único gancho que falta o dos:
+
+- **el pistón los empuja** — hoy no empuja ni al jugador ([BUG-RS9](#-bug-rs9)), así que este ticket
+  puede quedar reducido a «que el arreglo de RS9 valga también para los agentes». Mirar los dos juntos.
+- **pisar una placa** — `alPisar` (v1.29 de `game.bloques`) se dispara al **entrar en la celda**, y
+  quien lo dispara es el recorrido del **jugador**. Si el agente se mueve por otro camino, nunca pasa
+  por ahí.
+
+⚠️ Hipótesis que hay que descartar la primera, porque haría que este ticket y
+[BUG-AG2](#-bug-ag2) fueran **el mismo fallo**: si el agente anda 16 voxels por encima —o sea *sobre*
+la celda de la placa en vez de *dentro* de ella—, jamás entra en la celda y `alPisar` no puede
+dispararse aunque el gancho esté bien puesto. Medir eso antes de tocar nada.
+
+**Verificación esperada** — un agente que cruza una placa la enciende, y un pistón que se extiende
+contra un agente lo mueve una celda.
+
+#### Cómo se cerró (2026-08-07)
+
+La ⚠️ de arriba se midió, y la respuesta fue **«a medias»**, que es lo interesante: arreglar
+[BUG-AG2](#-bug-ag2) era **necesario pero no suficiente**. Con el agente ya a la cota buena, la placa
+seguía sin encenderse. Eran **tres** cosas, no una:
+
+1. **La altura** — [BUG-AG2](#-bug-ag2). Mientras el agente flotara 16 voxels sobre la placa, no había
+   nada más que discutir.
+2. **La pregunta equivocada.** `sueloDe()` mira medio voxel fino **bajo** la caja del bicho: lo que le
+   *sostiene*. Una placa de presión no es eso — es un bloque `atravesable` **dentro** del cual te
+   quedas de pie, así que mirando solo bajo los pies se ve la losa de debajo y la placa no salta
+   jamás. El jugador ya tenía las **dos** preguntas (`pieEn` + `pieDentro`); el agente solo la
+   primera. Se le añadió `dentroDe()`, con el mismo flanco por celda+clave. Es la regla de Minecraft:
+   *la placa es el bloque que OCUPAS, no el que te sostiene*.
+3. **La válvula estaba al revés.** `fisica.placas` venía apagada por defecto con este aviso: «el
+   alPisar que hay escrito está pensado para el jugador (hace `game.tp`), así que un zombie pisando
+   una placa te teletransportaría A TI. Se enciende con `placas:true` **a sabiendas de que el alPisar
+   sepa quién pisa**». La premisa había caducado (el `alPisar` de `hab:placa` ya llama a
+   `game.redstone.encender`), y la condición que el propio aviso ponía es justo lo que se cumplió: el
+   payload lleva ahora `quien` (`'jugador'` | `'agente'`) y `agente:{id,nombre}`. Así que se invierte:
+   **encendida por defecto** —una placa que solo notas tú no es una placa— y `fisica:{placas:false}`
+   la apaga.
+
+Y el **pistón** (`apartarAgentes` en `redstone/redstone-piezas.js`) resultó **no** ser el mismo caso
+que el jugador, contra lo que decía este ticket. Con `mc.pos` bastaba `mcCollides`; la caja de un
+agente son estructuras estampadas y su colisión es asunto de la librería de esqueletos, que no
+asomaba nada por fuera. Se añadieron a la librería las **dos capacidades generales** que le faltaban
+—`game.esqueletos.enCaja(x0,y0,z0,x1,y1,z1)` y `game.esqueletos.desplazar(rig,dx,dy,dz)`— y la
+**política** (hasta dónde barrer y qué hacer si no cabe) se quedó en la pieza. Un
+`game.esqueletos.empujaPiston()` habría metido el redstone dentro del motor de agentes.
+
+#### ⚠️ La mitad del pistón se cerró antes de tiempo — reabierta y cerrada de verdad (2026-08-07)
+
+El dueño volvió con el mismo síntoma **después** de darlo por cerrado:
+
+> «al agente articulado le pasa lo mismo con el pistón que le pasaba al jugador, en lugar de
+> empujarlo se sube arriba y debería de ser empujado»
+
+Tenía razón, y el fallo era **del test**, no suyo. El §D de `test_piston_empuja.js` le ponía al bicho
+`rig.G.velocidad = 0` «para que su propio desplazamiento no contaminara la medida». Eso apaga el paso
+por frame del rig, y con él `asentar()` — que es **exactamente** la función que trepa. El tramo medía
+un agente congelado y salía verde mientras el Mundo de verdad hacía otra cosa. Es la lección que este
+repo ya tenía escrita: *el mundo de juguete miente*.
+
+Con el agente **andando de verdad**, el código que se había dado por bueno daba **3 FALLO(S)** con el
+síntoma literal del dueño: `Δz=0.063` (un solo 1/16) y un pico de cota **17.765** partiendo de 16.
+
+Dos causas, encadenadas:
+
+1. **`desplazar` reasentaba.** Iba por `moverRaiz` → `asentar`, y `asentar` sube un bloque entero para
+   salvar escalones: el primer pasito ya montaba al agente **encima** de la cabeza recién salida. Es
+   el mismo desenlace del [BUG-RS9](#-bug-rs9) con el jugador (`mcUnstick`, que solo busca hacia
+   arriba) por el mismo motivo. Ahora `desplazar` **traslada la raíz y nada más**: un empujón no es un
+   paso, no trepa. Volver a pisar suelo es cosa de su gravedad, el frame siguiente.
+2. **El barrido de la pieza estaba mal planteado.** Encadenaba pasitos de 1/16 exigiendo que cada uno
+   cupiera; pero cuando `apartarAgentes` corre, la cabeza **ya está escrita** y el agente ya está
+   embutido en ella, así que el primer pasito tampoco cabe y el bucle se rendía al primer intento.
+   Ahora prueba **distancias crecientes desde donde está** y acepta el primer hueco, que es lo que
+   `apartarJugador` hacía desde el principio dos funciones más arriba.
+
+De paso, el §D tenía **dos artefactos de banco** que fabricaban un pico falso de 17.765 (`alto=0.88`,
+o sea un **brinco** suyo, no una aupada): el jugador aparcado justo al final del paseo del agente, y
+el objetivo de marcha puesto en la propia celda de la cabeza — con lo que tras el empujón volvía sobre
+sus pasos y se subía al bloque como quien sube un escalón. Que el pico saliera **con el mismo float**
+incluso cuando el pistón no le tocaba fue lo que los delató.
+
+Nada de esto toca `app.js`. Reparto: comportamiento por material y física de agentes → snippet
+(`parche_snp_agente_pisa.py`, `parche_snp_cuerpo_real.py`, `parche_snp_agente_empujado.py`, los tres
+idempotentes); la pieza de redstone → `redstone/redstone-piezas.js`.
+
+**Verificado**
+
+- `node test_agente_pisa_placa.js` (nuevo): **TODO OK**. Mide un **circuito**, no un contador — un
+  zombie andando enciende `hab:placa`, la señal llega al `hab:cable` de al lado con `saca=15`, el
+  pulso la suelta sola, y con `fisica:{placas:false}` el mismo bicho **no** la enciende. Contra el
+  código anterior da **4 FALLO(S)**.
+- `node test_piston_empuja.js` §D (nuevo): **TODO OK**, ya con el agente **andando de verdad** (ver
+  arriba: la primera versión lo congelaba y por eso dio un verde falso). El pistón lo aparta en el
+  mismo acto de abrirse, `Δz=0.813`, sale de la celda de la cabeza y su cota **no sube ni un
+  instante** (pico 16, igual que antes de accionar). Contra el código anterior, **3 FALLO(S)**:
+  `Δz=0.063`, pico **17.765** y el bicho todavía dentro de la celda.
+- `node test_bloques_comportamiento.js`: **388 ok, 0 fallos** (§18 pasó a exigir lo contrario de lo
+  que exigía: que el agente **sí** dispare `alPisar`, una vez por celda, con `quien==='agente'`).
+- `node test_parkour_navegador.js` y `node test_fisica_navegador.js`: **18 ok, 0 fallos** cada uno.
+
+⚠️ `node test_esqueleto_navegador.js` sigue con **3 FALLO** en `/map/agents`
+(`mcSerialize`/`quitar()`/«el mundo queda píxel a píxel como estaba»). Son **anteriores** a todo
+esto: comprobado volviendo el snippet a la copia previa al parche y obteniendo los tres idénticos.
+Sin ticket propio todavía.
+
+---
+
+### ✅ BUG-AG2 · Los agentes articulados no respetan el cuerpo real de los bloques — ✅ cerrado 2026-08-07
+
+**Reportado** 2026-08-06 por el dueño, en el mismo mensaje que [BUG-RS9](#-bug-rs9):
+
+> «tampoco respetan la altura de los componentes, si una placa de redstone tiene altura 1 voxel
+> suben 16, no respetan el cuerpo real de los bloques»
+
+**Sin investigar** (política de tickets nuevos). El dueño lo dice con números: la placa mide **1
+voxel** de alto y el agente sube **16** — una celda entera. O sea que el agente trata la celda como
+un cubo lleno en vez de preguntar por la geometría fina, que es justo la distinción que el motor ya
+sabe hacer para el jugador (`bits` = colisión fina, y `mcCabeEnRejilla`/`mcEsFinaEnRejilla` para
+saber si una pieza es fina dentro de su celda).
+
+Sin abrir el código todavía, lo que hay que medir primero es **por dónde anda un agente**: si su
+movimiento pregunta a la misma colisión que el jugador (`mcCollides`) o si lleva la suya, porque eso
+decide si el arreglo es un ajuste o un cambio de camino.
+
+Ver también la ⚠️ de [BUG-AG1](#-bug-ag1): puede que las placas no se pisen **porque** el agente va
+16 voxels demasiado alto, en cuyo caso los dos tickets se cierran con un solo arreglo.
+
+**Verificación esperada** — un agente cruzando una placa de 1 voxel sube 1 voxel, no 16; y lo mismo
+con el cable, que es igual de fino.
+
+#### Cómo se cerró (2026-08-07)
+
+La sospecha del ticket era exacta, y la sonda (`sonda_ag2.js`) la confirmó antes de tocar nada: la
+placa mide `fdim=[14,2,14]` sobre 16, y el agente quedaba a **16** donde el jugador queda a **15**.
+
+Dos sitios, los dos en el snippet (`parche_snp_cuerpo_real.py`), **cero líneas de `app.js`**:
+
+- **`asentar()`** — `mcSurfaceNear` devuelve la altura en **celdas enteras**, y plantar los pies en el
+  techo de la celda es exactamente el «suben 16». Se le añadió una bajada en pasos de **1/16** hasta
+  apoyarlo donde de verdad hay materia. Con una guarda que importa: **solo si la celda de apoyo se
+  dibuja fina** (`celdaFina()`, que mira `mc._geoFina[id].bits`). Sobre un macizo el primer paso ya
+  chocaría, así que ni se entra — andar por terreno normal no cambia ni un voxel ni cuesta un sondeo
+  de más.
+- **`chocaTerreno()`** — dejaba de tratar las celdas como cubos enteros y sondea `bits` en 1/16,
+  calcado de `mcTerrenoChoca`. Sin esto lo anterior no serviría: la bajada fina la frena la propia
+  colisión, y si la colisión sigue siendo un cubo, el primer escalón ya choca.
+
+**Verificado** — `node test_agente_cuerpo_real.js` (nuevo): **TODO OK**. Sobre suelo llano el pie
+queda en **15** (lo mismo que el jugador) y sobre la placa en **15.125**, que son exactos 2/16 — la
+altura real de la pieza, no la de su celda. Contra el código anterior: **4 FALLO(S)** con `pie=16`,
+el número del ticket. `node test_parkour_navegador.js` sigue en **18 ok, 0 fallos**, que es lo que
+garantiza que la bajada fina no ha aflojado el andar de siempre.
+
+Y sí, [BUG-AG1](#-bug-ag1) hacía falta esto — pero **no bastaba**: la placa seguía sin encenderse
+después. Ver ahí por qué.
+
+---
+
+### ✅ BUG-AG3 · Un agente sin la capacidad «te persigue» sale roto — ✅ resuelto
+
+**Reportado** 2026-08-07 por el dueño, con captura (`data/tickets/BUG-AG3/01.png`):
+
+> «si se crea un agente articulado sin la capacidad "te persigue" no se renderiza correctamente,
+> ademas se quedan las piezas sueltas, no es empujable, no te mira, etc. parece roto»
+
+En la captura: la cabeza flotando muy por encima, el torso y **un brazo suelto** al lado, y una pierna
+sola apoyada en el suelo. No es un rig mal proporcionado: es un rig **sin montar** — cada pieza en el
+sitio donde se estampó, sin postura ni raíz común.
+
+**Sin investigar** (política de tickets nuevos). Lo único que apunta el enunciado, y que hay que
+comprobar antes que nada: el dueño lista **cuatro** síntomas (colocación, mirada, empuje, «parece
+roto») y todos son cosas que pasan **por frame**. La sospecha barata es que el paso por frame del rig
+—el que coloca las piezas, lo asienta en el suelo y mueve la cabeza— esté colgando de la capacidad de
+perseguir en vez de correr siempre, y que sin ella el agente no dé nunca un paso. Pero eso es una
+hipótesis, no un hallazgo: hay que medirlo.
+
+**Lo primero a medir** — crear un agente con y sin la capacidad y comparar, en los dos, si el rig
+llega a tener `_sig`/`cuerpo`, si `esqueletosPaso` lo visita, y si `asentar()` llega a correr. Sin ese
+antes/después no se sabe si falta el paso entero o solo la parte de la mirada.
+
+**Pista caída encima** (2026-08-07, sin buscarla: apareció al ojear `crearEsqueleto` para
+[REQ-AGESC1](#-req-agesc1); **no verificada**). Ese trozo del snippet tiene **tres** salidas que hacen
+`quitarEsqueleto(rig); return null;` cuando falta o no cuadra el `seguir` —`def.seguir === false ||
+null`, `!rig.G`, y el caso `porClave`— y las tres ocurren **antes** de la línea que le pone `_sig` a
+la raíz. Un agente que sale por ahí nunca llega a montarse: las piezas ya están estampadas y se
+quedan donde cayeron, sin postura y sin raíz, que es exactamente lo de la captura. Habría que mirar
+si `quitarEsqueleto` las desestampa de verdad en ese punto. Y el aviso va por `console.warn`, o sea
+invisible en el móvil: de ahí el «parece roto» en vez de «me ha dicho que le falta `seguir`».
+
+**Verificación esperada** — un test de navegador que cree un agente **sin** «te persigue» y compruebe
+que las piezas quedan pegadas al rig, que se apoya en el suelo, que `game.esqueletos.empujar()` lo
+mueve y que mira al jugador. Hoy debe fallar.
+
+**Medido antes de tocar nada** (dos sondas de navegador en `/map/test` con el documento del dueño,
+`data/agentes/personaje-1.json`). La pista de arriba era **media verdad**, y la otra media es lo que
+de verdad rompía la pantalla:
+
+- `seguir` **ausente** no falla: se planta un agente entero (7 piezas, `G`, `_sig`). O sea que el
+  ticket es solo del caso `seguir: false` explícito, no de «un documento al que le falta la clave».
+- `seguir: false` sí sale por `quitarEsqueleto(rig); return null;` … **y el desestampado tiene fuga**:
+  de las 7 piezas solo retiró **1**. Las otras 6 se quedaron en el mundo con `efimera:true` y
+  `_rig:null` — visibles, sin postura y sin nadie que las anime. Es la captura, clavada.
+
+**La fuga (el fallo de fondo, que no era de este ticket).** `quitarEsqueleto` borra por **referencia**
+(`mc.structures.indexOf(s) >= 0`), y durante el estampado salta un `mcRestampAll` — lo dispara la
+pieza que hace crecer el atlas; en la sonda, `hab:antorcha`. `app.js` **no reutiliza** las instancias
+al restampar: las **sustituye** por otras nuevas. Así que `parte.s` apuntaba a objetos que ya no
+estaban en `mc.structures`, `indexOf` daba `-1` y esas piezas **se saltaban en silencio**. Solo
+sobrevivía la última estampada, la única posterior al restampado. Para esto ya existía `readquirir()`,
+pero solo lo llamaba `esqueletosPaso`. ⚠️ **Esto le pasaba a cualquier `game.esqueletos.quitar()`
+posterior a un restampado**, no solo a este ticket; aquí se veía porque el rig se quita a los 0 ms de
+nacer.
+
+**La negativa (la decisión de diseño).** Se ha ido por donde apuntaba la verificación del ticket, que
+pedía un agente que **funcione** sin perseguir, no un fallo más limpio: apagar «te persigue» ahora
+planta **una estatua que te mira**. `G.quieto` reusa el estado que ya existía para «te he perdido de
+vista» (`g.por = 1`): postura de reposo y ni un paso, sin un modo de andar nuevo. Mirar y empujar son
+capacidades **aparte** (`mirar` por pieza, `empuje` por documento) y funcionaban solas desde siempre —
+lo único que se lo impedía era que el rig no llegara a existir.
+
+⚠️ **`asentar()` solo corre cuando la pieza SE MUEVE** (vive dentro del `if (vd >= 1e-4)` de
+`pasoSeguir`), así que un agente que no anda nunca tocaría el suelo: se quedaría flotando donde lo
+plantaste. El modo quieto lo llama a mano. Es la misma trampa que ya está anotada en CLAUDE.md sobre
+congelar agentes en los tests con `rig.G.velocidad = 0`.
+
+Todo en `parche_snp_agente_sin_seguir.py` (4 costuras, idempotente, todo-o-nada: comprueba los cuatro
+anclajes antes de escribir una letra). **Ni una línea de `app.js`.**
+
+**Verificado** — `test_agente_sin_seguir.js` (nuevo, navegador de verdad, **16 ok / 0 fallos**): las 7
+piezas pegadas al rig, se planta 6 bloques en el aire y **los pies acaban en la cara del terreno**
+(`cuerpo[1] + g.y == suelo + 1` — `asentar` apoya la caja del cuerpo, no la celda de la raíz, que es
+el torso y va a media altura), con el jugador al lado no da un paso, la cabeza gira 140° al pasar el
+jugador de un lado al otro, `empujar()` lo mueve, y `quitar()` devuelve el mundo a sus 75 estructuras.
+La sección **E** es el anti-falso-verde que hacía falta: el **mismo** documento **con** «te persigue»
+sí se echa encima (2,31 bloques), o sea que el «no se movió» de B no es un rig muerto. Sin regresiones:
+`test_esqueleto_navegador.js` 15 ok, `test_agentes_api.js` 30 ok, `test_bloques_comportamiento.js`
+388 ok, más `test_agente_cuerpo_real.js` / `test_agente_aturdido.js` / `test_agente_pisa_placa.js` /
+`test_escala_agente.js`.
+
+**Lo que NO se ha hecho, a propósito:** el cuerpo de un agente quieto **no gira** hacia ti (línea
+`if (g.por !== 1 && hay)` de `esqueletosPaso`); solo le sigue la cabeza. Girarse entero es del que
+persigue. Si el dueño lo quiere, es una línea — pero es una decisión suya, no un fallo.
+
+**Qué lo reabriría:** que el dueño espere que una estatua se gire entera hacia él; o que aparezca una
+capacidad más que hoy siga colgando de `seguir` sin que se haya notado (mirar y empujar ya no lo
+están).
+
+---
+
+### ✅ BUG-AG4 · Solo el torso de un agente es sólido; la cabeza se traspasa — ✅ hecho
+
+**Reportado** 2026-08-07 por el dueño:
+
+> «comprueba de paso también porque puedo subirme al torso de un agente pero no su cabeza que
+> parecería sólida pero no, la traspasa subirme encima y caigo en el torso»
+
+**Causa confirmada** (salió al medir la solidez para [REQ-AGESC1](#-req-agesc1), no buscándola): de
+las 6 piezas del zombie vivo, **solo la raíz** (el torso) tiene `_sig` puesto; `cabeza`, `brazo izq`,
+`brazo der`, `pierna izq` y `pierna der` dan `tieneSig: false` y `solidoEnSuCentro: false`. La
+solidez de un rig sale del envoltorio de `mcFineBoxHit` del snippet, que solo mira las piezas
+**desplazadas** (`_sig`), y el ancla de las que no son raíz va con `bits` a ceros por `sinChoque`.
+O sea que **todo lo que no es el torso es un fantasma**, no solo la cabeza — es el límite «el zombie
+choca por su torso» de CLAUDE.md, que el dueño se encuentra como un fallo al subírsele encima.
+
+**Hecho.** Se ha tomado el camino de fondo, no el barato: **la solidez sigue la MATRIZ**. La duda que
+dejaba el ticket —si las extremidades deben chocar, cuando el rig las **gira** y los envoltorios solo
+trasladaban— se resuelve haciendo que el sondeo entre en coordenadas de la pieza en vez de pedirle a
+la caja que persiga al dibujo. Todo en `parche_snp_solidez_piezas.py` (**10 costuras**, idempotente),
+ni una línea de `app.js`:
+
+- `comoSeMueve(s)` clasifica cada estructura en **0 / 1 / 2**: quieta, desplazada (el camino de
+  siempre, byte a byte) o **posada por matriz**. Solo el 2 es nuevo, así que lo que ya funcionaba no
+  cambia de rama.
+- Para el 2, el punto del mundo baja a coordenadas locales con la **traspuesta** de la parte 3×3 de
+  `s.model` (es una rotación, así que traspuesta = inversa y no hace falta invertir nada) y luego se
+  divide por la escala. La caja se redondea **hacia fuera** (`floor` por abajo, `ceil-1` por arriba)
+  para no perder voxeles de borde al girar.
+- **Dos contadores, no uno** (`nDesplazados` y `nPosadas`): son dos caminos de código distintos y el
+  atajo «no hay nada que mirar» de `envBox` tiene que apagarse solo cuando **ninguno** de los dos
+  tiene inquilinos. `nPosadas` se pone a 0 al principio de `esqueletosPaso`, o se queda clavado
+  cuando se retira el último agente.
+- **Válvula de escape** en los dos sentidos (§ «defectos automáticos, no opt-in»): `solidez:'raiz'`
+  en el documento del agente vuelve al comportamiento viejo, solo el torso.
+
+⚠️ Este parche va **DESPUÉS** de `parche_snp_escala_agente.py` (sus anclas cuentan con el `E = s.esc`
+que aquél mete en el bucle), y por eso aquél estrenó un 4º elemento **MARCA** en sus tuplas: reescribir
+un bloque desincronizaba la comprobación de idempotencia del otro. Los dos convergen: en la segunda
+vuelta ambos dicen «nada que hacer».
+
+**Verificado** — `test_solidez_piezas.js` nuevo, en verde. No sondea el centro de cada pieza como
+decía este ticket: eso da **verdes falsos**, porque el ancla de un brazo cae dentro de la caja dibujada
+del **torso** y `mcFineBoxHit` solo contesta «¿hay algo sólido aquí?». La aserción buena es un barrido
+completo de 37³ que exige que **todo punto sólido caiga dentro de la caja dibujada de alguna pieza**:
+`426 puntos sólidos de 50653`, **`0 huérfanos`**. Se comprobó que es un guardián real revirtiendo el
+arreglo: **5 fallos**. Más 40 sondas de terreno idénticas antes y después, y la válvula probada.
+
+**Efecto colateral conocido, no causado por esto:** `test_esqueleto_navegador.js` da 3 fallos en
+`/map/agents` (estructuras de rig/efímeras que se quedan). Se verificó corriéndolo contra el snippet
+**anterior** al parche: los mismos 3. Es previo; queda por abrir como ticket aparte.
+
+---
+
+### ✅ BUG-AG5 · El agente anda contra el pistón que lo empuja — ✅ hecho
+
+**Reportado** 2026-08-07 por el dueño:
+
+> «cuando un agente es empujado por el pistón redstone, si el agente sigue avanzando en dirección al
+> pistón acaba ganando el movimiento del agente sobre el empuje del pistón, por lo que si por ejemplo
+> tenía que desplazarlo 16 al final del movimiento puede que no llegue a ese valor o se suba encima
+> del pistón abierto. Lo ideal es que al ser empujado el agente por el pistón el agente se quede unos
+> instantes, por ejemplo un segundo, en "shock", sin moverse, de forma que le dé tiempo al pistón
+> empujarle sin que el agente vaya en contra de su movimiento»
+
+Dos síntomas del mismo choque de dos cosas que mueven al mismo cuerpo en el mismo frame: el
+desplazamiento **se queda corto** (el agente recupera terreno andando) y, en el peor caso, **acaba
+encima de la cabeza extendida** — que es el mismo desenlace que BUG-RS9 le daba al jugador, aunque
+aquí por otro camino (allí era `mcUnstick`; aquí el agente se lo gana andando).
+
+**La decisión que quedaba abierta —dónde vive el «shock»— se cerró como se apuntaba:** es una
+**capacidad** de la librería, `game.esqueletos.aturdir(rig, segundos)`, y la **política** se queda en
+la pieza. El pistón llama a `aturdir` justo después de `desplazar`, **también si no cupo** (ahí es
+cuando más falta hace: si no, se pasa el rato empotrándose contra la pared de enfrente). Lo contrario
+—que `desplazar` aturdiera solo— rompería su contrato de primitivo de un solo tiro y metería una
+regla del pistón dentro del motor de agentes (§0). Todo en `parche_snp_aturdir.py` (**6 costuras**,
+idempotente, independiente de los otros dos parches) más `redstone/redstone-piezas.js`; ni una línea
+de `app.js`.
+
+⚠️ **El shock NO se implementa saltándose `pasoSeguir`.** Esa función es *además* quien hace la cuenta
+de `nDesplazados` que mantiene vivas las envolturas de colisión: saltársela volvería fantasma al
+agente justo en el frame en que lo están empujando. Se la llama con **`dt = 0`** — el avance sale
+exactamente 0, la cuenta se hace, y `g.por`/`g.pide` se siguen actualizando (te ve igual, solo que no
+se mueve). Regalo: las piernas se paran solas, porque el ciclo de andar avanza con la **distancia
+recorrida** y no con el reloj. La gravedad, el bote, el patinaje y el golpe (`rig.mov`) siguen
+corriendo con el `dt` de verdad; un shock que apagara la gravedad dejaría al bicho flotando si lo
+empujan sobre un borde.
+
+**Válvulas en los dos sentidos:** `game.redstone.shockPiston = 0` apaga el shock del pistón (y `2` lo
+alarga) en vivo desde la consola; `aturdir(rig, 0)` despierta a uno ya aturdido; y `lista()` estrena
+columna `shock`, que sin ella «no anda» y «no puede llegar» se leen igual en la tabla. El golpe del
+clic izquierdo **no** aturde: eso no lo pidió nadie y cambiaría cómo se siente pegarle.
+
+**Verificado** — `test_agente_aturdido.js` nuevo, en verde. Lo que impide el falso verde es el tramo
+**C**, que repite el pase con `shockPiston = 0`: sin shock el agente acaba **dos bloques más atrás y
+subido a la cabeza** (`dy = 2`). Ojo con **cómo** se mide, que costó dos intentos: los tres pases
+entran **andando** hasta apoyarse en el pistón (el pistón es de dos de alto a propósito, si no se le
+sube como quien sube un escalón, que es conducta correcta) y se comparan las posiciones **finales**,
+no los deltas — el bicho se planta asintóticamente y para donde para (~0,1 de dispersión), así que
+restar deltas de sitios distintos daba 0,5 contra 0,94 sin que hubiera ningún fallo detrás.
+
+Y la medida se toma **dentro de la ventana de shock**, no «al final de todo»: pasado el segundo el
+agente vuelve a caminar contra la cabeza ya extendida y se sube a ella, pero eso es un escalón de un
+bloque subido andando, que es conducta correcta del agente y no este ticket. Lo que el ticket pide es
+que el **empujón se complete**.
+
+---
+
+### ✅ BUG-AG7 · Te subes solo a los brazos de un agente; apagar el «unstick» automático — ✅ hecho
+
+**Reportado** 2026-08-07 por el dueño, justo después de cerrar [BUG-AG4](#-bug-ag4):
+
+> «algo raro pasa ahora con los brazos de un agente articulado cuando impactas con ellos, podría ser
+> que el jugador se quede trabado, el caso es que se sube automáticamente a sus brazos si está cerca,
+> se parece a cuando el jugador se queda trabado en una estructura que sale directamente a la
+> superficie; estaría bien deshabilitar el "unstuck" automático, que sea un `game.autoUnstuck = false`
+> por defecto, si hay que hacerlo a mano creo recordar que existía la tecla "u", así evitamos este
+> problema de forma fácil»
+
+**Sin investigar** (política de tickets nuevos). Lo que ya se sabe sin mirar nada:
+
+- Es casi seguro **una secuela de BUG-AG4**: hasta hace un rato los brazos eran fantasmas y ahora son
+  sólidos, así que rozar uno te embute y `mcUnstick` —que **solo sabe buscar salida hacia arriba**— te
+  planta encima. Es el mismo mecanismo exacto del [BUG-RS9](#-bug-rs9) con la cabeza del pistón.
+- Los dos datos del enunciado están **comprobados**: la **tecla `u`** existe (`mcForceUnstick`, avisa
+  con «Desatascado») y **`game.autoUnstuck` no existe** todavía, así que hay que crearlo.
+- Lo que habrá que decidir antes de escribir: `mcUnstick()` se llama desde **muchos** sitios, y solo
+  uno es «automático» (la auto-curación por frame de `mcUpdate`). Los otros son one-shot deliberados
+  (teletransporte, estampar, cambiar la escala). El interruptor debería apagar el primero **y no** los
+  otros, o teletransportarse dentro de una pared dejaría de funcionar.
+- Y hay una tercera vía ya escrita para este mismo problema: `mcAgentShove`, que aparta en la
+  **dirección del empujón** en vez de hacia arriba. Puede que lo que falle sea que a los brazos no les
+  llega, no que sobre el unstick.
+
+**El dueño dijo «hazlo ya y vemos cómo manejar más tarde lo de las paredes», y que el nombre fuera
+`Unstick` y no `Unstuck`** (que es el de la función que ya existía, `mcUnstick`).
+
+**Hecho.** `game.autoUnstick`, **`false` por defecto** y persistido en `localStorage`. Apaga **solo**
+la auto-curación por frame de `mcUpdate`. Tres decisiones que conviene no desandar sin querer:
+
+- **`mcAgentShove` sigue corriendo siempre**, con el interruptor puesto o quitado. Aparta en
+  **horizontal**, o sea que no aúpa a nadie: meterlo en el mismo interruptor habría desandado el
+  arreglo de la serpiente (te ensartaba y aparecías montado encima) sin que nadie lo pidiera.
+- **Los `mcUnstick()` de UN SOLO TIRO no se tocan** — teletransportarse, estampar, cambiar de escala,
+  re-mallar. Son deliberados y no te aúpan por sorpresa; apagarlos dejaría `game.tp` dentro de una
+  pared sin salida. Eso es lo que queda pendiente de decidir («lo de las paredes»).
+- **Aviso una sola vez por atasco**, con toast: *«Atascado · pulsa U para salir»*. Sin él, «no me
+  puedo mover» se lee como el juego colgado, porque la tecla que lo arregla no se adivina. Una vez por
+  atasco y no por frame (`mc._atascado`, que se rearma al quedar libre).
+
+La tecla **U** y `game.unstick()` ya existían (`mcForceUnstick`: sube, y si no cabe te manda al spawn);
+no hubo que crear nada ahí. Sale además en `game.dumpVars()`, con el resto de los tunables.
+
+**Verificado** — `test_auto_unstick.js` nuevo, en verde. Lo que impide el falso verde es el tramo **D**:
+con el interruptor **encendido** la conducta de siempre sigue intacta (16 → 19), así que «no te sube»
+no lo puede cumplir un `mcUpdate` roto. Los otros: el defecto es `false` **midiéndolo limpio** (el test
+borra la preferencia guardada antes de cargar, o leería la de una sesión anterior y no el defecto del
+motor), persistencia en los dos sentidos, atrapado sigue atrapado, `game.unstick()` te saca, y
+`mcAgentShove` se sigue llamando con el interruptor apagado — **espiándolo**, no leyendo el texto de
+`mcUpdate`, que el snippet del mundo envuelve funciones del motor y `String(mcUpdate)` puede acabar
+siendo el envoltorio.
+
+⚠️ **Esto trata el síntoma, no la causa.** Que el brazo de un agente te embuta al rozarlo sigue
+pasando; lo que ya no pasa es que te planten encima. Si molesta el atasco en sí, el camino es que a
+las piezas de un rig les llegue algo como `mcAgentShove` (apartar en horizontal), y eso es otro ticket.
+
+---
+
+### ✅ BUG-AG9 · el cuello **no tiene tope vertical**: encima de su cabeza te sigue mirando — ✅ resuelto 2026-08-07
+
+**Reportado** 2026-08-07 por el dueño:
+
+> «hay un bug en cuanto a qué puede ver un agente articulado cuando te mira (es una capacidad), si me
+> pongo encima de su cabeza no debería verme puesto que los ojos no pueden mirar en ese ángulo z»
+
+La capacidad **`mirar`** de una pieza. Lo que el documento deja decir hoy es `limites: { y: [-70, 70] }`
+y `alcance`, o sea **un cono horizontal y un radio**: nada acota cuánto puede *levantar* la vista. Un
+bicho al que te subes encima queda con el objetivo casi en su vertical y, mientras la distancia entre a
+`alcance`, la cabeza sigue apuntándote — que es justo lo que el dueño ve raro y lo que un cuello no hace.
+
+Encaja además con [REQ-MNT2](#-req-mnt2), recién cerrado: ahora que subirse a una cabeza es una
+capacidad que se marca con una casilla, estar ahí arriba va a ser un sitio **normal** donde estar, y el
+cuello mirando hacia atrás y hacia arriba se va a ver mucho más.
+
+**Sin investigar** (regla de tickets: redactar y archivar). Lo que sé de haber leído la zona en el
+ticket anterior, y que **no he verificado para éste**:
+
+- El giro de `mirar` se calcula en `esqueletosPaso` con un `Math.atan2(ddx, -ddz)` y se recorta con
+  `pinza(..., L.limY[0], L.limY[1])`. Es **un solo ángulo**: no hay un `ddy` en esa cuenta, así que la
+  altura del objetivo no entra en la decisión ni para apuntar ni para rendirse.
+- Hay que decidir si el tope vertical es **un `limites.x`** hermano del `y` que ya existe (y entonces
+  toca casilla/campo en el editor, como `tope del cuello`), o un cono único; y qué hace la pieza al
+  salirse — ¿se queda clavada en el tope, como hace hoy en horizontal, o vuelve a reposo?
+- **No es lo mismo que [BUG-AG10](#-bug-ag10)**, aunque el dueño los contó juntos: éste es la pieza
+  girando (`mirar`), y aquél es el bicho entero decidiendo perseguirte (`seguir`). Se pueden resolver
+  por separado y probablemente convenga.
+
+**Verificación esperada.** Un caso nuevo de navegador: plantar el zombie, ponerse **encima de su
+cabeza** y comprobar que el giro de la pieza se queda en reposo (o en su tope) en vez de apuntar arriba;
+y que a la altura de siempre no cambia nada. Ojo con el falso verde de sentarse en el centro del eje —
+ahí girar no mueve nada (la lección de REQ-DBG2).
+
+---
+
+**Resuelto 2026-08-07** · `limites.x`, hermano del `y` que ya existía, mismo defecto `[-70,70]` (un
+cuello humano). De las dos preguntas abiertas arriba, la que importaba era la segunda: **fuera del cono
+la pieza se RINDE**, vuelve despacio a su pose de origen y suelta la matriz. No se queda clavada en el
+tope — y eso **contradice a propósito** lo que hace el `mirar` por MATERIAL, donde el cabeceo al tope no
+cuenta como rendirse («pegar un salto apagaría la cabeza entera de golpe»). Son casos distintos: un rig
+**no cabecea en absoluto**, solo tiene yaw, así que pinzar no le deja «mirándote con esfuerzo», le deja
+apuntando a otro sitio con cara de maniquí.
+
+Cómo se ve: el cono vertical se mide con `Math.atan2(ddy, hypot(ddx,ddz))` **antes** de calcular el yaw,
+y si se sale, la pieza entra por la misma puerta que «me he salido del alcance». `game.esqueletos()` gana
+la columna **`frente`** para poder distinguir «no me sigue» de «me tiene a 78° y su cono llega a 70».
+
+Entregado en `parche_snp_vision_agentes.py` (idempotente, 16 costuras, junto con
+[BUG-AG10](#-bug-ag10)) — el snippet lo edita el dueño en vivo, así que se parchea, no se reescribe. En
+el panel es el campo «tope arriba y abajo (±°)»; ⚠️ el setter escribe **la clave del eje**, porque el de
+antes hacía `mir.limites={y:[…]}` y poner el tope horizontal **borraba** el vertical (lo fija un caso de
+`test_panel_agentes.js`).
+
+Verificado con `node test_vision_agente.js` (**11 ok**), cuyo tramo **A bis** es el anti-falso-verde: con
+`limites.x:[-90,90]` ese **mismo** sitio de encima sí le gira la cabeza 70°. Y sí hubo que aprender la
+lección del falso verde por otro lado: fijar `mc.pos` cada frame **no basta** — la gravedad acumula en
+`mc.vel` y el jugador cae ~1,5 bloques *dentro* de un solo `mcUpdate`, así que «3 por encima» se medía
+como 1,5 y el ángulo salía a 68,6°, justo por debajo del tope. Hay que poner `mc.vel` a cero también.
+
+---
+
+### ✅ BUG-AG10 · la detección es una **esfera**: te ve por la espalda y empieza a seguirte — ✅ resuelto 2026-08-07
+
+**Reportado** 2026-08-07 por el dueño, en el mismo mensaje que [BUG-AG9](#-bug-ag9):
+
+> «tampoco si paso por detrás de él no debería poder verme para comenzar a seguirme»
+
+La capacidad **`seguir`** del bicho entero. Hoy lo único que acota a quién persigue es `deteccion`, que
+es **un radio**: una esfera alrededor del agente, sin frente ni espalda. Pasar por detrás dispara la
+persecución igual que pasar por delante, y el bicho se da la vuelta como si tuviera ojos en la nuca.
+
+**Sin investigar**. Lo que conviene dejar apuntado porque es la decisión de fondo:
+
+- **Hacia dónde mira un agente** para esto: su `giro` es el del cuerpo, y ese giro lo mueve *la propia
+  persecución*. Si el cono se mide contra el giro actual hay **realimentación** — te ve, se gira hacia
+  ti, y ya te tiene dentro del cono para siempre. Probablemente haga falta separar «ángulo con el que
+  DETECTO» de «ángulo al que me giro una vez detectado» (una vez que te ha visto, seguir viéndote de
+  espaldas es razonable; empezar de cero no).
+- **Perder de vista ≠ no detectar.** `seguir` ya tiene `volver` y `correa` para cuando te pierde; hay
+  que decidir si salir del cono cuenta como perderte o solo como no-empezar.
+- **Y la pregunta que el dueño no ha hecho pero está debajo:** ¿la vista atraviesa paredes? Hoy, con un
+  radio, sí. Un cono no lo arregla. Es un tercer ticket si se quiere, no parte de éste.
+- Campo nuevo en la tarjeta 👁 del editor (`data/agentes/<id>.json`), y con un **defecto que no rompa
+  los agentes de siempre**: si el defecto pasa a ser 120°, todos los bichos ya guardados cambian de
+  conducta. Decidir eso explícitamente es la mitad del ticket.
+
+**Verificación esperada.** Plantar un agente, acercarse **por detrás** dentro de `deteccion` y
+comprobar que no arranca; entrar por delante y que sí. Sin regresión en `test_agente_sin_seguir.js` ni
+en el resto de la familia de agentes.
+
+---
+
+**Resuelto 2026-08-07** · `seguir.vision`, grados de cono, **defecto 180** (`360` = la esfera de
+siempre). Las cuatro decisiones de fondo, resueltas y por qué:
+
+1. **La realimentación se corta acotando el cono a EMPEZAR.** El campo solo se mira cuando el agente
+   está en reposo (`g.por === 1`); una vez persiguiendo manda `deteccion` como siempre. O sea:
+   **rodearle no le hace perderte**. Si el cono gobernara también la persecución, andar en círculos a
+   su alrededor lo dejaría parpadeando entre perseguir y soltar justo en el borde.
+2. **Salir del cono NO cuenta como perderte**, por lo mismo. `volver`/`correa` se quedan como estaban.
+3. **La vista sigue atravesando paredes.** Confirmado como fuera de alcance, tal y como estaba escrito
+   arriba; si se quiere, es otro ticket.
+4. **El defecto sí cambia la conducta de los agentes guardados, y es a propósito** (§0, «defectos
+   automáticos, no opt-in»): un bicho con ojos en la nuca es el fallo, no la conducta normal. La válvula
+   está en los dos sentidos y a un campo de distancia: `vision:360` devuelve la esfera intacta.
+
+⚠️ Lo que **no** estaba previsto y salió al implementarlo: **el cono solo se aplica si el objetivo es el
+JUGADOR**. Con un `objetivo:[x,y,z]` fijo, «no lo ve» no es transitorio sino un **atasco definitivo** —
+el cuerpo solo se gira mientras persigue, así que un punto a su espalda no entraría en el cono jamás y el
+bicho se quedaría plantado de por vida. Y `g.pide` se sigue actualizando aunque esté ciego (la ceguera
+entra *después* de anotar la distancia): si no, `game.esqueletos()` diría `0` y parecería que no estás
+ahí. La tabla lleva además la columna **`frente`** = a cuántos grados te tiene.
+
+Mismo parche que [BUG-AG9](#-bug-ag9) (`parche_snp_vision_agentes.py`), y campo «campo de visión (°)» en
+la tarjeta 👁 del panel. ⚠️ `crearEsqueleto` rehace el `seguir` **campo a campo** al reconstruir por
+clave: el campo nuevo hay que traerlo ahí a mano o no llega al rig.
+
+Verificado con `node test_vision_agente.js` (**11 ok**), cuyo tramo **B bis** es el anti-falso-verde:
+con `vision:360` esa **misma** espalda vuelve a arrancarle la persecución (3,80 bloques andados). Sin
+regresión en `test_agente_sin_seguir.js` (16 ok), `test_esqueleto_navegador.js` (15 ok),
+`test_agente_aturdido.js`, `test_montar_agente.js`, `test_montable_editor.js`,
+`test_agente_cuerpo_real.js`, `test_agente_pisa_placa.js` ni `test_panel_agentes.js` (41 ok).
+
+---
+
+### 🟡 REQ-AG12 · `cabalgable`: montado se queda quieto y **lo conduces** — 🟡 abierto 2026-08-07
+
+**Abierto 2026-08-07**, sin investigar, a raíz de la corrección del dueño en
+[BUG-AG11](#-bug-ag11):
+
+> «"montado" no es lo mismo que "cabalgable", si fuese "cabalgable" tiene sentido que se quede quieto y
+> que además pueda moverlo; si estás "montado" y no te ve, pues que sea como tonto y vuelva a su ancla»
+
+Yo había metido las dos cosas en una: al arreglar BUG-AG11 excluí a los montados de `volver` para que
+`game.esqueletos.desplazar()` pudiera pasearlos. Se revirtió. Esto es **la mitad que se quitó**, ahora
+como capacidad con nombre propio.
+
+**Lo que se pide, en sus palabras:** montado en un agente `cabalgable`, (a) **se queda quieto** —ni te
+persigue ni se vuelve a su ancla— y (b) **lo puedes mover tú**.
+
+**Lo que ya se sabe sin investigar nada** (sale de BUG-AG11, no lo confirma):
+- La señal de «te lleva encima» ya existe y ya se lee: `P.llevando` → `rig.llevando`.
+- Hoy `volver` (defecto `true`) hace justo lo contrario de (a): te pasea hasta el ancla.
+- Y por eso **un rig montado se pelea con `game.esqueletos.desplazar()`**, que es el primitivo que
+  seguramente quiere (b). `test_montar_agente.js` y `test_montable_editor.js` ya se defienden con
+  `rig.G.volver = false`.
+
+**Sin decidir:** dónde vive la marca (¿`cabalgable:true` en el documento del agente, hermana de
+`montable` por pieza? ¿por instancia como `game.esqueletos.montable`?), y sobre todo **cómo se conduce**
+—¿con las teclas de andar del jugador, con una API, con la mirada?—. **Preguntar al dueño antes de
+tocar nada.**
+
+---
+
+### 🟡 REQ-AG13 · no hay forma de **ver** el cono de visión de un agente — 🟡 abierto 2026-08-07
+
+**Abierto 2026-08-07**, sin investigar. Del mismo mensaje que [BUG-AG11](#-bug-ag11):
+
+> «…tampoco veo su cono»
+
+Es cierto y no es un fallo del motor: **no existe ninguna visualización**. Lo único que hay hoy para
+depurar la vista de un agente es la tabla de `game.esqueletos.lista()` (`estado`, `a`, `frente`,
+`teVe`) y los rayos-X, que enseñan geometría, no atención.
+
+⚠️ **Son DOS conos distintos y no se pueden dibujar como uno** (es toda la lección de
+[BUG-AG9](#-bug-ag9)/[BUG-AG10](#-bug-ag10)): `seguir.vision` es del **bicho entero** y horizontal
+(decide EMPEZAR a perseguirte), y `mirar.limites` es de **cada pieza**, con tope horizontal `y` y
+vertical `x`. Un agente con dos piezas que miran tiene tres conos.
+
+**Sin decidir:** si es un modo de depuración global (tecla, como los rayos-X) o por agente; si se dibuja
+en el Mundo o solo en el preview del panel de agentes; y si además marca **cuál** de los conos te está
+descartando ahora mismo, que es la pregunta que el dueño intentaba responder cuando lo pidió.
+
+---
+
+### ✅ BUG-AG11 · montado encima **te sigue viendo**, y el cuerpo se pone a **dar vueltas** — ✅ resuelto 2026-08-07
+
+**Reportado** 2026-08-07, justo al cerrar [BUG-AG9](#-bug-ag9)/[BUG-AG10](#-bug-ag10), con una captura
+de la tarjeta 👁 delante: «dada la cabeza del agente, teniendo en cuenta que **quiero montarme encima**,
+qué parámetros tendría que poner para que una vez dentro no me vea? porque he hecho varias pruebas y no
+lo consigo, tampoco veo su cono». Y sobre la marcha: «puse *tope arriba y abajo (±°) = 0* y lo que hace
+es **dar vueltas en círculo** si me subo a su cabeza».
+
+**La respuesta a la pregunta literal era «con ninguno».** Los dos mandos que acababa de estrenar no
+llegan, cada uno por su motivo:
+
+- **`seguir.vision` no puede**: por diseño el cono solo decide **EMPEZAR** (`g.por === 1`). Montado
+  estás a ~0 bloques, o sea muy dentro de `deteccion` (14 en el zombie), así que el bicho está
+  permanentemente en faena y el cono **ni se consulta**. Eso es [BUG-AG10](#-bug-ag10) funcionando.
+- **`mirar.limites.x` solo calla el CUELLO**, no la persecución. Que es exactamente lo que el dueño
+  observó al ponerlo a 0: la cabeza se quedó quieta y **el cuerpo siguió girando**.
+
+Y «tampoco veo su cono» es cierto y no es un fallo: **no existe ninguna visualización del cono**. Lo que
+hay es la tabla de `game.esqueletos.lista()` (`estado`, `a`, `frente`) y los rayos-X. Queda apuntado como
+posible ticket aparte, no se ha hecho aquí.
+
+⚠️ **Las vueltas no eran un efecto secundario del cuello: era un caso DEGENERADO.** Con el objetivo justo
+encima del eje, la distancia horizontal es ~0, y ahí:
+
+1. la meta «a `distancia` de ti» sale de `tx - dx/d * G.distancia` con `d ≈ 0` ⇒ **dirección de puro
+   ruido**, distinta cada frame;
+2. el giro del cuerpo sale de `Math.atan2(tx - cxr, -(tz - czr))` = `atan2(≈0, ≈0)` ⇒ **ruido también**;
+3. y encima `distancia: 1.2` le pide **apartarse** de ti — pero al apartarse **te lleva consigo**, así
+   que el error **no se satisface jamás**. Motor de vueltas perfecto.
+
+**Dos arreglos independientes, y ninguno es un parámetro nuevo** (§0, «defectos automáticos»):
+
+| | qué | por qué va aparte |
+|---|---|---|
+| **A · `rig.llevando` ⇒ no te ve** | ni persigue ni te encara con el cuello (misma puerta que «te he perdido de vista», `volver` incluido) | es **semántico**: «montado» es un estado del bicho, y «no te veo» es una sola cosa para las dos capacidades |
+| **B · guardia del `atan2`** | sin distancia horizontal (`> 1e-4` en planta) el cuerpo **se queda como está** | es **numérico**: vale igual si te subes a una pieza que **no** es montable, donde `llevando` es `false` |
+
+**La señal ya existía**: `llevarPasajero()` deja puesto `P.llevando` al final del frame. Solo faltaba
+mirarla. Se sube a `rig.llevando` (es del **bicho**, no de la pieza) y se lee al frame siguiente, antes
+de decidir. Y **solo contra el JUGADOR**: con un `objetivo:[x,y,z]` fijo, llevarte encima es ser un
+**vehículo** y tiene que seguir su camino.
+
+⚠️ **`montado` ≠ `cabalgable`, y eso lo corrigió el dueño.** Mi primera versión excluía a los montados de
+`volver` (razonamiento: «no te has ido, te tengo puesto») para que `game.esqueletos.desplazar()` pudiera
+pasearlos sin que el bicho deshiciera el paseo. Su respuesta: «*"montado" no es lo mismo que
+"cabalgable"; si fuese cabalgable tiene sentido que se quede quieto y que además pueda moverlo; si estás
+"montado" y no te ve, pues que sea como tonto y vuelva a su ancla*». **Revertido**: montado entra en la
+puerta de reposo entera, `volver` incluido, y con el defecto (`true`) te pasea hasta su ancla. Yo había
+metido dos capacidades en una; **`cabalgable` es otra cosa y no existe todavía** — queda como ticket
+posible, no hecho aquí.
+
+Consecuencia que hay que saber: **un rig montado se pelea con `game.esqueletos.desplazar()`**, porque
+cada frame deshace el paseo andando hacia casa. `test_montar_agente.js` y `test_montable_editor.js`
+—que pasean el rig a mano para probar el **acarreo**, no el seguimiento— le ponen `rig.G.volver = false`.
+
+La válvula de escape es **bajarte**. No hay bandera para «que me vea mientras me lleva» porque el estado
+es observable —la tabla pone **«te lleva encima»** en `estado`, que si no un «fuera de alcance» a 0,3
+bloques parece una avería— y volver a él es dar un paso.
+
+⚠️ Dos formas de medir que costaron un falso rojo cada una, y que valen para cualquier test de agentes:
+
+1. **«Da vueltas» ≠ «gira mucho».** Volviendo al ancla el bicho **se da la vuelta entera**, y eso es un
+   giro grande y legítimo: el `saltoMax` por frame marcaba 29° y no era el fallo. Lo que delata al
+   `atan2(0,0)` es girar **sin ir a ninguna parte**, o sea **recorrido acumulado ≫ giro neto**. Medido
+   así sale 51,6° / 51,6°: un giro monótono, cero oscilación.
+2. **«De pie delante» no es un `-z` fijo.** En cuanto el agente anda deja de mirar al norte, y desde
+   [BUG-AG10](#-bug-ag10) el cono lo dejaría **ciego** justo en el caso de control. Hay que colocarse
+   en `giro + horneado` (su morro de verdad) o el anti-falso-verde mide lo contrario de lo que cree.
+
+`python3 parche_snp_agente_montado.py` (idempotente, **7 costuras**, ninguna en `app.js`). Verificado con
+`node test_agente_montado.js` (**todo ok**), con tres tramos anti-falso-verde: **A** (de pie delante sí
+te ve, `por 0..0`, y el cuello sí se gira), **D** (bajarte lo revierte: vuelve a perseguir y a encarar) y
+**C** (abre `limites.x` a `[-90,90]` para probar que el cuello calla por esto y **no** por
+[BUG-AG9](#-bug-ag9)); el **E** comprueba que el jugador está *de verdad* sobre el eje (0,0000 en planta)
+antes de dar por buena la guardia. Sin regresión en `test_montar_agente.js` (todo ok, 1 fallo previo
+menos), `test_vision_agente.js` (11 ok), `test_agente_sin_seguir.js` (16 ok),
+`test_esqueleto_navegador.js` (15 ok), `test_agente_aturdido.js`, `test_agente_cuerpo_real.js`,
+`test_agente_pisa_placa.js`, `test_montable_editor.js` ni `test_panel_agentes.js` (41 ok).
+
+---
+
+### ✅ BUG-AG8 · `test_esqueleto_navegador.js` deja piezas de rig sin recoger en `/map/agents` — ✅ resuelto 2026-08-07
+
+**Encontrado por mí** (no reportado) corriendo la suite al cerrar BUG-AG4/AG5/AG7. Tres casos en rojo,
+siempre los mismos:
+
+```
+FALLO mcSerialize NO las mete en el mundo    en memoria tenían que estar: 96 → 103
+FALLO quitar() retira las 6 piezas           49 estructuras se quedaron marcadas de rig o efímeras
+FALLO ...y el mundo queda pixel a pixel como estaba   quedan 97 estructuras y había 96
+```
+
+**Sin investigar** (política de tickets nuevos). Lo único comprobado, porque importaba saberlo antes de
+cerrar los otros tickets: **es anterior a BUG-AG4** —falla igual con el snippet de antes— así que **no
+es una regresión** de la solidez por matriz ni de `aturdir` ni del `autoUnstick`. El olor es que
+`/map/agents` arrastra estructuras de rig **de una sesión anterior** (49 marcadas, cuando el zombie son
+6) y el test cuenta sobre un mundo que ya venía sucio; si es eso, el arreglo es del test o del mundo, no
+del motor. Pero eso hay que mirarlo, no darlo por hecho.
+
+⚠️ Al mirarlo: `/map/agents` es un mundo **real** del dueño. No se borra nada de `data/habitantes/`; lo
+que sobre se mueve a `data/habitantes_trash/<ms>__<nombre>`.
+
+**✅ Resuelto 2026-08-07. No había basura ninguna: el fallo era del test, y el motor está intacto.**
+Antes de tocar nada, una sonda que solo abre `/map/agents` y mira, **sin plantar ningún zombie**:
+
+```
+t≈1s  structures 72 · efímeras 24 · rigs vivos 0
+t≈3s  structures 96 · efímeras 48 · rigs vivos 0
+t≈6s  structures 97 · efímeras 49 · rigs vivos 0   ← y ahí se queda
+```
+
+Las 49 «estructuras marcadas de rig o efímeras» son **`asset:assets/cartel.vox.json`**: el cartel que
+`app.js` **deriva** de cada una de las 49 notas del mapa (`MC_NOTE_SIGN`, `s.efimera=true; s.nota=k`).
+Van marcadas efímeras **justo para lo contrario de lo que el test suponía**: para que no entren en
+`mundo.json`. O sea que el test leía la marca como «resto de un rig» cuando significa «esto no son
+datos del mundo». Con **cero** rigs vivos ya salían las 49.
+
+De ahí los tres fallos, que son **dos** causas y ninguna del motor:
+
+- **Una carrera.** El `waitForTimeout(3000)` fijo tomaba la foto del «antes» con el mundo a medio
+  montar: a los 3 s solo habían aterrizado 48 de los 49 carteles (cada uno espera a su documento) y el
+  goteo seguía. Por eso `96 → 103` en vez de `+6`, y `97` estructuras donde había `96`: el cartel que
+  faltaba llegó **entre** las dos fotos. Ahora se espera a que `mc.structures.length` **se quede
+  quieto** (6 sondeos seguidos), no a que pase un rato.
+- **Una marca mal leída.** `sueltas` contaba `s._rig || s.efimera` sobre TODO el mundo. Pasa a contar
+  solo `s._rig`; de las instancias concretas del esqueleto ya se ocupaba `enArray`, que las persigue
+  **por referencia** y no por marca — que es lo que hay que hacer.
+
+Y un caso **nuevo**, porque el susto de verdad estaba a un paso: que `quitar()` no se lleve por delante
+lo efímero **de otros**. Los carteles llevan la misma marca que las piezas de un rig, así que un barrido
+por marca —que es justo lo que el test insinuaba que había que hacer— habría borrado las 49 notas del
+mapa del dueño. Se comprueba que siguen las mismas antes y después.
+
+**Verificado** — `test_esqueleto_navegador.js`: **15 ok, 0 fallos** (antes 12 ok / 3 fallos).
+
+---
+
+### ✅ REQ-DBG2 · El toast «Atascado» debe decir POR QUÉ estás atascado — ✅ resuelto 2026-08-07
+
+**Reportado** 2026-08-07 por el dueño, en cuanto vio el aviso que acababa de añadir [BUG-AG7](#-bug-ag7):
+
+> «cuando aparece el toast "Atascado - ..." debería de aparecer el motivo, muchas veces queda claro
+> que el atasco es por agente, debería de haber una depuración que indique el motivo o más bien, por
+> qué estás atascado, ocurre que un agente al avanzar con sus brazos extendidos te atasca (es como un
+> abrazo)»
+
+**Sin investigar** (política de tickets nuevos). Lo poco que hace falta apuntar para no perderlo:
+
+- Son **tres** cosas distintas las que te pueden atrapar y el aviso debería distinguirlas: el
+  **terreno** (`mc.grid`), una **estructura fina** estampada (`mc.structures` — ahí viven las piezas
+  de los agentes articulados) y un **NPC** de `mc.agents` (AABB 1×1×1).
+- El caso que le duele al dueño («el abrazo») es el segundo: una pieza de un rig. El nombre bonito
+  —*«el brazo izq de Zombie»*— lo sabe el **snippet** (`s._rig`), no `app.js`, así que el motivo
+  legible no lo puede componer el motor solo: hará falta un gancho, al estilo `mc.sunExtra`.
+- Pide **dos** salidas, no una: el texto en el toast **y** «una depuración» —o sea algo consultable
+  por consola cuando el toast ya se fue.
+
+Y al ponerse a ello, el dueño lo concretó: **«si es una parte de un agente quiero saber el agente y
+su parte»**.
+
+**Resuelto** 2026-08-07.
+
+**Qué se hizo.** `mcStuckShow(true)` llama **una vez, en el flanco** (nunca por frame) a
+`mcStuckWhy(x,y,z)`, que devuelve `{atascado, motivo, terreno[], piezas[], npcs[], cuando}`
+mirando los tres sitios del ticket. `mcStuckMotivo` lo resume por orden de utilidad —**piezas con
+etiqueta → NPCs → piezas sin etiqueta → terreno**— y con varios culpables dice `«torso» de zombie
+(+2 más)` en vez de escupir la lista. Las dos salidas que pedía: el toast pasa a *«Atascado por
+«brazo der» de zombie · pulsa U…»*, y **`game.atasco()`** / **`game.atasco('ultimo')`** dan el
+detalle por consola cuando el toast ya se fue (`ultimo` guarda su `cuando`, porque el toast dura 4 s
+y la consola del móvil se abre después).
+
+**El reparto, que es el fondo del asunto.** `app.js` sabe que le estorba
+`asset:assets/brazo-zombie.vox.json`; que **esa instancia** sea el brazo izquierdo del zombie de la
+esquina solo lo sabe la tabla de rigs, que vive en el snippet. Así que el motor abre el hueco
+`mcStuckExtra(s) => 'texto'` —hermano de `mcXrayExtra`, `var` y no `let` para que un snippet en
+`new Function` pueda engancharse, y se desengancha avisando una vez si revienta— y
+`parche_snp_atasco.py` pone `quienAtasca()` en `mundo-autoarranque`. Nombra siempre **pieza + agente**
+porque con dos avisos idénticos no se sabe si te agarran dos bichos o uno con los dos brazos: el
+«abrazo» del ticket.
+
+**Lo que costó de verdad** (y lo que hay que recordar). Primer escalón: mirando solo `mc.structures`
+con `mcStructColl(s)`, **un agente articulado no aparece jamás**. Para una pieza de rig eso devuelve
+`null` a propósito —el envoltorio del snippet apaga el ancla vacía, y la solidez la pone el envoltorio
+de `mcFineBoxHit` pasando la caja por la **inversa de `s.model`** ([BUG-AG4](#-bug-ag4))—.
+
+Segundo escalón, y éste lo cazó el dueño probándolo de verdad: **con el toast puesto, `game.atasco()`
+devolvía las tres listas vacías y `atascado:false`**. La primera versión de la segunda pasada
+muestreaba la caja del jugador **en rejilla**, y un abrazo no es un empotramiento: es una **esquirla**
+de solape que la rejilla se salta. Al medirlo salió algo peor y más interesante — `mcCollides`=`true`,
+`mcFineBoxHit`=`true` y `mcStructAt`=`null` en **las ~3000 celdas** de la caja, con el «brazo izq» a
+**un voxel fino** por fuera. Porque para una pieza movida la colisión mete la caja **entera** del
+jugador en espacio local y redondea **hacia fuera** (`cajaEnLocal`, `floor`/`ceil`: el snippet ya
+avisa, *«antes sobrar que faltar»*): **te frena un brazo que aún no te toca**, y el abrazo *es* esa
+holgura. Una bisección sobre `mcFineBoxHit` tampoco vale — el oráculo que la guía está inflado y el
+descenso se mete en mitades vacías (bajó los mudos de 12 a 8, no a 0).
+
+La solución es **atribuir como dibuja el motor**: la caja del jugador al espacio local de cada pieza
+con la **traspuesta** de `s.model`, más `MC_STUCK_HOLGURA`, cruzada con `s.aabb`; `O(estructuras)`,
+sin sondeos, ordenado por volumen de solape para que en un abrazo se nombre primero la que más te
+agarra. **0 mudos de 40** posiciones de roce. Y `w.atascado` pasa a salir de `mcCollides` en vez de
+mis listas: si sale de lo que he sabido nombrar, un culpable que se escape se convierte en un
+`atascado:false` con el cartel rojo puesto, que es exactamente el síntoma que reportó el dueño.
+
+El test tropezó con lo mismo por su lado: metía al jugador en `P.s.aabb`, que es el **ancla** donde se
+estampó la pieza, no donde el rig la dibuja; ahora pasa el centro por `s.model` y espera a que el paso
+del rig haya compuesto las matrices. Y el caso del terreno afirmaba `/stone/`, que es un **alias de
+scripting**, no una clave de `mc.blockKey`: ahora planta un id y exige que el motivo diga la clave de
+**ese** id.
+
+`mcStuckWhy` **duplica a propósito** los bucles de `mcTerrenoChoca` y `mcFineBoxHit`: esas dos tienen
+que quedar byte-idénticas porque el snippet las envuelve y `test_rayo_apuntado.js` las extrae
+*verbatim* por texto.
+
+Tercer escalón, otra vez cazado probándolo: el aviso decía «antorcha» de **personaje 1** — y ése es
+el nombre de la *definición*, no del bicho. Con tres «personaje 1» por el mapa no identifica a nadie.
+Ahora va por instancia, `nombre (#id)`, que además es accionable: `game.esqueletos.empujar(id)` /
+`.quitar(id)` / `.aturdir(id)` aceptan ese número.
+
+Cuarto escalón, y lo destapó una **pregunta** del dueño mirando la consola: *«la variable "agentes"
+es para identificar los agentes o es otra cosa?»*. Era otra cosa —los NPC-cubo de `mc.agents`, que no
+tienen nada que ver con `game.esqueletos`— y el cartel apuntaba al sitio equivocado justo cuando un
+agente le agarraba: `agentes: []` al lado de un zombie abrazándole. Renombrado a **`npcs[]`** (API de
+un día, sin alias: un alias reintroduce la confusión que se está quitando). Y la pregunta destapó lo
+de verdad útil: la identidad del agente existía **solo dentro de la frase**. Ahora el hueco admite
+también `{texto, agente, agenteId}` y cada pieza trae `agente`/`agenteId` como **campos**, así que
+`game.atasco().piezas[0].agenteId` va derecho a `empujar(id)` sin una regex por medio.
+
+⚠️ **Y de paso salió que el parche del snippet NO era idempotente**, que es justo lo que dice ser: se
+volvió a ejecutar y **duplicó `quienAtasca`** en el snippet vivo. La causa es genérica y vale para
+todos los `parche_snp_*.py`: el cambio 1 se reconocía «ya hecho» buscando **su texto completo**, y el
+cambio 2 le reescribió dos líneas por dentro ⇒ dejó de reconocerse, su ancla seguía ahí, y lo insertó
+otra vez — con la versión **vieja** ganando, porque en JS manda la última declaración. Ahora cada
+cambio se salta por una **marca** corta (`function senas(`) que los demás no tocan.
+
+**Tocado**: `app.js` (`mcStuckExtra`, `mcStuckSenas`, `mcStuckWhy`, `mcStuckMotivo`, `mcStuckShow`,
+`game.atasco`), `parche_snp_atasco.py` (nuevo, idempotente por marca, 4 cambios), `CLAUDE.md`.
+**Verificado**: `node test_atasco_motivo.js` → **27 ok, 0 fallos** (tres pasadas seguidas: el rig se
+mueve entre ejecuciones y el caso del roce tenía que aguantarlo). El test recorre el **roce** saliendo
+de la pieza de 1/32 en 1/32 y exige **cero posiciones mudas**: mientras la física diga que chocas, el
+diagnóstico tiene que nombrar a alguien. Sin regresión en `node test_rayo_apuntado.js` (12 ok),
+`node test_fisica_navegador.js` (18 ok) ni `node test_parkour_navegador.js`.
+
+---
+
+### ✅ REQ-MNT2 · «Montable» como casilla del editor de agentes — ✅ cerrado 2026-08-07
+
+**Pedido** 2026-08-07 por el dueño, justo al cerrar [BUG-STR1](#-bug-str1):
+
+> «abre un nuevo ticket de implementación, quiero que `game.esqueletos.montable(1, 'cabeza');` sea algo
+> configurable desde el editor de agentes, decir si una parte del agente articulado es montable»
+
+[REQ-MNT1](#-req-mnt1) dejó el acarreo funcionando pero **solo por scripting**, y encima **por
+instancia**: `montable(rig, pieza)` marca la pieza de *ese* rig ya plantado, así que hay que volver a
+llamarla cada vez que se planta el agente, y no queda escrito en ningún sitio. Esto es pedir lo mismo
+que ya tienen los NPC-cubo, donde `passengers` es una capacidad **del agente**, no un recado que se le
+da al de turno.
+
+**Resuelto** 2026-08-07.
+
+**Las tres preguntas que dejó abiertas el ticket, contestadas:**
+
+- **Dónde vive el dato.** En el **documento del agente** (`data/agentes/<id>.json`), como un campo más
+  de la pieza, al lado de `articula` y `mirar` — `"montable": true`. El ticket sospechaba de
+  `data/snippets/agente-*.json`, y eso era **una pista falsa**: esos snippets son demos que plantan
+  bichos, no la definición. Lo que el panel edita y el servidor guarda es `data/agentes/`.
+- **Cuál es «el editor de agentes».** El panel `#ag-modal` (menú ⋯ → 🦴 Agentes), y **sí edita el
+  documento**: `agDoc` es lo que se manda por `POST /api/agentes`. Por eso la casilla persiste sola,
+  sin inventar ningún sitio nuevo donde guardar nada.
+- **Lo que ya está plantado.** `game.esqueletos.montable(rig, pieza, si)` **no se toca ni se deprecia**:
+  se queda como la válvula por instancia, y **en los dos sentidos** — encender en *ese* bicho una pieza
+  que el documento no marca, o apagar la que sí marca.
+
+**El reparto, que es lo único delicado.** La casilla es UI y va en `app.js`; **quien la aplica es el
+snippet**. `app.js` escribe la clave y sigue sin saber qué es ir montado — la frontera de §0 intacta.
+
+| dónde | qué |
+|---|---|
+| `app.js` · `agForm` | la casilla «te lleva montado», por pieza y también en la raíz. Encendida escribe `montable:true`; **apagada borra la clave** |
+| `app.js` · `agRefrescar` / `agChips` | la etiqueta `🧍 llevas` en la lista de piezas y el chip `🧍 te lleva encima` en el resumen |
+| snippet · `crearEsqueleto` | `montable: !!q.montable` en la parte, y `montable: def.raiz.montable` en la pieza 0 |
+
+⚠️ **La raíz se fabrica a mano.** `crearEsqueleto` no reenvía `def.raiz`: se construye la pieza 0 con
+cuatro campos elegidos (`nombre`, `pieza`, `rot`, `en`). Sin tocar esa línea, marcar el torso en el
+editor no habría llegado nunca a la parte — y un **agente-plataforma** (una barca, un ascensor) no
+tiene más pieza que su torso. Es la trampa que se lleva por delante cualquier campo nuevo del documento.
+
+⚠️ **La marca del parche importa.** El primer intento usó «casilla Te lleva montado» como marca de
+idempotencia de un cambio, y esa misma frase aparecía en el comentario de otro: el parche daba un «ya
+estaba» falso y se saltaba el cambio **para siempre**. Las marcas tienen que ser únicas *contra el
+texto que el propio parche inserta*, no solo contra el original.
+
+**Verificación.** `node test_montable_editor.js` (**28 ok**), nuevo, en dos mitades porque el editor
+vive en `/` y el Mundo en `/map/test`: (A) la casilla escribe y borra la clave, lee el documento al
+volver, marca la lista y el chip, y viaja en el `POST`; (B) un documento con la marca se planta y la
+pieza **nace montable sin llamar a nada** y te lleva de verdad, con el invariante de siempre
+—`L = Rᵀ·(p − t)` no cambia mientras vas montado— y un agente **de control sin la clave** haciendo el
+mismo paseo para que el verde no pueda ser casualidad. Sin regresión: `node test_montar_agente.js`
+(20 ok, sin tocarlo), `node test_panel_agentes.js` (**40 ok** — el conteo de chips pasa de 6 a 7),
+`node test_atajo_agentes.js` (20 ok), `node test_escala_agente.js`.
+
+**Ojo con el control.** El primer intento pedía que el jugador del agente de control **no se moviera**,
+y fallaba con 2,17: sin nadie que te lleve **te caes**, y la caída es movimiento. La señal buena es la
+que ya usaba `test_montar_agente.js` — la **deriva** dentro de la pieza (0,03 montado vs 2,16 suelto) —
+más el viaje **horizontal**, que sí es 0.
+
+---
+
+### ✅ REQ-MNT1 · Ir MONTADO en una pieza de un agente articulado
+
+**Pedido** 2026-08-07 por el dueño, como pregunta:
+
+> «cuando construimos los npcs se les dieron habilidades a algunos como "passengers: true", ¿es
+> posible que para un agente articulado le pueda dar esta habilidad a su cabeza desde scripting ahora
+> mismo?»
+
+**Resuelto** 2026-08-07.
+
+**La respuesta a la pregunta era NO**, y por tres motivos independientes que conviene tener juntos
+porque son la misma frontera que destapó [REQ-DBG2](#-req-dbg2):
+
+1. `passengers` se lee en `mcAgentsSmoothUpdate` (`app.js:11127`), que recorre **`mc.agents`** — los
+   NPC-cubo. Un agente articulado no está ahí: sus miembros son estructuras finas de `mc.structures`.
+   Ese código no llegaba a ejecutarse para una cabeza ni una sola vez.
+2. `a.isMounted()` (`app.js:10967`) está **cableado a la caja 1×1×1**: `rx+0.1..rx+0.9`,
+   `ry+1.9..ry+2.5`. Cotas que no significan nada para una pieza con matriz propia, que además puede
+   ir girada.
+3. El acarreo se calcula con los deltas de `renderX/Y/Z`, que un miembro de rig no tiene.
+
+**Subirse encima ya funcionaba** (las piezas de rig son sólidas donde se las ve, BUG-AG4). Lo que
+faltaba era que te **llevase**: el bicho se iba andando por debajo y te dejaba plantado en el aire.
+
+**Qué se hizo, y dónde.** `game.esqueletos.montable(id, 'cabeza')` / `montable(id, 'cabeza', false)`.
+**Cero líneas de `app.js`**: es comportamiento de agentes (§0) y `esqueletosPaso` ya tenía todo lo
+necesario — corre por frame, compone la matriz de cada miembro y es **lo último del frame del
+jugador** (después de la física, de `pisar` y de `suavizarPaso`), o sea el mismo sitio de la cadena
+que ocupa el acarreo del cubo. Va por **instancia y pieza**, no por material: la cabeza de *ese*
+zombie, no todas las cabezas del mapa.
+
+⚠️ **El acarreo es RÍGIDO, no una traslación.** `L = Rᵀ·(p − t)` con la matriz del frame anterior y
+`p' = R'·L + t'` con la de éste. Así el **giro también te lleva** —orbitas con la pieza— en vez de
+resbalarte en cuanto la cabeza se vuelve. Es la misma traspuesta que la atribución del abrazo
+(REQ-DBG2) y que la solidez de las piezas movidas (BUG-AG4): en este motor, *todo* lo que pregunta
+«dónde está esto respecto de una pieza movida» pasa por ahí. Se planteó hacer solo traslación y
+añadir el giro después; resultó ser **más código**, porque la traspuesta ya estaba escrita dos veces.
+
+**Tres detalles que no son adorno:**
+
+- **La Y física, no la pintada.** `suavizarPaso` baja `mc.pos[1]` para el ojo y deja la real en
+  `mc._pasoReal`. Midiendo sobre la pintada, un escalón reciente te bajaba del carro sin haberte
+  movido. Y se escribe **por delta**, para no borrar ese desfase.
+- **«No empeorar» en vez de «no chocar».** De pie encima ya rozas la caja inflada de la pieza (el
+  abrazo), así que exigir un destino limpio no te subiría jamás. Se rechaza solo el caso honesto:
+  ahora no chocas y ahí sí.
+- **Tope de 2 bloques por frame**: de más que eso no es que se mueva, es que la han reestampado
+  (`readquirir`), y no hay que salir volando.
+
+**Tocado**: `data/snippets/mundo-autoarranque.json` vía `parche_snp_montable.py` (nuevo, idempotente
+por marca, 4 cambios), `test_montar_agente.js` (nuevo), `CLAUDE.md`. `app.js` **intacto**.
+
+**Verificado**: `node test_montar_agente.js` → **20 ok, 0 fallos**. Sin regresión en
+`node test_esqueleto_navegador.js` (15 ok) ni `node test_fisica_navegador.js` (18 ok).
+
+⚠️ **La trampa del test, que costó una pasada en rojo**: la primera aserción comparaba el viaje del
+jugador con `|t1 − t0|`, la traslación de la matriz. **No vale**: en cuanto la pieza gira —y gira,
+porque el bicho se vuelve hacia ti— su origen recorre un arco que tú no recorres, y salía *jugador
+3.0 vs pieza 12.9* con el acarreo perfecto. La referencia correcta es **el punto de la pieza que
+pisas** (`R·L₀ + t`). El invariante bueno es el local y sirve igual para trasladarse que para girar:
+**mientras vas montado, tu sitio dentro de la pieza no cambia** — y sale exactamente `0`, porque la
+cuenta es exacta. El caso apagado da `2.9` con el mismo paseo, que es lo que lo convierte en una
+prueba y no en un adorno.
+
+**Lo que NO hace** (dicho para que no sorprenda): no gira la **cámara** contigo, igual que una
+vagoneta de Minecraft — orbitas mirando adonde mirabas. Y si la pieza cabecea en vertical, botas.
+
+---
+
+### ✅ BUG-AG6 · El preview del editor de agentes no debe aplicar la escala — ✅ hecho
+
+**Reportado** 2026-08-07 por el dueño, con captura (`data/tickets/BUG-AG6/01.png`):
+
+> «no afecta a la funcionalidad, pero en el editor de agentes articulados, si se indica la escala del
+> agente este se ve mal en la previsualización, no haría falta tener ahí en cuenta la escala, debería
+> verse como siempre, la escala es en el juego»
+>
+> «la imagen es al ponerlo a escala 2, a escala 1 se ve como siempre»
+
+En la captura (`personaje 1`, 7 piezas, **escala 2**): el muñeco sale **desmontado** — la cabeza
+enorme arriba, el torso suelto debajo, las piernas más abajo todavía y los brazos como dos cubos
+sueltos flotando. No es «se ve grande»: es que las piezas dejan de estar pegadas entre sí. A escala 1
+el preview está bien.
+
+⚠️ **Esto REVIERTE una decisión de [REQ-AGESC1](#-req-agesc1), y hay que saberlo antes de tocarlo.**
+Ahí se escaló el preview **a propósito**, con el argumento de que si el panel enseña un bicho normal y
+el Mundo planta un gigante, eso es justo el fallo que el preview existe para evitar; son 3 de las 11
+costuras de `parche_snp_escala_agente.py` (`ESCP`, la caja/separación de cada pieza, y `piv`). El
+dueño dice lo contrario: **el panel es un maniquí y la escala es del juego**. Manda él, y además el
+preview ya diverge del Mundo a propósito en otra cosa (la fase de andar la lleva el reloj y no la
+distancia). Quitarlo es más barato que arreglarlo.
+
+La duda que quedaba —si además convenía un rótulo diciendo en qué escala se plantará, para no perder
+el aviso que motivó la decisión original— la cerró el dueño: **«pues en prepararEsqueleto no leas la
+escala, no hace falta nada más»**. Sin rótulo.
+
+**Hecho.** Las 3 costuras del preview salen de `CAMBIOS` y pasan a una lista **`REVERTIR`** nueva en
+`parche_snp_escala_agente.py` (quedan 8 + 3). Van aparte porque en una vuelta atrás la comprobación de
+idempotencia **se invierte**: el texto original es subcadena del parcheado, así que el `if nuevo in
+code` de siempre diría «ya estaba» y no revertiría nunca; se pregunta por lo parcheado. Corriendo el
+parche dos veces converge, con `ESCP` en 0 y el `ESC` del Mundo intacto. Ni una línea de `app.js`.
+
+**Verificado** — `test_escala_agente.js` en verde (el caso *preview == Mundo* invertido: ahora exige
+preview idéntico a ×1, ×2 y ×0,5, **y** que el Mundo sí plante al gigante, que es lo que separa esto
+de «la escala no hace nada»). El guardián se comprobó al revés: volviendo a meter las 3 costuras a
+mano, el test da **3 fallos**. Ojo con lo que caza cada aserción — el `alto` (2.5625 → 5.125) es quien
+detecta el fallo; el **hueco entre piezas se queda en 0 con y sin bug**, porque la escala movía las
+piezas *y* las agrandaba a la vez, así que en la plantilla siguen tocándose. Lo que el dueño veía
+desmontado se rompe **más tarde, al posar/dibujar**, no en las cajas de `preparar()`. El hueco se deja
+como invariante barato, no como el guardián del ticket.
+
+---
+
+### ✅ REQ-AGESC1 · Escala del agente: enanos y gigantes — ✅ hecho (2026-08-07)
+
+**Pedido** 2026-08-07 por el dueño:
+
+> «me gustaría para el editor de agentes una propiedad que sea "escala del agente" de forma que pueda
+> hacer un agente pequeño o grande en función de ese valor, para crear enanos y gigantes»
+
+Un solo número por documento de agente, y el mismo dibujo sirve para un enano y para un gigante. El
+jugador ya tiene su equivalente (`game.playerScale`, que escala `MC_HW`/`MC_PH`), así que el concepto
+no es nuevo en el motor — lo nuevo es aplicárselo a un cuerpo hecho de **varias piezas estampadas**.
+
+**Casi sin investigar** (política de tickets nuevos): solo he mirado por encima `crearEsqueleto` en el
+snippet y `mcStampStruct` en `app.js`, lo justo para saber si esto es «una propiedad más» o toca
+motor. **Toca motor**, y por eso no lo he empezado. Lo que se ve de pasada:
+
+- Un agente se monta estampando **una estructura por pieza** con `mcStampStruct(clave, cx,cy,cz, rot)`
+  — **no admite escala**, y los desplazamientos `en` de cada pieza están en bloques enteros. O sea que
+  hay que escalar dos cosas distintas: el **tamaño** de cada pieza y la **separación** entre ellas.
+- Cada instancia tiene su propia malla (`colVbo`/`texVbo` los construye `mcBuildStructMesh` por
+  instancia), lo cual juega a favor; pero la **forma** sale de `mcStructGeom(clave, rot)`, que se
+  **cachea por clave+rot** y de ahí salen también los bitsets de colisión fina en 1/16. Meter la
+  escala obliga a que entre en esa clave de caché, o a escalar después.
+- `rig.cuerpo` (la caja que choca y que usan `asentar`, `chocaMundo`, `enCaja`/`desplazar` del pistón)
+  se deriva de los `aabb` de las piezas, así que sale escalada sola… **si** las piezas lo están.
+
+**Lo que NO he verificado** — si el mallado por instancia admite un factor sin tocar el atlas ni las
+UV; qué pasa con la luz de bloque y las celdas emisivas de una pieza escalada; si la física de
+agentes (altura de escalón, gravedad, alcance del `seguir`) necesita escalarse también o se apaña; y
+si el editor de agentes tiene ya un sitio natural para la propiedad o hay que abrirle hueco.
+
+**Decisión pendiente del dueño** — si vale con escalas **enteras** (×2, ×3) el asunto se simplifica
+mucho, porque un voxel escalado sigue cayendo en la rejilla fina de 1/16. Con escalas libres (×1,4)
+hay que decidir qué se hace con la colisión. Preguntar antes de diseñar.
+
+**Respondida**: «quiero escalas libres, implementa REQ-AGESC1». Así que ×1,4 y ×0,5 valen.
+
+#### Cómo se usa
+
+En el **editor de agentes**, tarjeta nueva 📏 **«Escala del agente»** (junto a 🧱 *Caja de choque*).
+Apagada, el documento no lleva la clave y el agente mide lo que siempre midió. Encendida, un número
+entre **0,1 y 8**. Desde scripting es una clave más del documento:
+
+```js
+game.esqueletos.crear({ ...doc, escala: 2 }, x, y, z);   // gigante
+game.esqueletos.crear({ ...doc, escala: 0.5 }, x, y, z); // enano
+```
+
+#### Lo que resultó ser (y en qué se equivocaba la nota de arriba)
+
+La suposición que daba miedo — que la escala tendría que **entrar en la clave de caché** de
+`mcStructGeom` — era falsa, y comprobarlo primero fue lo que abarató el ticket entero. `mcStructGeom`
+produce geometría **local al origen** y `mcBuildStructMesh` la lleva al mundo **sumando** (`src+ox`).
+Escalar es, por tanto, **multiplicar antes de sumar**: la misma malla local cacheada por `clave+rot`
+sirve para todas las escalas, y el atlas y las UV ni se enteran. Sonda: `test_escala_estructura.js`.
+
+**Un agente no es una malla, son piezas sueltas.** De ahí que haya que escalar **dos** cosas: el
+tamaño de cada pieza *y* la separación entre ellas. Escalar solo lo primero deja al gigante
+**desmontado** (cabeza flotando, piernas dentro del torso), y eso **no se ve** en una captura si no
+sabes qué buscar — por eso el test mide el **hueco máximo entre una pieza y el resto** y no solo el
+bulto.
+
+**Tres sitios que no se derivan solos** y había que escalar a mano:
+
+| qué | por qué no salía gratis |
+|---|---|
+| `parte.piv` | el pivote va en bloques **dentro de la caja de la pieza**: si la caja crece y él no, el brazo gira sobre un hombro que ya no está ahí |
+| `def.cuerpo` | la caja de choque «esbelta» viene en bloques **absolutos** (para caber por una puerta) — un gigante se veía enorme y chocaba como un zombie normal |
+| el **preview** del editor | va por otro camino (`prepararEsqueleto`, sin estampar nada). Sin escalarlo, el panel enseñaba tamaño normal y el Mundo plantaba un gigante: justo el fallo que el preview existe para evitar |
+
+El resto (`rig.cuerpo` cuando no hay `def.cuerpo`, `rig.eje`) **sí** sale escalado solo, porque se
+deriva de los `aabb` de las piezas.
+
+#### Y la colisión, que era la pregunta abierta
+
+El bitset fino sigue siendo el de la pieza **a tamaño 1** — no se re-hornea uno por escala. Lo que se
+corrige es el **mapeo**: la caja del mundo se lleva a coordenadas de la pieza **dividiendo por la
+escala**. Son cuatro sondas en `app.js`, con el camino `esc===1` intacto en un `if` aparte porque la
+física lo recorre en cada frame:
+
+- `mcFineBoxHit` (colisión) · `mcAimBoxHit` (apuntar) · `mcStructAt` (de quién es este voxel) ·
+  `mcXrayVolume` (rayos-X, que además dibuja la cajita ×`esc`).
+- `mcStructRayHit` no se toca: delega en `mcAimSolidAt`.
+- Nada de helpers nuevos: `mcFineBoxHit` y `mcAimBoxHit` las extrae **verbatim**
+  `test_rayo_apuntado.js`, y una dependencia nueva le revienta el sandbox. Por eso la rama va
+  inlineada tres veces en vez de factorizada.
+
+#### Verificación
+
+| test | qué cubre | resultado |
+|---|---|---|
+| `test_escala_estructura.js` (nuevo) | la sonda del motor: render en píxeles a ×1,4 y ×0,5, AABB, colisión, apuntado, `mcStructAt`, y que volver a ×1 deja la foto **idéntica** | TODO OK |
+| `test_escala_agente.js` (nuevo) | el bicho entero: bulto ×2/×0,5/×1,5, **que no se desmonta**, pivote, caja de choque, guardas (escala 0 y negativa → 1), y **preview == Mundo** | TODO OK |
+| `test_atlas_estructuras` · `test_luz_al_estampar` · `test_suelo_al_estampar` | el mallado por instancia no ha cambiado | 13 / 9 / 9 ok |
+| `test_rayo_apuntado` · `test_rayos_x` · `test_fisica_navegador` · `test_parkour_navegador` · `test_atravesable` | las cuatro sondas finas | 12 / 11 / 18 / 18 ok, todo ok |
+| `test_agente_cuerpo_real` · `test_agente_pisa_placa` · `test_piston_empuja` | agentes sin escala, sin cambios | TODO OK |
+| `test_panel_agentes` · `test_agentes_api` · `test_atajo_agentes` | el editor con la tarjeta nueva | 40 / 30 / 20 ok |
+
+`test_esqueleto_navegador.js` sigue con sus **3 fallos de siempre** (`mcSerialize`, `quitar()`, píxel
+a píxel). Comprobado que son **anteriores**: con el snippet sin parchear fallan los mismos tres.
+
+**Lo que NO escala, y es a propósito**: la altura de escalón (`asentar()` sube un bloque, sea enano o
+gigante), la gravedad y el alcance del `seguir`. Son *comportamiento*, no *tamaño*, y el dueño pidió
+tamaño. Si un gigante debe subir escalones de dos bloques, es otro ticket.
+
+**Tocado**: `app.js` (`mcBuildStructMesh` +`esc`, `mcStampStruct` +`esc`, las 4 sondas finas, tarjeta
+📏 en el editor), `parche_snp_escala_agente.py` (nuevo, 11 costuras idempotentes),
+`test_escala_estructura.js` + `test_escala_agente.js` (nuevos), `CLAUDE.md`.
+
+---
+
+### ✅ BUG-ROT2 · Las piezas de un esqueleto siguen recortadas a 16 posturas — ✅ resuelto 2026-08-07
+
+**Encontrado al cerrar BUG-RS7/RS8** (no reportado por el dueño), barriendo el resto del código en
+busca del mismo `& 15`. Queda **uno**, y está en el snippet que el dueño edita en vivo
+(`data/snippets/mundo-autoarranque.json`, dentro de `game.esqueletos.crear`):
+
+```js
+nombre: q.nombre || ('pieza ' + idx), clave: q.pieza, rot: (q.rot | 0) & 15,
+```
+
+Una parte de un rig declarada con `rot: 16..23` no se rechaza: se convierte **en silencio** en
+`0..7`, o sea en otra postura. Es exactamente el fallo que costó los dos tickets de redstone.
+
+**Por qué no se ha tocado ya:** ese fichero es del dueño y lo edita **en vivo**, así que se parchea
+con un script idempotente (como `parche_snp_rot24.py`), no a mano — y esto cambia el comportamiento
+de los esqueletos, no el de redstone, así que decide él si entra. **Riesgo real bajo:** con el
+recorte, declarar `16..23` daba una pieza visiblemente mal puesta, así que es poco probable que haya
+ningún rig guardado dependiendo del recorte.
+
+**Arreglo esperado** — `mcOriNorm(q.rot)` en vez del recorte, con el mismo criterio que en todas
+partes: lo que no es una postura conocida se lee como «sin girar», nunca como otra.
+
+**✅ Resuelto 2026-08-07**, con el dueño diciendo «arregla los más fáciles». `oriDePieza(q.rot)`, que
+pregunta a `mcOriNorm` y lleva el calco de red por si el snippet corre sin motor (los arneses de
+juguete) — el mismo patrón que ya usaba `partesOri` en este fichero. Se aplica con
+`parche_snp_rot24_esqueletos.py`, idempotente. **Era el último `& 15` vivo del repo.**
+
+⚠️ **Queda otro recorte, y NO es un descuido:** el preview del editor de agentes hace `((q.rot|0) % 4 + 4) % 4`
+a propósito, porque ese dibujo no sabe pintar espejados y solo ofrece los 4 cuartos de vuelta. Es una
+limitación del preview, no de los datos; si un día pinta las 24, ahí es donde hay que mirar.
+
+**Verificado** — `test_material_familia.js` §E (junto a BUG-SNP2, que salió en la misma tanda): las 24
+se conservan tal cual, la 16 ya no se lee como la 0 ni la 23 como la 7, lo desconocido (24, 99, −1,
+`undefined`, `null`) se lee **sin girar**, y con `mcOriNorm` delante manda el motor y no el calco.
+`test_esqueleto_navegador.js` sigue con **los mismos 3 fallos que ya tenía antes** (basura de rigs
+efímeros en `/map/agents`, ver más abajo), ninguno nuevo.
+
+---
+
+### ✅ BUG-RS8 · Accionar la palanca la mueve de sitio y le cambia el giro — ✅ hecho (2026-08-06)
+
+**Reportado** 2026-08-06 por el dueño, con dos capturas (antes y después de accionarla):
+
+> «y este otro bug, si doy a la palanca que esta pegada al piston, se rota sola desactivada y aparece
+> abajo que no es donde la puse»
+
+En la primera está **pegada a la cara vertical** del bloque; en la segunda ha aparecido **en el suelo,
+tumbada** y apagada.
+
+**Causa** — una sola línea, `oriDe()` en `redstone/redstone.js`, que leía la postura de la clave y la
+**recortaba a 4 bits** (`& 15`). Desde BUG-ROT1 las posturas son **24**, no 16, así que las ocho
+nuevas caían sobre otras: una palanca puesta en `@19` volvía como `@3`. Y ahí están **las dos mitades
+de lo que el dueño vio, que no eran dos fallos sino uno**:
+
+- «se rota sola» — literal: `@19` y `@3` son posturas distintas.
+- «aparece abajo, que no es donde la puse» — la palanca es una **plaquita fina** que no llena su
+  celda: cambiarle la postura la mueve **dentro** de la celda. No cambió de celda; cambió de sitio
+  dentro de ella. Por eso el ticket decía «hay dos cosas que medir» y resultó haber una.
+
+El recorte estaba en el camino por el que **todo** cambio de bloque devuelve su postura a la celda
+(`conOri`, que usan `aplicar()` y `conmutar()`), así que afectaba por igual a la pieza que suelta el
+jugador y a la que sigue a la señal sola.
+
+**Arreglo** — `oriDe` delega en `mcOriNorm`, que es quien sabe cuántas posturas hay (con respaldo
+`0..23` si el motor no está delante). Un sufijo que no sea una postura conocida se lee como «sin
+girar», nunca como otra.
+
+**Verificación** — `node test_redstone_postura_al_accionar.js` (nuevo): las 24 posturas, por los dos
+caminos de reescritura (`conmutar()` con una palanca y `aplicar()` con un cable), conservan el sufijo
+al encenderse y al apagarse. Comprobado además que el test **caza** el fallo: volviendo a poner el
+`& 15` salen 5 fallos y se lee `hab:palanca@19 → hab:palanca-on@3`, exactamente lo del ticket.
+
+⚠️ Capturas **no rescatadas**: el mensaje del dueño no estaba volcado al transcript cuando se abrió el
+ticket, y al cerrarlo ya no hacía falta (la causa está medida). Si se quiere el antes/después para el
+historial, `guardar_imagenes_ticket.py BUG-RS8 --uuid ...`.
+
+---
+
+### ✅ BUG-RS7 · El pistón no se puede poner apuntando hacia arriba: se coloca de lado — ✅ hecho (2026-08-06)
+
+**Reportado** 2026-08-06 por el dueño, con captura (`data/tickets/BUG-RS7/01.png`):
+
+> «intento poner el piston de redstone apuntando hacia arriba pero al dejarse sobre el mapa se pone
+> de lado»
+
+Ni el fantasma ni el estampado tenían nada que ver: **el pistón se colocaba bien y el circuito lo
+acostaba acto seguido**. Eran **dos** cosas, las dos en redstone:
+
+1. **El mismo recorte a 4 bits de [BUG-RS8](#-bug-rs8)**, que es lo que el dueño VE. El motor repasa
+   toda celda recién puesta, y al repasarla le devuelve su postura con `conOri()`; con el recorte,
+   `hab:piston@16` (mirando arriba) se reescribía como `hab:piston@0` — de lado — en el mismo
+   instante de soltarlo. Literalmente «al dejarse sobre el mapa se pone de lado».
+2. **`frenteDe()` era horizontal por construcción**: forzaba la `y` a 0 y solo miraba `ori & 3`,
+   así que aunque la postura hubiera sobrevivido, el pistón habría seguido empujando de lado. Había
+   incluso un aviso («el pistón está VOLCADO… usa R, no Shift+R») que documentaba la limitación como
+   si fuera una advertencia al usuario. Ese aviso ya no tiene sentido y se ha quitado.
+
+**Arreglo** — el frente de una pieza es el `+X` de su dibujo pasado por la postura, y eso lo dice
+ahora el motor: `mcOriPerm(ori)`, que sale de la **misma composición** con la que `mcStructGeom` gira
+los voxels. Lo que la pieza hace y lo que se ve ya no se pueden separar, y el frente puede ser `+Y` o
+`−Y`. Para que esa composición siga siendo una sola, se ha extraído a `mcOriMove(rot, bx, by, bz)`:
+`mcStructGeom` ya no la lleva escrita, la pide.
+
+Comprobado que en Minecraft un pistón **sí** apunta arriba y abajo (es una de sus seis orientaciones,
+y la base de las máquinas verticales), así que el arreglo va en la dirección correcta.
+
+**Verificación** — `node test_redstone_piston.js`: la batería entera (empuja, la cabeza ocupa el
+hueco, idempotencia, recoger, sin hueco, borde del mundo) pasa de 4 posturas a **12** — los 4 giros
+horizontales de siempre más las 8 verticales — y se comprueba explícitamente que `@16..@19` empujan
+**hacia arriba** y `@20..@23` hacia abajo. Las 12 restantes son vuelcos que dejan el frente donde ya
+estaba. Más `node test_posturas_24.js` §E, que fija que `mcOriMove` es la composición de
+`mcStructGeom` y que `@0..@15` miran adonde miraban (los circuitos ya construidos no se giran).
+
+---
+
+### ✅ BUG-RS6 · Agrandar la puerta a 16×16×24 la convierte en estructura y deja de ser redstone — ✅ hecho (2026-08-06)
+
+> *«al modificar la puerta usada en redstone de 16x16x16 a un tamaño 16x16x24 porque era demasiado
+> baja, ahora se plancha como estructura y no como bloque, y deja de funcionar como elemento de
+> redstone»*
+
+La puerta era demasiado baja —una puerta de un bloque de alto no es una puerta—, y al darle la altura
+que le corresponde deja de ser una pieza de circuito.
+
+Es el mismo material contado en **los dos sitios**: por debajo de 16³ una pieza vive en `mc.grid` (una
+celda, un id, `mc._geoFina`) y por encima se **estampa** en `mc.structures`, que no es rejilla. El
+motor de redstone lee la rejilla, así que una puerta estampada es invisible para él: ni la encola, ni
+le cambia el material al abrirse, ni la ve el cable que tiene pegada.
+
+**Decidido por el dueño (2026-08-06): VARIAS CELDAS DE REJILLA, no estructura.**
+
+> *«si se puede hacer en varias celdas parecería mejor ya que las estructuras son lentas, eso sí,
+> tendrían que moverse al unísono si es una puerta que se abre»*
+
+O sea: dos piezas de 16³ apiladas (`hab:puerta-abajo` / `hab:puerta-arriba`), cada una en su celda de
+`mc.grid`, y no un asset de 16×16×24 estampado. El motivo es el de siempre — el coste son **draw
+calls**, y una estructura fina por puerta las paga todas; en la rejilla la puerta entra en la malla
+del chunk. **La restricción que impone el dueño es «al unísono»**: abrir la de abajo tiene que abrir
+la de arriba en la misma pasada, o se ve media puerta abierta.
+
+**Precedente directo, de esta misma sesión: el pistón (REQ-RS3).** Cuerpo en una celda, cabeza en
+otra, y se mueven juntos porque el cuerpo manda sobre la cabeza desde `alRecibirSeñal`. La puerta es
+la misma forma: **la mitad de abajo es la pieza de circuito** (la que escucha la placa) y arrastra a
+la de arriba, que no necesita ser circuito. Y con la misma advertencia que costó el pistón: el motor
+solo re-malla lo que ha tocado **él**, así que la mitad de arriba hay que re-mallarla a mano.
+
+**Preguntas abiertas, ninguna decidida (sin investigar):**
+
+- «Al unísono» **no es solo abrir**. ¿Qué pasa al **romper** una mitad, al **poner** solo una, al
+  **girarla** con `R`, y al guardar/reabrir con las dos mitades en estados distintos? Lo de abrir lo
+  resuelve el patrón del pistón; lo demás no, y es donde de verdad está el ticket.
+- ¿La de arriba es un material **mudo** (no circuito, solo arrastrado) o también escucha? Mudo es más
+  simple, pero entonces una placa a la altura de la cabeza no abre la puerta.
+- ¿Y el **dibujo**? Hoy hay un `hab:puerta` / `hab:puerta-abierta` de 16³; pasar a dos mitades es
+  rehacer `make_piezas.py` y **migrar las puertas ya puestas** en `/map/redstone` y `/map/test`.
+- ¿Afecta solo a la puerta, o a cualquier pieza de redstone que quiera pasar de 16³?
+- ¿Hay que avisar en el editor al agrandar un asset que **es** pieza de redstone, en vez de dejar que
+  deje de funcionar en silencio? Eso es lo que ha costado este ticket.
+
+**Verificación esperada** — una puerta con su altura de verdad se abre y se cierra con una placa de
+presión, y sigue funcionando tras guardar y reabrir el mundo. Sin regresión en los `test_redstone_*.js`.
+
+**Cómo se resolvió (2026-08-06)**
+
+La medida que ordenó todo: `mcCabeEnRejilla` (`app.js:5827`) exige `w/h/d ≤ 1` celda para que una pieza
+entre en `mc.grid`. Con 16×16×24 son **dos** celdas, así que el clic derecho la estampaba como
+estructura suelta — y una estructura no tiene celda, ni vecinos, ni señal. El circuito nunca estuvo
+roto; lo que se rompió fue el **sitio** donde vivía la pieza. Confirmado midiendo: `hab:puerta` daba
+`finoRejilla=false` mientras `hab:puerta-abierta` (todavía 16³) daba `true`.
+
+1. **El dibujo se parte, no se rehace.** `redstone/partir_puerta.py` (nuevo) coge la puerta que el
+   dueño tenía **hoy** en la galería —776 voxels, con su listón claro y el tirador recolocado a media
+   altura— y la corta en dos celdas: `puerta` (z 0..15) y `puerta-alta` (z 16..23). La hoja abierta se
+   **deriva girando la cerrada 90°** sobre la jamba (`abatir`), no se dibuja aparte: así hereda el
+   grosor, el tirador y los colores. Justo lo contrario ya había pasado — el dueño subió la cerrada a
+   24 y `puerta-abierta.json` se quedó en 16 y con otro grosor. Las cuatro piezas quedan en
+   `w=h=d=1`, o sea de vuelta en `mc.grid` y dibujadas con su geometría real dentro de la malla del
+   chunk. Lo pisado está en `data/habitantes_trash/1786030148112__puerta.json`.
+2. **Se mueven al unísono porque una manda sobre la otra**, que es el patrón del pistón (REQ-RS3):
+   `hab:puerta` y `hab:puerta-abierta` van con **dos `define()` y `alRecibirSeñal`**, sin `encendida`,
+   y el callback escribe **las dos celdas y remalla una sola vez**. La mitad de arriba **no es una
+   pieza de redstone**: no tiene señal propia, no conduce, no hace cola — la arrastra la de abajo. Y
+   si a la de arriba le falta el material en la paleta (todo va con `precargar:false`), **no se mueve
+   ninguna de las dos** y se reintenta entero; con `encendida` el motor habría abierto la de abajo él
+   mismo antes de avisar y se habría quedado media puerta abierta.
+3. **Muere el apaño de `conduce`.** La puerta ya no conduce señal (una de Minecraft tampoco). Con eso
+   se va el `perdida: 1` obligatorio —con 0 las dos hojas se sostenían la una a la otra y la puerta no
+   se cerraba jamás—, el tick de diferencia entre hojas y el caso feo de abrir solo media al final del
+   alcance.
+
+**Respuestas a las preguntas abiertas del ticket:** la de arriba es **muda** (más simple, y una placa
+a la altura de la cabeza es un caso que nadie ha pedido); **no hay auto-completado al poner** porque
+`game.bloques` no tiene gancho `alPoner`/`alRomper` y `alRecibirSeñal` solo salta con cambio de nivel
+— se ponen las dos mitades a mano, y una puerta de **una sola celda sigue siendo legítima**; lo que
+haya encima que no sea media puerta **no se pisa** (esto mueve una puerta, no la construye); el giro
+se **arrastra** a la hoja de arriba. Queda **fuera**: avisar en el editor al agrandar un asset que es
+pieza de redstone (es la causa raíz de que esto se rompiera en silencio — ticket aparte si duele).
+
+**Verificación** — `node test_redstone_puerta.js` (nuevo) en verde: mide en qué **pasada** cambia cada
+hoja tickeando de una en una, y las dos cambian en la misma (1 y 1) en los cuatro giros, al abrir y al
+cerrar. Más: las cuatro piezas caben en la rejilla, media puerta sola funciona y no escribe encima, un
+bloque ajeno arriba queda intacto, y un cable al otro lado se queda apagado. Sin regresión en
+`test_redstone_piston.js`, `test_redstone_giro.js`, `test_redstone_bloques.js` y
+`test_redstone_arranque.js`.
+
+**Pendiente de una pasada del dueño**: `/map/redstone` (los ejemplos 3 y 7 apilaban dos `hab:puerta`)
+está actualizado en `redstone/redstone-ejemplos.js` pero **no re-montado** — se monta con
+`node redstone/montar_ejemplos.js`, que sí guarda mapa.
 
 ---
 
 ## Bitácora
+- 2026-08-06 · 🔌 **El Mundo hacía cola detrás de miniaturas que nadie veía (PERF-MC3, segunda vuelta)** (dueño: «mira ver si estás midiendo las cosas bien», y luego «no puede ser que el mapa empty tarde si no tiene ni un voxel»). Tras arreglar el serie→paralelo, en su máquina la paleta seguía costando **10032 ms de 11287**, y **9905 se los comía el PRIMER bloque** (`hierba`) mientras los otros catorce salían a 4-18 ms. **Mi diagnóstico anterior era falso, y el culpable era mi propio instrumento**: la línea `RED ·` sacaba el veredicto de los KB/s y acusó al **ancho de banda** de una fase cuyas descargas habían terminado en **1265 ms**. Un caudal bajo solo dice que los documentos son pequeños para lo que tarda un viaje, no que la red sea el cuello. Segundo error encadenado: el dueño **no está en el móvil**, está en un portátil potente con buena red, así que la hipótesis de CPU (rasterizar las miniaturas de las galerías) tampoco se sostenía — la medí estrangulando la CPU ×8 por CDP y todo escalaba **uniforme**, nunca aparecía un bloque comiéndose el 99 %. La causa real estaba en el **orden de arranque**, en las tres últimas líneas del fichero: en `/map/<nombre>` se llamaba a `loadServerAssets()` + `refreshHabitantesList()` **antes** de `openWorld()`, así que el editor entero arrancaba primero aunque el Mundo lo tape entero, y sus galerías bajan **un documento por miniatura** (43 habitantes, 6,3 MB) **por el mismo host**, del que el navegador solo abre **~6 sockets**. La paleta no estaba descargando: estaba **esperando turno**. Arreglo: se parte el índice de assets en sus dos trabajos —`mcIndexAssets` (los nombres cortos que usan los snippets, hace falta ANTES) y llenar las galerías (solo lo mira el editor, va DESPUÉS)— compartiendo la promesa de `assets/index.json` para no pedirlo dos veces; y de propina **se cierra una carrera que ya existía**: `openWorld()` salía sin esperar a `loadServerAssets()`, así que el autoarranque podía encontrarse el registro de alias a medias. Medido en local: peticiones **ajenas compitiendo por el cable 3 → 0** y el pico de simultáneas de la paleta **5 → 8**. Confirmado por el dueño en su máquina: «ya carga rápido». **Y el instrumento se arregló para que no vuelva a mentir**: `RED ·` ya no calcula KB/s, sino que **solapa** la ventana de red con la duración real de la fase (comparar los dos relojes de largo daba 233 %, porque parte de esos documentos los pide la galería antes de que la fase empiece); el `ms` de cada bloque se reparte en **`doc` / `caras` / `geom`** —esperar el documento, rasterizar las 6 caras, hornear geometría fina: un bloque de 9905 ms es un problema distinto según cuál de las tres sea—; y se añade **`esperando TURNO de socket`** (`requestStart − fetchStart`) junto a cuántas **peticiones ajenas** competían en esa misma ventana, que es exactamente la cifra que distingue «la red va lenta» de «la red no era para ti» y que no aparecía en ninguna otra parte. Sin regresiones: `test_paleta_paralela` (12), `test_informe` (34), `test_galeria_assets` (7), `test_galeria_namespace` (8), `test_mapas` (18), `test_materiales_en_espera`, `test_setvoxel_autocarga` (21), `test_stamp_scripting`, `test_redstone_arranque`.
+- 2026-08-06 · ⏳ **Un mundo vacío tardaba 2,2 s porque los 15 materiales bajaban de uno en uno (PERF-MC3)** (dueño: «cargo `/map/empty`, que no tiene ni un voxel, y se tira en "Preparando bloques (0/15)…" un buen rato, cosa que no tiene sentido; quiero saber qué pasa»). Lo primero fue **medirlo con su propio informe**, no suponer: de 2178 ms, **1775 eran la paleta** y dentro de ella los 15 documentos salían **estrictamente consecutivos** (`roca` 868 ms, luego `hierba` 162, luego `tierra` 149…). El bucle de `mcBuildPaletteImpl` esperaba la `fetch` de cada bloque antes de pedir el siguiente. El arreglo es de seis líneas y **no toca el bucle**: `mcPrecargarDocs` suelta las peticiones en tandas con tope 8 y **no se espera a que acaben**, así que el bucle sigue yendo en serie —tiene que ir, rasteriza sobre un canvas compartido y escribe `mc.palette[id]` en orden— pero cuando le toca el bloque 5 su documento ya está bajando. Lo que lo hace posible es que **`getRoomData` cachea la PROMESA y no el resultado**: pedir un documento dos veces no lo baja dos veces, así que precalentar es literalmente pedirlos antes. Medido en local con caché fría, tres vueltas cada uno: **383 ms de media → 63 ms**, ≈6×. Y de paso **desmiente la sospecha del propio ticket**: si una parte gorda hubiera sido CPU (`JSON.parse` + rasterizar 6 caras), esos 383 ms no se caerían a 63 con latencia ≈ 0 — era espera en serie casi entera. El segundo síntoma era el cartel: `onProgress` se llamaba **después** de terminar cada bloque y con el nombre del bloque **ya hecho**, así que los 868 ms de `roca` transcurrían enteros diciendo «(0/15)» — justo mientras más se trabajaba, el número no se movía, y eso es lo que se lee como un cuelgue. Ahora avisa dos veces por bloque y la de «empezando» dice el que se está bajando; la de después es la única que trae el `ms` y por tanto la única que entra en el informe. Las **descargas que nadie pidió** que apuntaba el ticket resultaron ser dos cosas distintas al medirlas con la pila de llamadas: `/api/habitantes` ×3 son **tres inicializadores del editor** disparando a la vez (`refreshHabitantesList`, `loadRooms`, `refreshTexturas`), que ahora **comparten la petición en vuelo** —no el resultado, que daría listas rancias tras guardar o borrar—; y los dos assets de fuera de la paleta los pide `renderTexStrip`, la tira de texturas **del editor**, que se pinta detrás mientras el Mundo carga: no sobran, son de otra pantalla, y lo único que hacían era ocupar dos de las ~6 conexiones del navegador. Verificado con `test_paleta_paralela.js` **nuevo** (12 ok, estable en tres vueltas), que mide la **forma y no el reloj**: pico de peticiones en vuelo ≥ 4 (en serie sería 1 por definición), paleta completa **y en el mismo orden** (el id de bloque es la posición en `mc.blockKey` y los mundos guardados llevan ids dentro), primer cartel `(0/8) hierba ⬇`, y `/api/habitantes` una sola vez. Deliberadamente **no** compara reloj de pared contra suma de las partes: en localhost lo que domina es la cola de conexiones del navegador, no el código, así que aprobaría y suspendería sola. Sin regresiones en `test_informe` (34), `test_materiales_en_espera`, `test_atlas_estructuras` (13), `test_galeria_assets` (7), `test_bloques_comportamiento` (384) y `test_navegador` (15). ⚠️ **En el host remoto del dueño no está medido**: allí eran 1774 ms de idas y vueltas, así que debería ganarse más que en local, pero es previsión y no dato. Las propuestas 3 y 4 del ticket (paleta perezosa, caras ya rasterizadas por el servidor) quedan **abiertas a propósito**: ahora la paleta son ~60 ms en local y conviene volver a medir en remoto antes de decidir si sigue siendo el cuello.
+- 2026-08-06 · 🚪 **La puerta alta son DOS celdas, no una estructura (BUG-RS6)** (dueño: «al modificar la puerta usada en redstone de 16x16x16 a un tamaño 16x16x24 por que era demasiado baja, ahora se plancha como estructura y no como bloque, y deja de funcionar como elemento de redstone», y luego «si se puede hacer en varias celdas parecería mejor ya que las estructuras son lentas, eso sí, tendrían que moverse al unísono si es una puerta que se abre»). El circuito nunca estuvo roto: lo que se rompió fue **dónde vive la pieza**. `mcCabeEnRejilla` exige `w/h/d ≤ 1` celda para entrar en `mc.grid`, y 24 de alto son dos — así que el clic derecho pasó a estamparla como **estructura suelta**, y una estructura no tiene celda, ni vecinos, ni señal. Medido de frente antes de tocar nada: `hab:puerta` daba `finoRejilla=false` mientras `hab:puerta-abierta` (todavía 16³) daba `true`. La salida que puso el dueño —celdas de rejilla, no estructuras— trae su propia condición: **al unísono**, porque media puerta abierta es peor que una puerta lenta. Dos decisiones sostienen el arreglo. La primera: **el dibujo se parte, no se rehace**. `redstone/partir_puerta.py` corta la puerta que él tenía **hoy** en la galería (776 voxels, con su listón claro y el tirador recolocado a media altura) en `puerta` (z 0..15) y `puerta-alta` (z 16..23), y **deriva la hoja abierta girando la cerrada 90° sobre la jamba** en vez de dibujarla aparte — que es exactamente el fallo que ya había ocurrido: él subió la cerrada a 24 y `puerta-abierta.json` se quedó en 16 y con otro grosor. La segunda: **una manda sobre la otra**, el patrón del pistón. `hab:puerta` y `hab:puerta-abierta` van con **dos `define()` y `alRecibirSeñal`**, sin `encendida`, y el callback escribe las dos celdas y remalla **una sola vez**; la mitad de arriba no es pieza de redstone (no tiene señal, no conduce, no hace cola). Lo que compra no usar `encendida` se ve en el caso feo: como todo va con `precargar:false`, si a la hoja de arriba le falta el material en la paleta **no se mueve ninguna de las dos** y se reintenta entero — con `encendida` el motor habría abierto la de abajo él mismo antes de avisar. De regalo muere el apaño de `conduce`: se va el `perdida: 1` obligatorio (con 0 las dos hojas se sostenían la una a la otra y la puerta **no se cerraba jamás**), el tick de diferencia entre hojas y el abrir-solo-media al final del alcance; una puerta de Minecraft tampoco conduce. **Sin tocar `app.js`.** Verificado con `test_redstone_puerta.js` **nuevo**, que no pregunta «¿se abrió?» sino **«¿en qué pasada se abrió cada hoja?»**: tickea de una en una y las dos cambian en la **misma** (1 y 1) en los cuatro giros, al abrir y al cerrar. Más: las cuatro piezas caben en la rejilla, media puerta sola funciona y no escribe encima, un bloque ajeno arriba queda intacto, y el cable del otro lado se queda apagado. Sin regresión en `test_redstone_piston`, `test_redstone_giro`, `test_redstone_bloques` y `test_redstone_arranque`. Lo que **no** se hizo, y es la causa raíz de que esto se rompiera en silencio: avisar en el editor al agrandar un asset que **es** pieza de redstone.
 - 2026-08-06 · ⚡ **Un muro también lleva corriente: bloques macizos como puente (redstone r1.2)** (dueño: «los bloques que reciben energía de redstone deben energizarse, por lo tanto, una antorcha pegada a un bloque que recibe energía como el de la imagen debería encenderse; salvo que se haya indicado como bloque aislante»). Hasta r1.1 una celda sin `cfg` era un **agujero**: `señalQueLlega` la saltaba y el circuito se acababa ahí, así que la antorcha de la captura —pegada a un bloque, no al polvo— no tenía forma de enterarse. El ticket temía **estado nuevo por celda** (`energizado` en `mundo.json`) y **un barrido que ya no puede limitarse a las claves de redstone**; no hizo falta ninguno de los dos: la energía del bloque **se calcula al vuelo** desde sus seis vecinos y **nunca se encadena bloque → bloque**, lo que acota el coste a un salto y evita el dominó de un cable suelto energizando un muro entero (precio explícito: dos bloques en fila no conducen, igual que en Minecraft). Lo que sostiene todo es la asimetría **FUERTE/DÉBIL**: el **cable** energiza el bloque solo débilmente y otro cable **no lee lo débil**; sin eso, dos tendidos separados por un bloque se contagiarían **saltándose la pérdida** y un tendido se realimentaría a través del bloque que él mismo alimenta, sin bajar nunca de nivel. Una lámpara (que no es cable) sí lee lo débil, y por eso se enciende colgada bajo un cable. **El error que casi se cuela**: el aviso a vecinos tiene que saltar **dos** celdas a través del bloque, y la primera versión se lo ahorraba cuando quien cambiaba «no era circuito», para que un TNT de mil voxels no costara 36 lecturas cada uno — pero **«¿era esta celda circuito?» no se puede responder después de la escritura**, porque una *fuente* (una palanca) no deja entrada en `potencia`; al arrancarla parecía un bloque cualquiera y la lámpara del otro lado del muro **se quedaba encendida**. Ahora salta siempre y el filtro que de verdad importaba sigue en pie (solo se **encola** lo que tiene `cfg`): la cola sigue vacía en una ráfaga y lo único que sube son lecturas de array, 7 → 43, con **600 escrituras en 0,9 ms**. El «bloque aislante» que pedía el dueño quedó en `game.redstone.aislante(clave)` y no en `game.bloques.define(…, {aislante:true})` como se apuntó al redactar el ticket: la tabla de materiales de redstone ya vive en el motor, y meterlo en `define()` lo convertiría en pieza de circuito —cola y entrada de `potencia`— para no hacer nada. `info()` enseña ahora `vecinos[i].bloque = {fuerte, debil}`, sin lo cual «le llega corriente y no enciende» se mira a ciegas justo en el caso nuevo. Todo en `redstone/redstone.js`, **sin tocar `app.js`**. Verificado con `test_redstone_bloques.js` (nuevo), los cuatro `test_redstone_*` de antes, `test_bloques_comportamiento.js` (373 ok) y —lo que de verdad medía el riesgo— los **nueve circuitos reales** de `redstone/montar_ejemplos.js`, que van montados **sobre el suelo**, que es donde el transporte por bloques podía romperlos: todo ok.
 - 2026-08-06 · 🔌 **El lío del cable: un id sin espacio de nombres no identifica nada** (dueño: «he querido modificar el cable de redstone por una forma más interesante y en lugar de reemplazar el actual se ha creado uno nuevo… además parece que se llama igual viendo los rayos-X, solamente el nuevo tiene ficha… y lo que es peor, el modificado no funciona»). Tres quejas, **una sola línea de causa**. El disco lo dijo todo antes de teorizar: dos ficheros de verdad, `data/habitantes/cable.json` (112 vox, la cruz gorda, de ayer) y `assets/cable.vox.json` (44 vox, la cruz irregular que él redibujó, de hoy a las 12:10). `save()` elegía destino por `state.meta.type` —`'textura'` → `/api/assets`— **en vez de por la galería de la que salió el dibujo**; y como el cable es un habitante de tipo `textura`, cargarlo y darle a Guardar lo escupía a `assets/` con el mismo `id`, dejando el original intacto. `serverId` recordaba el **id** pero no el **espacio de nombres**, y ahí está el fondo del asunto: `cable` existía a la vez como habitante y como asset, o sea que el id solo no identificaba nada. Las otras dos quejas caen de ahí: el «no funciona» es que el circuito se declara sobre `'hab:cable'` y la copia era `asset:assets/cable.vox.json` —la propia captura `02.png` del dueño lo decía, no hizo falta tocar el motor de redstone—, y encima el duplicado **secuestró el nombre corto `cable`** para todos los scripts, porque `mcIndexAssets` registra el basename de cada asset. Lo de la ficha resultó ser **otro bug**, y por eso iba aparte: el botón `📋 Ficha` estaba escrito solo en el bucle que pinta assets, así que **ningún habitante ha tenido ficha nunca**. No bastó con añadirlo, porque la ficha estaba escrita entera en forma de asset (clave `'asset:'+file`, nombres derivados del basename, alias por `PATCH /api/assets`) y un habitante **no pasa por `mcIndexAssets`**: su id y su rótulo **no valen como clave**, solo `hab:<id>`. Ofrecérselos habría sido mentir, que es exactamente el error que dejó el cable mudo — así que para habitantes la ficha enseña su clave entera y **esconde** la mitad editable en vez de fingir que se puede editar. Arreglo: `serverKind` (`'hab'|'asset'|null`) viaja junto a `serverId`, sobrevive al `localStorage`, y `vaAAssets()` enruta por él; el tipo solo decide cuando **no hay origen**, o sea en un dibujo nuevo. Verificado con `test_galeria_namespace.js` **nuevo** (8 ok), que además se comprobó **contra el código viejo** para asegurar que de verdad detecta el fallo (2 fallos: aparece el asset gemelo y el voxel nuevo no llega al habitante); sin regresión en `test_galeria_assets` (7), `test_guardar_pieza` (17) y los tres de redstone. Los datos del dueño se recolocaron con respaldo previo en `data/habitantes_trash/1786012950832__*`: su dibujo nuevo pasó a `hab:cable`, `cable-on` recibió la misma forma heredando el color emisivo que ya usaba (si no, el cable **cambiaba de forma al encenderse**) y el duplicado se retiró por `DELETE /api/assets/cable`, que lo deja en la papelera y libera el nombre corto. Nota aparte: `test_ficha_material` tiene **1 fallo previo** («un nombre corto nuevo resuelve sin recargar la página»), comprobado que ya venía de antes y no lo causa este cambio.
 - 2026-08-05 · 🔦 **La antorcha vuelve a alumbrar: la luz de bloque también se siembra desde la rejilla** (dueño: «jumper ya funciona, pero la antorcha no ilumina, mira las fotos de la galería #10 y #11», y luego «todo esto funcionaba cuando era una estructura, ha dejado de iluminar al pasar a setVoxel»). Las dos fotos son una A/B perfecta: en la #10 la antorcha está puesta en `51,6,59` del mapa `test` y **se ve encendida**, pero el pasillo está exactamente igual de negro que en la #11, donde no hay antorcha. El dueño tenía razón y el motivo es de nacimiento: `mcComputeBlockLight` se escribió cuando una pieza luminosa **solo podía existir estampada suelta**, así que sembraba recorriendo `mc.structures` y leyendo sus `emitCells` — desde que el clic derecho mete en `mc.grid` todo lo que cabe en su celda, la antorcha ya no está en esa lista y **no existe como foco**. Mismo patrón que el giro en la clave: la pieza no cambió, cambió por dónde entra. Medido antes de tocar nada, con la misma antorcha en la misma celda: rejilla `hasGlow=false` y luz `[0,0,0,0]`; estructura `hasGlow=true` y luz `[15,11,9,7]`. **No hubo que inventar luz nueva**: la geometría fina de la rejilla ya trae `emitCells:[0,0,0]` y `emitDir:[0,4,0]` horneados, que es justo lo que consume la siembra, así que el arreglo es *dónde mirar* — `siembra(cx,cy,cz,ed,k)` sale a función y se llama desde las **dos** fuentes. Lo que sí costó pensar es **encontrarlas**: barrer `mc.grid` entera en cada edición son ~60 ms en 512×40×512 (extrapolado de 2,07 ms medidos en 96³) y la luz se recalcula en **cada bloque puesto o roto**, o sea que la solución ingenua devolvía el lag que se quitó el 2026-08-04. De ahí un índice disperso (`mc._glowCeldas`) que solo se rehace de cero cuando cambia *qué materiales emiten* (`mc._glowFirma`: paleta nueva o geometría recién horneada) o la rejilla entera (`mc._glowRef`: cargar/redimensionar), y que se corrige celda a celda en `mcGlowTocada` **después** de escribir. ⚠️ `mcDirty` **no vale de embudo** aunque lo llamen todos los caminos: se corta sola cuando el guardado ya está marcado entero (`p.full`). Dos efectos laterales obligados: `mcRecomputeHasGlow` mira también la rejilla (si no, quitar una estructura apagaba una antorcha que sigue puesta), y `mcAgentSetBlock` ya no puede saltarse el BFS en un sólido→sólido si la celda gana o pierde emisor (pintar una antorcha encima de piedra). Verificado con `test_luz_en_rejilla.js` **nuevo** (17 ok: rejilla y estructura dan el **mismo perfil** `[15,11,9,7]`, romperla devuelve el pasillo a `[0,0,0,0]`, una flor fina no emisiva sigue sin encender nada, y 20 ediciones seguidas = **0 re-barridos**), más `test_luz_al_estampar` (9), `test_luz_incremental_navegador` (19), `test_luz_traspasa`, `test_flor_en_rejilla`, `test_clic_derecho_rejilla`, `test_atlas_estructuras` (13), `test_suelo_al_estampar` y `test_bloques_comportamiento` (**373 ok, 0 fallos**). Falta la confirmación visual del dueño en su mundo.
@@ -2109,3 +4091,6 @@ Pantalla nueva aparte del editor: 1ª persona, WASD + ratón, terreno plano, con
   - **Verificado sin tocar nada más:** `test_caras_mascara.js` (35 ok), `test_caras_pegadas.js` (15 ok — el guardián píxel a píxel), `test_caras_mundo.js`, `test_caras_render.js`, `test_stamp_scripting.js` y `test_atravesable.js`, todos en verde.
   - **Lección de método, que es la que importa:** medí la textura horneada, vi que estaba casi opaca y concluí que el dibujo estaba mal. Nunca comprobé si **quien la hornea** respetaba el contrato que yo mismo había escrito tres fases antes. Un número malo no dice de quién es la culpa; antes de culpar al dato hay que releer al productor del dato.
   - **Entregable visible:** `monta_zona_caras.js` deja plantada en `/map/test` una fila de cinco puestos con nota post-it al lado de cada uno (hojas por `setVoxel`, hojas por `game.stamp`, el «antes» sin `caras`, la mata en cruz atravesable, y un muro para probar `game.bloques.define(…,{atravesable:true})` a mano). Se deja puesto a propósito. `assets/demo-hojas-sin-caras.vox.json` existe solo para ese A/B.
+
+- 2026-08-07 · 🧹 **Limpieza de la cola: dos PERF cerrados sin hacer y los dos tickets fáciles resueltos** (dueño: «cerrar PERF-MC3 y PERF-MC2 y arreglar los más fáciles»). **PERF-MC3** se cierra con las propuestas 3 y 4 sin hacer: lo entregado (paleta en tandas de 8, 383 → 63 ms en local; el cartel que ya dice qué bloque baja *antes* de bajarlo) se queda, pero en el enlace del dueño abrir un mundo sigue costando ~9-13 s y **eso no se arregla desde el motor** — 15 KB/s efectivos y 192 KB por el cable es ancho de banda, y lo que queda por hacer es mandar menos bytes, o sea un formato nuevo (`.faces.png` + IndexedDB) que es obra propia y no la continuación de éste. **PERF-MC2** (sub-chunk culling) se cierra sin tocar nada: se abrió por una sospecha razonable que las medidas posteriores **desmintieron dos veces** —aquel «pegado a la estructura bajan los fps» era la colisión fina ∝ `playerScale³`, y la carga lenta era la red—, y desde entonces los draw calls de estructuras no han vuelto a salir como cuello en ninguna medición. Los dos dejan escrito **qué los reabriría**, para no repetir el diagnóstico. **BUG-SNP2**: `hab:placa-on` se cantaba como dedo torcido de `hab:palanca-on` (distancia 2, tope 2 en palabras largas). Lo que **no** se hizo fue apretar la distancia —la reacción obvia, que habría roto los typos de verdad: `eskalera` está a 1—; se mira una señal **distinta y exacta** y se mira **primero**: si `placa` ya está en la paleta, `placa-on` es de su familia y espera en silencio (`deLaFamilia`, `parche_snp_familia_material.py`). Un guion no es salvoconducto: sin el padre en la paleta se sigue avisando. **BUG-ROT2**: cae el **último `& 15` vivo del repo**, en `game.esqueletos.crear` — no rechazaba un `rot` 16..23, lo convertía en silencio en 0..7, o sea en **otra postura**, que es exactamente lo que costó BUG-RS7 y BUG-RS8; ahora `oriDePieza` pregunta a `mcOriNorm` y lo desconocido se lee «sin girar», nunca como otra (`parche_snp_rot24_esqueletos.py`). El `% 4` del preview del editor de agentes **se queda a propósito**: ese dibujo no sabe pintar espejados. Los dos son del snippet que el dueño edita en vivo ⇒ parches **idempotentes**, no reescrituras. Verificado con `test_material_familia.js` **nuevo** (21 ok), que saca `resolver`/`parecidos`/`nombreCorto`/`deLaFamilia`/`oriDePieza` **verbatim** del snippet —ojo, sus funciones cierran con `}` en la **columna 2**, así que el corte por `\n}\n` de los otros arneses no vale aquí—, más `test_materiales_en_espera.js` (8 ok) y `test_esqueleto_navegador.js`, que sigue con **los mismos 3 fallos que ya traía** (basura de rigs efímeros en `/map/agents`) y ninguno nuevo: se abre **BUG-AG8** para eso, sin investigar.
+- 2026-08-07 · 👁 **Lo que un agente puede ver son DOS preguntas, no una** (dueño: «si me pongo encima de su cabeza no debería verme, los ojos no pueden mirar en ese ángulo z, y tampoco si paso por detrás de él debería poder verme **para comenzar a seguirme**» → **BUG-AG9** + **BUG-AG10**, «resuélvelos ya»). Vinieron en el mismo mensaje y son mecanismos separados a propósito: **atención** (`mirar.limites.x`, por PIEZA, defecto ±70° = un cuello humano) y **detección** (`seguir.vision`, por AGENTE, defecto 180°). **BUG-AG9**: fuera del cono vertical la pieza **se rinde** y vuelve a su pose de origen en vez de quedarse pinzada en el tope — y eso **contradice a propósito** al `mirar` por MATERIAL, donde el cabeceo al tope no cuenta como rendirse; la diferencia es que un rig **no cabecea en absoluto** (solo yaw), así que pinzarlo no lo deja «mirándote con esfuerzo», lo deja de maniquí apuntando a otro sitio. **BUG-AG10**: el cono acota **EMPEZAR** y solo eso — ya persiguiendo manda `deteccion`, así que **rodearle no le hace perderte**; con el cono gobernando también la persecución, andar en círculos lo dejaría parpadeando en el borde. Lo que no estaba previsto y salió al implementarlo: **el cono solo vale contra el JUGADOR**, porque con un `objetivo:[x,y,z]` fijo «no lo ve» no es transitorio sino un **atasco definitivo** (el cuerpo solo gira mientras persigue ⇒ un punto a su espalda no entra en el cono jamás). `g.pide` se sigue anotando aunque esté ciego, o `game.esqueletos()` diría 0 y parecería que no estás ahí; y la tabla gana la columna **`frente`** para distinguir «no me sigue» de «me tiene a 175° y su cono es de 180». Las dos válvulas van en los dos sentidos (`limites.x:[-90,90]`, `vision:360`), que es lo que permite que el defecto sea automático y no opt-in. Entregado con `parche_snp_vision_agentes.py` (idempotente, 16 costuras) porque el snippet lo edita el dueño en vivo, más dos campos en el panel; ⚠️ el setter del tope de cuello escribe **la clave del eje** y no `limites` entero — el de antes hacía `mir.limites={y:[…]}` y poner el tope horizontal **borraba** el vertical. Verificado con `test_vision_agente.js` **nuevo** (11 ok), con sus dos tramos anti-falso-verde (**A bis**: con el cuello abierto ese mismo sitio SÍ gira la cabeza; **B bis**: con `vision:360` esa misma espalda SÍ arranca), y sin regresión en `test_agente_sin_seguir.js` (16 ok), `test_esqueleto_navegador.js` (15 ok), `test_agente_aturdido.js`, `test_montar_agente.js`, `test_montable_editor.js`, `test_agente_cuerpo_real.js`, `test_agente_pisa_placa.js` y `test_panel_agentes.js` (41 ok). Lección de medición apuntada en el ticket: fijar `mc.pos` cada frame **no basta** para colgar al jugador en el aire — la gravedad acumula en `mc.vel` y cae ~1,5 bloques *dentro* de un solo `mcUpdate`, así que «3 por encima» se medía como 1,5 y el ángulo salía a 68,6°, justo por debajo del tope: hay que poner `mc.vel` a cero también.

@@ -1,0 +1,147 @@
+{
+  "nombre": "perro maquinero",
+  "raiz": {
+    "nombre": "torso",
+    "pieza": "asset:assets/torso-perro.vox.json",
+    "rot": 0,
+    "montable": true
+  },
+  "piezas": [
+    {
+      "nombre": "cabeza",
+      "pieza": "asset:assets/cabeza-perro.vox.json",
+      "en": [
+        0,
+        0.1875,
+        -0.5
+      ],
+      "articula": {
+        "pivote": 1,
+        "base": -10,
+        "reposo": 0,
+        "amplitud": 50,
+        "fase": 90,
+        "eje": "x"
+      },
+      "mirar": {
+        "alcance": 12,
+        "limites": {
+          "y": [
+            -60,
+            60
+          ]
+        },
+        "suavidad": 1
+      }
+    },
+    {
+      "nombre": "pata del izq",
+      "pieza": "asset:assets/pata-perro.vox.json",
+      "en": [
+        0,
+        -0.5625,
+        0.0625
+      ],
+      "articula": {
+        "pivote": 1,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": 32,
+        "fase": 0,
+        "eje": "x"
+      }
+    },
+    {
+      "nombre": "pata del der",
+      "pieza": "asset:assets/pata-perro.vox.json",
+      "en": [
+        0.3125,
+        -0.5625,
+        0.0625
+      ],
+      "articula": {
+        "pivote": 2,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": 32,
+        "fase": 180,
+        "eje": "x"
+      }
+    },
+    {
+      "nombre": "pata tras izq",
+      "pieza": "asset:assets/pata-perro.vox.json",
+      "en": [
+        0,
+        -0.5625,
+        0.5625
+      ],
+      "articula": {
+        "pivote": 1,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": 32,
+        "fase": 180,
+        "eje": "x"
+      }
+    },
+    {
+      "nombre": "pata tras der",
+      "pieza": "asset:assets/pata-perro.vox.json",
+      "en": [
+        0.3125,
+        -0.5625,
+        0.5625
+      ],
+      "articula": {
+        "pivote": 2,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": 32,
+        "fase": 0,
+        "eje": "x"
+      }
+    },
+    {
+      "nombre": "cola",
+      "pieza": "asset:assets/cola-perro.vox.json",
+      "en": [
+        0.125,
+        0.25,
+        0.8125
+      ],
+      "articula": {
+        "pivote": 1,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": 38,
+        "fase": 0,
+        "eje": "y"
+      }
+    },
+    {
+      "nombre": "diana",
+      "pieza": "hab:diana",
+      "en": [
+        -0.25,
+        0.5625,
+        0
+      ]
+    }
+  ],
+  "seguir": {
+    "deteccion": 16,
+    "distancia": 3,
+    "velocidad": 2.6
+  },
+  "andar": {
+    "cadencia": 1.8
+  },
+  "cuerpo": {
+    "ancho": 0.5,
+    "fondo": 1,
+    "alto": 1.4375
+  },
+  "savedAt": "2026-08-07T20:29:24",
+  "id": "perro-maquinero"
+}

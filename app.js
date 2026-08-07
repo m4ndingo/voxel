@@ -1788,10 +1788,19 @@ function mcIndexAssets(idx){
     MC_MAT_ALIAS[fileBase] = fileKey;
   }
 }
+// El índice de assets hace DOS trabajos que no ocurren a la vez: da de alta los nombres cortos que
+// usan los snippets (mcIndexAssets, hace falta ANTES de abrir el Mundo) y llena las galerías del
+// editor (hace falta cuando se ve el editor, que en /map/<nombre> es más tarde o nunca). Se pide una
+// sola vez y se comparte la promesa, para que separarlos no cueste una segunda descarga.
+let _idxAssetsP=null;
+function assetIndex(){
+  if(!_idxAssetsP) _idxAssetsP=fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
+  return _idxAssetsP;
+}
 async function loadServerAssets(){
   const ul=$('#roster-assets');
   try{
-    const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
+    const idx=await assetIndex();
     mcIndexAssets(idx);
     ul.innerHTML='';
     if(!idx.length){ ul.innerHTML='<li class="muted">(sin assets)</li>'; return; }
@@ -1833,7 +1842,16 @@ function fmtDate(iso){
   const d=new Date(iso); if(isNaN(d)) return '';
   return '🕒 '+d.toLocaleDateString('es-ES',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
 }
-async function apiHabitantes(){ return fetch('/api/habitantes',{cache:'no-store'}).then(r=>r.json()); }
+// Comparten la petición EN VUELO, no el resultado: al arrancar la llaman tres sitios distintos a la vez
+// (la galería, el catálogo de bloques y el de texturas) y salían tres GET idénticos (PERF-MC3). En cuanto
+// llega, la promesa se suelta, así que un `apiHabitantes()` posterior a guardar o borrar vuelve a pedirla
+// de verdad — cachear el resultado sí daría listas rancias.
+let _habEnVuelo=null;
+async function apiHabitantes(){
+  if(_habEnVuelo) return _habEnVuelo;
+  _habEnVuelo=fetch('/api/habitantes',{cache:'no-store'}).then(r=>r.json());
+  try{ return await _habEnVuelo; } finally{ _habEnVuelo=null; }
+}
 // miniatura iso de un objeto voxel (usa renderIso con swap temporal de state.voxels)
 function drawThumb(cv, d){
   const saved=state.voxels, savedCaras=state.caras;
@@ -1848,7 +1866,7 @@ async function loadHabitante(id){
     ingestTextures(d);
     load(new Map(Object.entries(d.voxels||{})), d.meta||{name:id,type:'personaje'}, d.size, d.pivotes, d.caras, d.atravesable);
     serverId=id; serverKind='hab'; loadedName=state.meta.name; closeHabitantes();
-    document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-active',x.dataset.tab==='objeto'));
+    // (REQ-NAV1: ya no hay pestaña «Objeto» que volver a marcar — cerrar la galería ES volver al lienzo.)
     toast('Cargado «'+((d.meta&&d.meta.name)||id)+'»');
   }catch(e){ toast('No se pudo cargar'); }
 }
@@ -1857,13 +1875,13 @@ async function renameHabitante(id,cur){
   if(name==null || !name.trim() || name===cur) return;
   await fetch('/api/habitantes/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim()})});
   if(serverId===id && serverKind==='hab') state.meta.name=name.trim(), $('#meta-name').value=name.trim();
-  openHabitantes(); refreshRosters();
+  openHabitantes(habKind); refreshRosters();
 }
 async function delHabitante(id,name){
   if(!confirm('¿Borrar «'+(name||id)+'» del servidor? No se puede deshacer.')) return;
   await fetch('/api/habitantes/'+id,{method:'DELETE'});
   if(serverId===id && serverKind==='hab') serverId=null, serverKind=null;
-  openHabitantes(); refreshRosters();
+  openHabitantes(habKind); refreshRosters();
 }
 // Renombrar un asset cambia SOLO el rótulo. El id y el fichero se quedan porque los voxels del mundo
 // guardan el material como 'asset:assets/<id>.vox.json': mover el fichero (como sí hace el rename de
@@ -1873,30 +1891,44 @@ async function renameAsset(id,cur){
   if(name==null || !name.trim() || name===cur) return;
   const r=await fetch('/api/assets/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim()})});
   if(!r.ok){ alert('No se pudo renombrar: '+r.status); return; }
-  openHabitantes(); refreshRosters();
+  openHabitantes(habKind); refreshRosters();
 }
 async function delAsset(id,name){
   if(!confirm('¿Borrar el asset «'+(name||id)+'»?\n\nVa a la papelera (data/habitantes_trash), pero si está\nen uso en algún mundo esos bloques se quedan sin textura.')) return;
   const r=await fetch('/api/assets/'+id,{method:'DELETE'});
   if(!r.ok){ alert('No se pudo borrar: '+r.status); return; }
-  openHabitantes(); refreshRosters();
+  openHabitantes(habKind); refreshRosters();
 }
 // Galería (modal)
 // clasifica un item guardado por su tipo: habitación (bloque), objeto (objeto/decoración) o habitante (resto)
 function habBucket(t){ return t==='bloque' ? 'habitacion' : t==='textura' ? 'textura' : (t==='objeto'||t==='decoracion') ? 'objeto' : 'habitante'; }
 const HAB_TITLE={habitacion:'Habitaciones', objeto:'Objetos', habitante:'Habitantes', textura:'Texturas'};
 const HAB_EMPTY={habitacion:'Aún no hay habitaciones guardadas.', objeto:'Aún no hay objetos guardados.', habitante:'Aún no hay habitantes guardados.', textura:'Aún no hay texturas guardadas.'};
-let habKind='habitante';   // 'habitante' | 'objeto' | 'habitacion' — qué muestra la galería (por tipo)
+// Orden en que se agrupa la galería SIN filtro: si se mezcla todo tal cual, las 86 texturas se comen la
+// primera pantalla y lo que uno edita a mano queda debajo del todo.
+const HAB_ORDEN=['habitante','objeto','habitacion','textura'];
+// Agrupa por bucket sin reordenar dentro del grupo (el sort de JS es estable): cada tipo conserva el
+// orden que traía su fuente, que es el que el dueño ya conoce, y los assets del juego siguen saliendo
+// antes que lo guardado en el servidor.
+function habOrdena(entradas){
+  return entradas.slice().sort((a,b)=> HAB_ORDEN.indexOf(a.b) - HAB_ORDEN.indexOf(b.b));
+}
+// `null` = TODO. REQ-NAV1, decisión del dueño (2026-08-07): «ir a Galería es mostrar todo lo que hay y
+// punto» — sin clasificación, sin pastillas y sin recordar nada entre sesiones. El parámetro `kind`
+// sigue vivo porque los botones «Galería ▤» del panel derecho nacen junto a su roster, y ahí pedir un
+// tipo concreto sí significa algo.
+let habKind = null;
 async function openHabitantes(kind){
-  if(typeof kind==='string') habKind=kind;
+  habKind = (typeof kind==='string' && HAB_TITLE[kind]) ? kind : null;
   const modal=$('#hab-modal'), grid=$('#hab-grid');
-  const titleEl=$('#hab-title'); if(titleEl) titleEl.textContent = HAB_TITLE[habKind]||'Habitantes';
+  const titleEl=$('#hab-title'); if(titleEl) titleEl.textContent = habKind ? HAB_TITLE[habKind] : 'Galería';
   modal.hidden=false;
   grid.innerHTML='<p class="hab-empty">Cargando…</p>';
   let list;
   try{ list=await apiHabitantes(); }
   catch(e){ grid.innerHTML='<p class="hab-empty">No se pudo conectar con el servidor.</p>'; return; }
-  list=list.filter(h=> habBucket(h.type)===habKind);   // enruta por tipo
+  // Sin `kind` no se filtra nada: sale TODO. Con `kind` (los atajos del panel derecho) se enruta por tipo.
+  if(habKind) list=list.filter(h=> habBucket(h.type)===habKind);
   // Assets del juego del mismo tipo (assets/index.json): también se pueden CARGAR desde la galería, y
   // cargarlos se queda con su id, así que Guardar REESCRIBE ese asset (para bifurcar está «Guardar
   // como…»). Es la única forma de que retocar una pieza se note en los agentes que la usan: ellos
@@ -1906,11 +1938,17 @@ async function openHabitantes(kind){
   // que todo lo que el dueño importa aterriza aquí. Sin estos botones, cada textura nueva era para siempre.
   let assets=[];
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
-       assets=idx.filter(a=> habBucket(a.type)===habKind); }catch(e){}
-  if(!list.length && !assets.length){ grid.innerHTML='<p class="hab-empty">'+(HAB_EMPTY[habKind]||HAB_EMPTY.habitante)+'<br>Crea un objeto y pulsa <b>Guardar</b>.</p>'; return; }
+       assets = habKind ? idx.filter(a=> habBucket(a.type)===habKind) : idx; }catch(e){}
+  if(!list.length && !assets.length){ grid.innerHTML='<p class="hab-empty">'+(habKind?HAB_EMPTY[habKind]:'Aún no hay nada guardado.')+'<br>Crea un objeto y pulsa <b>Guardar</b>.</p>'; return; }
   grid.innerHTML='';
-  for(const a of assets){
+  // Las dos fuentes se pintan en UNA pasada, no una detrás de otra: pintándolas por separado cada tipo
+  // saldría dos veces (los 8 assets de habitación arriba y las 8 del servidor mucho más abajo), que es
+  // justo lo que hace ilegible una galería de 102 piezas.
+  const todo = habOrdena(assets.map(a=>({b:habBucket(a.type), asset:a})).concat(list.map(h=>({b:habBucket(h.type), hab:h}))));
+  for(const e of todo){
     const card=document.createElement('div'); card.className='hab-card';
+    card.dataset.bucket=e.b;   // la galería mezcla los cuatro: que la tarjeta diga de cuál es
+    if(e.asset){ const a=e.asset;
     card.innerHTML=`<div class="hab-thumb"><canvas width="150" height="150"></canvas></div>
       <div class="hab-name" title="${esc(a.name)}">${(a.icon?esc(a.icon)+' ':'')}${esc(a.name)} <span class="badge" style="margin:0">asset</span></div>
       <p class="hab-sub">${esc(a.role||a.type||'')} · del juego</p>
@@ -1927,13 +1965,10 @@ async function openHabitantes(kind){
     card.querySelector('[data-a=load]').onclick=async()=>{
       await loadFromUrl(a.file, a.id);   // se recuerda de qué asset viene: Guardar reescribe ESE fichero
       closeHabitantes();
-      document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-active',x.dataset.tab==='objeto'));
     };
     card.querySelector('[data-a=ren]').onclick=()=>renameAsset(a.id,a.name);
     card.querySelector('[data-a=del]').onclick=()=>delAsset(a.id,a.name);
-  }
-  for(const h of list){
-    const card=document.createElement('div'); card.className='hab-card';
+    } else { const h=e.hab;
     card.innerHTML=`<div class="hab-thumb"><canvas width="150" height="150"></canvas></div>
       <div class="hab-name" title="${esc(h.name)}">${esc(h.name)}</div>
       <p class="hab-sub">${esc(h.role||h.type||'')} · ${h.count} vox</p>
@@ -1945,11 +1980,15 @@ async function openHabitantes(kind){
         <button class="btn sm danger" data-a="del">Borrar</button>
       </div>`;
     grid.appendChild(card);
-    fetch('/api/habitantes/'+h.id,{cache:'no-store'}).then(r=>r.json()).then(d=>drawThumb(card.querySelector('canvas'),d)).catch(()=>{});
+    // Por getRoomData, no por un fetch pelado: es EL MISMO documento que necesita la paleta del Mundo y
+    // que pide la otra galería, y sin caché se bajaba dos y tres veces (PERF-MC3: 23 documentos para una
+    // paleta de 17). Con un enlace fino eso son segundos regalados. invalidateTex() ya lo tira al guardar.
+    getRoomData('hab:'+h.id).then(d=>drawThumb(card.querySelector('canvas'),d)).catch(()=>{});
     card.querySelector('[data-a=ficha]').onclick=()=>openFicha(h,'hab');
     card.querySelector('[data-a=load]').onclick=()=>loadHabitante(h.id);
     card.querySelector('[data-a=ren]').onclick=()=>renameHabitante(h.id,h.name);
     card.querySelector('[data-a=del]').onclick=()=>delHabitante(h.id,h.name);
+    }
   }
 }
 function closeHabitantes(){ $('#hab-modal').hidden=true; }
@@ -2050,7 +2089,7 @@ async function guardarFicha(){
     if(typeof refreshTexturas==='function') refreshTexturas(idx);
   }catch(e){}
   fichaPinta();
-  openHabitantes();
+  openHabitantes(habKind);
   toast(res.alias ? 'Ficha guardada · usa «'+res.alias+'»' : 'Ficha guardada');
 }
 // Lista lateral de habitantes (carga rápida)
@@ -3182,26 +3221,43 @@ document.querySelector('.templates').addEventListener('click',e=>{
   load(PRESETS[p](), {name:b.textContent.trim().replace(/^\S+\s/,''), type:p==='slime'?'personaje':'objeto'});
 });
 
-// tabs: Habitantes abre la galería; Habitaciones/Mapa mock
+// REQ-NAV1 · la barra son tres botones y un menú. Un solo enrutador por `data-tab` para los dos, que
+// es lo que permite que mover una entrada de la barra al menú (o al revés) sea mover una línea de
+// HTML y nada más.
+const MAS=$('#mas-menu'), BTN_MAS=$('#btn-mas');
+function cerrarMas(){ MAS.hidden=true; BTN_MAS.setAttribute('aria-expanded','false'); }
+function alternarMas(){ MAS.hidden ? (MAS.hidden=false, BTN_MAS.setAttribute('aria-expanded','true')) : cerrarMas(); }
+function irA(tab){
+  if(tab==='galeria'){ openHabitantes(); return; }   // sin bucket = TODO (decisión del dueño)
+  if(tab==='mapa'){ openMapa(); return; }            // overlay mapa del mundo
+  if(tab==='jugar'){ quickPlay(); return; }          // jugar ya (sala + personaje al azar)
+  if(tab==='mundo'){ openWorld(); return; }          // sandbox 3D en primera persona (WebGL)
+  if(tab==='codigo'){ openSnips(); return; }         // gestor de snippets de código
+  if(tab==='agentes'){ openAgentes(); return; }      // panel de agentes articulados
+}
 $('#tabs').addEventListener('click',e=>{
   const t=e.target.closest('.tab'); if(!t) return;
-  if(t.dataset.tab==='habitantes'){ openHabitantes('habitante'); return; }    // overlay, no cambia de pestaña
-  if(t.dataset.tab==='objetos'){ openHabitantes('objeto'); return; }          // overlay galería de objetos
-  if(t.dataset.tab==='habitaciones'){ openHabitantes('habitacion'); return; } // overlay galería de habitaciones
-  if(t.dataset.tab==='texturas'){ openHabitantes('textura'); return; }         // overlay galería de texturas
-  if(t.dataset.tab==='mapa'){ openMapa(); return; }                            // overlay mapa del mundo
-  if(t.dataset.tab==='jugar'){ quickPlay(); return; }                          // jugar ya (sala + personaje al azar)
-  if(t.dataset.tab==='mundo'){ openWorld(); return; }                          // sandbox 3D en primera persona (WebGL)
-  if(t.dataset.tab==='codigo'){ openSnips(); return; }                         // gestor de snippets de código
-  if(t.dataset.tab==='agentes'){ openAgentes(); return; }                      // panel de agentes articulados
-  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('is-active',x===t));
-  if(t.dataset.tab!=='objeto') toast('Vista mock — el MVP se centra en el editor de objeto');
+  if(t.dataset.tab==='mas'){ alternarMas(); return; }
+  cerrarMas(); irA(t.dataset.tab);
 });
+// Las entradas del menú que NO son data-tab (Nuevo, Guardar, Exportar, Importar…) conservan sus ids y
+// sus manejadores de siempre; aquí solo se cierra el menú y, si la entrada es una vista, se abre.
+MAS.addEventListener('click',e=>{
+  const it=e.target.closest('.menu-item'); if(!it) return;
+  cerrarMas();
+  if(it.dataset.tab) irA(it.dataset.tab);
+});
+// Cerrar: Esc, un clic fuera, o un segundo clic en «⋯» (que lo lleva alternarMas).
+document.addEventListener('pointerdown',e=>{
+  if(MAS.hidden) return;
+  if(e.target.closest('#mas-menu') || e.target.closest('#btn-mas')) return;
+  cerrarMas();
+},true);
 $('#btn-habitantes').onclick=()=>openHabitantes('habitante');
 $('#btn-habitaciones').onclick=()=>openHabitantes('habitacion');
 $('#btn-texturas').onclick=()=>openHabitantes('textura');
 $('#hab-close').onclick=closeHabitantes;
-$('#hab-refresh').onclick=()=>openHabitantes();   // reusa el tipo actual
+$('#hab-refresh').onclick=()=>openHabitantes(habKind);   // recarga sin cambiar lo que se está viendo
 $('#ficha-close').onclick=closeFicha;
 $('#ficha-save').onclick=guardarFicha;
 // Copiar la clave / el ejemplo. La confirmación va por toast: el dueño mira desde el móvil y un
@@ -3220,6 +3276,8 @@ $('#hab-modal').addEventListener('click',e=>{ if(e.target.id==='hab-modal') clos
 
 // atajos
 window.addEventListener('keydown',e=>{
+  // El menú «⋯» es lo más superficial que hay abierto: se cierra ANTES que cualquier modal (REQ-NAV1).
+  if(e.key==='Escape' && !MAS.hidden){ cerrarMas(); return; }
   if(e.key==='Escape' && !$('#mc-modal').hidden){                               // Mundo (REQ-MC): Esc de 2 pasos
     if(!$('#snip-modal').hidden){ closeSnips(); return; }                         // 1º si el modal de código está abierto → cerrarlo
     if(!$('#ag-modal').hidden){ closeAgentes(); return; }                         // 1º ídem el panel de agentes (Alt+A)
@@ -4001,6 +4059,9 @@ function agRefrescar(){
     const tag=document.createElement('span'); tag.className='ap-tag';
     tag.textContent=i===0? 'raíz' : (p.articula? (p.articula.eje==='y'?'gira':'cabecea') : (p.mirar?'mira':'fija'));
     li.appendChild(nm); li.appendChild(tag);
+    // «Te lleva montado» va en su PROPIA etiqueta y no dentro de la de arriba: es ortogonal a lo que
+    // hace la pieza —una cabeza puede mirarte y llevarte a la vez— y meterla ahí escondería lo otro.
+    if(p.montable){ const mt=document.createElement('span'); mt.className='ap-tag'; mt.textContent='🧍 llevas'; li.appendChild(mt); }
     li.onclick=()=>{ agSel=i; agRefrescar(); };
     ul.appendChild(li);
   });
@@ -4145,10 +4206,16 @@ function agForm(){
   if(!raiz){
     const mir=(p.mirar&&typeof p.mirar==='object')? p.mirar : null;
     const lim=(mir&&mir.limites&&mir.limites.y)||[-70,70];
+    // BUG-AG9 · el cono vertical. `limites.x` es hermano del `y` de toda la vida y hay que leerlos
+    // por separado: escribir uno pisando el objeto entero borraba el otro en silencio.
+    const limV=(mir&&mir.limites&&mir.limites.x)||[-70,70];
     const bMir=agTarjeta(box, 'mirar', '👀', 'Te mira', !!mir,
-      mir? ('alcance '+(+mir.alcance||12)+' · ±'+Math.abs(+lim[1]||70)+'°') : 'la pieza no gira',
+      mir? ('alcance '+(+mir.alcance||12)+' · ±'+Math.abs(+lim[1]||70)+'°↔ · ±'+Math.abs(+limV[1]||70)+'°↕')
+         : 'la pieza no gira',
       v=>{ if(v) p.mirar={alcance:12, limites:{y:[-70,70]}}; else delete p.mirar; cambia(); });
     if(mir){
+      const ponLim=(eje,v)=>{ if(!mir.limites||typeof mir.limites!=='object') mir.limites={};
+                              mir.limites[eje]=[-Math.abs(v), Math.abs(v)]; cambia(); };
       bMir.appendChild(agCampoNum({t:'alcance (bloques)', ayuda:
         'A qué distancia deja de seguirte con la vista y vuelve a mirar al frente. Si la pieza no gira, '+
         'lo primero que hay que mirar es esto: los rayos X dicen «en reposo (a 14 bloques, alcance 12)».'},
@@ -4157,7 +4224,14 @@ function agForm(){
         'Hasta dónde puede torcerse a cada lado. Pasado el cono se queda quieta en vez de darse la '+
         'vuelta entera: es lo que evita la cabeza del exorcista. Se cuenta desde la pose que le deja «rot».'},
         Math.abs(+lim[1]||70), 5,
-        v=>{ mir.limites={y:[-Math.abs(v), Math.abs(v)]}; cambia(); }));
+        v=>ponLim('y', v)));
+      bMir.appendChild(agCampoNum({t:'tope arriba y abajo (±°)', ayuda:
+        'Cuánto puede levantar y bajar la vista. Fuera de este cono NO te ve: vuelve a su postura de '+
+        'reposo en vez de quedarse clavada en el tope —quedarse clavada es seguir mirándote—, que es '+
+        'lo que hacía que subiéndote a su cabeza te siguiera encarando. 90 mira recto arriba y recto '+
+        'abajo, o sea el radar de antes. En gris significa que está en su valor por defecto.'},
+        Math.abs(+limV[1]||70), 5,
+        v=>ponLim('x', v), !(mir.limites&&mir.limites.x)));
       bMir.appendChild(agCampoNum({t:'suavidad del cuello (s)', ayuda:
         'Cuánto tarda en alcanzarte con la vista. 0 la clava en ti como un radar; subirlo hace el giro '+
         'más perezoso y más vivo. En gris significa que está en su valor por defecto.'},
@@ -4167,6 +4241,20 @@ function agForm(){
                    'dos veces.');
     }
   }
+  // 🧍 montable (REQ-MNT2). Antes solo se podía encender a mano y por instancia
+  // (`game.esqueletos.montable(1,'cabeza')`), así que había que repetirlo cada vez que se plantaba el
+  // bicho y no quedaba escrito en ninguna parte. La marca vive en la PIEZA del documento, al lado de
+  // `articula` y `mirar`; quien la aplica es la librería al plantar (`crearEsqueleto` la copia a la
+  // parte). Aquí solo se escribe la clave: app.js sigue sin saber qué es ir montado (§0).
+  // Vale también en la raíz a propósito — un agente-plataforma (una barca, un ascensor) no tiene más
+  // pieza que su torso. Y apagada NO se guarda, como el resto de capacidades: un agente de siempre
+  // sale byte a byte igual que antes.
+  box.appendChild(agCampoBool({t:'te lleva montado', ayuda:
+    'Si te subes encima de ESTA pieza, el bicho te lleva: te mueves con ella y, cuando se vuelve, '+
+    'orbitas con ella en vez de resbalarte. Subirse encima ya se podía siempre; lo que enciende esto '+
+    'es que te LLEVE. Queda escrito en el agente, así que vale para todos los que plantes: '+
+    'game.esqueletos.montable(id, «'+(p.nombre||'pieza')+'», false) solo lo apaga en un bicho suelto.'},
+    !!p.montable, v=>{ if(v) p.montable=true; else delete p.montable; cambia(); }));
   if(raiz) agCapacidades(box, cambia);
   if(!raiz){
     const del=document.createElement('button'); del.className='btn sm danger'; del.textContent='Quitar esta pieza';
@@ -4196,6 +4284,24 @@ function agCapacidades(box, cambia){
   agCapEmpuje(box, cambia);
   agCapFisica(box, cambia);
   agCapCuerpo(box, cambia);
+  agCapEscala(box, cambia);
+}
+// 📏 escala. «Para crear enanos y gigantes» (REQ-AGESC1). Multiplica la geometría de cada pieza Y las
+// distancias entre ellas, así que el bicho crece entero en vez de desmontarse; la caja de choque va
+// con él. Sin la clave, `escala` no se guarda: un agente de siempre sigue midiendo lo que medía.
+function agCapEscala(box, cambia){
+  const e=+agDoc.escala;
+  const on=!!(e>0 && e!==1);
+  const b=agTarjeta(box, 'escala', '📏', 'Escala del agente', on,
+    on? '×'+e+(e>1?' (gigante)':' (enano)') : 'tamaño normal (×1)',
+    v=>{ if(v) agDoc.escala=2; else delete agDoc.escala; cambia(); });
+  if(!on){ agNota(b, 'Enciéndela para hacer enanos y gigantes con el MISMO dibujo: multiplica las piezas '+
+                     'y lo que se separan entre ellas.'); return; }
+  b.appendChild(agCampoNum('escala (1 = normal)', e, 0.25, v=>{
+    // Los mismos topes que la librería (crearEsqueleto): un 0 o un negativo harían desaparecer al bicho.
+    agDoc.escala=Math.max(0.1, Math.min(8, +v||1)); cambia(); }));
+  agNota(b, 'Se multiplica también la caja de choque, así que un gigante no cabe por donde cabía antes. '+
+            'Entre 0.1 y 8.');
 }
 // 👁 seguir. Apagarlo no es un matiz: la librería SE NIEGA a plantar un agente sin `seguir` (sin
 // nada que perseguir no haría falta ningún rig), así que la tarjeta lo dice antes de guardar.
@@ -4221,6 +4327,13 @@ function agCapSeguir(box, cambia){
     [{key:'jugador', name:'el jugador'}, {key:'punto', name:'un punto fijo'}]));
   if(punto) b.appendChild(agTerna('punto (x, alto, z)', obj, v=>ponS('objetivo',v)));
   b.appendChild(agCampoNum('detección (bloques)', S('deteccion',16), 1, v=>ponS('deteccion',v), !hay('deteccion')));
+  // BUG-AG10 · la detección era una ESFERA y este campo es lo que la convierte en un cono.
+  b.appendChild(agCampoNum({t:'campo de visión (°)', ayuda:
+    'El cono en el que te ve para EMPEZAR a perseguirte. 180 es todo lo que tiene delante; 360 es a su '+
+    'alrededor, que es como funcionaba antes: pasarle por la espalda dentro de la detección bastaba '+
+    'para que se diera la vuelta y te siguiera. Una vez en faena manda la detección, no el cono — si no, '+
+    'parpadearía justo en el borde.'},
+    S('vision',180), 15, v=>ponS('vision',v), !hay('vision')));
   b.appendChild(agCampoNum('se para a (bloques)', S('distancia',2.5), 0.5, v=>ponS('distancia',v), !hay('distancia')));
   b.appendChild(agCampoNum('velocidad (bloques/s)', S('velocidad',3), 0.2, v=>ponS('velocidad',v), !hay('velocidad')));
   b.appendChild(agCampoNum('correa (bloques, 0 = suelto)', S('correa',24), 1, v=>ponS('correa',v), !hay('correa')));
@@ -4362,12 +4475,15 @@ function agChips(){
   const fis=!(agDoc.fisica===false || agDoc.fisica===null);
   const cue=!!(agDoc.cuerpo&&typeof agDoc.cuerpo==='object');
   const mira=(agDoc.piezas||[]).some(q=>q&&q.mirar);
+  // Por `agPiezas()` y no por `agDoc.piezas`: la raíz también puede llevarte (agente-plataforma).
+  const monta=agPiezas().some(q=>q&&q.montable);
   const chips=[[sigue, sigue? '👁 te ve a '+((seg&&seg.deteccion!==undefined)? +seg.deteccion : 16) : '👁 plantado'],
                [cad>0, cad>0? '🚶 '+cad+' pasos/bloque' : '🚶 sin patas'],
                [!(fue===0&&sal===0), !(fue===0&&sal===0)? '👊 empujable' : '👊 aguanta el golpe'],
                [fis, fis? '🧊 pisa como tú' : '🧊 ignora el suelo'],
                [cue, cue? '🧱 caja a medida' : '🧱 caja de las piezas'],
-               [mira, mira? '👀 te mira' : '👀 sin cuello']];
+               [mira, mira? '👀 te mira' : '👀 sin cuello'],
+               [monta, monta? '🧍 te lleva encima' : '🧍 no te lleva']];
   for(const [on,txt] of chips){
     const s=document.createElement('span'); s.className='ag-chip'+(on?' on':''); s.textContent=txt;
     el.appendChild(s);
@@ -4608,7 +4724,7 @@ async function buildRoomHabList(){
     const li=document.createElement('li');
     li.innerHTML=`<canvas width="60" height="60"></canvas>`+
                  `<div style="min-width:0"><div class="rh-name">${esc(h.name)}</div><div class="rh-role">${esc(h.role||h.type)}</div></div>`;
-    fetch('/api/habitantes/'+h.id,{cache:'no-store'}).then(r=>r.json()).then(d=>drawThumb(li.querySelector('canvas'),d)).catch(()=>{});
+    getRoomData('hab:'+h.id).then(d=>drawThumb(li.querySelector('canvas'),d)).catch(()=>{});   // ver la otra galería
     li.title='Añadir «'+h.name+'» a la habitación';
     li.onclick=()=>addHabToRoom('hab:'+h.id);
     ul.appendChild(li);
@@ -5477,6 +5593,7 @@ const mc={
   sens:0.000625,                  // sensibilidad del ratón, rad/px (base 0.0025 × mouseSpeed 0.25 por defecto; game.mouseSpeed = múltiplo)
   reach:16,                       // alcance de romper/poner en bloques (game.reach)
   speed:5,                        // velocidad de marcha en u/s (game.playerSpeed; Shift = mitad)
+  autoUnstick:false,              // game.autoUnstick: la auto-curación por frame de mcUpdate. APAGADA por defecto (BUG-AG7): sube HACIA ARRIBA, así que rozar el brazo de un agente te planta encima. A mano con la tecla U
   airControl:true,                // game.airControl: movimiento en el aire estilo Quake (air-strafe). true = girar el ratón NO redirige el salto y W/A/S/D solo nudgea; false = clásico (velocidad reescrita cada frame)
   airAccel:6,                     // game.airAccel: aceleración hacia wishdir en el aire (mayor = el nudge alcanza el tope más rápido)
   airCap:3,                       // game.airCap: tope (u/s, ∝√scale) de la componente de velocidad que se puede AÑADIR en el aire por dirección → cuánto se puede desviar/ganar. Mientras sea < velocidad de salto no hay acel. recta hacia delante (anti-truco)
@@ -5497,8 +5614,8 @@ const mc={
   previewKey:null,                // memo "sk|ox|oy|oz|rot" de la vista-previa actual (para no re-mallar cada frame)
   previewStructKey:null,          // clave de sala cuyas texturas deben estar en el atlas para la vista-previa
   previewBusy:null,               // memo en construcción (evita solapar builds asíncronos de la vista-previa)
-  previewRot:0,                   // giro (yaw) a mano para estampar estructuras (0..3 = 0/90/180/270° sobre el eje vertical; tecla R); persiste entre colocaciones
-  previewTilt:0,                   // vuelco (tilt) a mano: 0..3 = 0/90/180/270° sobre el eje X (plano altura↔profundidad; Shift+R); se combina con previewRot en la orientación estampada
+  previewCara:0,                   // qué CARA de la pieza queda arriba al estampar (0..5; tecla R); persiste entre colocaciones
+  previewGiro:0,                   // giro DENTRO de esa cara (0..3 = 0/90/180/270°; Shift+R); con previewCara sale la postura, ver mcPreviewOri
   stampCenter:false,              // modo de pegado en pared lateral: false = por CANTO (flush, def) · true = CENTRADO (hundido); tecla S alterna MIENTRAS se mantiene el clic derecho
   selA:null,                      // herramienta Seleccionar (tool='select'): 1ª esquina pendiente [x,y,z] tras el 1er clic, o null
   selBox:null,                    // selección confirmada {a:[x,y,z], b:[x,y,z]} (caja inclusiva de mundo) para resaltar y copiar (Ctrl+C)
@@ -5526,9 +5643,12 @@ const mc={
                                   // deja pasar la luz sin que nadie lo declare. Esto es solo la excepción a mano.
                                   // NO abre la columna de cielo: un dosel sigue dando sombra a lo que tiene debajo.
                                   // null (lo normal) = coste cero.
-  recorte:null,                   // Uint8Array por id de bloque, 1 = su textura tiene AGUJEROS (alpha 0 ⇒ el shader
-                                  // del terreno hace discard). Lo hornea mcBuildPalette y lo lee un solo sitio:
-                                  // mcTapaCara, o sea el mallado del chunk. null (lo normal) = coste cero.
+  recorte:null,                   // Uint8Array por id de bloque, 1 = POR AQUÍ SE VE A TRAVÉS. Lo hornea
+                                  // mcBuildPalette por dos motivos distintos que dan la misma respuesta:
+                                  // su textura tiene AGUJEROS (alpha 0 ⇒ el shader del terreno hace discard), o la
+                                  // celda se dibuja con geometría fina (mc.finoRejilla) y entonces el atlas ni se
+                                  // mira —una flor, un cubo translúcido (BUG-STR1)—. Lo leen mcTapaCara (el mallado
+                                  // del chunk) y mcTablaLuz (el defecto de la luz del cielo). null = coste cero.
   atraviesaDoc:null,              // lo MISMO, pero lo escribe app.js desde el propio documento del material
                                   // ("atravesable": true en su .vox.json) al hornear la paleta. Eso es
                                   // intrinseco del material, no una opinion de este mundo, asi que va aparte
@@ -5788,8 +5908,11 @@ async function mcStructCells(srcKey){
   // forma o huecos que cabe en <1 bloque (llama = 191 vox) NO es blockLike → se estampa como ESTRUCTURA FINA
   // (voxels reales, como el editor 3D) en vez de proyectarse en las 6 caras de un cubo (silueta con huecos → cielo).
   // …y OPACO: el atlas del terreno se hornea a RGB sin alpha (buildTexFaces fija d[o+3]=255) y el shader del
-  // terreno solo hace recorte binario, así que un cubo translúcido colocado como bloque saldría MACIZO. Con alpha
-  // se estampa como ESTRUCTURA FINA, que sí lo mezcla de verdad (aAlpha/vAlpha + pasada con BLEND).
+  // terreno solo hace recorte binario, así que un cubo translúcido PROYECTADO a las 6 caras saldría MACIZO.
+  // Ojo con lo que esto sí y no dice (BUG-STR1): no es blockLike, o sea que la proyección no vale; pero desde
+  // BUG-STR1 el material SÍ entra en mc.grid, dibujándose con su geometría real dentro de la malla del chunk,
+  // que tiene su propia pasada con BLEND (aAlpha/vAlpha) y lo mezcla de verdad. Quién va por qué camino es
+  // mcRecFina, más abajo; aquí solo se decide que la proyección no es fiel.
   // …y SIN máscara de caras: un 16³ macizo al que le han quitado una cara entraría en mc.grid, y la
   // proyección a las 6 caras del bloque es otro camino que no sabe de `caras` — la máscara se perdería
   // en silencio. Con `caras`, la pieza pasa a ser estructura fina (más cara de dibujar, pero fiel).
@@ -5813,9 +5936,11 @@ async function mcStructCells(srcKey){
 // derecho: si la respuesta es sí, poner y estampar son la MISMA función (setVoxel) y la pieza deja de
 // costar un draw call. Tres motivos para decir que no:
 //   · varias celdas (una sala, un árbol): en la rejilla cada celda se proyectaría suelta.
-//   · la piel cubre el cubo Y es translúcida o tiene `caras`: el atlas del terreno recorta, no mezcla, y
-//     una máscara sobre un macizo enseñaría el otro lado en vez de lo de dentro (ver mcStructCells).
+//   · la piel cubre el cubo Y tiene `caras`: una máscara sobre un macizo enseñaría el otro lado en vez de
+//     lo de dentro (ver mcStructCells).
 //   · sin huella todavía (nunca se ha mirado el dibujo): se calienta la caché y esta vez va como pieza.
+// La translucidez ESTABA en esta lista y ya no (BUG-STR1): un macizo translúcido cabe, y lo dibuja la
+// geometría fina del chunk con su pasada de BLEND. Lo que decide cuál de los dos caminos es mcRecFina.
 // Lo que NO llena su celda (una flor, una mata) sí entra: el mallador emite su geometría de verdad dentro
 // de la malla del chunk (mc.finoRejilla) y mcTerrenoChoca la usa también para chocar, así que la forma
 // manda igual que en la pieza suelta. Queda la válvula game.useOldStructBuildCall para volver a la de antes.
@@ -5824,15 +5949,33 @@ function mcCabeEnRejilla(key){
   const rec=key && mc.structs[key];
   if(!rec || rec.w==null){ if(key) mcStructCells(key).catch(()=>{}); return false; }
   if(rec.w>1 || rec.h>1 || rec.d>1) return false;
-  if(rec.pielCubre && (rec.translucido || rec.conCaras)) return false;
+  if(rec.pielCubre && rec.conCaras) return false;
   return true;
 }
 // ¿Y esta pieza, en la rejilla, sale con su GEOMETRÍA de verdad (mc.finoRejilla) en vez de proyectada
-// sobre las 6 caras del cubo? Es la misma condición que hornea mcBuildPalette. Importa para el giro: una
-// pieza proyectada como cubo no tiene dónde enseñar que está girada, así que ésa se sigue estampando.
+// sobre las 6 caras del cubo? Importa para el giro: una pieza proyectada como cubo no tiene dónde enseñar
+// que está girada, así que ésa se sigue estampando.
+// FUENTE ÚNICA de la regla. La repetían por su cuenta este sitio, mcCabeEnRejilla y mcBuildPalette (al
+// hornear mc.finoRejilla), y por eso se desincronizaron: BUG-STR1. Casos, en orden:
+// · varias celdas (una sala, un árbol) → ni siquiera cabe: no es asunto de esta pregunta.
+// · blockLike (16³ macizo Y opaco): la proyección a 6 caras ES fiel y cuesta 6 quads. No.
+// · la piel NO cubre el cubo (una flor, una mata, una llama): la proyección la aplasta contra las paredes
+//   de la celda. Sí, geometría real.
+// · la piel cubre pero es TRANSLÚCIDA (hab:cubo-trans): la proyección la sacaría MACIZA, porque el atlas del
+//   terreno se hornea sin alpha (buildTexFaces fija d[o+3]=255) y el shader solo recorta. Sí, geometría real:
+//   el flujo fino del chunk tiene su propia pasada con BLEND (finoAVbo), así que mezcla de verdad SIN dejar
+//   de ser una celda de rejilla. Esto es lo que BUG-STR1 arregla; antes se la echaba del terreno entera.
+// · la piel cubre y tiene `caras`: sigue fuera del terreno (mcCabeEnRejilla), porque una máscara sobre un
+//   macizo enseñaría el otro lado en vez de lo de dentro. No es lo mismo que la translucidez y no se toca.
+function mcRecFina(rec){
+  if(!rec || rec.w==null) return false;
+  if(rec.w>1 || rec.h>1 || rec.d>1) return false;
+  if(rec.blockLike) return false;
+  if(!rec.pielCubre) return true;
+  return !!rec.translucido && !rec.conCaras;
+}
 function mcEsFinaEnRejilla(key){
-  const rec=key && mc.structs[mcClaveBase(key)];
-  return !!(rec && rec.w<=1 && rec.h<=1 && rec.d<=1 && !rec.blockLike && !rec.pielCubre);
+  return mcRecFina(key && mc.structs[mcClaveBase(key)]);
 }
 // ── El giro cabe en la CLAVE ────────────────────────────────────────────────────────────────────────
 // Una celda de mc.grid es un Uint16 con el id del bloque: no hay hueco para el giro. Pero sí hay otro id.
@@ -5844,8 +5987,8 @@ function mcEsFinaEnRejilla(key){
 // sola como cualquier otro material que venga del fichero. Y como mc._geoFina[id] ya devuelve la
 // geometría horneada de ESE id, el mallado, la sombra y la colisión por forma salen girados gratis.
 function mcClaveBase(k){ return typeof k==='string' ? k.replace(/@\d{1,2}$/,'') : k; }
-function mcClaveOri(k){ const m=typeof k==='string' && /@(\d{1,2})$/.exec(k); return m ? (+m[1])&15 : 0; }
-function mcClaveConOri(k,ori){ ori=(ori|0)&15; return ori ? mcClaveBase(k)+'@'+ori : mcClaveBase(k); }
+function mcClaveOri(k){ const m=typeof k==='string' && /@(\d{1,2})$/.exec(k); return m ? mcOriNorm(+m[1]) : 0; }
+function mcClaveConOri(k,ori){ ori=mcOriNorm(ori); return ori ? mcClaveBase(k)+'@'+ori : mcClaveBase(k); }
 // Al girar el fantasma (R / Shift+R) la pieza pasa a ser OTRO material, y darlo de alta es descargar +
 // re-hornear la paleta. Se hace ya, mientras el dueño mira el fantasma, para que el clic de después sea
 // el camino normal y no el de «material pendiente» (que llega tarde y sin historial).
@@ -5901,12 +6044,65 @@ function mcRotXZ(x,z,rot,W,D){
     default: return [x, z];             // 0°
   }
 }
-// Permutación de caras que provoca la orientación combinada (tilt,yaw) de una estructura estampada.
-// Se DERIVA de las mismas dos llamadas a mcRotXZ que mueven las coordenadas en mcStructGeom, aplicadas
-// al vector normal de cada cara: así no puede desincronizarse de la geometría. Devuelve P con
-// P[i] = índice de la cara en la que acaba MC_FACES[i].
-function mcFacePerm(tilt,yaw,bx,by,bz,bzT){
-  const T=(x,y,z)=>{ const t=mcRotXZ(y,z,tilt,by,bz), r=mcRotXZ(x,t[1],yaw,bx,bzT); return [r[0],t[0],r[1]]; };
+// ── Las 24 posturas de un cubo ─────────────────────────────────────────────────────────────────────
+// Un cubo se puede poner de 24 maneras: 6 caras arriba × 4 giros dentro de cada cara. Con dos ejes
+// (vuelco sobre X + giro sobre Y) solo se alcanzaban 16: las 6 caras sí llegaban a quedar arriba, pero
+// TUMBADA DE LADO (+X o −X arriba) únicamente 2 de los 4 giros — las otras 8 posturas no había forma
+// de pedirlas. Hace falta un TERCER cuarto de vuelta, `roll`, sobre el eje Z (plano ancho↔altura), y
+// va ANTES del vuelco.
+// La tabla se DERIVA, no se escribe a mano: se enumeran las 64 combinaciones (roll,tilt,yaw) en un
+// orden que empieza por roll=0 y se guarda la primera que produce cada rotación distinta. Salen
+// exactamente 24, y las 16 primeras son (0,tilt,yaw) con ori=(tilt<<2)|yaw — o sea, EXACTAMENTE el
+// código de antes: los `@0`..`@15` ya escritos en los mundos guardados no se mueven ni un grado, y las
+// ocho posturas nuevas entran detrás, como `@16`..`@23`. De propina el orden queda agrupado de cuatro
+// en cuatro por cara (mismo roll y tilt, los 4 yaw seguidos), así que ori = cara*4 + giro, que es justo
+// el gesto de R / Shift+R (ver mcPreviewOri).
+const MC_ORI=(function(){
+  // Se pasa por mcRotXZ —no por una matriz escrita aparte— y se resta el origen para quedarse con la
+  // parte lineal: así la tabla no puede desincronizarse de la geometría. La huella da igual aquí,
+  // porque el offset se cancela al restar.
+  const T=(roll,tilt,yaw,x,y,z)=>{
+    const p=mcRotXZ(x,y,roll,1,1), t=mcRotXZ(p[1],z,tilt,1,1), r=mcRotXZ(p[0],t[1],yaw,1,1);
+    return [r[0], t[0], r[1]];
+  };
+  const firma=(roll,tilt,yaw)=>{
+    const o=T(roll,tilt,yaw,0,0,0);
+    return [[1,0,0],[0,1,0],[0,0,1]].map(v=>{
+      const q=T(roll,tilt,yaw,v[0],v[1],v[2]);
+      return (q[0]-o[0])+','+(q[1]-o[1])+','+(q[2]-o[2]);
+    }).join('|');
+  };
+  const vistas=new Set(), tabla=[];
+  for(let roll=0;roll<4;roll++) for(let tilt=0;tilt<4;tilt++) for(let yaw=0;yaw<4;yaw++){
+    const f=firma(roll,tilt,yaw);
+    if(vistas.has(f)) continue;
+    vistas.add(f); tabla.push([roll,tilt,yaw]);
+  }
+  return tabla;
+})();
+// Un código que no está en la tabla (basura, o un `@n` de un mundo más nuevo) se trata como «sin
+// girar», igual que hacía el enmascarado `&15` de antes: nunca romper el mundo por un número.
+function mcOriNorm(ori){ ori=ori|0; return (ori>=0 && ori<MC_ORI.length) ? ori : 0; }
+function mcOriParts(ori){ return MC_ORI[mcOriNorm(ori)]; }        // → [roll, tilt, yaw]
+// Qué cara del dibujo acaba MIRANDO ARRIBA en cada una de las 6 posturas base (ori = cara*4). Solo sirve
+// para que el aviso de la tecla R diga algo humano, pero también se deriva: se busca qué normal de
+// MC_FACES acaba apuntando a +Y.
+const MC_ORI_CARA=(function(){
+  const NOM=['arriba','abajo','+X','−X','+Z','−Z'], res=[];
+  for(let c=0; c<MC_ORI.length/4; c++){
+    const [roll,tilt,yaw]=MC_ORI[c*4];
+    const T=(x,y,z)=>{ const p=mcRotXZ(x,y,roll,1,1), t=mcRotXZ(p[1],z,tilt,1,1), r=mcRotXZ(p[0],t[1],yaw,1,1); return [r[0],t[0],r[1]]; };
+    const o=T(0,0,0);
+    const i=MC_FACES.findIndex(F=>{ const q=T(F.dir[0],F.dir[1],F.dir[2]); return q[0]-o[0]===0 && q[1]-o[1]===1 && q[2]-o[2]===0; });
+    res.push(NOM[i] || String(c));
+  }
+  return res;
+})();
+// Permutación de caras que provoca la orientación de una estructura estampada. Se le pasa la MISMA
+// función que mueve las coordenadas en mcStructGeom, aplicada al vector normal de cada cara: así no
+// puede desincronizarse de la geometría. Devuelve P con P[i] = índice de la cara en la que acaba
+// MC_FACES[i].
+function mcFacePerm(T){
   const o=T(0,0,0), P=new Array(6);
   for(let i=0;i<6;i++){
     const d=MC_FACES[i].dir, q=T(d[0],d[1],d[2]);
@@ -5915,23 +6111,48 @@ function mcFacePerm(tilt,yaw,bx,by,bz,bzT){
   }
   return P;
 }
-// Orientación estampada = entero combinado 0..15: bits 0-1 = giro (yaw, cuartos sobre el eje vertical Y, la sala
-// gira para MIRAR al jugador, ticket #3); bits 2-3 = vuelco (tilt, cuartos sobre el eje X, plano altura↔profundidad,
-// Shift+R). `rot&3`=yaw, `(rot>>2)&3`=tilt. Con tilt=0 es idéntico al comportamiento previo (compat con saves viejos).
-// Huella efectiva (celdas w×h×d) de una estructura tras aplicar la orientación combinada. Reutilizada por el origen
+// Los tres cuartos de vuelta de una postura, en este orden y en UN SOLO SITIO. Lo usan las coordenadas
+// de cada voxel de mcStructGeom, (vía mcFacePerm) las normales de sus caras, y quien necesita saber
+// hacia dónde acaba MIRANDO una pieza. Las dimensiones de la caja solo DESPLAZAN —la parte lineal de
+// mcRotXZ no las mira—, así que con la caja unidad sale la rotación pura.
+function mcOriMove(rot, bx, by, bz){
+  const [roll, tilt, yaw]=mcOriParts(rot);
+  // Huella según se va girando: cada cuarto de vuelta impar intercambia los dos ejes de su plano.
+  const bxR=(roll&1)?by:bx, byR=(roll&1)?bx:by;   // roll impar: ancho↔altura
+  const bzT=(tilt&1)?byR:bz;  // tras un vuelco impar la profundidad pasa a ser la altura (ya rodada) original
+  return (x,y,z)=>{
+    const p=mcRotXZ(x, y, roll, bx, by);        // Paso 2a: roll `roll` cuartos sobre Z → rota el par (ancho,altura)
+    const t=mcRotXZ(p[1], z, tilt, byR, bz);    // Paso 2b: vuelco `tilt` cuartos sobre X → rota (altura,profundidad)
+    const r=mcRotXZ(p[0], t[1], yaw, bxR, bzT); // Paso 2c: giro `yaw` cuartos sobre Y → rota el plano (fx,fz)
+    return [r[0], t[0], r[1]];
+  };
+}
+// Permutación de caras de una postura, para quien NO tiene la geometría delante: las piezas de redstone
+// preguntan por aquí hacia dónde empuja un pistón o por dónde escucha una antorcha (P[2] = dónde acaba
+// su cara +X, que es el «frente» del dibujo). Sale de la misma composición que gira los voxels, así que
+// lo que una pieza HACE no se puede separar de cómo se VE. Con las 24 posturas el frente ya puede ser
+// +Y o −Y — un pistón mirando arriba —, cosa que una tabla horizontal no sabía decir.
+function mcOriPerm(rot){ return mcFacePerm(mcOriMove(rot, 1, 1, 1)); }
+// Orientación estampada = índice 0..23 en MC_ORI, que lo abre en (roll, tilt, yaw): roll = cuartos sobre Z
+// (plano ancho↔altura), tilt = vuelco, cuartos sobre X (plano altura↔profundidad), yaw = giro, cuartos sobre
+// el eje vertical Y (la sala gira para MIRAR al jugador, ticket #3). Los códigos 0..15 son los de siempre
+// —roll=0, ori=(tilt<<2)|yaw—, así que los mundos guardados siguen valiendo tal cual.
+// Huella efectiva (celdas w×h×d) de una estructura tras aplicar la orientación. Reutilizada por el origen
 // de estampado y por el fantasma de huella, para que ambos coincidan.
 function mcOriDims(w, h, d, rot){
-  const tilt=(rot>>2)&3, yaw=rot&3;
-  if(tilt&1){ const t=d; d=h; h=t; }   // vuelco impar (90°/270° sobre X): profundidad↔altura
+  const [roll, tilt, yaw]=mcOriParts(rot);
+  if(roll&1){ const t=w; w=h; h=t; }    // roll impar (90°/270° sobre Z): ancho↔altura
+  if(tilt&1){ const t=d; d=h; h=t; }    // vuelco impar (90°/270° sobre X): profundidad↔altura
   if(yaw&1){ const t=w; w=d; d=t; }     // giro impar (90°/270° sobre Y): ancho↔fondo
   return [w, h, d];
 }
-// Orientación combinada elegida a mano para la vista-previa/estampado (R = yaw, Shift+R = vuelco).
-function mcPreviewOri(){ return (mc.previewRot&3) | ((mc.previewTilt&3)<<2); }
+// Orientación elegida a mano para la vista-previa/estampado. El gesto es en dos pasos, como pidió el dueño:
+// R elige QUÉ CARA queda arriba (6) y Shift+R el giro DENTRO de esa cara (4). Encaja sin tabla intermedia
+// porque MC_ORI sale agrupada de cuatro en cuatro por cara: ori = cara*4 + giro.
+function mcPreviewOri(){ return ((mc.previewCara|0)%6)*4 + (mc.previewGiro&3); }
 // La geometría depende de rot ⇒ se cachea por (srcKey, rot) en mc.structs[srcKey].meshRot[rot].
 async function mcStructGeom(srcKey, rot){
-  rot=(rot|0)&15;                       // orientación combinada: yaw=rot&3 (eje Y), tilt=(rot>>2)&3 (eje X)
-  const yaw=rot&3, tilt=(rot>>2)&3;
+  rot=mcOriNorm(rot);                   // una de las 24 posturas; mcOriMove la abre en los tres cuartos de vuelta
   const cached=mc.structs[srcKey] && mc.structs[srcKey].meshRot;
   if(cached && cached[rot]) return cached[rot];
   const doc=await getRoomData(srcKey);
@@ -5961,16 +6182,15 @@ async function mcStructGeom(srcKey, rot){
   let bx=0, by=0, bz=0;
   for(const b of base){ b[0]-=cminx; b[1]-=cminy; b[2]-=cminz; if(b[0]+1>bx)bx=b[0]+1; if(b[1]+1>by)by=b[1]+1; if(b[2]+1>bz)bz=b[2]+1; }
   bx=Math.ceil(bx/MC_TILE)*MC_TILE; by=Math.ceil(by/MC_TILE)*MC_TILE; bz=Math.ceil(bz/MC_TILE)*MC_TILE;
-  const bzT=(tilt&1)?by:bz;   // tras un vuelco impar (Shift+R 90°/270°) la profundidad pasa a ser la altura original
   const solid=new Set(); const raw=[]; let mx=0,my=0,mz=0;
   const emitCells=new Set();   // celdas-de-bloque locales (floor(fine/16)) con ≥1 voxel emisivo (Parte B: siembra de luz de bloque)
   const emitDir=new Map();     // celda-bloque local → [dx,dy,dz]: suma de normales de sus caras emisivas EXPUESTAS = dirección del HAZ (Parte B foco)
   const maskAt=new Map();      // voxel fino local → máscara de caras (TODOS, si el documento trae `caras`)
-  const facePerm=carasDoc ? mcFacePerm(tilt,yaw,bx,by,bz,bzT) : null;   // la misma rotación, aplicada a las normales
+  const mueve=mcOriMove(rot, bx, by, bz);   // los tres cuartos de vuelta de la postura, en su único sitio
+  const facePerm=carasDoc ? mcFacePerm(mueve) : null;   // la misma rotación, aplicada a las normales
   for(const b of base){
-    const t=mcRotXZ(b[1], b[2], tilt, by, bz);     // Paso 2a: vuelco `tilt` cuartos sobre el eje X → rota el par (altura,profundidad)
-    const r=mcRotXZ(b[0], t[1], yaw, bx, bzT);     // Paso 2b: giro `yaw` cuartos sobre el eje Y → rota el plano (fx,fz)
-    const fx=r[0], fy=t[0], fz=r[1], v=b[3];       // todo queda en [0,ext)
+    const q=mueve(b[0], b[1], b[2]);
+    const fx=q[0], fy=q[1], fz=q[2], v=b[3];       // todo queda en [0,ext)
     if(facePerm) maskAt.set(fx+','+fy+','+fz, permMask(b[4], facePerm));   // también el 63: es una marca, no un defecto
     solid.add(fx+','+fy+','+fz); raw.push([fx,fy,fz,v]);
     if(isGlow(v)) emitCells.add(Math.floor(fx/MC_TILE)+','+Math.floor(fy/MC_TILE)+','+Math.floor(fz/MC_TILE));
@@ -6129,10 +6349,14 @@ async function mcStructGeom(srcKey, rot){
   return mesh;
 }
 // Malla de una INSTANCIA estampada: traslada cada flujo fino a la celda de mundo (ox,oy,oz) y sube DOS VBO.
-async function mcBuildStructMesh(srcKey, ox,oy,oz, rot){
-  rot=(rot|0)&15;                       // orientación combinada (yaw + vuelco); ver mcStructGeom
+async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc){
+  rot=mcOriNorm(rot);                   // una de las 24 posturas; ver mcStructGeom
   const geom=await mcStructGeom(srcKey, rot);
   const gl=mc.gl;
+  // Escala LIBRE de la instancia (REQ-AGESC1): la geometría fina de mcStructGeom es local al origen, así que
+  // escalarla es multiplicar la posición ANTES de trasladar. No toca la caché key+rot: la misma malla local
+  // sirve para todas las escalas. esc===1 recorre exactamente el mismo camino aritmético que antes (×1).
+  const E=(esc>0?+esc:1);
   // Luz del entorno horneada por CARA (Parte A): igual que el terreno, cada cara se oscurece por la luz de la celda
   // de aire vecina (celda-muestra en geom.*SC, en unidades de bloque relativas al origen). lv = max(skylight, luz de
   // bloque). Sin luz activa (interiorDark>=1 y sin brillo) → factor 1: comportamiento de hoy (plena luz).
@@ -6144,14 +6368,14 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot){
   // Factor de luz para la cara fi de un flujo, desde su celda-muestra (celda de bloque local → mundo).
   const faceFactor=(sc,fi)=>{
     if(!lightLut) return 1;                                    // interiorDark>=1: la luz de bloque no puede sobre-iluminar → sin efecto
-    const wx=ox+sc[fi*3], wy=oy+sc[fi*3+1], wz=oz+sc[fi*3+2];  // celda de bloque de mundo del lado aire
+    const wx=Math.floor(ox+sc[fi*3]*E), wy=Math.floor(oy+sc[fi*3+1]*E), wz=Math.floor(oz+sc[fi*3+2]*E);  // celda de bloque de mundo del lado aire (la escala también mueve la muestra)
     const lv = mcInside(wx,wy,wz) ? Math.max(L?L[mcIdx(wx,wy,wz)]:0, BL?BL[mcIdx(wx,wy,wz)]:0) : MC_MAXLIGHT;  // fuera de rejilla = cielo
     return lightLut[lv];
   };
   // Desplaza un array por vértice (stride s, pos en 0..2) a coords de mundo, hornea shade (offset shOff) por CARA
   // (6 vértices) con faceFactor, y lo sube como VBO STATIC_DRAW. Caras emisivas: el shader ignora vShade → no-op.
   const upload=(src,count,s,sc,shOff)=>{ if(!count) return null; const world=new Float32Array(src.length);
-    for(let i=0;i<count;i++){ const b=i*s; world[b]=src[b]+ox; world[b+1]=src[b+1]+oy; world[b+2]=src[b+2]+oz;
+    for(let i=0;i<count;i++){ const b=i*s; world[b]=src[b]*E+ox; world[b+1]=src[b+1]*E+oy; world[b+2]=src[b+2]*E+oz;
       for(let j=3;j<s;j++) world[b+j]=src[b+j]; }
     if(doLight && sc){ const faces=count/6; for(let fi=0;fi<faces;fi++){ const f=faceFactor(sc,fi);
       if(f!==1){ for(let v=0;v<6;v++){ const o=(fi*6+v)*s+shOff; world[o]*=f; } } } }
@@ -6159,8 +6383,8 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot){
   const colCount=geom.colCount,   colVbo  =upload(geom.colLocal,   colCount,   9, geom.colSC,   6);   // opaco: pos(3)+rgb(3)+shade(6)+emit+alpha
   const alphaCount=geom.alphaCount, alphaVbo=upload(geom.alphaLocal, alphaCount, 9, geom.alphaSC, 6);   // translúcido: mismo layout
   const texCount=geom.texCount,   texVbo  =upload(geom.texLocal,   texCount,  10, geom.texSC,   9);   // stride 10: pos(3)+aTile(2)+aRect(4)+aShade(9)
-  const aabb=[ox,oy,oz, ox+geom.ext.x, oy+geom.ext.y, oz+geom.ext.z];
-  return {key:srcKey, ox,oy,oz, rot, colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitCells:geom.emitCells, emitDir:geom.emitDir};
+  const aabb=[ox,oy,oz, ox+geom.ext.x*E, oy+geom.ext.y*E, oz+geom.ext.z*E];
+  return {key:srcKey, ox,oy,oz, rot, esc:E, colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitCells:geom.emitCells, emitDir:geom.emitDir};
 }
 // Atlas de TEXTURAS de estructuras (gemelo de mcBuildPalette/mcUploadAtlas): compone las 6 caras de cada
 // CLAVE `tex:` distinta usada por las estructuras vivas (6 cols × Nclaves filas, NEAREST, medio téxel de
@@ -6235,8 +6459,25 @@ async function mcBuildPalette(onProgress){
   try{ return await mcBuildPaletteImpl(onProgress); }
   finally{ mc.paletaEnObra--; }
 }
+// Pide N documentos EN PARALELO con un tope de conexiones a la vez. No devuelve nada: lo único que hace
+// es dejar la promesa de cada uno metida en la caché de getRoomData, que es quien deduplica. Quien los
+// necesite los pedirá igual que siempre y se los encontrará ya en vuelo.
+// El tope existe porque el navegador solo abre ~6 conexiones por host: soltar 200 de golpe no baja nada
+// antes y sí retrasa lo demás. Los fallos se tragan aquí a propósito — el que de verdad usa el documento
+// vuelve a pedirlo y trata su error como siempre (fucsia macizo).
+function mcPrecargarDocs(keys, tope){
+  const cola=[...new Set(keys)]; let i=0;
+  const obrero=async()=>{ while(i<cola.length){ const k=cola[i++]; try{ await getRoomData(k); }catch(e){} } };
+  return Promise.all(Array.from({length:Math.min(tope||6, cola.length)}, obrero));
+}
 async function mcBuildPaletteImpl(onProgress){
   mc.palette=[null]; mc.blockKey=[null]; mc.name2id={};
+  // PERF-MC3: el bucle de abajo es SERIE (rasteriza sobre un canvas compartido y escribe mc.palette[id]
+  // en orden), y esperar dentro de él la descarga de cada bloque convertía 15 materiales en 15 idas y
+  // vueltas consecutivas: 1774 ms medidos en remoto para un mundo VACÍO. Aquí se lanzan las descargas en
+  // tandas y NO se espera a que acaben: el bucle sigue yendo en serie, pero cuando le toca el bloque 5 su
+  // documento ya está bajando (o bajado). Rasterizar sigue costando lo que cuesta; lo que se cae es la red.
+  mcPrecargarDocs(mc.blocks.map(b=>b.key), 8);
   const AW=6*MC_TILE, AH=Math.max(1,mc.blocks.length)*MC_TILE;
   const cv=document.createElement('canvas'); cv.width=AW; cv.height=AH;
   const ctx=cv.getContext('2d'); ctx.imageSmoothingEnabled=false;
@@ -6247,8 +6488,18 @@ async function mcBuildPaletteImpl(onProgress){
   for(let bi=0; bi<mc.blocks.length; bi++){
     const b=mc.blocks[bi], id=bi+1; let faces=null;
     const _tB=performance.now(), _cached=texDefs.has(b.key);   // ¿ya estaba en caché o toca descargarla?
+    // El aviso va ANTES de trabajar el bloque, no solo después. Si el primero tarda 868 ms, el cartel se
+    // pasaba ese rato entero diciendo «(0/15)» y con el nombre del bloque YA terminado: justo mientras más
+    // se trabajaba, el número no se movía, y eso es lo que el dueño leyó como un cuelgue (PERF-MC3).
+    if(onProgress) onProgress(bi, mc.blocks.length, b.name, b.key, 0, _cached, true);
+    // El `ms` de un bloque mezcla tres cosas MUY distintas —esperar el documento, rasterizar sus 6 caras y
+    // hornear su geometría fina— y sin separarlas no se puede decidir nada: un bloque de 9905 ms es un
+    // problema de red si es todo `doc`, de CPU si es todo `caras`, y un bug si es todo `geom`. Se apuntan
+    // por separado para que el informe lo reparta en vez de dejarlo a la interpretación.
+    let _tDoc=0, _tCaras=0, _tGeom=0, _t=performance.now();
     // Una textura que falla se pinta fucsia MACIZO, así que no cuenta como hueco.
-    try{ const def=await getTexDef(b.key); const tf=buildTexFaces(def); faces=tf.faces;
+    try{ const def=await getTexDef(b.key); _tDoc=performance.now()-_t; _t=performance.now();
+      const tf=buildTexFaces(def); _tCaras=performance.now()-_t; faces=tf.faces;
       // Textura con agujeros = bloque de RECORTE: enciende el `discard` del shader (global) y además se
       // apunta su id, porque el mallado tiene que dejar de pelar contra él (mcTapaCara).
       if(tf.hueco){ hueco=true; if(!recorte) recorte=new Uint8Array(mc.blocks.length+1); recorte[id]=1; }
@@ -6266,14 +6517,25 @@ async function mcBuildPaletteImpl(onProgress){
     // El sufijo `@<ori>` (ver mcClaveBase) es lo único que distingue a una variante girada de su original:
     // misma pieza, misma textura, misma huella; lo que cambia es CON QUÉ GIRO se hornea su geometría.
     const kBase=mcClaveBase(b.key), kOri=mcClaveOri(b.key);
+    _t=performance.now();
     if(kBase.startsWith('asset:') || kBase.startsWith('hab:')) try{
       const rec=await mcStructCells(kBase);
-      if(rec && rec.w<=1 && rec.h<=1 && rec.d<=1 && !rec.blockLike && !rec.pielCubre){
+      if(mcRecFina(rec)){
         if(!fino) fino=new Uint8Array(mc.blocks.length+1); fino[id]=1;
+        // Una celda que se dibuja con su geometría real no tapa NADA: ni la cara del vecino (mcTapaCara ya
+        // lo sabe por mc._geoFina) ni el cielo (mcTablaLuz, que lee esto). Una flor ya lo tenía porque su
+        // textura sale con agujeros; un cubo translúcido no —su piel cubre— y sin esta línea un techo de
+        // hab:cubo-trans dejaría a oscuras lo de debajo, que es MENOS de lo que hacía estampado suelto
+        // (una estructura no está en mc.grid, así que la luz le pasaba entera). `hueco` no se toca: eso
+        // enciende el `discard` del shader del atlas para TODO el terreno, y a una celda fina el atlas ni
+        // se le mira.
+        if(!recorte) recorte=new Uint8Array(mc.blocks.length+1); recorte[id]=1;
         if(!mc.finoGeom[b.key]) mc.finoGeom[b.key]=await mcStructGeom(kBase, kOri);
       }
     }catch(e){}
-    if(onProgress) onProgress(bi+1, mc.blocks.length, b.name, b.key, performance.now()-_tB, _cached);
+    _tGeom=performance.now()-_t;
+    if(onProgress) onProgress(bi+1, mc.blocks.length, b.name, b.key, performance.now()-_tB, _cached, false,
+      { doc:_tDoc, caras:_tCaras, geom:_tGeom });
     mc.name2id[b.name]=id; mc.blockKey[id]=b.key;
     const rects=[];
     for(let fi=0; fi<6; fi++){
@@ -7085,7 +7347,7 @@ async function mcRebakeStructsNear(x,z,x1,z1){
   const affected=mc.structures.filter(s=>{ const a=s.aabb; return x1>=a[0]-R&&x<=a[3]+R&&z1>=a[2]-R&&z<=a[5]+R; });
   for(const s of affected){
     if(mc.structures.indexOf(s)<0) continue;                 // se retiró mientras se reconstruía otra
-    const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot);
+    const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot, s.esc);   // s.esc o la instancia se re-mallaría a tamaño 1
     const j=mc.structures.indexOf(s);
     if(j>=0){ mcFreeStruct(s); mc.structures[j]=mcCarryEfimera(s,rebuilt); } else mcFreeStruct(rebuilt);
   }
@@ -7120,10 +7382,21 @@ function mcFineBoxHit(fx0,fy0,fz0,fx1,fy1,fz1){
   const T=MC_TILE;
   for(const s of mc.structures){
     const g=mcStructColl(s); if(!g) continue;
-    const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T;
-    const x0=Math.max(fx0-bx,0), x1=Math.min(fx1-bx,d[0]-1); if(x0>x1) continue;
-    const y0=Math.max(fy0-by,0), y1=Math.min(fy1-by,d[1]-1); if(y0>y1) continue;
-    const z0=Math.max(fz0-bz,0), z1=Math.min(fz1-bz,d[2]-1); if(z0>z1) continue;
+    const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T, E=s.esc;
+    // Instancia ESCALADA (REQ-AGESC1): el bitset es siempre el de la pieza a tamaño 1, así que la caja del
+    // mundo se lleva a coordenadas de la pieza dividiendo por la escala. Con esc 1 (o sin esc) el divisor
+    // sobra y el bucle se queda exactamente como estaba: esto lo recorre la física en CADA frame.
+    let x0,x1,y0,y1,z0,z1;
+    if(E===undefined||E===1){
+      x0=Math.max(fx0-bx,0); x1=Math.min(fx1-bx,d[0]-1);
+      y0=Math.max(fy0-by,0); y1=Math.min(fy1-by,d[1]-1);
+      z0=Math.max(fz0-bz,0); z1=Math.min(fz1-bz,d[2]-1);
+    }else{
+      x0=Math.max(Math.floor((fx0-bx)/E),0); x1=Math.min(Math.floor((fx1-bx)/E),d[0]-1);
+      y0=Math.max(Math.floor((fy0-by)/E),0); y1=Math.min(Math.floor((fy1-by)/E),d[1]-1);
+      z0=Math.max(Math.floor((fz0-bz)/E),0); z1=Math.min(Math.floor((fz1-bz)/E),d[2]-1);
+    }
+    if(x0>x1||y0>y1||z0>z1) continue;
     for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){
       const row=(y*d[2]+z)*d[0];
       for(let x=x0;x<=x1;x++) if(g.bits[row+x]) return true;
@@ -7214,6 +7487,220 @@ function mcUnstick(){
   }
   return false;   // no encontró hueco subiendo (raro) → el llamador reubica al spawn
 }
+// El cartel-botón de «estás atascado» (BUG-AG7). Con game.autoUnstick apagado nadie te saca solo, así que hace falta
+// una salida VISIBLE: en el móvil no hay tecla U, y en el escritorio tampoco se adivina. Se avisa además por toast,
+// pero solo en el FLANCO: por frame serían 60 toasts por segundo. mc._atascado guarda ese flanco y se rearma al salir.
+// ── REQ-DBG2 · POR QUÉ estás atascado ──────────────────────────────────────────────────────────────
+// mcCollides contesta sí/no y corre 60 veces por segundo; esto contesta QUIÉN y corre UNA vez: en el
+// flanco del atasco y cuando se pregunta por consola. Por eso puede permitirse recorrerlo todo y
+// quedarse con TODOS los culpables en vez de salir al primero, que es justo lo que hace falta cuando
+// te abraza un agente con los brazos abiertos: te atrapan dos piezas, no una.
+//
+// ⚠️ Repite los bucles de mcTerrenoChoca y mcFineBoxHit en vez de compartirlos, a propósito y por la
+// misma razón por la que ese bucle ya está inlineado tres veces (CLAUDE.md): son las funciones que
+// envuelve `mundo-autoarranque` y que test_rayo_apuntado.js extrae VERBATIM por texto, así que
+// factorizar un helper común les metería una dependencia que revienta ese sandbox. Manda la física:
+// esto es un diagnóstico y no puede cambiar por dónde se anda.
+//
+// El NOMBRE BONITO de una pieza de agente («el brazo izq de Zombie») no lo sabe app.js: la tabla de
+// rigs vive en el snippet. Igual que mc.sunExtra o mcXrayExtra, el motor solo ofrece el gancho.
+// `var` y no `let`/`const` a propósito: un `let` de nivel superior NO es propiedad de window y el
+// snippet (que corre en `new Function`) no podría engancharse con `window.mcStuckExtra = …`.
+var mcStuckExtra=null;   // (s) => 'brazo izq de Zombie' | {texto,agente,agenteId} | '' si no sabe
+// Voxels finos (1/16 de bloque) que se le perdonan al culpable, en el espacio LOCAL de la pieza. La
+// colisión de una pieza movida redondea su caja con floor/ceil, o sea hasta un voxel por lado: si
+// aquí se exigiera solape exacto, el «abrazo» —el caso del ticket— se quedaría sin nombre. Con 2 hay
+// margen para el redondeo sin llegar a acusar a algo que solo pasaba por ahí.
+const MC_STUCK_HOLGURA=2;
+// Cuelga de `p` (la ficha de la pieza) lo que el snippet sepa de ella, y devuelve `p`. El gancho
+// admite DOS formas a propósito: una cadena, que es con la que nació y sigue siendo lo mínimo para
+// que el toast diga algo, o un objeto {texto, agente, agenteId}. El objeto existe porque `motivo` es
+// prosa, y de la prosa no se saca un número: con `agenteId` aparte se pasa del aviso a
+// `game.esqueletos.empujar(id)` sin parsear una cadena. app.js sigue sin saber qué es un rig — copia
+// tres campos y no los mira.
+function mcStuckSenas(s, p){
+  p.etiqueta='';
+  if(!mcStuckExtra) return p;
+  let r=null;
+  try{ r=mcStuckExtra(s); }
+  catch(e){ mcStuckExtra=null; console.warn('mcStuckExtra desenganchado:', e && e.message); return p; }
+  if(!r) return p;
+  if(typeof r==='string'){ p.etiqueta=r; return p; }
+  p.etiqueta=String(r.texto||r.etiqueta||'');
+  const nom=String(r.agente||''), id=+r.agenteId||0;
+  if(nom) p.agente=nom;                          // solo si se sabe: un muro no tiene dueño y no debe
+  if(id)  p.agenteId=id;                         // enseñar `agente:''` en la consola
+  return p;
+}
+function mcStuckWhy(px,py,pz){
+  // `npcs` y no `agentes`: son los NPC-cubo de mc.agents (game.defineAgent), que NO son los agentes
+  // articulados de game.esqueletos/game.agentes — ésos están hechos de estructuras finas y salen en
+  // `piezas`, un miembro por entrada. El dueño se topó justo con eso: un zombie abrazándole y un
+  // `agentes: []` al lado. Dos sistemas distintos, dos nombres distintos.
+  const w={ atascado:false, motivo:'', terreno:[], piezas:[], npcs:[], cuando:Date.now() };
+  if(!mc.grid) return w;
+  if(px===undefined){ px=mc.pos[0]; py=mc.pos[1]; pz=mc.pos[2]; }
+  const HW=MC_HW*mc.scale, PH=MC_PH*mc.scale, T=MC_TILE;
+  const fx0=Math.floor((px-HW)*T), fy0=Math.floor(py*T),            fz0=Math.floor((pz-HW)*T);
+  const fx1=Math.floor((px+HW)*T), fy1=Math.floor((py+PH-1e-4)*T),  fz1=Math.floor((pz+HW)*T);
+
+  // 1) Terreno (mc.grid), celda a celda, con el mismo sondeo fino de mcTerrenoChoca.
+  const GEO=mc._geoFina;
+  const bx0=Math.floor(px-HW), bx1=Math.floor(px+HW);
+  const by0=Math.floor(py),    by1=Math.floor(py+PH-1e-4);
+  const bz0=Math.floor(pz-HW), bz1=Math.floor(pz+HW);
+  for(let x=bx0;x<=bx1;x++) for(let y=by0;y<=by1;y++) for(let z=bz0;z<=bz1;z++){
+    if(!mcSolidWalk(x,y,z)) continue;
+    const id=(y<0||!mcInside(x,y,z)) ? 0 : mc.grid[mcIdx(x,y,z)];
+    const g=(GEO && y>=0) ? GEO[id] : null;
+    let choca=true;
+    if(g && g.bits){                             // celda con forma (escalera, flor…): choca por su FORMA
+      choca=false;
+      const d=g.fdim, cx=x*T, cy=y*T, cz=z*T;
+      const ax0=Math.max(fx0-cx,0), ax1=Math.min(fx1-cx,d[0]-1);
+      const ay0=Math.max(fy0-cy,0), ay1=Math.min(fy1-cy,d[1]-1);
+      const az0=Math.max(fz0-cz,0), az1=Math.min(fz1-cz,d[2]-1);
+      for(let fy=ay0;fy<=ay1 && !choca;fy++) for(let fz=az0;fz<=az1 && !choca;fz++){
+        const row=(fy*d[2]+fz)*d[0];
+        for(let fx=ax0;fx<=ax1;fx++) if(g.bits[row+fx]){ choca=true; break; }
+      }
+    }
+    if(choca) w.terreno.push({ x, y, z, clave: y<0 ? 'suelo del mundo' : (mc.blockKey[id]||('id '+id)) });
+  }
+
+  // 2) Estructuras finas estampadas, en la celda donde se las estampó.
+  const yaVistas=new Set();
+  for(const s of mc.structures){
+    const g=mcStructColl(s); if(!g) continue;
+    const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T, E=s.esc;
+    let x0,x1,y0,y1,z0,z1;
+    if(E===undefined||E===1){
+      x0=Math.max(fx0-bx,0); x1=Math.min(fx1-bx,d[0]-1);
+      y0=Math.max(fy0-by,0); y1=Math.min(fy1-by,d[1]-1);
+      z0=Math.max(fz0-bz,0); z1=Math.min(fz1-bz,d[2]-1);
+    }else{
+      x0=Math.max(Math.floor((fx0-bx)/E),0); x1=Math.min(Math.floor((fx1-bx)/E),d[0]-1);
+      y0=Math.max(Math.floor((fy0-by)/E),0); y1=Math.min(Math.floor((fy1-by)/E),d[1]-1);
+      z0=Math.max(Math.floor((fz0-bz)/E),0); z1=Math.min(Math.floor((fz1-bz)/E),d[2]-1);
+    }
+    if(x0>x1||y0>y1||z0>z1) continue;
+    let toca=false;
+    for(let y=y0;y<=y1 && !toca;y++) for(let z=z0;z<=z1 && !toca;z++){
+      const row=(y*d[2]+z)*d[0];
+      for(let x=x0;x<=x1;x++) if(g.bits[row+x]){ toca=true; break; }
+    }
+    if(toca){ yaVistas.add(s);
+      w.piezas.push(mcStuckSenas(s,
+        { key:s.key, rot:s.rot|0, en:[s.ox,s.oy,s.oz], esc:s.esc||1 })); }
+  }
+
+  // 2b) …y las que NO están donde se las estampó, que son justo las que aprietan: los miembros de un
+  // agente articulado. Una pieza movida por matriz se DIBUJA en otro sitio y el envoltorio del
+  // snippet APAGA su ancla — mcStructColl(s) devuelve null ahí arriba, así que el bucle de 2 no la ve
+  // nunca. Su solidez la pone el envoltorio de mcFineBoxHit pasando la caja por la inversa (BUG-AG4).
+  //
+  // ⚠️ Aquí NO se puede preguntar por puntos, y ésa fue la lección cara del ticket. Para una pieza
+  // movida, la colisión mete la caja ENTERA del jugador en el espacio local de la pieza y redondea
+  // HACIA FUERA (`cajaEnLocal`: floor/ceil, «antes sobrar que faltar»), así que te frena un brazo que
+  // todavía no te toca — el abrazo es justo esa holgura. Preguntando `mcStructAt` en el voxel exacto
+  // no hay NADIE en ninguna celda de tu caja, y el aviso salía mudo con el cartel rojo puesto.
+  //
+  // Así que se atribuye igual que dibuja el motor: se pasan las 8 esquinas del ancla por `s.model` —la
+  // misma cuenta del culling (mcStructVisible), pero con la caja girada en vez de su esfera, porque
+  // aquí hay que ajustar y no barrer— y se cruza con la caja del jugador. Es O(estructuras), sin
+  // descensos ni muestreos, y se ordena por cuánto te agarra cada una: en un abrazo la primera que se
+  // nombra es la que más solapa. La holgura que se le perdona es la misma que se da la física.
+  if(mcFineBoxHit(fx0,fy0,fz0,fx1,fy1,fz1)){
+    const H=MC_STUCK_HOLGURA/T;                       // el voxel fino de más del redondeo (floor/ceil)
+    const cand=[];
+    for(const s of mc.structures){
+      if(yaVistas.has(s)) continue;
+      const m=s.model, a=s.aabb;
+      if(!a || !(m && m.length===16)) continue;       // sin matriz está en su ancla: ya la miró la pasada 2
+      // La caja del JUGADOR al espacio local de la pieza, no al revés: es lo que hace la colisión, y
+      // la diferencia importa. Una pieza inclinada convierte la caja del jugador (0,6 × 1,8) en un
+      // AABB local mucho más gordo, y por eso te agarra desde lejos: si aquí se comparasen dos cajas
+      // de mundo con una holgura fija, seguiría sin salir el culpable en las poses tumbadas.
+      // La 3×3 de la matriz de una pieza es ortonormal ⇒ su inversa es la TRASPUESTA (no hay que
+      // invertir nada); en cuartos de vuelta es exacto y en ángulos intermedios sale un pelo mayor,
+      // que es el mismo lado seguro que se toma la física.
+      let lx0=Infinity,ly0=Infinity,lz0=Infinity,lx1=-Infinity,ly1=-Infinity,lz1=-Infinity;
+      for(let i=0;i<8;i++){
+        const dx=((i&1)?px+HW:px-HW)-m[12], dy=((i&2)?py+PH:py)-m[13], dz=((i&4)?pz+HW:pz-HW)-m[14];
+        const qx=m[0]*dx+m[1]*dy+m[2]*dz;             // Rᵀ · p, por columnas
+        const qy=m[4]*dx+m[5]*dy+m[6]*dz;
+        const qz=m[8]*dx+m[9]*dy+m[10]*dz;
+        if(qx<lx0)lx0=qx; if(qx>lx1)lx1=qx;
+        if(qy<ly0)ly0=qy; if(qy>ly1)ly1=qy;
+        if(qz<lz0)lz0=qz; if(qz>lz1)lz1=qz;
+      }
+      const ox=Math.min(lx1+H,a[3])-Math.max(lx0-H,a[0]);
+      const oy=Math.min(ly1+H,a[4])-Math.max(ly0-H,a[1]);
+      const oz=Math.min(lz1+H,a[5])-Math.max(lz0-H,a[2]);
+      if(ox<=0||oy<=0||oz<=0) continue;
+      cand.push({s, v:ox*oy*oz});
+    }
+    cand.sort((A,B)=>B.v-A.v);                        // la que más te agarra, primero
+    for(const c of cand){
+      const s=c.s, m=s.model;
+      yaVistas.add(s);
+      w.piezas.push(mcStuckSenas(s,
+        { key:s.key, rot:s.rot|0, en:[s.ox,s.oy,s.oz], esc:s.esc||1, movida:true,
+          donde:[+m[12].toFixed(2),+m[13].toFixed(2),+m[14].toFixed(2)],
+          solape:+c.v.toFixed(4) }));
+    }
+  }
+
+  // 3) NPCs de mc.agents (caja 1×1×1), tal cual los prueba mcCollides.
+  if(mc.agents && mc.agents.size){
+    const minX=px-HW, maxX=px+HW, minY=py, maxY=py+PH-1e-4, minZ=pz-HW, maxZ=pz+HW;
+    for(const a of mc.agents.values()){
+      if(a.state==='stopped') continue;
+      const rx=a.renderX!==undefined?a.renderX:a.x;
+      const ry=a.renderY!==undefined?a.renderY:a.y;
+      const rz=a.renderZ!==undefined?a.renderZ:a.z;
+      if(maxX>rx && minX<rx+1 && maxY>ry+1 && minY<ry+2 && maxZ>rz && minZ<rz+1)
+        w.npcs.push({ id:a.id, nombre:a.name||a.id, en:[rx,ry,rz] });
+    }
+  }
+
+  // La autoridad de «¿estoy atascado?» es la FÍSICA, no lo que yo haya sabido nombrar. Si se toman de
+  // mis listas, un culpable que se me escape se convierte en un `atascado:false` mientras el cartel
+  // rojo sigue puesto — que es exactamente lo que le pasó al dueño en la consola. Cuando choca y no
+  // sé de quién es, se dice; callar es peor que admitirlo, porque parece que no pasa nada.
+  w.choca = mcCollides(px,py,pz);
+  w.atascado = !!(w.choca || w.terreno.length || w.piezas.length || w.npcs.length);
+  w.sinIdentificar = !!(w.choca && !w.terreno.length && !w.piezas.length && !w.npcs.length);
+  w.motivo = mcStuckMotivo(w);
+  return w;
+}
+// El texto corto del toast. Orden a propósito: primero lo que se mueve y te acorrala sin que lo veas
+// venir (piezas de agente y NPCs) y al final el terreno, que es el caso en que ya sabes dónde estás.
+function mcStuckMotivo(w){
+  const nom=[];
+  for(const p of w.piezas) if(p.etiqueta) nom.push(p.etiqueta);
+  for(const a of w.npcs) nom.push('el NPC «'+a.nombre+'»');
+  for(const p of w.piezas) if(!p.etiqueta) nom.push(p.key);
+  for(const t of w.terreno) nom.push(t.clave+' ('+t.x+','+t.y+','+t.z+')');
+  if(!nom.length) return w.sinIdentificar ? 'algo que no consigo identificar' : '';
+  return nom[0] + (nom.length>1 ? ' (+'+(nom.length-1)+' más)' : '');
+}
+function mcStuckShow(on){
+  on=!!on;
+  if(on===!!mc._atascado) return;              // sin cambio de estado no se toca el DOM ni se repite el aviso
+  mc._atascado=on;
+  const b=$('#mc-stuck'); if(b) b.hidden=!on;
+  // El motivo se calcula SOLO aquí, en el flanco: por frame sería recorrer todas las estructuras 60
+  // veces por segundo para escribir un cartel que ya está puesto. Se guarda para game.atasco('ultimo'),
+  // porque el toast se va a los 1,8 s y la pregunta llega después.
+  if(on){
+    let w=null;
+    try{ w=mcStuckWhy(mc.pos[0], mc.pos[1], mc.pos[2]); }catch(e){ console.warn('mcStuckWhy:', e && e.message); }
+    if(w) mc._stuckWhy=w;
+    toast(w && w.motivo ? 'Atascado por '+w.motivo+' · pulsa U (o el botón) para salir'
+                        : 'Atascado · pulsa U (o el botón) para salir', 4);
+  }
+}
 // Desatasco «duro» (tecla U / game.unstick()): intenta subir; si no sale, teletransporta al spawn y sube ahí.
 function mcForceUnstick(){
   if(mcUnstick()) return true;
@@ -7260,10 +7747,17 @@ function mcAgentShove(){
 }
 function mcUpdate(dt){
   if(dt<=0) return; dt=Math.min(dt,0.05);   // clamp para no atravesar bloques en un frame lento
-  // Auto-curación: si acabamos INCRUSTADOS (sala mallada tras aparecer, estampada encima, resize…), el
-  // siguiente frame nos saca solo. Evita quedar congelado sin poder andar/saltar sin depender de la tecla U.
-  // Un agente encima se resuelve APARTANDO en horizontal (empujón); solo si eso falla se sube al aire.
-  if(mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])){ if(!mcAgentShove()) mcUnstick(); }
+  // Auto-curación: si acabamos INCRUSTADOS (sala mallada tras aparecer, estampada encima, resize…).
+  // El empujón horizontal de un agente que te embiste se resuelve SIEMPRE: eso aparta, no aúpa.
+  // Lo que va detrás (mcUnstick) sube HACIA ARRIBA, y por eso está APAGADO por defecto (game.autoUnstick,
+  // BUG-AG7): rozar el brazo de un agente articulado te embutía y el siguiente frame te plantaba encima
+  // de él sin haber saltado. Atascado de verdad se sale con la tecla U, que es un gesto y no una sorpresa.
+  if(mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])){
+    if(!mcAgentShove() && mc.autoUnstick) mcUnstick();
+    // …y si nadie te ha sacado, se avisa UNA vez por atasco. Sin esto, «no me puedo mover» es un juego
+    // colgado: la tecla que lo arregla no se adivina. Y en el móvil no hay tecla ninguna, de ahí el botón.
+    else if(!mc.autoUnstick && mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])) mcStuckShow(true);
+  } else mcStuckShow(false);
   const k=mc.keys, sp=mc.speed*(k['shift']?0.5:1)*Math.sqrt(mc.scale);   // game.playerSpeed; Shift = mitad. Velocidad ∝ √scale (sublineal): un gigante avanza más en absoluto pero LENTO respecto a su cuerpo → sensación de mole/peso (antes ∝ scale = mismo ritmo relativo = ligero)
   const sinY=Math.sin(mc.yaw), cosY=Math.cos(mc.yaw);
   const fwd=[-sinY,0,-cosY], right=[cosY,0,-sinY];   // horizontal, relativo al yaw (no al pitch)
@@ -7850,14 +8344,24 @@ function mcXrayVolume(out){
     for(const s of mc.structures){
       const g=mcStructColl(s); if(!g) continue;
       const bits=g.bitsAim||g.bits;                    // rayos-X enseña lo que HAY, no lo que frena
-      const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T;
-      const x0=Math.max(fx0-bx,0), x1=Math.min(fx1-bx,d[0]-1); if(x0>x1) continue;
-      const y0=Math.max(fy0-by,0), y1=Math.min(fy1-by,d[1]-1); if(y0>y1) continue;
-      const z0=Math.max(fz0-bz,0), z1=Math.min(fz1-bz,d[2]-1); if(z0>z1) continue;
+      const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T, E=s.esc||1;
+      // Escala (REQ-AGESC1): el recorte va en coordenadas de la PIEZA (dividir), y la cajita que se dibuja
+      // vuelve al mundo multiplicando — si no, los rayos-X de un gigante saldrían del tamaño del enano.
+      let x0,x1,y0,y1,z0,z1;
+      if(E===1){
+        x0=Math.max(fx0-bx,0); x1=Math.min(fx1-bx,d[0]-1);
+        y0=Math.max(fy0-by,0); y1=Math.min(fy1-by,d[1]-1);
+        z0=Math.max(fz0-bz,0); z1=Math.min(fz1-bz,d[2]-1);
+      }else{
+        x0=Math.max(Math.floor((fx0-bx)/E),0); x1=Math.min(Math.floor((fx1-bx)/E),d[0]-1);
+        y0=Math.max(Math.floor((fy0-by)/E),0); y1=Math.min(Math.floor((fy1-by)/E),d[1]-1);
+        z0=Math.max(Math.floor((fz0-bz)/E),0); z1=Math.min(Math.floor((fz1-bz)/E),d[2]-1);
+      }
+      if(x0>x1||y0>y1||z0>z1) continue;
       for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){
         const row=(y*d[2]+z)*d[0];
         for(let x=x0;x<=x1;x++) if(bits[row+x])
-          mcPushBoxEdges(out, (bx+x)/T,(by+y)/T,(bz+z)/T, (bx+x+1)/T,(by+y+1)/T,(bz+z+1)/T, 1,0.55,0.1);
+          mcPushBoxEdges(out, (bx+x*E)/T,(by+y*E)/T,(bz+z*E)/T, (bx+(x+1)*E)/T,(by+(y+1)*E)/T,(bz+(z+1)*E)/T, 1,0.55,0.1);
       }
     }
   }
@@ -7907,10 +8411,20 @@ function mcAimBoxHit(fx0,fy0,fz0,fx1,fy1,fz1){
   for(const s of mc.structures){
     const g=mcStructColl(s); if(!g) continue;
     const bits=g.bitsAim||g.bits;
-    const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T;
-    const x0=Math.max(fx0-bx,0), x1=Math.min(fx1-bx,d[0]-1); if(x0>x1) continue;
-    const y0=Math.max(fy0-by,0), y1=Math.min(fy1-by,d[1]-1); if(y0>y1) continue;
-    const z0=Math.max(fz0-bz,0), z1=Math.min(fz1-bz,d[2]-1); if(z0>z1) continue;
+    const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T, E=s.esc;
+    // Misma corrección de escala que en mcFineBoxHit (REQ-AGESC1): apuntar a un gigante tiene que
+    // encontrarlo donde SE VE, no donde estaría a tamaño 1.
+    let x0,x1,y0,y1,z0,z1;
+    if(E===undefined||E===1){
+      x0=Math.max(fx0-bx,0); x1=Math.min(fx1-bx,d[0]-1);
+      y0=Math.max(fy0-by,0); y1=Math.min(fy1-by,d[1]-1);
+      z0=Math.max(fz0-bz,0); z1=Math.min(fz1-bz,d[2]-1);
+    }else{
+      x0=Math.max(Math.floor((fx0-bx)/E),0); x1=Math.min(Math.floor((fx1-bx)/E),d[0]-1);
+      y0=Math.max(Math.floor((fy0-by)/E),0); y1=Math.min(Math.floor((fy1-by)/E),d[1]-1);
+      z0=Math.max(Math.floor((fz0-bz)/E),0); z1=Math.min(Math.floor((fz1-bz)/E),d[2]-1);
+    }
+    if(x0>x1||y0>y1||z0>z1) continue;
     for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){
       const row=(y*d[2]+z)*d[0];
       for(let x=x0;x<=x1;x++) if(bits[row+x]) return true;
@@ -7954,7 +8468,9 @@ function mcStructAt(px,py,pz){
   for(const s of mc.structures){
     const g=mcStructColl(s); if(!g) continue;
     const bits=g.bitsAim||g.bits;                      // qué estructura estoy señalando, aunque se atraviese
-    const d=g.fdim, lx=fx-s.ox*T, ly=fy-s.oy*T, lz=fz-s.oz*T;
+    const d=g.fdim, E=s.esc;                           // escala (REQ-AGESC1): mundo → coords de la pieza
+    let lx=fx-s.ox*T, ly=fy-s.oy*T, lz=fz-s.oz*T;
+    if(E!==undefined && E!==1){ lx=Math.floor(lx/E); ly=Math.floor(ly/E); lz=Math.floor(lz/E); }
     if(lx<0||ly<0||lz<0||lx>=d[0]||ly>=d[1]||lz>=d[2]) continue;
     if(bits[(ly*d[2]+lz)*d[0]+lx]) return s;
   }
@@ -7980,7 +8496,7 @@ async function mcRestampAll(){
   // da hasGlow=false → mcComputeBlockLight sale en 0 → las estructuras se horneaban a oscuras y solo se iluminaban
   // al re-estamparlas a mano (mcStampStruct forzaba hasGlow=true). mcStructGeom cachea en meshRot[rot], así que el
   // mcBuildStructMesh de abajo reutiliza el greedy (sin doble coste).
-  for(const s of insts){ const g=await mcStructGeom(s.key, (s.rot|0)&15); s.emitCells=g.emitCells; s.emitDir=g.emitDir; }
+  for(const s of insts){ const g=await mcStructGeom(s.key, mcOriNorm(s.rot)); s.emitCells=g.emitCells; s.emitDir=g.emitDir; }
   // Luz de bloque FRESCA antes de reconstruir → mcBuildStructMesh hornea la luz correcta por cara (corrige luz
   // estructura-sobre-estructura y post-edición). El terreno se re-malla al final SOLO si el brillo cambió respecto
   // al que tienen HORNEADO los chunks (mc.blockLightMeshed, que pone mcMeshAll): las mallas del terreno dependen de
@@ -7994,7 +8510,7 @@ async function mcRestampAll(){
   // Reconstruye cada instancia en un objeto NUEVO y solo entonces libera la vieja y la sustituye en su sitio: así
   // ninguna estructura desaparece del render mientras se re-hornea (evita el parpadeo de ~1s al colocar emisivos).
   for(const s of insts){
-    const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot);
+    const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot, s.esc);   // s.esc o la instancia se re-mallaría a tamaño 1
     const j=mc.structures.indexOf(s);
     if(j>=0){ mcFreeStruct(s); mc.structures[j]=mcCarryEfimera(s,rebuilt); } else mcFreeStruct(rebuilt);   // se retiró mientras se reconstruía
   }
@@ -8867,9 +9383,10 @@ async function mcStructTexKeys(srcKey){
   for(const k in vox){ const v=vox[k]; if(typeof v==='string' && v.slice(0,4)==='tex:') out.add(v.slice(4)); }
   return [...out];
 }
-async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet){
-  rot=(rot|0)&15;                       // orientación combinada (yaw + vuelco); ver mcStructGeom
-  const s={key:srcKey, ox,oy,oz, rot, colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[ox,oy,oz,ox,oy,oz]};
+async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet, esc){
+  rot=mcOriNorm(rot);                   // una de las 24 posturas; ver mcStructGeom
+  const E=(esc>0?+esc:1);               // escala libre de la instancia (REQ-AGESC1); 1 = el camino de siempre
+  const s={key:srcKey, ox,oy,oz, rot, esc:E, colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[ox,oy,oz,ox,oy,oz]};
   mc.structures.push(s);                                        // en la lista ya (el render la ignora sin malla; el atlas la ve)
   // ¿aparece alguna clave tex: nueva? ⇒ recomponer el atlas de estructuras. Con filas fijas y altura escalonada eso
   // NO mueve las UV de las demás casi nunca, así que solo hay que re-mallarlo todo cuando el atlas sube de escalón
@@ -8880,7 +9397,7 @@ async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet){
   if(grow && mc.structUVMoved){
     await mcRestampAll();                                       // el atlas creció de escalón → re-malla todas (ya recomputa luz de bloque)
   } else {
-    Object.assign(s, await mcBuildStructMesh(srcKey, ox, oy, oz, rot));   // cachea también el bitset de colisión fina
+    Object.assign(s, await mcBuildStructMesh(srcKey, ox, oy, oz, rot, E));   // cachea también el bitset de colisión fina
     if(s.emitCells && s.emitCells.length){                      // la nueva estructura tiene voxeles emisivos:
       mc.hasGlow=true; mcComputeBlockLight();                   // …enciende su luz de bloque…
       if(mc.structures.length>1) await mcRestampAll(); else mcMeshAll();   // …y re-oscurece/ilumina terreno (y estructuras vecinas vía restamp)
@@ -9084,7 +9601,7 @@ function mcBake(doc){                          // hornea un mundo guardado a la 
   // y malle todo (evita la carrera de estampar N a la vez, cada una recomponiendo el atlas). El render las dibuja
   // en cuanto están listas.
   for(const st of (doc.structures||[])){ if(st&&st.key)
-    mc.structures.push({key:st.key, ox:st.x|0, oy:st.y|0, oz:st.z|0, rot:(st.rot|0)&15, colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[st.x|0,st.y|0,st.z|0,st.x|0,st.y|0,st.z|0]}); }
+    mc.structures.push({key:st.key, ox:st.x|0, oy:st.y|0, oz:st.z|0, rot:mcOriNorm(st.rot), colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[st.x|0,st.y|0,st.z|0,st.x|0,st.y|0,st.z|0]}); }
   if(mc.structures.length) mcRestampAll().then(mcForceUnstick);   // al terminar de mallar, sácalo si una sala cayó sobre el spawn (p.ej. escala grande la última vez)
 }
 // game.reloadWorld() · recarga el mundo desde el servidor SIN teletransportar: re-hornea /api/mundo pero
@@ -9428,11 +9945,11 @@ function mcAvisaSiFino(material, id){
     // blockLike es el caso trivial de «la piel cubre el cubo»: un 16³ macizo. Con la piel cubriendo, lo
     // que se ve del dibujo es su cáscara y el terreno la dibuja fiel, agujeros incluidos.
     if(rec.blockLike || (rec.pielCubre && !rec.translucido)) return;
-    // …y si CABE en una celda pero no la llena (una flor, una mata), tampoco hay nada que avisar: el
-    // mallador emite su geometría real dentro de la malla del chunk (mcTablaFina), con su alfa y todo,
-    // así que se ve como el documento sin costar un draw call. Solo queda la queja para lo que sigue
-    // sin tener arreglo por ese camino: varias celdas (cada una se proyecta suelta) o un macizo translúcido.
-    if(rec.w<=1 && rec.h<=1 && rec.d<=1 && !rec.pielCubre) return;
+    // …y si el mallador va a emitir su geometría real dentro de la malla del chunk (mcRecFina → mcTablaFina),
+    // con su alfa y todo, tampoco hay nada que avisar: se ve como el documento sin costar un draw call.
+    // Desde BUG-STR1 eso incluye al macizo TRANSLÚCIDO, que antes caía en la queja de abajo. Lo que queda
+    // sin arreglo por ese camino son las varias celdas: cada una se proyecta suelta.
+    if(mcRecFina(rec)) return;
     const falta=[];
     if(!rec.pielCubre) falta.push('forma');                 // varias celdas: cada una se proyecta a un cubo lleno
     if(rec.translucido) falta.push('transparencia real');   // el terreno recorta, no mezcla
@@ -9472,7 +9989,7 @@ game.stamp=async function(material, x, y, z, rot){
   const rec=await mcStructCells(key);
   if(rec.blockLike && !mcAvisadoMacizo[key]){ mcAvisadoMacizo[key]=true;
     toast('«'+material+'» es un bloque macizo: setVoxel(…) lo pone igual y sale muchísimo más barato'); }
-  await mcStampStruct(key, x, y, z, (rot|0)&15, true);   // quiet: el resumen y el guardado los da mcFlushStamp
+  await mcStampStruct(key, x, y, z, mcOriNorm(rot), true);   // quiet: el resumen y el guardado los da mcFlushStamp
   mcStampN++;
   if(!mc.batching){ clearTimeout(mcStampT); mcStampT=setTimeout(mcFlushStamp, 80); }
   return true;
@@ -9640,10 +10157,54 @@ function mcLoadPhase(nombre){ mcLoadStop(); if(mcLoad) mcLoad.abierta={ nombre, 
 function mcLoadStop(){
   if(!mcLoad || !mcLoad.abierta) return;
   const f=mcLoad.abierta;
-  mcLoad.fases.push({ fase:f.nombre, ms:+(performance.now()-f.t).toFixed(1) });
+  // Se guarda también el instante ABSOLUTO de arranque: sin él no se puede cruzar una fase con la
+  // Resource Timing API, que vive en el mismo reloj (performance.now) pero no sabe nada de fases.
+  mcLoad.fases.push({ fase:f.nombre, ms:+(performance.now()-f.t).toFixed(1), t:f.t });
   mcLoad.abierta=null;
 }
 function mcLoadNote(txt){ if(mcLoad) mcLoad.notas.push(txt); }
+// Lo que el NAVEGADOR vio de las descargas de la paleta, no lo que creyó el bucle. Sale de la Resource
+// Timing API, que es la única fuente que sabe cuándo salió y cuándo llegó cada una de verdad; el `ms` que
+// apunta el bucle solo mide su propia espera, y desde PERF-MC3 esa espera se concentra entera en el
+// primer bloque. Con el pico de simultáneas y los KB/s se distingue lo único que importa para decidir el
+// siguiente paso: si el cuello es la LATENCIA (muchas idas y vueltas) o el ANCHO DE BANDA (demasiados
+// bytes). Devuelve null si el navegador no guarda estos datos.
+function mcRedDeLaPaleta(){
+  if(!performance.getEntriesByType) return null;
+  const claves=(mc.blocks||[]).map(b=>b.key.replace(/^(asset:|hab:)/,'').replace(/@\d+$/,''));
+  const todas=performance.getEntriesByType('resource');
+  const ent=todas.filter(e=>
+    (/\.vox\.json$/.test(e.name) || /\/api\/habitantes\/./.test(e.name)) && claves.some(k=>e.name.indexOf(k)>=0));
+  if(!ent.length) return null;
+  // Un documento pedido DOS veces no es una curiosidad: es el mismo peso otra vez por el cable. Pasó de
+  // verdad —las miniaturas de las dos galerías bajaban cada habitante aparte de la paleta— y con 15 KB/s
+  // son segundos. Se cuenta aquí para que se vea solo, sin tener que abrir la pestaña de red.
+  const veces={}; for(const e of ent) veces[e.name]=(veces[e.name]||0)+1;
+  const repes=Object.entries(veces).filter(([,n])=>n>1);
+  // Pico de simultáneas: se recorren las salidas y llegadas en orden y se lleva la cuenta viva. Yendo en
+  // serie el pico es 1 por definición, así que este número es la prueba de que el paralelismo llega.
+  const hitos=[];
+  for(const e of ent){ hitos.push([e.startTime,1]); hitos.push([e.responseEnd,-1]); }
+  hitos.sort((a,b)=>a[0]-b[0]);
+  let vivas=0, pico=0;
+  for(const [,d] of hitos){ vivas+=d; if(vivas>pico) pico=vivas; }
+  // transferSize es 0 si la respuesta salió de la caché; encodedBodySize es lo que pesa comprimida.
+  const bytes=ent.reduce((s,e)=>s+(e.transferSize||e.encodedBodySize||0),0);
+  // COLA DE CONEXIONES: el navegador solo abre ~6 sockets por host. Si las galerías del editor están
+  // bajando sus 40 y pico miniaturas por el mismo host, la petición de la paleta se queda esperando TURNO
+  // —no ancho de banda, no latencia: turno— y ese rato aparece entre fetchStart y requestStart. Es la
+  // diferencia entre «la red va lenta» y «la red no era para ti», y no se ve en ninguna otra cifra.
+  const cola=ent.map(e=>e.requestStart>e.startTime ? e.requestStart-e.startTime : 0);
+  const ini=Math.min(...ent.map(e=>e.startTime)), fin=Math.max(...ent.map(e=>e.responseEnd));
+  // …y con QUIÉN se compitió: peticiones que NO son de la paleta y que estaban vivas en esa misma ventana.
+  const ajenas=todas.filter(e=>ent.indexOf(e)<0 && e.startTime<fin && e.responseEnd>ini);
+  return { n:ent.length, pico, bytes, repes, ini, fin,
+           cola:Math.max(0,...cola), colaSuma:cola.reduce((s,x)=>s+x,0),
+           ajenas:ajenas.length, ajenasBytes:ajenas.reduce((s,e)=>s+(e.transferSize||e.encodedBodySize||0),0),
+           repeBytes:repes.reduce((s,[u,n])=>s+(n-1)*(ent.find(e=>e.name===u).transferSize||0),0),
+           suma:ent.reduce((s,e)=>s+e.duration,0),
+           pared:fin-ini };
+}
 function mcLoadReport(){
   if(!mcLoad){ console.log('Aún no se ha cargado ningún mundo en esta sesión.'); return null; }
   const total=+(performance.now()-mcLoad.t0).toFixed(1);
@@ -9654,11 +10215,52 @@ function mcLoadReport(){
   if(mcLoad.bloques.length){
     const orden=mcLoad.bloques.slice().sort((a,b)=>b.ms-a.ms);
     console.log('--- BLOQUES DE LA PALETA (cada uno = 1 asset + 6 caras rasterizadas) ---');
-    console.table(orden.map(b=>({ bloque:b.name, ms:+b.ms.toFixed(1), origen:b.cached?'caché':'descarga', clave:b.key })));
+    // Las tres columnas del desglose son la pregunta entera: `doc` es esperar el documento (red o cola de
+    // conexiones), `caras` es rasterizar las 6 caras (CPU) y `geom` es hornear la geometría de una pieza
+    // fina. Un bloque caro con doc≈todo NO se arregla con la misma medicina que uno con caras≈todo.
+    console.table(orden.map(b=>({ bloque:b.name, ms:+b.ms.toFixed(1),
+      doc:b.det?+b.det.doc.toFixed(1):'', caras:b.det?+b.det.caras.toFixed(1):'', geom:b.det?+b.det.geom.toFixed(1):'',
+      origen:b.cached?'caché':'descarga', clave:b.key })));
+    const sum=k=>mcLoad.bloques.reduce((s,b)=>s+(b.det?b.det[k]:0),0);
+    console.log('  reparto de toda la paleta: esperar documentos '+sum('doc').toFixed(0)
+      +' ms · rasterizar caras '+sum('caras').toFixed(0)+' ms · hornear geometría fina '+sum('geom').toFixed(0)+' ms.');
     const desc=mcLoad.bloques.filter(b=>!b.cached);
     console.log('  '+desc.length+' de '+mcLoad.bloques.length+' bloques hubo que descargarlos ('
-      +desc.reduce((s,b)=>s+b.ms,0).toFixed(0)+' ms). Las descargas son EN SERIE: es el tramo que más'
-      +' se nota en «Preparando bloques…».');
+      +desc.reduce((s,b)=>s+b.ms,0).toFixed(0)+' ms). Es el tramo que más se nota en «Preparando bloques…».');
+    // El ms de arriba es ENGAÑOSO desde que las descargas van en tandas (PERF-MC3): mide lo que esperó el
+    // bucle, y como el bucle va en serie, el PRIMER bloque se come la espera de todos y los demás salen a
+    // 3 ms. Para saber qué pasó de verdad hay que preguntarle al navegador, no al bucle.
+    const red=mcRedDeLaPaleta(), kbs=red ? red.bytes/1024/(red.pared/1000) : 0;
+    // La pregunta es «¿cuánto de ESTA FASE fue el cable?», así que el reloj de la red se compara contra
+    // la fase, no contra sí mismo. La versión anterior sacaba el veredicto de los KB/s y llegó a acusar
+    // al ancho de banda de unos 10 s de paleta cuyas descargas habían terminado en 1,3 s: un caudal bajo
+    // solo dice que los documentos son pequeños para lo que tarda un viaje, no que la red sea el cuello.
+    // Y se cruza SOLAPANDO, no comparando los dos relojes de largo: parte de estos documentos los pide
+    // la galería del editor antes de que la fase empiece, así que la ventana de red es más ancha que la
+    // fase y el porcentaje se iba por encima del 100 %. Lo que cuenta es cuánta FASE cayó dentro de la red.
+    const fp=mcLoad.fases.find(f=>/^Paleta/.test(f.fase)), fasePal=fp?fp.ms:0;
+    const dentro=red && fp ? Math.max(0, Math.min(red.fin, fp.t+fp.ms)-Math.max(red.ini, fp.t)) : 0;
+    const cuota=fasePal ? dentro*100/fasePal : 0;
+    if(red) console.log('  RED · '+red.n+' documentos, '+(red.bytes/1024).toFixed(0)+' KB por el cable en '
+      +red.pared.toFixed(0)+' ms de reloj (suma de las partes: '+red.suma.toFixed(0)+' ms).'
+      +'\n        pico de '+red.pico+' en vuelo a la vez · '+kbs.toFixed(0)+' KB/s efectivos'
+      +'\n        esperando TURNO de socket: '+red.colaSuma.toFixed(0)+' ms sumados, peor caso '+red.cola.toFixed(0)+' ms'
+      +' · compitiendo por el cable: '+red.ajenas+' petición(es) ajenas ('+(red.ajenasBytes/1024).toFixed(0)+' KB)'
+      +(red.cola>500 ? '\n        ⚠ ESO ES EL PROBLEMA: la paleta no está descargando, está haciendo cola detrás'
+          +' de otra cosa (las miniaturas de las galerías van por el mismo host y solo hay ~6 sockets).' : '')
+      +(red.repes.length ? '\n        ⚠ '+red.repes.length+' documento(s) se bajaron MÁS DE UNA VEZ ('
+          +(red.repeBytes/1024).toFixed(0)+' KB tirados): '+red.repes.map(([u,n])=>u.split('/').pop()+'×'+n).join(', ') : '')
+      +(fasePal ? '\n        de los '+fasePal.toFixed(0)+' ms de la fase «Paleta», '+dentro.toFixed(0)
+          +' ms ('+cuota.toFixed(0)+' %) transcurren con algo en el cable.' : '')
+      +'\n        '+(!fasePal
+          ? '(sin fase «Paleta» medida, no se puede repartir la culpa.)'
+          : cuota<50
+          ? '⚠ el cable NO explica esta fase: quedan '+(fasePal-dentro).toFixed(0)+' ms sin red por medio.'
+            +' Mirar el HILO PRINCIPAL (rasterizar caras, miniaturas de las galerías, parsear JSON), no los bytes.'
+          : red.pico<2
+          ? '⚠ van de una en una: el paralelismo NO está llegando, mirar antes de nada por qué.'
+          : '⚠ la red se lleva la fase y las peticiones ya se solapan (pico '+red.pico+', '+kbs.toFixed(0)+' KB/s):'
+            +' paralelizar no puede dar más; lo único que ayuda es mandar MENOS BYTES.'));
   }
   return { total, fases:mcLoad.fases, bloques:mcLoad.bloques };
 }
@@ -9699,10 +10301,12 @@ async function openWorld(){
       +' + los presentes en el mundo guardado).');
     mcShowLoading('Preparando bloques… (0/'+mc.blocks.length+')'); await mcYield();
     mcLoadPhase('Paleta: assets + rasterizar caras');
-    await mcBuildPalette((n,total,name,key,ms,cached)=>{
+    await mcBuildPalette((n,total,name,key,ms,cached,empezando,det)=>{
       // El overlay deja de mentir: dice QUÉ bloque va y cuántos quedan, en vez de un mensaje fijo.
+      // Llega DOS veces por bloque: al empezar (para que el nombre sea el que se está bajando, no el
+      // anterior) y al acabar, que es la que trae el tiempo y por tanto la única que va al informe.
       mcShowLoading('Preparando bloques… ('+n+'/'+total+') '+name+(cached?'':' ⬇'));
-      if(mcLoad) mcLoad.bloques.push({ name, key, ms, cached });
+      if(!empezando && mcLoad) mcLoad.bloques.push({ name, key, ms, cached, det });
     });
     mcLoadPhase('Atlas → GPU');
     mcUploadAtlas();
@@ -9859,6 +10463,14 @@ Object.defineProperty(game,'noteWidth',{ enumerable:true, get:()=>mc.noteWidth,
 mcNoteUIAplicar();   // lo guardado en localStorage tiene que llegar al CSS sin esperar a que alguien lo toque
 Object.defineProperty(game,'playerSpeed',{ enumerable:true, get:()=>mc.speed,
   set:v=>{ v=Math.max(1,Math.min(40,+v||5)); mc.speed=v; try{localStorage.setItem('vf_mcSpeed',v);}catch(e){} return v; } });
+// game.autoUnstick = la auto-curación por frame de mcUpdate, la que te sube cuando quedas embutido. APAGADA por
+// defecto (BUG-AG7): solo sabe buscar salida HACIA ARRIBA, así que rozar el brazo de un agente te subía a caballito
+// sobre él. Con ella apagada, atascarse se sale con la tecla U (game.unstick()), que es un gesto y no una sorpresa.
+// ⚠️ NO gobierna los mcUnstick() de UN SOLO TIRO —teletransportarse, estampar, cambiar de escala, re-mallar—, que
+// son deliberados y no te aúpan por sorpresa. Persiste.
+try{ const a=localStorage.getItem('vf_mcAutoUnstick'); if(a!==null) mc.autoUnstick=(a==='1'); }catch(e){}
+Object.defineProperty(game,'autoUnstick',{ enumerable:true, get:()=>mc.autoUnstick,
+  set:v=>{ v=!!v; mc.autoUnstick=v; try{localStorage.setItem('vf_mcAutoUnstick', v?'1':'0');}catch(e){} return v; } });
 // game.airControl / airAccel / airCap = movimiento en el AIRE estilo Quake (air-strafe). airControl on: la velocidad
 // horizontal NO se reescribe en el aire, así girar el ratón no redirige el salto y soltar teclas conserva la inercia;
 // W/A/S/D solo aceleran de forma acotada hacia donde miras (la componente en esa dirección no pasa de airCap·√scale).
@@ -9995,6 +10607,20 @@ game.resizeWorld=function(x,y,z){
 // game.unstick() = sácame de donde esté incrustado (equivale a la tecla U): sube por encima de lo que estorbe;
 // si no encuentra hueco, teletransporta al spawn. Útil si cargaste el mundo dentro de una estructura.
 game.unstick=function(){ if(!mc.active) return 'abre el Mundo primero'; mcForceUnstick(); return 'ok'; };
+// game.atasco() = POR QUÉ estás atascado (REQ-DBG2). Mira dónde estás AHORA y devuelve quién te
+// atrapa, repartido en las tres cosas que pueden hacerlo: `terreno` (bloques de mc.grid, con su clave
+// y su celda), `piezas` (estructuras finas — ahí viven las piezas de los agentes articulados, y si el
+// snippet tiene enganchado mcStuckExtra cada una trae su `etiqueta`: «el brazo izq de Zombie», más
+// `agente` y `agenteId` para poder hacer game.esqueletos.empujar(agenteId) sin parsear el texto) y
+// `npcs` (los NPC-cubo de mc.agents/game.defineAgent, que son OTRA cosa que los agentes articulados:
+// éstos salen en `piezas`, un miembro por entrada). `motivo` es el texto corto que sale en el toast.
+// game.atasco('ultimo') devuelve el último atasco que hubo, con su `cuando`: el toast dura 4 s y la
+// pregunta casi siempre llega después.
+game.atasco=function(cual){
+  if(cual==='ultimo' || cual==='último') return mc._stuckWhy || 'ningún atasco en esta sesión';
+  if(!mc.active) return 'abre el Mundo primero';
+  return mcStuckWhy(mc.pos[0], mc.pos[1], mc.pos[2]);
+};
 // game.toast("mensaje", segundos) = muestra un aviso efímero desde la consola, en CUALQUIER vista de la app
 // (Capas, editor 3D o Mundo). El 2º argumento es opcional (duración en segundos; def. 1.8 s). En el Mundo el
 // toast sube por encima de la hotbar automáticamente (clase mc-mode en toast()). game.showToast es alias.
@@ -10007,7 +10633,7 @@ game.dumpVars=function(){
   const keys=['nearClip','perspStrength','playFill','playZoom','playLift',   // edición 3D / modo jugar
     'fov','renderDist','renderScale','mouseSpeed','yaw','pitch','hotbarHide','reach',   // Mundo (WebGL)
     'ghostAlpha','structGhostAlpha','noteAlpha','noteSigns','noteText','noteTextDist','noteFont','noteWidth','structBias','structCull','playerSpeed','playerScale','playerTool',
-    'airControl','airAccel','airCap',
+    'airControl','airAccel','airCap','autoUnstick',
     'structTextures','structGreedy','useOldStructBuildCall','interiorDark','sunShade','shadowSize','glowLevel','glowFocus','worldSize',
     'agentSpeed','agentSaveMs'];
   const V={ showFPS:_showFPS, showVoxels:_showVox, showOSDbuttons:_showOSD, carasMarcadas:carasMarcar }; // callables → su booleano subyacente
@@ -10019,6 +10645,7 @@ game.dumpVars=function(){
 function closeWorld(){
   mc.active=false; mc.keys={}; mc.heldBtn=-1; mcClearPreview();
   mcTouchShow(false);
+  mcStuckShow(false);   // salir del Mundo atascado dejaba el cartel colgado sobre el editor
   mcPauseAgents();   // los agentes se pausan al salir al editor: retienen memoria y coords hasta reabrir el Mundo
   mcCloseNote(); { const nv=$('#mc-noteview'); if(nv) nv.hidden=true; }   // t1 · cierra el editor/visor de notas al salir
   mcFreeNoteTexts();   // los rótulos horneados de los carteles: al volver se re-hornean con el texto de entonces
@@ -10073,9 +10700,10 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   if(k==='u'){ mcForceUnstick(); toast('Desatascado'); e.preventDefault(); return; }                       // U = sácame de aquí (sube sobre lo que estorbe; si no, al spawn)
   if(k==='n'){ mcOpenNote(); e.preventDefault(); return; }                                                  // N = anota el bloque apuntado (post-it)
   if(k==='f'){ mcFoto(); e.preventDefault(); return; }                                                      // F = foto de lo que se ve (ficha quemada en la imagen) → data/fotos/ y galería en /fotos
-  if(k==='r' && mc.slotStruct[mc.sel]){                                                                       // gira/vuelca la estructura 90° (mantén clic derecho para ver la vista-previa; suelta = estampa así)
-    if(e.shiftKey){ mc.previewTilt=(mc.previewTilt+1)&3; toast('Vuelco: '+(mc.previewTilt*90)+'°'); }          // Shift+R = vuelco sobre el eje X (plano altura↔profundidad)
-    else { mc.previewRot=(mc.previewRot+1)&3; toast('Giro: '+(mc.previewRot*90)+'°'); }                        // R = giro sobre el eje vertical (plano horizontal)
+  if(k==='r' && mc.slotStruct[mc.sel]){                                                                       // coloca la estructura en cualquiera de sus 24 posturas (mantén clic derecho para ver la vista-previa; suelta = estampa así)
+    // Dos pasos, que es como se piensa: primero QUÉ CARA queda arriba, y luego cómo está girada sobre ella.
+    if(e.shiftKey){ mc.previewGiro=(mc.previewGiro+1)&3; toast('Giro: '+(mc.previewGiro*90)+'° sobre esa cara'); }   // Shift+R = los 4 giros dentro de la cara elegida
+    else { mc.previewCara=(mc.previewCara+1)%6; toast('Cara arriba: '+MC_ORI_CARA[mc.previewCara]+' ('+(mc.previewCara+1)+'/6)'); }  // R = las 6 caras
     mcPrecargaGirada(mc.slotStruct[mc.sel], mcPreviewOri());   // la pieza girada es otro material (mcClaveConOri): que esté listo ANTES del clic
     e.preventDefault(); return; }
   if(k==='r' && mc.tool==='select' && mc.selBox){ mcRotateSelBox(); e.preventDefault(); return; }              // gira 90° (horizontal) los bloques de la caja seleccionada — p.ej. tras Ctrl+V pegar
@@ -10155,6 +10783,11 @@ function mcStickSuelta(){    // el pulgar levantado deja de andar: si no, te que
   // soltar, así que mcTouchSuelta no tiene que saber de él.
   const foto=$('#mc-tfoto');
   if(foto) foto.addEventListener('pointerup',e=>{ if(!mc.active) return; mcFoto(); e.preventDefault(); });
+  // Desatasco (BUG-AG7). Va aquí con los demás mandos pero NO dentro de #mc-touch: en el escritorio
+  // también hace falta. También en pointerup, por lo mismo que la foto. Lo esconde el propio mcUpdate
+  // en cuanto quedas libre; no hace falta apagarlo a mano.
+  const stuck=$('#mc-stuck');
+  if(stuck) stuck.addEventListener('pointerup',e=>{ if(!mc.active) return; mcForceUnstick(); toast('Desatascado'); e.preventDefault(); });
 }
 // ⚠️ LOS FINALES SE ESCUCHAN EN WINDOW, NO EN CADA MANDO. Un `pointerup` perdido deja el estado
 // pegado, y los dos síntomas salen a la vez: te quedas ANDANDO SOLO (la tecla del joystick no se
@@ -10768,8 +11401,15 @@ window.addEventListener('mouseup',e=>{ if(!mc.active) return;
 $('#mc-canvas').addEventListener('contextmenu',e=>{ if(mc.active) e.preventDefault(); });
 
 buildPalette();
-loadServerAssets();   // llena Assets del servidor (personajes) y Habitaciones (bloques) desde index.json
-refreshHabitantesList();
+// En /map/<nombre> el Mundo se abre ENCIMA del editor y lo tapa entero, pero hasta ahora el editor
+// arrancaba primero igual: sus galerías (Assets, Habitaciones, Habitantes, texturas) bajan un documento
+// por miniatura —decenas, megas— y todas van por el MISMO host, del que el navegador solo abre ~6
+// sockets. Resultado medido en el portátil del dueño: la paleta del Mundo se pasaba la apertura
+// HACIENDO COLA detrás de miniaturas que nadie estaba viendo, y el primer bloque se comía ~10 s.
+// Aquí se separa lo que el Mundo sí necesita (los nombres cortos del índice, que usan los snippets) de
+// lo que solo mira el editor, y esto último se arranca cuando el Mundo ya está en pie.
+const _enMundo=/^\/map\//.test(location.pathname);
+if(!_enMundo){ loadServerAssets(); refreshHabitantesList(); }
 if(!restore()){ setSize(16,16,16); state.voxels=presetBarril(); }
 $('#meta-name').value=state.meta.name;
 $('#meta-type').value=state.meta.type;
@@ -10788,4 +11428,10 @@ syncLayer(); syncColor(); updateZoomLabel(); updateUndoUI(); updateInfo();
 // a resizeEdit() por su rama, así que el lienzo 2D se dimensiona y se pinta cuando de verdad se ve.
 setMode('3d');   // arrancar en Edición 3D (no en Capas)
 // URL /map/<nombre>: entrar directo a ese mundo (persistente y propio). Sin /map/ arranca en el editor como siempre.
-if(/^\/map\//.test(location.pathname)) openWorld();
+// El índice se espera A PROPÓSITO: el autoarranque del Mundo resuelve materiales por nombre corto
+// («hierba»), y esos nombres los da de alta mcIndexAssets. Antes esto era una carrera —loadServerAssets()
+// era async y openWorld() salía sin esperarla—, así que el snippet podía encontrarse el registro a medias.
+// Son unos KB de index.json; las galerías, que son lo caro, van después de que el Mundo esté cargado.
+if(_enMundo) assetIndex().then(mcIndexAssets).catch(()=>{})
+  .then(openWorld)
+  .then(()=>{ loadServerAssets(); refreshHabitantesList(); });

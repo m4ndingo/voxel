@@ -18,25 +18,30 @@
       </div>
     </div>
 
+    <!-- REQ-NAV1 · tres botones y nada más. Todo lo demás vive en el menú «⋯» de abajo: a 390 px la
+         barra de quince botones comía dos o tres filas de pantalla. No hay pestaña «Objeto» porque
+         el editor ES el fondo: cerrar la Galería (✕ o Esc) ya te devuelve al lienzo. -->
     <nav class="tabs" id="tabs">
-      <button class="tab is-active" data-tab="objeto">Objeto</button>
-      <button class="tab" data-tab="habitantes">Habitantes</button>
-      <button class="tab" data-tab="objetos">Objetos</button>
-      <button class="tab" data-tab="habitaciones">Habitaciones</button>
-      <button class="tab" data-tab="texturas">Texturas</button>
-      <button class="tab" data-tab="mapa">Mapa</button>
-      <button class="tab tab-play" data-tab="jugar" title="Jugar ya · habitación y personaje al azar">▶ Jugar</button>
+      <button class="tab" data-tab="galeria" title="Galería · habitantes, objetos, habitaciones y texturas">▤ Galería</button>
       <button class="tab tab-mundo" data-tab="mundo" title="Mundo · sandbox 3D en primera persona (WebGL)">🌍 Mundo</button>
-      <button class="tab tab-snip" data-tab="codigo" title="Snippets de código · guardar, editar y ejecutar contra el Mundo (Alt+C)">🧩 Código</button>
-      <button class="tab tab-agente" data-tab="agentes" title="Agentes articulados · compón piezas y articulaciones y míralas moverse (Alt+A)">🦴 Agentes</button>
+      <button class="tab tab-mas" id="btn-mas" data-tab="mas" aria-haspopup="true" aria-expanded="false" title="Todo lo demás">⋯</button>
     </nav>
 
-    <div class="actions">
-      <button class="btn" id="btn-nuevo" title="Vaciar el lienzo">Nuevo</button>
-      <button class="btn" id="btn-guardar" title="Guardar en el servidor">Guardar</button>
-      <button class="btn" id="btn-guardar-como" title="Guardar como un habitante nuevo">Guardar como…</button>
-      <button class="btn" id="btn-exportar" title="Descargar .vox.json">Exportar</button>
-      <label class="btn" title="Cargar .vox.json">Importar
+    <!-- El menú del «⋯». Los ids son los MISMOS que tenían los botones de la barra vieja, así que
+         todos los manejadores de app.js siguen enganchados sin tocar una línea. Importar sigue
+         siendo un <label> con su <input type=file> dentro: convertirlo en <button> rompería el
+         diálogo de fichero. -->
+    <div class="menu" id="mas-menu" hidden>
+      <button class="menu-item" data-tab="mapa">🗺 Mapa</button>
+      <button class="menu-item" data-tab="jugar">▶ Jugar<small>habitación y personaje al azar</small></button>
+      <button class="menu-item" data-tab="codigo">🧩 Código<small>Alt+C</small></button>
+      <button class="menu-item" data-tab="agentes">🦴 Agentes<small>Alt+A</small></button>
+      <div class="menu-sep"></div>
+      <button class="menu-item" id="btn-nuevo">Nuevo<small>vaciar el lienzo</small></button>
+      <button class="menu-item" id="btn-guardar">Guardar<small>en el servidor</small></button>
+      <button class="menu-item" id="btn-guardar-como">Guardar como…<small>un habitante nuevo</small></button>
+      <button class="menu-item" id="btn-exportar">Exportar<small>descargar .vox.json</small></button>
+      <label class="menu-item">Importar<small>cargar .vox.json</small>
         <input type="file" id="file-importar" accept="application/json" hidden />
       </label>
     </div>
@@ -253,7 +258,10 @@
   <!-- ===================== Galería de Habitantes ===================== -->
   <div class="modal" id="hab-modal" hidden>
     <div class="modal-head">
-      <div><strong id="hab-title">Habitantes</strong> <span class="muted">guardados en el servidor</span></div>
+      <div><strong id="hab-title">Galería</strong> <span class="muted">lo guardado en el servidor y los assets del juego</span></div>
+      <!-- REQ-NAV1 · «ir a Galería es mostrar todo lo que hay y punto» (dueño, 2026-08-07): NO hay
+           selector de bucket. Los botones «Galería ▤» del panel derecho siguen pudiendo pedir un
+           tipo concreto porque nacen junto a su roster, y ahí el filtro sí significa algo. -->
       <div class="modal-actions">
         <button class="btn sm" id="hab-refresh" title="Recargar">↻ Recargar</button>
         <button class="btn sm" id="hab-close" title="Cerrar (Esc)">✕ Cerrar</button>
@@ -497,6 +505,9 @@
       <button class="mc-tbtn" id="mc-tjump" type="button" title="Saltar">⤒</button>
       <button class="mc-tbtn foto" id="mc-tfoto" type="button" title="Sacar foto (tecla F)">📷</button>
     </div>
+    <!-- Botón de desatasco (BUG-AG7). Sale SOLO cuando estás atascado de verdad, porque con
+         game.autoUnstick apagado el juego ya no te saca solo y en el móvil no hay tecla U. -->
+    <button class="mc-stuck" id="mc-stuck" type="button" hidden title="Desatascarse (tecla U)">🆘 Atascado · pulsa aquí (U)</button>
     <div class="mc-hotbar" id="mc-hotbar"></div>
     <div class="fps-float mc-float" id="mc-fps" hidden title="FPS reales del modo Mundo">— fps</div>
     <div class="vox-float mc-float2" id="mc-vox" hidden title="Caras (quads) dibujadas por la GPU">— vox</div>

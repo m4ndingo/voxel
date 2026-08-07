@@ -53,7 +53,8 @@ const ok = (nom, cond, extra) => {
 
     // name2id indexa por mote corto, no por clave: quien sabe si un material está puesto es la paleta.
     const cargado = k => mc.name2id[k] > 0 || mc.blockKey.indexOf(k) > 0;
-    out.materiales = ['hab:cable', 'hab:inversor', 'hab:boton', 'hab:repetidor', 'hab:puerta',
+    out.materiales = ['hab:cable', 'hab:inversor', 'hab:boton', 'hab:repetidor',
+                      'hab:puerta', 'hab:puerta-alta',
                       // Las giradas son entradas de paleta APARTE: si faltan, las piezas de vuelta
                       // de los lazos salen roca y el 5, el 6 y el 8 se quedan sin cerrar.
                       'hab:repetidor@2', 'hab:inversor@2',
@@ -204,7 +205,8 @@ const ok = (nom, cond, extra) => {
   console.log('\n3 · puerta con placa de presión');
   ok('la puerta nace cerrada', r.e3cerrada === 'hab:puerta', r.e3cerrada);
   ok('la placa abre la hoja de abajo', r.e3abajo === 'hab:puerta-abierta', r.e3abajo);
-  ok('…y la de arriba (el cable trepa)', r.e3arriba === 'hab:puerta-abierta', r.e3arriba);
+  // La de arriba no tiene señal ni cable propio: la arrastra la de abajo en la misma pasada (BUG-RS6).
+  ok('…y la de arriba, arrastrada por ella', r.e3arriba === 'hab:puerta-alta-abierta', r.e3arriba);
   ok('cerrada, el jugador no cabe en el vano', r.e3chocaCerrada === true);
   ok('abierta, se puede cruzar', r.e3chocaAbierta === false);
   ok('y se cierra sola al soltarse la placa', r.e3traspulso === 'hab:puerta', r.e3traspulso);
@@ -235,7 +237,7 @@ const ok = (nom, cond, extra) => {
   ok('1,0 cerrada', r.and[1] === false, JSON.stringify(r.and));
   ok('0,1 cerrada', r.and[2] === false, JSON.stringify(r.and));
   ok('1,1 ABIERTA', r.and[3] === true, JSON.stringify(r.and));
-  ok('y abre la hoja de arriba también', r.e7hojaArriba === 'hab:puerta-abierta', r.e7hojaArriba);
+  ok('y abre la hoja de arriba también', r.e7hojaArriba === 'hab:puerta-alta-abierta', r.e7hojaArriba);
 
   console.log('\n8 · XOR (el interruptor de pasillo)');
   ok('0,0 apagada', r.xor[0] === false, JSON.stringify(r.xor));

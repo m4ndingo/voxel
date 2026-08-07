@@ -678,10 +678,70 @@ console.log('\ndefine se planta si el nombre corto es ambiguo o no existe');
     aviso.indexOf('hab:escalera') >= 0 && aviso.indexOf('asset:assets/escalera.vox.json') >= 0, aviso);
 
   const antes2 = w.avisosConsola.length;
-  const r2 = w.sinRuido(() => w.game.bloques.define('ladrillo', { trepable: true }));
+  const r2 = w.sinRuido(() => w.game.bloques.define('eskalera', { trepable: true }));
   const aviso2 = w.avisosConsola.slice(antes2).join(' | ');
-  t('un material que no existe sigue sin registrarse', r2 === null && !w.game.bloques._tabla['ladrillo']);
-  t('y el aviso manda usar info() para ver la clave exacta', /info\(\)/.test(aviso2), aviso2);
+  t('un nombre mal escrito sigue sin registrarse', r2 === null && !w.game.bloques._tabla['eskalera']);
+  t('y el aviso enseña la clave que quería escribir', /hab:escalera/.test(aviso2), aviso2);
+  t('...y no se queda esperando a un material que no va a existir',
+    w.game.bloques._pendientes().indexOf('eskalera') < 0, w.game.bloques._pendientes().join(' '));
+}
+
+// ── BUG-SNP1 ────────────────────────────────────────────────────────────────────────────────────
+console.log('\nLo que todavía no está en el mundo ESPERA; no se tira');
+{
+  // El fallo: la paleta solo lleva lo COLOCADO (+ hotbar + los 6 de serie), asi que en un mundo vacio
+  // casi todo lo que define el arranque «no existe». Se tiraba con un console.warn con traza —once
+  // seguidos, ahogando el informe de carga— y, peor, el comportamiento se perdia para toda la sesion:
+  // colocar el material despues ya no lo recuperaba.
+  const w = montar();
+  const antes = w.avisosConsola.length;
+  const r = w.sinRuido(() => w.game.bloques.define('ladrillo', { trepable: true, subida: 7 }));
+  const aviso = w.avisosConsola.slice(antes).join(' | ');
+  t('un material que no está en este mundo no se registra todavía',
+    r === null && !w.game.bloques._tabla['ladrillo']);
+  t('...y NO grita: no se parece a nada, o sea que no es un error de quien escribe',
+    aviso === '', aviso);
+  t('...pero queda apuntado, no desaparece', w.game.bloques._pendientes().indexOf('ladrillo') >= 0);
+  const enLista = w.sinRuido(() => w.game.bloques.lista()).filter(f => f.clave === 'ladrillo');
+  t('...y lista() lo enseña, para que se pueda ver desde fuera',
+    enLista.length === 1 && /espera/.test(enLista[0].comportamiento),
+    enLista.length ? enLista[0].comportamiento : 'no sale');
+
+  // Y esto es lo que arregla el fallo de verdad: al aparecer el material, la definicion entra sola.
+  w.mc.blockKey.push('hab:ladrillo');                     // mcAddBlock apenda al colocar el material
+  w.frames(1);                                            // cualquier consulta por id reconstruye la cache
+  const cfg = w.game.bloques._tabla['hab:ladrillo'];
+  t('al colocar el material la definición en espera se aplica sola',
+    !!cfg && cfg.trepable === true && cfg.subida === 7, cfg ? '↑' + cfg.subida : 'se perdió');
+  t('...y llega a la caché densa, que es lo que consulta la física',
+    w.game.bloques._porId().some(c => c && c.clave === 'hab:ladrillo'));
+  t('...y ya no figura como pendiente', w.game.bloques._pendientes().indexOf('ladrillo') < 0);
+}
+
+console.log('\nLa espera no deja rastro: define y quitar se enteran');
+{
+  // Un material puede estar en espera Y luego definirse a mano (es justo lo que pasa con las piezas
+  // que el arranque define antes de que existan). Si la espera se quedara ahí, quitar() creería que
+  // solo espera y dejaria puesto lo que sí está en la tabla — la pieza se quedaba torcida.
+  const w = montar();
+  w.sinRuido(() => w.game.bloques.define('ladrillo', { trepable: true, subida: 7 }));
+  w.mc.blockKey.push('hab:ladrillo');
+  w.sinRuido(() => w.game.bloques.define('hab:ladrillo', { impulso: 5 }));
+  t('definir a mano lo que esperaba sustituye la espera',
+    w.game.bloques._pendientes().indexOf('ladrillo') < 0 &&
+    w.game.bloques._tabla['hab:ladrillo'].impulso === 5, w.game.bloques._pendientes().join(' '));
+  t('y quitar() lo quita de verdad, no solo de la lista de espera',
+    w.sinRuido(() => w.game.bloques.quitar('hab:ladrillo')) === true &&
+    !w.game.bloques._tabla['hab:ladrillo']);
+
+  // Al reves: quitar algo que solo espera vale, y sin avisar de que no tenia comportamiento.
+  const w2 = montar();
+  w2.sinRuido(() => w2.game.bloques.define('ladrillo', { trepable: true }));
+  const antes = w2.avisosConsola.length;
+  const q = w2.sinRuido(() => w2.game.bloques.quitar('ladrillo'));
+  t('quitar() también cancela una definición en espera',
+    q === true && w2.game.bloques._pendientes().indexOf('ladrillo') < 0 &&
+    w2.avisosConsola.slice(antes).join(' | ') === '', w2.avisosConsola.slice(antes).join(' | '));
 }
 
 console.log('\nEl snippet trae la escalera ya definida');
@@ -3264,20 +3324,42 @@ async function seccionEsqueletos() {
     t('...pero acaba parado en su distancia igual', Math.abs(hielo.fin - 1.2) < 0.15, hielo.fin.toFixed(3));
   }
 
-  console.log('\nLo que el agente NO hace: disparar las placas del jugador');
+  console.log('\nEl agente también pisa las placas (BUG-AG1)');
   {
-    // El alPisar de una placa está escrito pensando en el jugador (el del mundo del dueño hace
-    // game.tp): si lo disparase un zombie al pisarla, el teletransportado serías TÚ. Va apagado
-    // salvo que se encienda a sabiendas con fisica:{placas:true}.
+    // Esto estuvo APAGADO a propósito mientras el payload no decía quién pisaba: un alPisar escrito
+    // para el jugador (el ejemplo de la cabecera hace game.tp) te habría teletransportado A TI
+    // porque pasara un zombie por encima. Con `quien` en el payload esa objeción desaparece y la
+    // válvula se invierte — «tampoco pueden presionar placas de redstone» era el ticket.
+    const w = mundoZ();
+    w.jugador(12, 18);
+    suelo(w, HIELO, 8, 16, 12, 13);
+    const vistos = [];
+    w.def(HIELO, { alPisar: c => vistos.push(c) });
+    const rig = await crear(w, 12, 5, 6);
+    w.sinRuido(() => w.frames(240));
+    t('el agente cruza la placa...', centroRaiz(rig)[2] > 14, 'z=' + centroRaiz(rig)[2].toFixed(1));
+    t('...y AHORA sí dispara su alPisar', vistos.length > 0, vistos.length + ' veces');
+    // Y no una por frame: el flanco es por celda+clave, igual que el del jugador.
+    t('...una vez por celda, no una por frame', vistos.length > 0 && vistos.length <= 8,
+      vistos.length + ' pisadas en 240 frames');
+    t('...diciendo que ha sido un AGENTE y cuál', vistos.length > 0 && vistos[0].quien === 'agente'
+      && !!vistos[0].agente && vistos[0].agente.id === rig.id,
+      vistos.length ? vistos[0].quien + ' / ' + JSON.stringify(vistos[0].agente) : '');
+    w.sinRuido(() => w.game.esqueletos.quitar());
+  }
+
+  {
+    // La válvula, en el otro sentido: un bicho al que esto le estorbe se apaga solo.
     const w = mundoZ();
     w.jugador(12, 18);
     suelo(w, HIELO, 8, 16, 12, 13);
     let pisadas = 0;
     w.def(HIELO, { alPisar: () => { pisadas++; } });
-    const rig = await crear(w, 12, 5, 6);
+    const doc = JSON.parse(JSON.stringify(ZOMBIE)); doc.fisica = { placas: false };
+    const rig = await crear(w, 12, 5, 6, doc);
     w.sinRuido(() => w.frames(240));
-    t('el agente cruza la placa...', centroRaiz(rig)[2] > 14, 'z=' + centroRaiz(rig)[2].toFixed(1));
-    t('...y NO dispara su alPisar', pisadas === 0, pisadas + ' veces');
+    t('con fisica:{placas:false} cruza igual...', centroRaiz(rig)[2] > 14, 'z=' + centroRaiz(rig)[2].toFixed(1));
+    t('...y no dispara nada', pisadas === 0, pisadas + ' veces');
     w.sinRuido(() => w.game.esqueletos.quitar());
   }
 

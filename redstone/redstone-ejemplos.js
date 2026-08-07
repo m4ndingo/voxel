@@ -59,7 +59,8 @@
   var CLAVES = [LOSA, MURO, LAMPARA_OFF, LAMPARA_ON,
                 'hab:cable', 'hab:cable-on', 'hab:palanca', 'hab:palanca-on',
                 'hab:boton', 'hab:boton-on', 'hab:placa', 'hab:placa-on',
-                'hab:puerta', 'hab:puerta-abierta', 'hab:repetidor', 'hab:repetidor-on',
+                'hab:puerta', 'hab:puerta-abierta', 'hab:puerta-alta', 'hab:puerta-alta-abierta',
+                'hab:repetidor', 'hab:repetidor-on',
                 'hab:inversor', 'hab:inversor-on',
                 // Las giradas son OTRA entrada de paleta («hab:repetidor@2»), no la misma con un
                 // atributo: si no se precargan, la pieza de vuelta de los lazos sale ROCA.
@@ -146,11 +147,12 @@
        + 'segundo (pulso) y la puerta se cierra detrás de ti. Que se ABRA es redstone (cambia de '
        + 'material); que se pueda CRUZAR es física (atravesable). Ninguna mitad sabe de la otra.');
   for (var dy = 0; dy <= 2; dy++) fila(2, 14, 8, MURO, dy);   // el muro, con su hueco de puerta
-  pon(8, 8, 'hab:puerta');
-  pon(8, 8, 'hab:puerta', 1);
+  pon(8, 8, 'hab:puerta');                          // una puerta son DOS celdas: abajo la de
+  pon(8, 8, 'hab:puerta-alta', 1);                  // redstone, encima la que ella arrastra
   pon(8, 11, 'hab:placa');
-  columna(8, 9, 10, 'hab:cable');                   // el cable llega solo a la hoja de ABAJO: la
-                                                    // puerta conduce y se abre entera (ver piezas)
+  columna(8, 9, 10, 'hab:cable');                   // el cable llega solo a la hoja de ABAJO, la
+                                                    // única con señal: la de arriba la mueve ella en
+                                                    // la misma pasada (BUG-RS6, ver piezas)
 
   // ── 4 · NOR: el juego de puertas completo ──────────────────────────────────────────────────
   parcela(3);
@@ -236,7 +238,8 @@
   pon(7, 7, 'hab:inversor');                        // …y el NOT que lo convierte en AND
   fila(8, 11, 7, 'hab:cable');                      // a la hoja de abajo; la de arriba va sola
   for (dy = 0; dy < 2; dy++) columna(12, 2, 13, MURO, dy);
-  for (dy = 0; dy < 2; dy++) pon(12, 7, 'hab:puerta', dy);
+  pon(12, 7, 'hab:puerta');
+  pon(12, 7, 'hab:puerta-alta', 1);
 
   // ── 8 · XOR: el interruptor de pasillo ─────────────────────────────────────────────────────
   // La función que NO sale de una sola puerta, y la que todo el mundo tiene en casa: dos

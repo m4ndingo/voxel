@@ -50,6 +50,7 @@ body{
   display:flex; align-items:center; gap:20px;
   padding:10px 16px; border-bottom:1px solid var(--line);
   background:linear-gradient(180deg,#171b26,#12151d);
+  position:relative;            /* ancla del menú «⋯» (REQ-NAV1) */
 }
 .brand{display:flex; align-items:center; gap:10px}
 .brand-mark{
@@ -59,7 +60,8 @@ body{
 .brand-txt strong{letter-spacing:.14em; font-size:15px}
 .brand-txt small{display:block; color:var(--muted); font-size:11px; letter-spacing:.04em}
 
-.tabs{display:flex; gap:4px; margin-left:8px}
+/* A la derecha: el «⋯» queda bajo el borde por el que se abre su menú (REQ-NAV1). */
+.tabs{display:flex; gap:4px; margin-left:auto}
 .tab{
   background:transparent; border:0; color:var(--muted);
   padding:7px 12px; border-radius:8px; cursor:pointer; font-size:13px;
@@ -71,7 +73,25 @@ body{
   border:1px solid color-mix(in srgb, var(--accent-2) 45%, transparent)}
 .tab-play:hover{color:#141821; background:var(--accent-2)}
 
-.actions{margin-left:auto; display:flex; gap:8px}
+/* REQ-NAV1 · el «⋯» y su menú. El menú se ancla a la cabecera (position:relative en .topbar), no al
+   botón: dentro de .tabs, que es flex, un hijo absoluto arrastra el ancho del contenedor. */
+.tab-mas{font-size:18px; line-height:1; padding:5px 12px; letter-spacing:2px}
+.tab-mas[aria-expanded="true"]{color:#141821; background:var(--accent); font-weight:600}
+.menu{
+  position:absolute; top:100%; right:12px; z-index:60; min-width:220px;
+  display:flex; flex-direction:column; padding:6px;
+  background:var(--panel); border:1px solid var(--line); border-radius:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.5);
+}
+.menu[hidden]{display:none}
+.menu-item{
+  background:transparent; border:0; color:var(--ink); text-align:left;
+  padding:9px 12px; border-radius:7px; cursor:pointer; font-size:13px;
+  display:flex; align-items:baseline; justify-content:space-between; gap:14px;
+}
+.menu-item:hover{background:var(--panel-2); color:#fff}
+.menu-item small{color:var(--muted); font-size:11px; white-space:nowrap}
+.menu-sep{height:1px; margin:6px 4px; background:var(--line)}
 
 .btn{
   background:var(--panel-2); color:var(--ink);
@@ -661,6 +681,15 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
   background:rgba(14,17,25,.34); border:1px solid rgba(255,255,255,.28); color:#fff;
   font-size:26px; line-height:1; padding:0; pointer-events:auto; touch-action:none}
 .mc-tbtn:active{background:rgba(255,255,255,.32)}
+/* Desatasco (BUG-AG7). Centrado y arriba, donde estorba mientras dura y no se puede no ver: con
+   game.autoUnstick apagado, quedarse embutido ya no se arregla solo, y en el móvil no hay tecla U.
+   Va FUERA de #mc-touch a propósito — en el escritorio también hace falta si no te sabes el atajo. */
+.mc-stuck{position:absolute; z-index:8; left:50%; top:14%; transform:translateX(-50%);
+  padding:10px 16px; border-radius:10px; white-space:nowrap;
+  background:rgba(190,60,60,.86); border:1px solid rgba(255,255,255,.4); color:#fff;
+  pointer-events:auto; touch-action:manipulation; cursor:pointer}
+.mc-stuck:active{background:rgba(230,90,90,.95)}
+.mc-stuck[hidden]{display:none}
 /* Foto (lo que hace la tecla F) encima del salto: sin teclado no hay ninguna otra forma de sacarla
    desde el móvil. Más pequeño que el salto porque se pulsa mil veces menos y no debe robarle sitio.
    A diferencia de romper/poner, sacar una foto NO edita el mundo, así que aquí sí cabe un botón. */
@@ -735,6 +764,7 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .mc-note textarea{font-family:var(--font-game); font-size:var(--note-fs,18px); line-height:1.8}
 .toast.mc-mode{font-family:var(--font-game); font-size:9px; line-height:1.7}
 .fps-float.mc-float,.vox-float.mc-float2{font-family:var(--font-game); font-size:9px}
+.mc-stuck{font-family:var(--font-game); font-size:9px; line-height:1.7}
 .mc-slot .mc-slot-key{font-family:var(--font-game); font-size:9px}
 /* rayos-X (tecla X): capa de etiquetas de coordenadas; no intercepta clics, cada .mc-xlbl se posiciona por transform */
 .mc-xray-labels{position:absolute; inset:0; z-index:7; pointer-events:none; overflow:hidden}
@@ -793,9 +823,12 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 
 @media (max-width:980px){
   body{height:auto; min-height:100%}
-  .topbar{flex-wrap:wrap; gap:8px 12px}
-  .tabs{order:3; width:100%; margin-left:0; flex-wrap:wrap}   /* que ▶ Jugar fluya si no cabe */
-  .tab-play{margin-left:auto}                                  /* empuja Jugar al extremo/línea propia */
+  /* REQ-NAV1 · con tres botones la barra ya cabe en la fila de la marca: se fue el `flex-wrap` y el
+     `.tabs{width:100%}`, que es lo que le comía dos o tres filas al móvil. Solo se aprieta el
+     espaciado. Ojo: sin `flex-wrap:wrap` el menú «⋯» sigue anclado a .topbar, que no crece. */
+  .topbar{gap:10px; padding:8px 10px}
+  .tabs{margin-left:auto; gap:2px}
+  .tab{padding:7px 9px; font-size:12px}
   .layout{display:flex; flex-direction:column; flex:none; overflow:visible}
   .panel{overflow:visible; min-height:0}
   .card.grow{flex:none; overflow:visible}     /* cada tarjeta a su altura natural; scrollea la página */

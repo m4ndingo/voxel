@@ -47,7 +47,19 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
   await p.goto(URL, { timeout: 60000 });
   await p.waitForFunction('typeof mc !== "undefined" && mc.prog && mc.structures', { timeout: 120000 });
   await p.waitForFunction('window.game && game.esqueletos && game.esqueletos.crear', { timeout: 60000 });
-  await p.waitForTimeout(3000);
+
+  // BUG-AG8 · esperar 3 s a ojo NO basta: `/map/agents` tiene 49 NOTAS, y cada nota planta su cartel
+  // (`assets/cartel.vox.json`, marcado efímero) en cuanto se baja su documento. A los 3 s solo han
+  // aterrizado ~24 de los 49 y el goteo sigue durante ~8 s más, así que la foto del «antes» salía con
+  // el mundo a medio montar: luego llegaban carteles nuevos y las cuentas del final no cuadraban
+  // (96 → 103 en vez de +6, y 97 estructuras donde había 96). Se espera a que el mundo SE QUEDE
+  // QUIETO, no a que pase un rato.
+  await p.waitForFunction(() => {
+    const n = mc.structures.length;
+    if (window.__ultimoN === n) { window.__quietos = (window.__quietos || 0) + 1; }
+    else { window.__ultimoN = n; window.__quietos = 0; }
+    return window.__quietos >= 6;          // 6 sondeos seguidos sin moverse (≈3 s)
+  }, null, { timeout: 120000, polling: 500 });
 
   // 1) Se planta el zombie ejecutando su snippet tal cual, con los contadores de guardado puestos ANTES.
   const plantado = await p.evaluate(async () => {
@@ -60,7 +72,8 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     const antes = {
       estructuras: mc.structures.length,
       serial: mcSerialize().structures.length,
-      voxels: Object.keys(mcSerialize().voxels).length
+      voxels: Object.keys(mcSerialize().voxels).length,
+      carteles: mc.structures.filter(s => s.efimera && s.nota).length
     };
     const r = await fetch('/api/snippets/agente-zombie');
     if (!r.ok) return { sinSnippet: true, estado: r.status };
@@ -177,7 +190,13 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
         estructuras: mc.structures.length,
         serial: mcSerialize().structures.length,
         voxels: Object.keys(mcSerialize().voxels).length,
-        sueltas: mc.structures.filter(s => s._rig || s.efimera).length,
+        // BUG-AG8 · «efímera» NO quiere decir «basura de un rig»: los carteles de las notas también lo
+        // son (app.js los DERIVA de mc.notes y los marca así justo para que no entren en mundo.json), y
+        // en este mapa hay 49. Contarlos daba 49 falsos positivos con el mundo perfectamente limpio. Lo
+        // que sí tiene que quedar en cero es lo marcado de rig; de las instancias concretas de ESTE
+        // esqueleto ya se ocupa `enArray`, que las persigue por referencia y no por marca.
+        sueltas: mc.structures.filter(s => s._rig).length,
+        carteles: mc.structures.filter(s => s.efimera && s.nota).length,
         enArray: piezas.filter(s => mc.structures.indexOf(s) >= 0).length,
         guardados: window.__guardados, programados: window.__programados,
         bloqueados: (window.__bloqueados || []).length
@@ -268,6 +287,10 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
       'quedan ' + quitado.estructuras + ' estructuras y había ' + plantado.antes.estructuras);
     assert(quitado.serial === plantado.antes.serial && quitado.voxels === plantado.antes.voxels,
       'mcSerialize no coincide con el de partida');
+    // Y el barrido no puede llevarse por delante lo efímero de OTROS: los carteles de las notas están
+    // marcados igual que las piezas de un rig y son 49 en este mapa (BUG-AG8).
+    assert(quitado.carteles === plantado.antes.carteles,
+      'los carteles de las notas pasan de ' + plantado.antes.carteles + ' a ' + quitado.carteles);
   });
   test('plantar y quitar un zombie NO dispara ningún guardado', () => {
     assert(quitado.programados === 0, 'se programaron ' + quitado.programados + ' guardados');

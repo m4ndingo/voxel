@@ -55,7 +55,9 @@ const nVoxels = id => Object.keys(JSON.parse(fs.readFileSync(FICH(id), 'utf8')).
   const creado = await fetch(API + '/api/assets', { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc) }).then(r => r.json());
 
-  const b = await chromium.launch();
+  // Sin los args de SwiftShader el arranque se cuela ~9 s en el WebGL por software y las esperas
+  // fijas de este test se quedan cortas: es el mismo lanzamiento que usa el resto de la suite.
+  const b = await chromium.launch({ args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'] });
   const p = await b.newPage();
   const errores = [];
   p.on('pageerror', e => errores.push('EXCEPCION ' + e.message));

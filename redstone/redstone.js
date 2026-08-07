@@ -143,34 +143,38 @@
   // pieza se realimente a sí misma a través del cable que ella misma alimenta, y por tanto lo único
   // que faltaba para poder cerrar un anillo de inversores y tener MEMORIA (un biestable).
   //
-  // El lado no se guarda en ninguna tabla: sale del GIRO, que ya vive en la clave ('hab:antorcha@3').
+  // El lado no se guarda en ninguna tabla: sale de la POSTURA, que ya vive en la clave ('hab:antorcha@3').
   // Por eso sobrevive a guardar y recargar el mundo sin que el motor persista nada.
-  // mcRotXZ con rot 1 lleva (1,0) a (0,1), o sea +X pasa a +Z: de ahí sale esta tabla.
-  var FRENTE = [0, 4, 1, 5];   // rot 0..3 → índice en DIRS de +X, +Z, −X, −Z
   var NOMDIR = ['+X', '−X', '+Y', '−Y', '+Z', '−Z'];   // para que info() hable en cristiano
-  // ⚠️ Dos preguntas distintas sobre el mismo sufijo, y confundirlas cuesta caro:
-  //   oriDe → la orientación ENTERA (0..15), que es lo que hay que devolverle a la clave al cambiar
-  //           de material. app.js la guarda combinada: giro (yaw) en los bits 0-1 y vuelco (tilt,
-  //           Shift+R) en los bits 2-3. Quedarse solo con los dos de abajo endereza la pieza al
-  //           encenderla: una placa puesta con vuelco se ponía DE PIE al pisarla y ahí se quedaba.
-  //   rotDe → solo el giro, que es lo único que dice hacia dónde MIRA (FRENTE es horizontal).
-  function oriDe(k) { var i = String(k).lastIndexOf('@'); return i > 0 ? ((+k.slice(i + 1) || 0) & 15) : 0; }
-  function rotDe(k) { return oriDe(k) & 3; }
+  // ⚠️ La postura entera, SIN recortarla. Son 24 (mcOriNorm manda), no 16, y quedarse con unos pocos
+  // bits no deja la pieza «casi bien»: la convierte en OTRA postura. Una palanca puesta de las nuevas
+  // se giraba sola al accionarla y, siendo una plaquita fina, aparecía en otro sitio de su celda
+  // (BUG-RS8); y un pistón apuntando hacia arriba se acostaba en cuanto el motor le repasaba la celda
+  // (BUG-RS7). Un sufijo que no sea una postura conocida se lee como «sin girar», nunca como otra.
+  function oriDe(k) {
+    var i = String(k).lastIndexOf('@');
+    if (i <= 0) return 0;
+    var n = +String(k).slice(i + 1);
+    if (!isFinite(n)) return 0;
+    return (typeof mcOriNorm === 'function') ? mcOriNorm(n) : ((n >= 0 && n <= 23) ? (n | 0) : 0);
+  }
   // Cambiar de material NO puede cambiar cómo está puesta la pieza. Todo cambio de bloque de una
   // celda pasa por aquí para devolverle su orientación; si no, encender una placa la endereza.
   function conOri(quiero, x, y, z) {
     var ori = oriDe(claveEn(x, y, z));
     return ori ? claveBase(quiero) + '@' + ori : quiero;
   }
-  function frenteDe(x, y, z) {
-    var k = claveEn(x, y, z), ori = oriDe(k);
-    // Un VUELCO (Shift+R) tumba la pieza, pero «su frente» se sigue calculando en horizontal: lo
-    // que se ve y lo que escucha dejan de coincidir, y la pieza parece rota sin estarlo. Es barato
-    // decirlo (el aviso solo se arma en las volcadas, y una sola vez).
-    if (ori >> 2) avisaUnaVez('vuelco:' + k, '«' + k + '» mira hacia donde diga su giro y está VOLCADA: '
-      + 'su frente ya no es el que parece. Para orientarla usa R (giro), no Shift+R (vuelco)');
-    return FRENTE[ori & 3];
+  // Hacia dónde MIRA una pieza. Su frente es el +X de su dibujo, y a dónde va ese +X con la postura
+  // puesta lo dice el motor (mcOriPerm), que lo saca de la MISMA composición con la que gira los
+  // voxels: así lo que la pieza escucha no se puede separar de cómo se la ve. Ahora el frente puede
+  // ser +Y o −Y —una pieza mirando al techo—, que es justo lo que la tabla horizontal no sabía decir.
+  var CARA2DIR = [2, 3, 0, 1, 4, 5];   // índice en MC_FACES (+Y,−Y,+X,−X,+Z,−Z) → índice en DIRS
+  var FRENTE = [0, 4, 1, 5];           // respaldo sin motor delante: giro 0..3 → +X, +Z, −X, −Z
+  function frenteDeOri(ori) {
+    if (typeof mcOriPerm !== 'function') return FRENTE[ori & 3];
+    return CARA2DIR[mcOriPerm(ori)[2]];   // MC_FACES[2] = +X = el frente del dibujo
   }
+  function frenteDe(x, y, z) { return frenteDeOri(oriDe(claveEn(x, y, z))); }
   function atrasDe(x, y, z) { return frenteDe(x, y, z) ^ 1; }   // DIRS se empareja 0/1, 2/3, 4/5
 
   // Lo que una celda PRESENTA a sus vecinos. Separarlo de lo que RECIBE es lo que permite el cable:

@@ -55,7 +55,7 @@ const ok = (nom, cond, extra) => {
     // se queda lejos, que si no salta la guarda de «no encajonar».
     const guarda = { pos: mc.pos.slice(), yaw: mc.yaw, pitch: mc.pitch, sel: mc.sel,
                      slot: mc.slotStruct.slice(), reach: mc.reach, viejo: mc.useOldStructBuild,
-                     rot: mc.previewRot, tilt: mc.previewTilt, hist: mc.hist.length };
+                     giro: mc.previewGiro, cara: mc.previewCara, hist: mc.hist.length };
     const apunta = () => { mc.pos = [X + 0.5, GY + 9, Z + 0.5]; mc.vel = [0, 0, 0]; game.pitch = -89; mc.reach = 16; };
     const nEstr = () => mc.structures.length;
 
@@ -69,7 +69,7 @@ const ok = (nom, cond, extra) => {
     };
 
     try {
-      mc.previewRot = 0; mc.previewTilt = 0; mc.useOldStructBuild = false;
+      mc.previewGiro = 0; mc.previewCara = 0; mc.useOldStructBuild = false;
       mc.slotStruct[mc.sel] = claveFlor;
 
       // ── §1 la flor cabe en una celda: va por setVoxel ──────────────────────
@@ -97,7 +97,7 @@ const ok = (nom, cond, extra) => {
       // La variante no esta en la paleta la primera vez, asi que la escritura de verdad llega luego (se
       // descarga el material y se re-hornea la paleta): hay que esperarla, como con cualquier material nuevo.
       const esperaLlena = async () => { for (let i = 0; i < 200 && enDiana() === out.antesVacio; i++) await new Promise(r => setTimeout(r, 100)); };
-      mc.previewRot = 1; apunta();
+      mc.previewGiro = 1; apunta();
       mcPlace();
       out.giroSinInstancia = nEstr() === e0;
       await esperaLlena();
@@ -114,14 +114,14 @@ const ok = (nom, cond, extra) => {
       await mcUndo();
       out.giroDeshecho = enDiana() === out.antesVacio;
 
-      // Shift+R (vuelco) va en el mismo sitio de la clave: ori = giro | vuelco<<2
-      mc.previewRot = 0; mc.previewTilt = 1; apunta();
+      // Shift+R (giro dentro de la cara) y R (cara arriba) van en el mismo sitio de la clave: ori = cara*4 + giro
+      mc.previewGiro = 0; mc.previewCara = 1; apunta();
       mcPlace();
       await esperaLlena();
-      out.claveVolcada = mc.blockKey[enDiana()] || null;
-      out.vuelcoEnRejilla = out.claveVolcada === claveFlor + '@4';
+      out.claveDeCara = mc.blockKey[enDiana()] || null;
+      out.caraEnRejilla = out.claveDeCara === claveFlor + '@4';
       await mcUndo();
-      mc.previewTilt = 0; mc.previewRot = 0;
+      mc.previewCara = 0; mc.previewGiro = 0;
       out.sinInstanciasDeGiro = nEstr() === e0;
 
       // ── §2b lo que se proyecta sobre las 6 caras del cubo NO puede girar en la rejilla ──
@@ -134,14 +134,14 @@ const ok = (nom, cond, extra) => {
       await mcStructCells(kMacizo);
       out.macizoCabe = mcCabeEnRejilla(kMacizo) === true;
       out.macizoNoEsFino = mcEsFinaEnRejilla(kMacizo) === false;
-      mc.slotStruct[mc.sel] = kMacizo; mc.previewRot = 1;
+      mc.slotStruct[mc.sel] = kMacizo; mc.previewGiro = 1;
       apunta(); const eM = nEstr();
       mcPlace();
       out.macizoConGiroEstampa = nEstr() === eM + 1;
       out.macizoConGiroNoEnRejilla = enDiana() === out.antesVacio;
       for (const s of mc.structures.filter(o => o.key === kMacizo)) mcRemoveStruct(s, true);
       delete mc.structs[kMacizo]; roomDataCache.delete(kMacizo);
-      mc.previewRot = 0; mc.slotStruct[mc.sel] = claveFlor;
+      mc.previewGiro = 0; mc.slotStruct[mc.sel] = claveFlor;
 
       // ── §3 la valvula devuelve el comportamiento de antes ─────────────────
       game.useOldStructBuildCall = true;
@@ -170,7 +170,7 @@ const ok = (nom, cond, extra) => {
     } finally {
       mc.pos = guarda.pos; mc.yaw = guarda.yaw; mc.pitch = guarda.pitch; mc.vel = [0, 0, 0];
       mc.slotStruct = guarda.slot; mc.sel = guarda.sel; mc.reach = guarda.reach;
-      mc.previewRot = guarda.rot; mc.previewTilt = guarda.tilt;
+      mc.previewGiro = guarda.giro; mc.previewCara = guarda.cara;
       game.useOldStructBuildCall = guarda.viejo;
       mcSetBlock(DIANA[0], DIANA[1], DIANA[2], out.antesVacio | 0);
       mcMeshAll();
@@ -199,7 +199,7 @@ const ok = (nom, cond, extra) => {
   ok('y entra en la tabla que leen colision y mcTapaCara', r.giroEnTablaFina === true);
   ok('su geometria es distinta de la del original', r.geomDistinta === true);
   ok('deshacer la quita', r.giroDeshecho === true);
-  ok('Shift+R (vuelco) da «clave@4»', r.vuelcoEnRejilla === true, r.claveVolcada);
+  ok('R (otra cara arriba) da «clave@4»', r.caraEnRejilla === true, r.claveDeCara);
   ok('ningun giro dejo instancias sueltas', r.sinInstanciasDeGiro === true);
 
   console.log('\n§2b lo que se proyecta como cubo se sigue estampando al girarlo');
