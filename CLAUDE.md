@@ -2,12 +2,53 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+## 🚦 ARRANQUE — leer esto antes que nada
+
+**1. ⛔ NUNCA borres de `data/habitantes/` ni de `data/agentes/`.** Son los dibujos y los agentes del
+dueño: autoría irremplazable, no estado de runtime. Nada de `DELETE` ni de `rm`; lo que sobra se
+mueve a `data/habitantes_trash/<ms>__<nombre>`. Lo mismo vale para las notas del Mundo (se les añade
+`[PROCESADA]` debajo, no se reescriben) y para `data/tickets/`. Ante la duda, pregunta: no hay prisa
+que justifique perder un dibujo.
+
+**2. El trabajo entra por `PLAN.md`.** No lo leas entero (554 KB): el **índice de tickets abiertos**
+está en `PLAN.md:74` y cada fila enlaza a su sección con el detalle. Un ticket se cierra editando su
+sección **y** su fila, con **un commit por ticket cerrado**.
+
+**3. Levanta el servidor antes de nada:** `python3 server.py 8500` (comprueba si ya está con
+`pgrep -af server.py`). Lo que se planta o se estampa para probar va a **`/map/test`**, nunca a
+`/map/default` ni a `/map/agents`, y lo que ya hay ahí **no se borra**.
+
+**4. Sí hay tests: 79 `test_*.js` en la raíz.** 66 abren un Chromium de verdad (Playwright +
+SwiftShader) contra `http://localhost:8500`; 12 son Node puro. Se corren de uno en uno
+(`node test_caras_mundo.js`) y **solo los del área que tocas** — la suite entera tarda muchísimo. Que
+no haya runner ni forma de saber qué necesita cada test es el ticket **REQ-TEST1**.
+
+⚠️ En un clon recién hecho **Playwright no está**: `node_modules/` está en `.gitignore`. Se instala a
+mano y la versión importa (la 1.48+ pide Node 20):
+`npm i -D playwright@1.47.2 && npx playwright install chromium`.
+
+**5. Las dos reglas de arquitectura que más caro cuesta romper**, cada una con su sección más abajo:
+`app.js` **no se toca para cambiar agentes** (§ «Agentes / NPC», es lo siguiente que hay que leer), y
+un snippet del Mundo tiene **dos copias vivas** — se parchea con un `parche_snp_*.py` idempotente por
+marca, nunca se reescribe entero.
+
+---
+
 ## Qué es
 
-**VoxelForge** — MVP de un editor de assets **voxel** para un videojuego RPG. El objetivo del
-producto: definir habitantes y habitaciones (voxel) que luego componen un mapa mayor. Este MVP
-se centra en **una sola pantalla: la edición de un objeto**; el resto del flujo (pestañas
-Habitantes / Habitaciones / Mapa y la Biblioteca lateral) está **mockeado**.
+**VoxelForge** — editor de assets **voxel** que ha crecido hasta tener un **Mundo** jugable. Son dos
+mitades que comparten formato y conviven en `app.js`:
+
+- **El editor** (`/`): se dibuja un objeto voxel (habitante, habitación, pieza) por capas o en 3D
+  libre, y se guarda en la galería del servidor. Es de donde arrancó el proyecto.
+- **El Mundo** (`/map/<nombre>`): un mundo de bloques en **WebGL crudo, sin three.js**, con chunks
+  mallados, luz y sombras, física de jugador, agentes articulados, redstone y scripting por
+  snippets. Es donde está hoy casi todo el trabajo.
+
+⚠️ Partes de este documento hablan todavía del proyecto como «un MVP de una sola pantalla con el
+resto mockeado». Eso quedó atrás: las pestañas Habitantes / Habitaciones / Mapa son reales.
 
 Front **sin build ni dependencias** (HTML/CSS/JS vanilla). Backend mínimo en Python:
 
@@ -57,8 +98,9 @@ volver a las coordenadas sin leer la imagen). Tres cosas que no son obvias:
   imagen no vale el apaño de `execCommand` de `mcCopyTraceText`). Por eso el camino que siempre
   funciona es el servidor, y la ficha va **quemada en el PNG** para sobrevivir a copiar y pegar.
 
-No hay tests; verificar con un navegador (o Playwright headless: cargar `file://.../index.html`,
-comprobar `#voxel-count` y capturar `screenshot`). API verificable con `curl` (`/api/mapa`, `/api/habitantes`).
+**Hay 79 `test_*.js`** en la raíz del repo (ver § ARRANQUE punto 4): 66 abren un Chromium de verdad
+con Playwright contra `http://localhost:8500` —compilan el GLSL, así que valen para el Mundo— y 12
+son Node puro. La API también se verifica con `curl` (`/api/mapa`, `/api/habitantes`).
 
 ## Arquitectura (por qué necesita leer varios archivos)
 

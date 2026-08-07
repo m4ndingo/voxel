@@ -85,6 +85,9 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ~~[BUG-RS9](#-bug-rs9)~~ | ~~el pistón **no empuja al jugador**: te subes encima de la cabeza extendida~~ | ✅ cerrado 2026-08-07 | era `mcUnstick`, que solo busca salida hacia arriba |
 | [BUG-RS10](#-bug-rs10) | el pistón **no empuja estructuras** (sí bloques, sí jugador, sí agentes) | 🟡 abierto 2026-08-07 | **el caso de la captura ya no ocurre** (era [BUG-STR1](#-bug-str1)): el pistón empuja `mc.grid` y no mira `mc.structures`, y eso está escrito como límite conocido de la v1. Preguntar al dueño si aún le molesta antes de tocar nada |
 | [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
+| [REQ-TEST1](#-req-test1) | 79 `test_*.js` sueltos en la raíz y **ningún runner**: no hay forma de correr la suite ni de saber cuáles necesitan servidor | 🟡 abierto 2026-08-07 | fila **acertada** de la auditoría del dueño. 66 abren Chromium contra `:8500`, 12 son Node puro, y el fichero no lo dice. **Sin investigar a fondo** |
+| [REQ-DOC1](#-req-doc1) | `CLAUDE.md` son 239 KB con **12 encabezados `##`**: lo que está documentado no se encuentra | 🟡 abierto 2026-08-07 | la auditoría lo leyó como «falta REDSTONE.md»; el diagnóstico era falso (hay 420 líneas en `CLAUDE.md:2420`), el síntoma no. **Sin investigar a fondo** |
+| [REQ-DOC2](#-req-doc2) | falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas) | 🟡 abierto 2026-08-07 | la crítica mejor puesta de la auditoría; no es partir el fichero, es documentar qué vive en `state`, `mc` y `game`. **Sin investigar a fondo** |
 | ~~[BUG-STR1](#-bug-str1)~~ | ~~`hab:cubo-trans` acaba como **estructura fina** y no como **bloque** de rejilla~~ | ✅ cerrado 2026-08-07 | no era la válvula ni «el cubo es hueco»: era el **alpha**. Un macizo translúcido ya entra en `mc.grid` con geometría real y pasada de BLEND; `mcRecFina` es ahora la fuente única de esa regla |
 | [REQ-MNT2](#-req-mnt2) | marcar desde el **editor de agentes** qué pieza es **montable**, sin `game.esqueletos.montable(…)` a mano | ✅ cerrado 2026-08-07 | Casilla «te lleva montado» por pieza (también en la raíz); la marca vive en el **documento** y la aplica el snippet al plantar. La API queda como válvula por instancia |
 | ~~[BUG-AG1](#-bug-ag1)~~ | ~~los **agentes articulados** no los empuja el pistón ni pueden pisar placas~~ | ✅ cerrado 2026-08-07 | eran **tres** fallos; BUG-AG2 hacía falta pero no bastaba |
@@ -2388,6 +2391,88 @@ saliendo mezcladas o en un grupo aparte.
 `like-water`, `rejilla`, `tejado`, ~630 KB). Las usan tests como `test_cubo_translucido.js` o
 `test_escalera_inercia.js`. No se han versionado porque el encargo era el redstone; decidir si
 entran.
+
+---
+
+### 🟡 REQ-TEST1 · Un runner para la suite, y que cada test diga qué necesita — 🟡 abierto 2026-08-07
+
+**Redactado sin investigar** (regla del dueño). Sale de una auditoría externa del repo, cuya fila
+«Batería de Pruebas — ⚠️ Descentralizado» es **la única que resultó exacta al comprobarla**.
+
+Lo medido al contestar la auditoría, y nada más:
+
+| | |
+|---|---|
+| ficheros `test_*.js` en la raíz | **79** (20 101 líneas) |
+| abren un Chromium contra `http://localhost:8500` | **66** |
+| Node puro (sin Playwright, sin servidor) | **12** |
+| script que corra la suite, o un subconjunto | **ninguno** |
+| tests citados en `CLAUDE.md` | 53, desperdigados en línea dentro del texto |
+
+El problema no es que sean muchos: es que **un fichero no declara de qué grupo es**. Un clon recién
+hecho no sabe cuáles puede correr sin levantar `server.py` ni instalar Playwright, y descubrirlo
+cuesta abrir los 79. Esa es también la razón de la regla vigente
+«solo los tests del área tocada»: no existe forma de
+correr la suite entera, así que la regla es en parte una racionalización de una carencia.
+
+Lo que se pediría, cuando se aborde:
+
+- Una **cabecera declarativa** por test (una línea, tipo `// @necesita: servidor, chromium` o un
+  campo equivalente) — barata y es la mitad del valor.
+- Un `correr_tests.js` (o `.sh`) que filtre por esa etiqueta y por **área** (`caras`, `redstone`,
+  `agentes`, `fisica`…), para que «los tests del área tocada» sea un comando y no criterio mío.
+- Que compruebe **antes de arrancar** que `:8500` responde y que `playwright` está instalado, en vez
+  de fallar 40 timeouts seguidos.
+
+⚠️ **No mover los `test_*.js` a una carpeta** sin decidirlo aparte: varios extraen funciones de
+`app.js` **verbatim por texto** con rutas relativas (`test_rayo_apuntado.js` y compañía), y ése es
+justo el mecanismo más frágil del repo.
+
+---
+
+### 🟡 REQ-DOC1 · `CLAUDE.md` está documentado pero no es navegable — 🟡 abierto 2026-08-07
+
+**Redactado sin investigar.** La auditoría externa marcó «Redstone — ⚠️ Parcial — Disperso en tests;
+falta REDSTONE.md». **El diagnóstico es falso** y conviene dejarlo escrito para no repetirlo:
+
+- Redstone **no** está disperso en tests: vive en `redstone/` (10 fuentes, motor de 54 KB + piezas de
+  32 KB), y por **petición explícita del dueño**, citada en `CLAUDE.md:2422`.
+- **Sí** hay documentación: `CLAUDE.md:2420-2842`, ~420 líneas con la tabla de ficheros, la regla «el
+  comportamiento cuelga del MATERIAL», la trampa de `define('apagada',{encendida:'X'})`, el
+  transporte fuerte/débil de r1.2 y la cola drenada en el `rAF`.
+
+Lo que la auditoría olió de verdad: **239 KB con solo 12 encabezados `##` y 22 `###`**. Sin `grep` no
+se llega. Un lector que busca redstone no encuentra las 420 líneas y concluye que no existen — que es
+exactamente lo que pasó.
+
+**Sugerencia de partida (no decidida): un índice al principio, no partir el fichero.** Extraer
+`REDSTONE.md` crea dos ficheros que mantener sincronizados y `CLAUDE.md` es el único que se carga
+solo en cada sesión; el coste de partir se paga en cada ticket, el de un índice se paga una vez.
+Decisión del dueño.
+
+---
+
+### 🟡 REQ-DOC2 · Un mapa del estado interno de `app.js` — 🟡 abierto 2026-08-07
+
+**Redactado sin investigar.** Tercera fila de la auditoría externa: «Frontend (`app.js`) — Legible
+pero Denso — Monolito de 778 KB; vendría bien un esquema/mapa de estado interno». La cifra real es
+**749 KB / 11 437 líneas**; la crítica es la mejor puesta de la tabla.
+
+**Esto NO es un ticket para partir `app.js`**, ni para refactorizarlo. Es para escribir el mapa que
+hoy hay que reconstruir a `grep` cada vez: qué vive en `state` (editor), qué en `mc` (mundo) y qué en
+`game` (scripting), quién invalida qué, y dónde está la frontera entre los tres.
+
+Candidatos a entrar, por ser los que ya han costado tickets o me han mordido en sesión:
+
+- `state.voxels` / `state.caras` y el contador `voxRev` que invalida las cachés de render.
+- `mc.grid` (assets 16³ macizos) **vs** `mc.structures` (todo lo que tiene forma, 1/16 de grosor) —
+  ya documentado como concepto, pero sin mapa de qué campo lo decide.
+- `bits` (colisión) vs `bitsAim` (apuntado), y las tres capas de envoltorios de solidez.
+- `mc.blockKey` / la paleta que se re-hornea en cada arranque (los ids **no son estables**).
+- Los ganchos que `app.js` expone sin saber qué son: `mc.sunExtra`, `mcXrayExtra`, `mc.atraviesa`.
+
+Sitio natural: sección nueva en `CLAUDE.md`, lo que lo hace hermano de [REQ-DOC1](#-req-doc1) — si el
+fichero no se vuelve navegable antes, este mapa se entierra igual que lo demás.
 
 ---
 
