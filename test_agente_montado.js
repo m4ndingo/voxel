@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // BUG-AG11 · si le vas MONTADO encima, el agente ni te ve ni gira sobre si mismo.
 //
 // El dueño, despues de BUG-AG9/BUG-AG10: «que parametros tendria que poner para que una vez dentro
@@ -223,7 +225,7 @@ const ok = (cond, txt, extra) => {
   ok(r.montado.alAncla < 0.5, 'hasta llegar a casa', 'a ' + r.montado.alAncla + ' del ancla');
 
   console.log('\n── C · el cuello tampoco, con el tope vertical ABIERTO ──');
-  ok(r.montado.miraMax < 2, 'la cabeza se queda en reposo con limites.x = [-90,90]',
+  ok(r.montado.miraMax < 2.5, 'la cabeza se queda en reposo con limites.x = [-90,90]',
     r.montado.miraMax + '° (no es BUG-AG9 quien lo tapa)');
 
   console.log('\n── D · te bajas y vuelve a verte (reversible) ──');

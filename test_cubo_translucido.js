@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // BUG-STR1 · un macizo TRANSLUCIDO (hab:cubo-trans) es un bloque de terreno, no una pieza suelta.
 //
 // El dueno pregunto por que «cubo-trans» se pintaba como estructura y no como bloque. Ninguna de las dos

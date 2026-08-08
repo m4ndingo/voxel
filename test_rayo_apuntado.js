@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: node
 // Arnes headless para el RAYO DE APUNTADO del Mundo (mcRaycast / mcStructRayHit de app.js).
 //
 // Extrae las funciones VERBATIM de app.js y las corre contra un mundo de juguete. Lo que se comprueba
@@ -8,12 +10,12 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const src = fs.readFileSync('/root/voxel/app.js', 'utf8');
+const src = fs.readFileSync(__dirname + '/app.js', 'utf8');
 // Cada funcion de nivel superior de app.js acaba con '}' en la columna 0.
 function extraer(nombre) {
   const ini = src.indexOf('\nfunction ' + nombre + '(');
   if (ini < 0) throw new Error('no encuentro function ' + nombre + ' en app.js');
-  const fin = src.indexOf('\n}\n', ini);
+  const fin = src.indexOf('\n}', ini);
   if (fin < 0) throw new Error('no encuentro el final de ' + nombre);
   return src.slice(ini + 1, fin + 3);
 }

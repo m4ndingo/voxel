@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // test_galeria_namespace.js — una pieza vuelve a la galeria de la que salio, en el navegador de verdad.
 //
 // La queja del dueño (2026-08-06, BUG-GAL1/GAL2/RS5): "he querido modificar el cable de redstone por una

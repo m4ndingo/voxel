@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // Materiales que DEJAN PASAR LA LUZ DEL CIELO (`game.bloques.define(clave,{luz:'pasa'})`).
 //
 // El problema real del dueno: `leaves` estampada como BLOQUE se ve NEGRA por dentro, y la MISMA pieza estampada como

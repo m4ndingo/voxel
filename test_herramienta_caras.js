@@ -1,3 +1,5 @@
+// @area: caras
+// @necesita: servidor, playwright
 // La herramienta «Caras» del editor: clic sobre una CARA (no sobre una celda) la MARCA.
 //
 // Marcar es decir que se muestra, no que se quita: en cuanto un voxel tiene una marca, cualquier cara

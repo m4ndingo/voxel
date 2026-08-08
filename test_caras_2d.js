@@ -1,3 +1,5 @@
+// @area: caras
+// @necesita: servidor, playwright
 // La herramienta «Caras» en la vista de Capas (2D).
 //
 // En 3D hay que apuntar a una cara de verdad, y hay caras a las que sencillamente no se llega: la de

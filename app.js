@@ -4280,11 +4280,24 @@ function agCapacidades(box, cambia){
   const h=document.createElement('h4'); h.className='ag-h2'; h.textContent='El bicho entero · capacidades';
   box.appendChild(h);
   agCapSeguir(box, cambia);
+  agCapCabalgable(box, cambia);
   agCapAndar(box, cambia);
   agCapEmpuje(box, cambia);
   agCapFisica(box, cambia);
   agCapCuerpo(box, cambia);
   agCapEscala(box, cambia);
+}
+// 🏇 cabalgable (REQ-AG12). Montado en él te permite conducirlo con WASD/flechas en vez de ir como un pasajero pasivo.
+function agCapCabalgable(box, cambia){
+  const on=!!agDoc.cabalgable;
+  const b=agTarjeta(box, 'cabalgable', '🏇', 'Cabalgable', on,
+    on? 'se conduce con WASD / flechas al montarlo' : 'pasajero pasivo',
+    v=>{ if(v) agDoc.cabalgable=true; else delete agDoc.cabalgable; cambia(); });
+  if(!on){
+    agNota(b, 'Enciéndela para que al subirte a una pieza montable del agente puedas conducirlo directamente con WASD / flechas en lugar de que vuelva a su ancla.');
+    return;
+  }
+  agNota(b, 'Al subirte a cualquier pieza «te lleva montado» de este agente, la montura se frena y tus teclas de movimiento (WASD / flechas) la orientan y desplazan directamente a ella.');
 }
 // 📏 escala. «Para crear enanos y gigantes» (REQ-AGESC1). Multiplica la geometría de cada pieza Y las
 // distancias entre ellas, así que el bicho crece entero en vez de desmontarse; la caja de choque va
@@ -4477,13 +4490,14 @@ function agChips(){
   const mira=(agDoc.piezas||[]).some(q=>q&&q.mirar);
   // Por `agPiezas()` y no por `agDoc.piezas`: la raíz también puede llevarte (agente-plataforma).
   const monta=agPiezas().some(q=>q&&q.montable);
+  const cabalg=!!(agDoc.cabalgable || (seg&&seg.cabalgable));
   const chips=[[sigue, sigue? '👁 te ve a '+((seg&&seg.deteccion!==undefined)? +seg.deteccion : 16) : '👁 plantado'],
                [cad>0, cad>0? '🚶 '+cad+' pasos/bloque' : '🚶 sin patas'],
                [!(fue===0&&sal===0), !(fue===0&&sal===0)? '👊 empujable' : '👊 aguanta el golpe'],
                [fis, fis? '🧊 pisa como tú' : '🧊 ignora el suelo'],
                [cue, cue? '🧱 caja a medida' : '🧱 caja de las piezas'],
                [mira, mira? '👀 te mira' : '👀 sin cuello'],
-               [monta, monta? '🧍 te lleva encima' : '🧍 no te lleva']];
+               [monta, monta? (cabalg? '🏇 cabalgable' : '🧍 te lleva encima') : '🧍 no te lleva']];
   for(const [on,txt] of chips){
     const s=document.createElement('span'); s.className='ag-chip'+(on?' on':''); s.textContent=txt;
     el.appendChild(s);
@@ -5594,6 +5608,7 @@ const mc={
   reach:16,                       // alcance de romper/poner en bloques (game.reach)
   speed:5,                        // velocidad de marcha en u/s (game.playerSpeed; Shift = mitad)
   autoUnstick:false,              // game.autoUnstick: la auto-curación por frame de mcUpdate. APAGADA por defecto (BUG-AG7): sube HACIA ARRIBA, así que rozar el brazo de un agente te planta encima. A mano con la tecla U
+  minStickedTime:1, stuckTime:0,  // BUG-AG14: umbral en segundos (game.minStickedTime) antes de mostrar aviso de atasco
   airControl:true,                // game.airControl: movimiento en el aire estilo Quake (air-strafe). true = girar el ratón NO redirige el salto y W/A/S/D solo nudgea; false = clásico (velocidad reescrita cada frame)
   airAccel:6,                     // game.airAccel: aceleración hacia wishdir en el aire (mayor = el nudge alcanza el tope más rápido)
   airCap:3,                       // game.airCap: tope (u/s, ∝√scale) de la componente de velocidad que se puede AÑADIR en el aire por dirección → cuánto se puede desviar/ganar. Mientras sea < velocidad de salto no hay acel. recta hacia delante (anti-truco)
@@ -7754,10 +7769,15 @@ function mcUpdate(dt){
   // de él sin haber saltado. Atascado de verdad se sale con la tecla U, que es un gesto y no una sorpresa.
   if(mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])){
     if(!mcAgentShove() && mc.autoUnstick) mcUnstick();
-    // …y si nadie te ha sacado, se avisa UNA vez por atasco. Sin esto, «no me puedo mover» es un juego
-    // colgado: la tecla que lo arregla no se adivina. Y en el móvil no hay tecla ninguna, de ahí el botón.
-    else if(!mc.autoUnstick && mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])) mcStuckShow(true);
-  } else mcStuckShow(false);
+    else if(!mc.autoUnstick && mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])){
+      mc.stuckTime = (mc.stuckTime || 0) + dt;
+      const threshold = (typeof mc.minStickedTime === 'number') ? mc.minStickedTime : 1.0;
+      if(mc.stuckTime >= threshold) mcStuckShow(true);
+    }
+  } else {
+    mc.stuckTime = 0;
+    mcStuckShow(false);
+  }
   const k=mc.keys, sp=mc.speed*(k['shift']?0.5:1)*Math.sqrt(mc.scale);   // game.playerSpeed; Shift = mitad. Velocidad ∝ √scale (sublineal): un gigante avanza más en absoluto pero LENTO respecto a su cuerpo → sensación de mole/peso (antes ∝ scale = mismo ritmo relativo = ligero)
   const sinY=Math.sin(mc.yaw), cosY=Math.cos(mc.yaw);
   const fwd=[-sinY,0,-cosY], right=[cosY,0,-sinY];   // horizontal, relativo al yaw (no al pitch)
@@ -7767,7 +7787,11 @@ function mcUpdate(dt){
   if(k['d']){ mx+=right[0]; mz+=right[2]; }
   if(k['a']){ mx-=right[0]; mz-=right[2]; }
   const ml=Math.hypot(mx,mz);
-  if(mc.onGround || !mc.airControl){
+  const cabalgando = (typeof game !== 'undefined' && game.esqueletos && typeof game.esqueletos.esCabalgando === 'function') ? game.esqueletos.esCabalgando() : false;
+  const reposicionando = cabalgando && (k['shift'] || k['Shift']);
+  if(cabalgando && !reposicionando){
+    mx=0; mz=0; mc.vel[0]=0; mc.vel[2]=0;
+  } else if(mc.onGround || !mc.airControl){
     // Suelo (o air-control off): la velocidad horizontal se fija DIRECTA desde la dirección de vista → marcha responsiva
     // e instantánea (y frena en seco al soltar). Comportamiento clásico.
     if(ml>0){ mx=mx/ml*sp; mz=mz/ml*sp; } else { mx=0; mz=0; }
@@ -8102,6 +8126,108 @@ function mcDrawArr(SL, arr, mode){   // sube arr (7 floats/vért) al VBO de over
   gl.vertexAttribPointer(SL.aShade,1,gl.FLOAT,false,7*4,24);
   gl.drawArrays(mode,0,arr.length/7);
 }
+function mcPushLine(out, x0,y0,z0, x1,y1,z1, r,g,b){
+  out.push(x0,y0,z0, r,g,b, 1,  x1,y1,z1, r,g,b, 1);
+}
+function getRigPos(r){
+  const g = (r.partes && r.partes[0] && r.partes[0].s && r.partes[0].s._sig) || r._sig;
+  const gx = g ? (g.x || 0) : 0;
+  const gy = g ? (g.y || 0) : 0;
+  const gz = g ? (g.z || 0) : 0;
+
+  if(r.partes && r.partes[0] && r.partes[0].s){
+    const s = r.partes[0].s;
+    return [s.ox + gx, s.oy + gy, s.oz + gz];
+  }
+  if(r.eje && r.eje.length >= 3){
+    return [r.eje[0] + gx, r.eje[1] + gy, r.eje[2] + gz];
+  }
+  if(r.cuerpo && r.cuerpo.length >= 6){
+    return [(r.cuerpo[0] + r.cuerpo[3]) * 0.5 + gx, r.cuerpo[1] + gy, (r.cuerpo[2] + r.cuerpo[5]) * 0.5 + gz];
+  }
+  if(r.mov && isFinite(r.mov.x) && isFinite(r.mov.y) && isFinite(r.mov.z)){
+    return [r.mov.x + gx, r.mov.y + gy + (r.mov.alto || 0), r.mov.z + gz];
+  }
+  if(r.plantado && r.plantado.length >= 3) return [r.plantado[0] + gx, r.plantado[1] + gy, r.plantado[2] + gz];
+  if(r.pos) return [r.pos[0] + gx, r.pos[1] + gy, r.pos[2] + gz];
+  return null;
+}
+function mcPushVisionCones(out){
+  if(typeof game === 'undefined' || !game.esqueletos || !game.esqueletos._vivos) return;
+  const vivos = game.esqueletos._vivos;
+  for(let i = 0; i < vivos.length; i++){
+    const r = vivos[i];
+    if(!r || r.quitado) continue;
+    const pos = getRigPos(r);
+    if(!pos) continue;
+
+    // 1) Cono de Detección del Cuerpo (`seguir.vision` · Ámbar/Dorado)
+    const px = pos[0] + 0.5, py = pos[1] + 1.2, pz = pos[2] + 0.5;
+    const gDeg = (r.giro || 0) + (r.horneado || 0);
+    const gRad = gDeg * (Math.PI / 180);
+    
+    const fx = -Math.sin(gRad), fz = -Math.cos(gRad);
+    const rx = Math.cos(gRad), rz = -Math.sin(gRad);
+    
+    const dist = (r.G && r.G.deteccion != null) ? r.G.deteccion : 8;
+    const visDeg = (r.G && r.G.vision != null) ? r.G.vision : 180;
+    const halfVis = (visDeg / 2) * (Math.PI / 180);
+
+    const cr = 1.0, cg = 0.85, cb = 0.2;
+    const numRayos = 8;
+    let prevX = null, prevZ = null;
+    for(let k = 0; k <= numRayos; k++){
+      const a = -halfVis + (k / numRayos) * (halfVis * 2);
+      const dx = (fx * Math.cos(a) + rx * Math.sin(a)) * dist;
+      const dz = (fz * Math.cos(a) + rz * Math.sin(a)) * dist;
+      const ex = px + dx, ez = pz + dz;
+
+      if(k === 0 || k === numRayos || k === numRayos / 2){
+        mcPushLine(out, px, py, pz, ex, py, ez, cr, cg, cb);
+      }
+      if(prevX !== null){
+        mcPushLine(out, prevX, py, prevZ, ex, py, ez, cr, cg, cb);
+      }
+      prevX = ex; prevZ = ez;
+    }
+
+    // 2) Cono de mirada (`mirar.limites` · Cian)
+    const cianR = 0.2, cianG = 0.85, cianB = 1.0;
+    const limX = (r.G && r.G.limitesX) ? r.G.limitesX : [-70, 70];
+    const limY = (r.G && r.G.limitesY) ? r.G.limitesY : [-90, 90];
+    const rangeM = 6;
+
+    const radXmin = (limX[0] || -70) * (Math.PI / 180);
+    const radXmax = (limX[1] || 70) * (Math.PI / 180);
+    const radYmin = (limY[0] || -90) * (Math.PI / 180);
+    const radYmax = (limY[1] || 90) * (Math.PI / 180);
+
+    const hx = px, hy = py + 0.4, hz = pz;
+    const getPoint = (angX, angY) => {
+      const totalYaw = gRad + angY;
+      const cosX = Math.cos(angX);
+      const dx = -Math.sin(totalYaw) * cosX * rangeM;
+      const dy = Math.sin(angX) * rangeM;
+      const dz = -Math.cos(totalYaw) * cosX * rangeM;
+      return [hx + dx, hy + dy, hz + dz];
+    };
+
+    const pTL = getPoint(radXmax, radYmin);
+    const pTR = getPoint(radXmax, radYmax);
+    const pBR = getPoint(radXmin, radYmax);
+    const pBL = getPoint(radXmin, radYmin);
+
+    mcPushLine(out, hx, hy, hz, pTL[0], pTL[1], pTL[2], cianR, cianG, cianB);
+    mcPushLine(out, hx, hy, hz, pTR[0], pTR[1], pTR[2], cianR, cianG, cianB);
+    mcPushLine(out, hx, hy, hz, pBR[0], pBR[1], pBR[2], cianR, cianG, cianB);
+    mcPushLine(out, hx, hy, hz, pBL[0], pBL[1], pBL[2], cianR, cianG, cianB);
+
+    mcPushLine(out, pTL[0], pTL[1], pTL[2], pTR[0], pTR[1], pTR[2], cianR, cianG, cianB);
+    mcPushLine(out, pTR[0], pTR[1], pTR[2], pBR[0], pBR[1], pBR[2], cianR, cianG, cianB);
+    mcPushLine(out, pBR[0], pBR[1], pBR[2], pBL[0], pBL[1], pBL[2], cianR, cianG, cianB);
+    mcPushLine(out, pBL[0], pBL[1], pBL[2], pTL[0], pTL[1], pTL[2], cianR, cianG, cianB);
+  }
+}
 function mcDrawOverlays(pj, view){
   const gl=mc.gl, SL=mc.structLoc; if(!mc.structProg) return;
   const playing=(document.pointerLockElement===mc.canvas);
@@ -8130,6 +8256,9 @@ function mcDrawOverlays(pj, view){
   // 2) Rayos-X (tecla X): volumen de colisión alrededor del jugador, VISIBLE a través de las paredes.
   const xrayLines=[];
   if(mc.xray){ mcXrayVolume(xrayLines); mcXrayRay(xray, xrayLines); }   // el volumen va a LÍNEAS (REQ-XR1); a `xray` solo le queda el impacto del rayo
+  if(mc.xray && mc.verConos !== false){
+    mcPushVisionCones(xrayLines);
+  }
   // 3) t1 · marcadores de nota: un post-it amarillo flotando sobre cada bloque anotado (dentro de la distancia de render).
   // Solo para las notas que NO tienen cartel: con carteles encendidos el post-it sobraría encima de la
   // tabla, y con ellos apagados (o pasado el tope de MC_NOTE_SIGN_MAX) sigue siendo la única marca.
@@ -8159,8 +8288,10 @@ function mcDrawOverlays(pj, view){
 
   gl.useProgram(mc.structProg);
   gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
+  gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
   gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
   gl.uniform1f(SL.uFogNear, pj.far*8); gl.uniform1f(SL.uFogFar, pj.far*10);   // sin niebla sobre el overlay
+  if(SL.aEmit >= 0) gl.vertexAttrib1f(SL.aEmit, 1.0);
   mcAttribs([SL.aPos, SL.aColor, SL.aShade]);   // deja habilitados SOLO estos 3; ningún atributo huérfano con VBO nulo
   // Rayos-X: relleno translúcido (alpha constante vía blendColor) y SIN test de profundidad (atraviesa muros).
   if(xray.length){
@@ -9464,32 +9595,198 @@ function mcSlotStructKeys(){ try{ const a=JSON.parse(localStorage.getItem('vf_mc
 async function mcBuildCatalog(){
   const cat=[];
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
-    idx.filter(a=>a.type==='bloque'||a.type==='textura').forEach(a=>cat.push({key:'asset:'+a.file, name:a.name, icon:a.icon||(a.type==='textura'?'🎨':'🏠'), badge:a.type})); }catch(e){}
-  try{ (await apiHabitantes()).filter(h=>h.type==='bloque'||h.type==='textura').forEach(h=>cat.push({key:'hab:'+h.id, name:h.name, icon:h.icon||(h.type==='textura'?'🎨':'🏠'), badge:'guardada'})); }catch(e){}
+    idx.filter(a=>a.type==='bloque'||a.type==='textura').forEach(a=>cat.push({key:'asset:'+a.file, name:a.name, icon:a.icon||(a.type==='textura'?'🎨':'🏠'), badge:a.type, categoria:a.categoria||''})); }catch(e){}
+  try{ (await apiHabitantes()).filter(h=>h.type==='bloque'||h.type==='textura').forEach(h=>cat.push({key:'hab:'+h.id, name:h.name, icon:h.icon||(h.type==='textura'?'🎨':'🏠'), badge:'guardada', categoria:h.categoria||''})); }catch(e){}
   mc.catalog=cat; mcKindCache.clear();   // el badge de cada clave alimenta la etiqueta de rayos-X (mcMatKind)
   return cat;
 }
+let mcPickSearch = '';
+let mcPickFilter = 'all';
+let mcPickCtxItem = null;
+
+function mcInitPickerUI(){
+  if(mc._pickerInited) return;
+  mc._pickerInited = true;
+  
+  const searchInput = $('#mc-picker-search');
+  if(searchInput){
+    searchInput.oninput = () => {
+      mcPickSearch = (searchInput.value || '').trim().toLowerCase();
+      mcRenderPickerGrid();
+    };
+  }
+
+  const filterContainer = $('#mc-picker-filters');
+  if(filterContainer){
+    filterContainer.onclick = (e) => {
+      const btn = e.target.closest('.mc-pick-filter');
+      if(!btn) return;
+      filterContainer.querySelectorAll('.mc-pick-filter').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      mcPickFilter = btn.dataset.cat || 'all';
+      mcRenderPickerGrid();
+    };
+  }
+
+  // Cierre de menú contextual y modal al hacer clic fuera o con Esc
+  document.addEventListener('click', (e) => {
+    const ctx = $('#mc-picker-ctxmenu');
+    if(ctx && !ctx.contains(e.target)) ctx.hidden = true;
+  });
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape'){
+      const ctx = $('#mc-picker-ctxmenu');
+      if(ctx && !ctx.hidden) { ctx.hidden = true; return; }
+      const card = $('#mc-card-modal');
+      if(card && !card.hidden) { card.hidden = true; return; }
+      if($('#mc-picker') && !$('#mc-picker').hidden) mcClosePicker();
+    }
+  });
+
+  const btnFicha = $('#mc-ctx-ficha');
+  if(btnFicha) btnFicha.onclick = () => { $('#mc-picker-ctxmenu').hidden = true; if(mcPickCtxItem) mcShowItemCard(mcPickCtxItem); };
+
+  const btnEdit = $('#mc-ctx-edit');
+  if(btnEdit) btnEdit.onclick = () => { $('#mc-picker-ctxmenu').hidden = true; if(mcPickCtxItem) mcEditItemMaterial(mcPickCtxItem); };
+
+  const btnCloseCard = $('#mc-card-close');
+  if(btnCloseCard) btnCloseCard.onclick = () => { $('#mc-card-modal').hidden = true; };
+}
+
 async function mcOpenPicker(slot){
   mc.pickSlot=slot;
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();       // liberar el ratón para poder elegir
+  mcInitPickerUI();
   const pk=$('#mc-picker'), g=$('#mc-picker-grid');
   $('#mc-picker-title').textContent='Bloque o textura · ranura '+(slot+1);
   g.innerHTML='<p class="hab-empty">Cargando galería…</p>';
   pk.hidden=false;
   if(!mc.catalog) try{ await mcBuildCatalog(); }catch(e){}
+  mcRenderPickerGrid();
+  $('#mc-picker-remove').hidden=!mc.hotbar[slot];
+}
+
+function mcRenderPickerGrid(){
+  const g=$('#mc-picker-grid'); if(!g) return;
   g.innerHTML='';
-  (mc.catalog||[]).forEach(c=>{
+  const slot = mc.pickSlot;
+  const items = mc.catalog || [];
+  let shown = 0;
+
+  items.forEach(c => {
+    // 1. Buscador por texto
+    if(mcPickSearch){
+      const q = mcPickSearch;
+      const match = c.name.toLowerCase().includes(q) || c.key.toLowerCase().includes(q);
+      if(!match) return;
+    }
+
+    // Identificación de Redstone (data-driven: lee meta.categoria del JSON)
+    const isRs = c.categoria === 'redstone';
+
+    // Estructura vs Bloque
+    const rec = (mc.structs && mc.structs[c.key] && mc.structs[c.key].w != null) 
+      ? mc.structs[c.key] 
+      : { w: 1, h: 1, d: 1, count: 1, blockLike: true };
+    const isPureBlock = rec.blockLike && rec.w === 1 && rec.h === 1 && rec.d === 1 && c.badge === 'bloque';
+    const isEstructura = (rec.w > 1 || rec.h > 1 || rec.d > 1 || !rec.blockLike) && c.badge !== 'textura';
+
+    // 2. Filtros por categoría EXCLUSIVOS
+    if(mcPickFilter === 'redstone'){
+      if(!isRs) return;
+    } else if(isRs && mcPickFilter !== 'all'){
+      // Redstone NUNCA aparece en las pestañas Bloques, Texturas ni Estructuras
+      return;
+    } else if(mcPickFilter === 'bloque'){
+      if(c.badge === 'textura' || isEstructura) return;
+    } else if(mcPickFilter === 'textura'){
+      if(c.badge !== 'textura') return;
+    } else if(mcPickFilter === 'estructura'){
+      if(c.badge === 'textura' || isPureBlock) return;
+    }
+
+    shown++;
     const o=document.createElement('div'); o.className='mapa-opt';
+    o.dataset.key = c.key;
+    o.title = c.name + ' (' + c.key + ')';
     o.innerHTML=`<div class="mo-thumb"><canvas width="120" height="120"></canvas></div>`+
                 `<div class="mo-name">${c.icon} ${esc(c.name)}</div><div class="mo-badge">${c.badge}</div>`;
     getRoomData(c.key).then(d=>drawThumb(o.querySelector('canvas'),d)).catch(()=>{});
-    // Si el ítem es una ESTRUCTURA (habitación de varios bloques), el badge muestra de cuántos se compone.
-    mcStructCells(c.key).then(rec=>{ if(rec.w>1||rec.h>1||rec.d>1){ const bd=o.querySelector('.mo-badge'); if(bd) bd.textContent=rec.count+' bloques'; } }).catch(()=>{});
+    
+    mcStructCells(c.key).then(rRec=>{
+      if(rRec.w>1||rRec.h>1||rRec.d>1){
+        const bd=o.querySelector('.mo-badge'); if(bd) bd.textContent=rRec.count+' bloques';
+      }
+      // Re-verificar exclusividad asíncrona si rec cambió tras cargar
+      const asyncEstruct = (rRec.w > 1 || rRec.h > 1 || rRec.d > 1 || !rRec.blockLike) && c.badge !== 'textura';
+      const asyncPure = rRec.blockLike && rRec.w === 1 && rRec.h === 1 && rRec.d === 1 && c.badge === 'bloque';
+      if(mcPickFilter === 'bloque' && asyncEstruct) o.remove();
+      if(mcPickFilter === 'estructura' && asyncPure) o.remove();
+    }).catch(()=>{});
+
     o.onclick=()=>mcAssignSlot(slot,c.key,c.name);
+    o.oncontextmenu=(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      mcOpenPickerCtx(e, c);
+    };
     g.appendChild(o);
   });
-  if(!mc.catalog||!mc.catalog.length) g.innerHTML='<p class="hab-empty">No hay bloques ni texturas en la galería.</p>';
-  $('#mc-picker-remove').hidden=!mc.hotbar[slot];
+
+  if(!shown) g.innerHTML='<p class="hab-empty">No se encontraron bloques ni texturas.</p>';
+}
+
+function mcOpenPickerCtx(e, c){
+  mcPickCtxItem = c;
+  const ctx = $('#mc-picker-ctxmenu'); if(!ctx) return;
+  ctx.style.left = Math.min(e.clientX, window.innerWidth - 160) + 'px';
+  ctx.style.top = Math.min(e.clientY, window.innerHeight - 80) + 'px';
+  ctx.hidden = false;
+}
+
+async function mcShowItemCard(c){
+  const card = $('#mc-card-modal');
+  const body = $('#mc-card-body');
+  const title = $('#mc-card-title');
+  if(!card || !body) return;
+
+  title.textContent = c.icon + ' ' + c.name;
+  body.innerHTML = '<p>Cargando información…</p>';
+  card.hidden = false;
+
+  let rec = { w: 1, h: 1, d: 1, count: 1, blockLike: true };
+  try { rec = await mcStructCells(c.key); } catch(e){}
+
+  const isEstruct = (rec.w > 1 || rec.h > 1 || rec.d > 1 || !rec.blockLike);
+
+  body.innerHTML = `
+    <div style="display:flex; gap:16px; align-items:center; margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.1)">
+      <div style="width:72px; height:72px; background:rgba(0,0,0,0.3); border-radius:8px; display:flex; align-items:center; justify-content:center">
+        <canvas id="mc-card-canvas" width="120" height="120" style="width:64px; height:64px"></canvas>
+      </div>
+      <div>
+        <div style="font-weight:bold; font-size:13px; color:#fff">${esc(c.name)}</div>
+        <div style="font-size:10px; color:#88b0ff; margin-top:2px">${esc(c.key)}</div>
+        <div style="display:inline-block; margin-top:6px; padding:2px 8px; border-radius:4px; background:#3377ff; color:#fff; font-size:9px">${c.badge}</div>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 16px">
+      <div><strong>Tipo:</strong> ${isEstruct ? 'Estructura' : 'Bloque 16³'}</div>
+      <div><strong>Dimensiones:</strong> ${rec.w} × ${rec.h} × ${rec.d}</div>
+      <div><strong>Total bloques:</strong> ${rec.count}</div>
+      <div><strong>Geometría:</strong> ${rec.blockLike ? 'Bloque macizo 16³' : 'Estructura fina'}</div>
+    </div>
+  `;
+
+  const canvas = $('#mc-card-canvas');
+  if(canvas) getRoomData(c.key).then(d=>drawThumb(canvas, d)).catch(()=>{});
+}
+
+function mcEditItemMaterial(c){
+  if(c.key.startsWith('hab:')){
+    window.open('/?edit=' + encodeURIComponent(c.key), '_blank');
+  } else {
+    alert('El material "' + c.name + '" (' + c.key + ') es un asset base del sistema y no un habitante editable.');
+  }
 }
 function mcClosePicker(){ $('#mc-picker').hidden=true; mc.pickSlot=-1; }
 async function mcAssignSlot(slot,key,name){
@@ -10471,6 +10768,33 @@ Object.defineProperty(game,'playerSpeed',{ enumerable:true, get:()=>mc.speed,
 try{ const a=localStorage.getItem('vf_mcAutoUnstick'); if(a!==null) mc.autoUnstick=(a==='1'); }catch(e){}
 Object.defineProperty(game,'autoUnstick',{ enumerable:true, get:()=>mc.autoUnstick,
   set:v=>{ v=!!v; mc.autoUnstick=v; try{localStorage.setItem('vf_mcAutoUnstick', v?'1':'0');}catch(e){} return v; } });
+// BUG-AG14 · game.minStickedTime = tiempo mínimo (s) de colisión continuada antes de mostrar el aviso de atasco. Defecto 1.0 s.
+try{ const t=parseFloat(localStorage.getItem('vf_mcMinStickedTime')); if(isFinite(t)&&t>=0) mc.minStickedTime=t; }catch(e){}
+Object.defineProperty(game,'minStickedTime',{ enumerable:true, get:()=>mc.minStickedTime,
+  set:v=>{ v=Math.max(0,Math.min(30, isFinite(+v)?+v:1.0)); mc.minStickedTime=v; try{localStorage.setItem('vf_mcMinStickedTime', v);}catch(e){} return v; } });
+// REQ-AG13 · game.verConos / game.conosVision = dibuja los conos 3D de visión y mirada de los agentes
+try{ const v=localStorage.getItem('vf_mcVerConos'); if(v!==null) mc.verConos=(v==='1'); }catch(e){}
+Object.defineProperty(game,'verConos',{ enumerable:true, get:()=>!!(mc.xray && mc.verConos !== false),
+  set:v=>{ v=!!v; mc.verConos=v; mc.xray=v; try{localStorage.setItem('vf_mcVerConos', v?'1':'0');}catch(e){} return v; } });
+Object.defineProperty(game,'conosVision',{ enumerable:true, get:()=>!!(mc.xray && mc.verConos !== false),
+  set:v=>{ game.verConos = v; return !!(mc.xray && mc.verConos !== false); } });
+let _esqueletos = game.esqueletos;
+Object.defineProperty(game, 'esqueletos', {
+  configurable: true, enumerable: true,
+  get: () => {
+    if (!_esqueletos) _esqueletos = {};
+    if (typeof _esqueletos === 'object' && !_esqueletos.verConos) {
+      _esqueletos.verConos = (v) => { if (v !== undefined) game.verConos = v; return game.verConos; };
+    }
+    return _esqueletos;
+  },
+  set: (v) => {
+    _esqueletos = v;
+    if (_esqueletos && typeof _esqueletos === 'object' && !_esqueletos.verConos) {
+      _esqueletos.verConos = (val) => { if (val !== undefined) game.verConos = val; return game.verConos; };
+    }
+  }
+});
 // game.airControl / airAccel / airCap = movimiento en el AIRE estilo Quake (air-strafe). airControl on: la velocidad
 // horizontal NO se reescribe en el aire, así girar el ratón no redirige el salto y soltar teclas conserva la inercia;
 // W/A/S/D solo aceleran de forma acotada hacia donde miras (la componente en esa dirección no pasa de airCap·√scale).

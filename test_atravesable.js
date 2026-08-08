@@ -1,3 +1,5 @@
+// @area: caras
+// @necesita: servidor, playwright
 // «atravesable»: una pieza que se ve, da sombra, se apunta y se rompe igual que cualquier otra, pero
 // que el jugador CRUZA sin frenarse. Es lo que hace que una mata de hierba se pise en vez de ser un
 // muro de 16 cm.

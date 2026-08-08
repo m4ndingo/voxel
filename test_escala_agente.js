@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // REQ-AGESC1 · «me gustaria para el editor de agentes una propiedad que sea "escala del agente" de forma
 // que pueda hacer un agente pequeño o grande en funcion de ese valor, para crear enanos y gigantes».
 //

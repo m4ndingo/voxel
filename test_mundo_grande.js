@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: servidor, playwright
 // test_mundo_grande.js — poner un bloque en un mundo grande no puede congelar el navegador.
 //
 // La queja del dueño: «poner un bloque se ve rapido como aparece pero luego se congela todo varios

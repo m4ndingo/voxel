@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // test_esqueleto_navegador.js — un agente articulado (el zombie) en un navegador de verdad.
 //
 // test_bloques_comportamiento.js §17 prueba que el motor CALCULA bien el esqueleto (cuerpo rigido,

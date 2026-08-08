@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // Redstone se carga SOLO: mundo-autoarranque trae el motor y los circuitos de serie en cada mapa.
 // Lo delicado no es que cargue, es que NO SE NOTE en un mundo que no usa redstone — porque esto
 // pasa a correr en todos:

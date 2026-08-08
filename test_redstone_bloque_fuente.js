@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // Redstone — el BLOQUE DE REDSTONE, una fuente que no se apaga.
 //
 // El dueño: «añade el bloque de redstone, y que no se active con red_concrete los elementos de

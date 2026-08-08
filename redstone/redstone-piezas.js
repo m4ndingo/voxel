@@ -121,18 +121,20 @@
   // No hace falta saber la caja del jugador ni la forma de la cabeza: se le pregunta a mcCollides,
   // que ya sabe las dos cosas y además a la escala del jugador. Por eso esto va DESPUÉS de escribir
   // los bloques: antes, las celdas barridas son aire y no habría contra qué chocar.
-  function apartar(d, chocabaAntes, celdas) {
-    apartarJugador(d, chocabaAntes);
+  function apartar(d, ax, ay, az, bx, by, bz, celdas) {
+    apartarJugador(d, ax, ay, az, bx, by, bz);
     apartarAgentes(d, celdas);
   }
 
-  function apartarJugador(d, chocabaAntes) {
-    if (chocabaAntes) return;                    // ya venía embutido de antes: no lo hemos hecho nosotros
+  function apartarJugador(d, ax, ay, az, bx, by, bz) {
     if (typeof mcCollides !== 'function' || !mc.pos) return;
     var p = mc.pos;
-    if (!mcCollides(p[0], p[1], p[2])) return;   // no estaba en medio
-    // El barrido son dos celdas como mucho (la cabeza y lo que empuja), pero un jugador grande es
-    // más ancho que su celda, así que el tope escala con él. Sale en el primer hueco, no recorre esto.
+    // BUG-RS13 · El jugador se empuja si está en la celda barrida por la cabeza/bloque o si choca
+    var enRango = (Math.abs(p[0] - (ax + 0.5)) < 0.9 && Math.abs(p[2] - (az + 0.5)) < 0.9 && p[1] >= ay - 0.5 && p[1] <= ay + 1.8) ||
+                  (bx !== undefined && Math.abs(p[0] - (bx + 0.5)) < 0.9 && Math.abs(p[2] - (bz + 0.5)) < 0.9 && p[1] >= by - 0.5 && p[1] <= by + 1.8);
+    var chocando = mcCollides(p[0], p[1], p[2]);
+    if (!enRango && !chocando) return;   // no estaba en el camino del pistón
+
     var paso = 1 / MC_TILE, tope = 2 + 2 * (mc.scale || 1);
     for (var t = paso; t <= tope + 1e-6; t += paso) {
       var nx = p[0] + d[0] * t, ny = p[1] + d[1] * t, nz = p[2] + d[2] * t;
@@ -141,8 +143,6 @@
       if (d[1] && mc.vel) { mc.vel[1] = 0; mc.onGround = false; }   // te levanta él, no tu caída
       return;
     }
-    // Aplastado contra la pared de enfrente: se queda donde está y ya lo desatasca mcUpdate. Mejor
-    // eso que colarlo DENTRO de la pared, que es un sitio del que no se sale andando.
   }
 
   // Y lo mismo para los agentes articulados (BUG-AG1): también son cuerpos. Aquí ni siquiera había
@@ -219,15 +219,22 @@
       if (!mcInside(ax, ay, az)) return;                     // contra el borde del mundo no se abre
       var enA = mc.grid[mcIdx(ax, ay, az)];
       if (enA === idCab) return;                             // ya estaba extendido
-      // Se mira ANTES de escribir nada: si el jugador ya venía embutido en algo, no es el pistón
-      // quien lo ha metido ahí y no le toca a él sacarlo (ver apartar()).
-      var chocaba = (typeof mcCollides === 'function' && mc.pos)
-        ? mcCollides(mc.pos[0], mc.pos[1], mc.pos[2]) : true;
       if (enA) {
         // v1: UN bloque, UNA celda. Si detrás no hay hueco, el pistón NO se extiende — como en
         // Minecraft, y por eso el cuerpo tampoco cambia de material: abierto sin cabeza se vería roto.
         if (!mcInside(bx, by, bz) || mc.grid[mcIdx(bx, by, bz)]) return;
-        mcSetBlock(bx, by, bz, enA);                         // no hace falta vaciar A: la cabeza la pisa
+        var enAMover = enA;
+        var claveA = mc.blockKey[enA] || '';
+        var baseA = baseDe(claveA);
+        // BUG-RS13 · Al empujar una placa/botón encendido, se restaura a su estado desaccionado
+        if (baseA === 'hab:placa-on') {
+          var idOff = idDe('hab:placa', oriDe(claveA), reintentar);
+          if (idOff) enAMover = idOff;
+        } else if (baseA === 'hab:boton-on') {
+          var idOff = idDe('hab:boton', oriDe(claveA), reintentar);
+          if (idOff) enAMover = idOff;
+        }
+        mcSetBlock(bx, by, bz, enAMover);                         // no hace falta vaciar A: la cabeza la pisa
         tocadas.push([bx, by, bz]);
       }
       mcSetBlock(ax, ay, az, idCab);
@@ -248,7 +255,7 @@
 
     if (mc.grid[mcIdx(x, y, z)] !== idCuerpo) { mcSetBlock(x, y, z, idCuerpo); tocadas.push([x, y, z]); }
     // Con la geometría ya en su sitio (cabeza y cuerpo): a quien se haya quedado dentro, se le empuja.
-    if (extender) apartar(d, chocaba, barridas);
+    if (extender) apartar(d, ax, ay, az, enA ? bx : undefined, enA ? by : undefined, enA ? bz : undefined, barridas);
     if (tocadas.length) remallar(tocadas);
   }
 
@@ -388,8 +395,10 @@
     // Sin `mira` ni `soloAlFrente`: un pistón de Minecraft se activa por cualquier lado, incluido el
     // de atrás y el de arriba; lo único que su giro decide es hacia DÓNDE empuja. Y `emite` a 0 (por
     // defecto): mueve bloques, no reparte señal.
-    'hab:piston':    { alRecibirSeñal: empujar },
-    'hab:piston-on': { alRecibirSeñal: empujar },
+    // BUG-RS12 · La cabeza del pistón no emite ni conduce energía ni hace de puente energizable
+    'hab:piston':        { alRecibirSeñal: empujar },
+    'hab:piston-on':     { alRecibirSeñal: empujar },
+    'hab:piston-cabeza': {},
   };
 
   Object.keys(CIRCUITOS).forEach(function (k) {

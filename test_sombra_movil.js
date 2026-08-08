@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // El mapa de sombra cubre el mundo entero a 2048x2048 y se rehacia ENTERO en cada frame en el que algo se moviese,
 // porque la firma de mcRenderShadow mezclaba geometria y posiciones de agentes. Medido con 48 estructuras: +20 ms
 // por frame. Eso es lo que el dueno veia como "coloco una estructura y los fps caen de 144 a 60-80 durante unos

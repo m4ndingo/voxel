@@ -1,3 +1,5 @@
+// @area: fisica
+// @necesita: servidor, playwright
 // test_parkour_navegador.js — el parkour (colgarse de un canto y trepar) contra el app.js DE VERDAD.
 //
 // Va aparte de test_fisica_navegador.js porque necesita otro escenario: aquel monta una plataforma

@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: node
 // BUG-ROT1 · un cubo se puede poner de 24 maneras (6 caras arriba x 4 giros por cara) y el Mundo solo
 // llegaba a 16: con dos ejes (vuelco sobre X + giro sobre Y) las 6 caras si salian arriba, pero TUMBADA
 // DE LADO (+X o -X arriba) unicamente 2 de los 4 giros. Faltaban 8 posturas, y no habia forma de pedirlas.
@@ -15,12 +17,12 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const src = fs.readFileSync('/root/voxel/app.js', 'utf8');
+const src = fs.readFileSync(__dirname + '/app.js', 'utf8');
 // Cada funcion de nivel superior de app.js acaba con '}' en la columna 0.
 function extraer(nombre) {
   const ini = src.indexOf('\nfunction ' + nombre + '(');
   if (ini < 0) throw new Error('no encuentro function ' + nombre + ' en app.js');
-  const fin = src.indexOf('\n}\n', ini);
+  const fin = src.indexOf('\n}', ini);
   if (fin < 0) throw new Error('no encuentro el final de ' + nombre);
   return src.slice(ini + 1, fin + 3);
 }
@@ -28,11 +30,11 @@ function extraer(nombre) {
 function extraerIIFE(nombre) {
   const ini = src.indexOf('\nconst ' + nombre + '=(function(){');
   if (ini < 0) throw new Error('no encuentro const ' + nombre + ' en app.js');
-  const fin = src.indexOf('\n})();\n', ini);
+  const fin = src.indexOf('\n})();', ini);
   if (fin < 0) throw new Error('no encuentro el final de ' + nombre);
   return src.slice(ini + 1, fin + 6);
 }
-// mcOriNorm y mcOriParts caben en una linea, asi que el corte por '\n}\n' se comeria medio fichero.
+// mcOriNorm y mcOriParts caben en una linea, asi que el corte por '\n}' se comeria medio fichero.
 function extraerLinea(nombre) {
   const ini = src.indexOf('\nfunction ' + nombre + '(');
   if (ini < 0) throw new Error('no encuentro function ' + nombre + ' en app.js');
@@ -44,7 +46,7 @@ function extraerLinea(nombre) {
 function extraerConst(nombre) {
   const ini = src.indexOf('\nconst ' + nombre + '=[');
   if (ini < 0) throw new Error('no encuentro const ' + nombre + ' en app.js');
-  const fin = src.indexOf('\n];\n', ini);
+  const fin = src.indexOf('\n];', ini);
   if (fin < 0) throw new Error('no encuentro el final de ' + nombre);
   return src.slice(ini + 1, fin + 4);
 }

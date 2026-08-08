@@ -1,3 +1,5 @@
+// @area: fisica
+// @necesita: servidor, playwright
 // test_fisica_navegador.js — los bloques que tocan la fisica del jugador, contra el app.js DE VERDAD.
 // Cubre la subida suave de escalones (pasoSuave) y el factor de marcha (velocidad).
 //

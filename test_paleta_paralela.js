@@ -1,3 +1,5 @@
+// @area: materiales
+// @necesita: servidor, playwright
 // PERF-MC3 · abrir /map/empty (CERO voxels) costaba 2178 ms en el host del dueño, y el 81 % era bajar
 // los 15 documentos de la paleta EN SERIE: cada vuelta del bucle esperaba su fetch entera antes de pedir
 // la siguiente. De propina, el cartel decia «(0/15)» durante los 868 ms del primer bloque y enseñaba el

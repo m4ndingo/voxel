@@ -1,3 +1,5 @@
+// @area: caras
+// @necesita: servidor, playwright
 // El EDITOR tiene que enseñar la mascara de state.caras, y de dos maneras distintas.
 //
 // Por defecto la cara MARCADA se pinta EN ROJO: el rojo senala lo que se QUEDA, no lo que se va. Es

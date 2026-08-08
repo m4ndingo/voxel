@@ -1,3 +1,5 @@
+// @area: materiales
+// @necesita: servidor, playwright
 // «Pasos sin celda nueva» no contaba pasos, y por eso la escalera de rescate no llegaba a bajar.
 // Dos defectos encadenados, uno detras del otro:
 //   1. el contador se ponia a cero cuando se LANZABA una maniobra de rescate, no cuando la maniobra

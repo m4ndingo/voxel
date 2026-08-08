@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: node
 // El almacen de agentes articulados: data/agentes/<id>.json servido por /api/agentes.
 // Un agente es un DOCUMENTO (que piezas, donde van, como articulan), no codigo — el motor vive en el
 // snippet «mundo-autoarranque». Lo que se guarda aqui es lo que anima el bicho, asi que:

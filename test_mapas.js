@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: servidor, playwright
 // /map/ era la SPA (abria el mundo sagrado); ahora es el LISTADO de mundos y solo /map/<nombre> abre uno.
 // Ese reparto es fragil de dos maneras y las dos se guardan aqui:
 //   1. si el boton "Abrir" del mundo por defecto apunta a /map/, la pagina se enlaza a si misma (bucle);

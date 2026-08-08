@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // BUG-RS8 · «si doy a la palanca que está pegada al pistón, se rota sola desactivada y aparece abajo,
 // que no es donde la puse».
 //

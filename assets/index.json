@@ -219,7 +219,8 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/bloque_redstone.vox.json"
+    "file": "assets/bloque_redstone.vox.json",
+    "categoria": "redstone"
   },
   {
     "id": "snow",
@@ -294,7 +295,7 @@
       "z": 16
     },
     "file": "assets/cubo-trans.vox.json",
-    "description": "",
+    "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir.",
     "alias": "cubo_trans"
   },
   {
@@ -705,5 +706,20 @@
     "file": "assets/cartel.vox.json",
     "description": "Cartel",
     "alias": "sign"
+  },
+  {
+    "id": "escalera",
+    "name": "Escalera",
+    "role": "Bloque básico 16³",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 1,
+      "z": 16
+    },
+    "file": "assets/escalera.vox.json",
+    "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir."
   }
 ]

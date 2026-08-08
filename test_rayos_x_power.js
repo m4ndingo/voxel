@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // Rayos-X enseña el NIVEL de señal de cada celda (REQ-XR2).
 //
 // Lo pidió el dueño: «una línea que indique el power del bloque». Es lo único de un circuito que no

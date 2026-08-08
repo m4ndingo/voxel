@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // El clic derecho construye. Hasta ahora, poner una pieza de una ranura de estructura SIEMPRE estampaba una
 // instancia suelta (mcStampStruct): fiel, pero 1 draw call por flor. Desde que el mallador emite la geometria
 // de verdad de lo que no llena su celda, poner la pieza y pintarla con setVoxel dan la MISMA imagen, asi que

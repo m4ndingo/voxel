@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // REQ-DBG2 · «cuando aparece el toast "Atascado - ..." deberia de aparecer el motivo […] ocurre que un
 // agente al avanzar con sus brazos extendidos te atasca (es como un abrazo)», y luego: «si es una parte
 // de un agente quiero saber el agente y su parte».

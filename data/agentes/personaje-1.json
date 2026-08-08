@@ -39,7 +39,8 @@
           ]
         },
         "alcance": 12
-      }
+      },
+      "montable": true
     },
     {
       "nombre": "brazo izq",
@@ -141,8 +142,9 @@
     "suavidad": 1
   },
   "id": "personaje-1",
-  "savedAt": "2026-08-04T20:35:42",
+  "savedAt": "2026-08-08T09:24:16",
   "empuje": {
     "fuerza": 16
-  }
+  },
+  "cabalgable": true
 }

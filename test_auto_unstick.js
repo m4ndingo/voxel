@@ -1,3 +1,5 @@
+// @area: fisica
+// @necesita: servidor, playwright
 // BUG-AG7 · «se sube automáticamente a sus brazos si está cerca […] estaría bien deshabilitar el
 // "unstuck" automático, que sea un game.autoUnstick = false por defecto, si hay que hacerlo a mano
 // creo recordar que existía la tecla "u"».

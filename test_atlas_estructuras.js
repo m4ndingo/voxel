@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // El atlas de estructuras se apilaba con altura = nº de texturas, y la v de un texel es fila/altura. Asi que meter
 // UNA textura nueva cambiaba la v de TODAS y habia que re-mallar las 48 estructuras (61 ms de los 134 que costaba
 // estampar). Ahora cada clave tiene FILA FIJA (mc.structTexRow) y la altura sube de 16 en 16 filas, asi que lo ya

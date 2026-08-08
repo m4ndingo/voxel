@@ -1,3 +1,5 @@
+// @area: fisica
+// @necesita: servidor, playwright
 // BUG-ESC1 · «si subo ladeado a la escalera sin darle a avanzar, por ella se mueve solo el jugador y
 // tiende a caerse. Al montar en la escalera no debería de haber ninguna inercia».
 //

@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // test_panel_agentes.js — que el panel de Agentes pueda DESCRIBIR un bicho entero, no solo su esqueleto.
 //
 // Lo que se prueba aquí y en ningún otro sitio: que un agente nuevo se puede montar **con el

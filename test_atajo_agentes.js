@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // test_atajo_agentes.js — entrar y salir del panel de Agentes sin pasar por el editor.
 //
 // El panel sabia describir un bicho (test_panel_agentes.js) y la libreria sabia plantarlo

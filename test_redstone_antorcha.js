@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // Redstone, primer circuito de verdad: una antorcha que SOLO se enciende con un bloque de redstone
 // pegado. Lo que este test guarda es la union de las tres piezas, que es donde estan los fallos:
 //

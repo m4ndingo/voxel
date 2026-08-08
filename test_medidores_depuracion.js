@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: servidor, playwright
 // Los dos interruptores de depuracion de F12 —game.showFPS y game.showVoxels— y sus medidores.
 //
 // El principio que fija REQ-DBG1 es que un toggle de depuracion vale IGUAL en los tres modos

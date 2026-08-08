@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // Una flor pintada con setVoxel tiene que verse como la flor del documento y seguir costando 0 draw calls.
 //
 // Proyectar el dibujo sobre las 6 caras del cubo solo es fiel si la piel CUBRE la celda (`leaves` va de 0
