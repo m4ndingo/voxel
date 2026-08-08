@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // REQ-CART2 · El PANEL DOM de la nota (tecla N), no el cartel 3D: que se lea.
 //
 // El ticket eran dos quejas distintas y el test las separa igual que el arreglo:

@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // BUG-RS2 · DIAGNÓSTICO — «los repetidores girados no funcionan».
 //
 // El ticket pide cuatro circuitos palanca→cable→repetidor→cable→lámpara con el repetidor en @0..@3.

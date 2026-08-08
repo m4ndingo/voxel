@@ -1,3 +1,5 @@
+// @area: caras
+// @necesita: servidor, playwright
 // La mascara de caras tiene que llegar al MALLADO del Mundo, no solo al editor.
 //
 // Aqui lo que se puede desincronizar es el GIRO: mcStructGeom rota las coordenadas con dos llamadas a

@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // SONDA de REQ-AGESC1 (escala libre de agentes). Todo el diseño descansa en UNA suposición: que escalar una
 // instancia estampada es multiplicar la posición local ANTES de trasladarla al mundo, dentro de
 // mcBuildStructMesh, sin tocar la caché de geometría (que va por key+rot y NO conoce la escala).

@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // BUG-RS9 · «si me pongo como jugador delante de él y lo activo, en lugar de empujarme que es lo que
 // ocurriria en la realidad, me subo encima del piston extendido».
 //

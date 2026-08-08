@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // test_ficha_material.js — la ficha de un asset: como se llama esa textura desde un script.
 //
 // La queja del dueño: escribio «Construye Montañas» usando la textura «Hormigón Verde / Hojas» y tuvo

@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // BUG-AG1 (mitad de las placas) · «los agentes articulados ... tampoco pueden presionar placas de
 // redstone».
 //

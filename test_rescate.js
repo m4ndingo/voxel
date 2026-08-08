@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: node
 // Prueba de humo de la cadena de rescate: carga la libreria con stubs minimos y comprueba
 // que minadoEmergencia solo declara exito si el picado ABRIO paso, y que logAgente acota.
 const fs = require('fs');

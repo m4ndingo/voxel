@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // BUG-AG2 · «los agentes articulados no respetan la altura de los componentes: si una placa de
 // redstone tiene altura 1 voxel suben 16, no respetan el cuerpo real de los bloques».
 //

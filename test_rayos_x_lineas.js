@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // REQ-XR1 · Rayos-X marca con ARISTAS, no con relleno.
 //
 // El fallo que este test impide que vuelva: el volumen se pintaba como cubos macizos con alfa

@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // mcRestampAll re-mallaba TODO el terreno en cada estampado "porque el brillo pudo cambiar". Con 48 estructuras eso
 // era la fase mas cara del estampado (61 de 134 ms medidos) y casi siempre para nada: la mayoria de estructuras no
 // son emisivas, asi que la luz de bloque sale identica y las mallas del terreno se rehacen iguales.

@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // REQ-NAV1 · «solamente quedan 3 botones visibles: [Galería] [Mapa] y [...]» — con la corrección
 // posterior del dueño: el botón 2 es 🌍 Mundo, y 🗺 Mapa se va dentro del «⋯».
 //

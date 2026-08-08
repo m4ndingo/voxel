@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // test_guardar_pieza.js — retocar una pieza de agente y que el bicho vivo se entere, en el navegador de verdad.
 //
 // La queja del dueño: «cuando se está editando un bloque/estructura que forma parte de un agente

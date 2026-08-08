@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // El cartel de las notas: una nota se ve como assets/cartel.vox.json plantado sobre su bloque, y ese
 // cartel responde a la tecla N (ver/editar/borrar) igual que el bloque anotado.
 //

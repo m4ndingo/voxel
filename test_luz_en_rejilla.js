@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // Una antorcha SE VEIA encendida pero no alumbraba nada en cuanto dejaba de ser una estructura suelta y pasaba a
 // la rejilla (clic derecho -> setVoxel). El motivo: mcComputeBlockLight sembraba la luz recorriendo SOLO
 // mc.structures y leyendo sus emitCells; una pieza en mc.grid no esta en esa lista, asi que no existia como foco.

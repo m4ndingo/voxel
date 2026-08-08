@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // Verificación headless del MAPA DE SOMBRA del sol vertical (app.js).
 // No hay GPU aquí, así que se comprueban las dos cosas que sí se pueden comprobar sin ella:
 //   1) COHERENCIA DE LOS SHADERS: que cada varying que usa un fragment shader lo escriba su vertex shader, y que
@@ -8,7 +10,7 @@
 // Escenarios sacados de los fallos reales: «un cubo solo se ve oscurecido por arriba», «salen esquinas de los
 // bloques sin sombrear» y «hay zonas mas iluminadas en algunos puntos del suelo junto al bloque».
 const fs = require('fs');
-const SRC = fs.readFileSync('/root/voxel/app.js', 'utf8');
+const SRC = fs.readFileSync(__dirname + '/app.js', 'utf8');
 
 let ok = 0, fallos = 0;
 function test(nombre, fn) {

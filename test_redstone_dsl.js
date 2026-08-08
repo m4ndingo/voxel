@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // Redstone r1.1 — el vocabulario nuevo (`retardo`, `manual`, `pulso`) y las piezas que salen de él.
 //
 // Lo que de verdad se defiende aquí es la respuesta a «¿es esto Turing-completo?», que se apoya en

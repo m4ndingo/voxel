@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // BUG-AG5 · «cuando un agente es empujado por el pistón redstone, si el agente sigue avanzando en
 // dirección al pistón acaba ganando el movimiento del agente sobre el empuje del pistón, por lo que
 // si por ejemplo tenía que desplazarlo 16 al final del movimiento puede que no llegue a ese valor o

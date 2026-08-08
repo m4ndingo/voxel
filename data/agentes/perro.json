@@ -3,7 +3,8 @@
   "raiz": {
     "nombre": "torso",
     "pieza": "asset:assets/torso-perro.vox.json",
-    "rot": 0
+    "rot": 0,
+    "montable": true
   },
   "piezas": [
     {
@@ -116,15 +117,6 @@
         "fase": 0,
         "eje": "y"
       }
-    },
-    {
-      "nombre": "diana",
-      "pieza": "hab:diana",
-      "en": [
-        -0.25,
-        0.5625,
-        0
-      ]
     }
   ],
   "seguir": {
@@ -141,5 +133,6 @@
     "alto": 1.4375
   },
   "id": "perro",
-  "savedAt": "2026-08-02T20:39:36"
+  "savedAt": "2026-08-08T10:36:23",
+  "cabalgable": true
 }

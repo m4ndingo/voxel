@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: servidor, playwright
 // test_navegador.js — lo unico que prueba de verdad que los shaders COMPILAN.
 //
 // Los demas tests (test_shadow_map.js) leen el GLSL de app.js y comprueban el algoritmo en JS: son utiles,

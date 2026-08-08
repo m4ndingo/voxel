@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: node
 // Prueba de humo de game.informe(): carga la libreria real con stubs minimos y comprueba que el
 // informe, POR SI SOLO, delata los fallos de REGLAS_AGENTES.md §21 — un peldano que se ejecuta sin
 // abrir paso, siempre desde la misma celda, y dos agentes peleandose por la misma celda.

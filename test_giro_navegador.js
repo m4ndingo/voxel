@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: servidor, playwright
 // test_giro_navegador.js — la matriz de modelo por instancia (s.model), en un navegador de verdad.
 //
 // Esto NO se puede probar headless. test_bloques_comportamiento.js comprueba que el snippet CALCULA

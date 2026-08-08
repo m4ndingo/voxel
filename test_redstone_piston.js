@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // REQ-RS3 · el PISTÓN — que empuje de verdad, en cada postura, y que sepa cuándo NO puede.
 // BUG-RS7 · …incluido APUNTANDO HACIA ARRIBA (y hacia abajo), que era lo que no se podía.
 //

@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // BUG-AG3 · «si se crea un agente articulado sin la capacidad "te persigue" no se renderiza
 // correctamente, ademas se quedan las piezas sueltas, no es empujable, no te mira, etc. parece roto».
 //

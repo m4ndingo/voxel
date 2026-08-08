@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: node
 // Prueba de humo de la muerte por la propia cola (§24): una serpiente metida en un callejon de 1 de
 // ancho tiene que dejar lapida y reaparecer, en vez de hacer ping-pong entre dos celdas para siempre.
 const fs = require('fs');

@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // Al estampar una estructura que trae texturas NUEVAS, mcStampStruct pasa por mcRestampAll (hay que recomponer el
 // atlas). Lo primero que hacia mcRestampAll era vaciar mc.structs[k].meshRot, y ahi vivia TAMBIEN el bitset de
 // colision fina que consulta mcFineBoxHit -> durante el re-horneado (con sus await, o sea con frames por medio) NO

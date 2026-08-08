@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // REQ-OSD1 · los dos botones de la esquina del Mundo (🧩 Código y ✕ Cerrar) nacen ocultos, para que no
 // salgan en las capturas, y se piden con game.showOSDbuttons(true).
 //

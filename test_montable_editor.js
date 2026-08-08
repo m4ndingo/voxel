@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // REQ-MNT2 · «quiero que game.esqueletos.montable(1,'cabeza') sea algo configurable desde el editor
 // de agentes, decir si una parte del agente articulado es montable».
 //

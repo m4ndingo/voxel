@@ -118,15 +118,6 @@
         "fase": 0,
         "eje": "y"
       }
-    },
-    {
-      "nombre": "diana",
-      "pieza": "hab:diana",
-      "en": [
-        -0.25,
-        0.5625,
-        0
-      ]
     }
   ],
   "seguir": {
@@ -142,6 +133,6 @@
     "fondo": 1,
     "alto": 1.4375
   },
-  "savedAt": "2026-08-07T20:29:24",
+  "savedAt": "2026-08-08T10:36:30",
   "id": "perro-maquinero"
 }

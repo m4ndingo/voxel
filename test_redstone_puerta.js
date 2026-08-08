@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // BUG-RS6 · la PUERTA de dos celdas — que vuelva a ser redstone y que las dos hojas se muevan juntas.
 //
 // El ticket sale de que el dueño subió su puerta de 16³ a 16×16×24 porque la de antes era demasiado

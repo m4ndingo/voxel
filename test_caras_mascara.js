@@ -1,3 +1,5 @@
+// @area: caras
+// @necesita: node
 // Arnes headless para la MASCARA DE CARAS por voxel (state.caras de app.js).
 //
 // Un voxel puede pintar solo algunas de sus 6 caras (bit i = CUBE_FACES[i]); es lo que convierte un
@@ -13,12 +15,12 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const src = fs.readFileSync('/root/voxel/app.js', 'utf8');
+const src = fs.readFileSync(__dirname + '/app.js', 'utf8');
 // Cada funcion de nivel superior de app.js acaba con '}' en la columna 0.
 function extraer(nombre) {
   const ini = src.indexOf('\nfunction ' + nombre + '(');
   if (ini < 0) throw new Error('no encuentro function ' + nombre + ' en app.js');
-  const fin = src.indexOf('\n}\n', ini);
+  const fin = src.indexOf('\n}', ini);
   if (fin < 0) throw new Error('no encuentro el final de ' + nombre);
   return src.slice(ini + 1, fin + 3);
 }
@@ -26,7 +28,7 @@ function extraer(nombre) {
 function extraerConst(nombre) {
   const ini = src.indexOf('\nconst ' + nombre + ' = [');
   if (ini < 0) throw new Error('no encuentro const ' + nombre + ' en app.js');
-  const fin = src.indexOf('\n];\n', ini);
+  const fin = src.indexOf('\n];', ini);
   if (fin < 0) throw new Error('no encuentro el final de ' + nombre);
   return src.slice(ini + 1, fin + 4);
 }

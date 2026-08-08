@@ -1,3 +1,5 @@
+// @area: materiales
+// @necesita: servidor, playwright
 // BUG-SNP1 · abrir /map/empty escupia once «game.bloques.define: no existe el material "X"» seguidos,
 // cada uno con su traza de pila, y ahogaba el informe de carga. El aviso ademas MENTIA: el material
 // existe en el disco, lo que pasa es que la paleta de un mundo solo lleva lo COLOCADO. Y detras del

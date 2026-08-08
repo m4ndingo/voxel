@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // REQ-MNT1 · «cuando construimos los npcs se les dieron habilidades a algunos como "passengers: true",
 // es posible que para un agente articulado le pueda dar esta habilidad a su cabeza desde scripting?».
 //

@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // Plantar hojas desde un script tiene que costar lo que cuesta en Minecraft: casi nada.
 //
 // `leaves` es una cáscara 16³ con 694 máscaras de `caras` y `atravesable`. Puesta A MANO va como pieza

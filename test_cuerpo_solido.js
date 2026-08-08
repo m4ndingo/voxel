@@ -1,3 +1,5 @@
+// @area: fisica
+// @necesita: node
 // Arnes headless para «CUERPO SOLIDO» de data/snippets/base-npc-skills.json.
 //
 // Extrae la seccion VERBATIM del snippet guardado y la ejecuta contra stubs de los internos del Mundo.
@@ -7,7 +9,7 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const lib = JSON.parse(fs.readFileSync('/root/voxel/data/snippets/base-npc-skills.json', 'utf8'));
+const lib = JSON.parse(fs.readFileSync(__dirname + '/data/snippets/base-npc-skills.json', 'utf8'));
 const lineas = lib.code.split('\n');
 const ini = lineas.findIndex(l => l.includes('CUERPO SOLIDO: la fisica del agente'));
 if (ini < 0) throw new Error('no encuentro la seccion CUERPO SOLIDO en la libreria');

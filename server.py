@@ -209,6 +209,7 @@ def list_all():
         meta = d.get('meta', {})
         out.append({'id': fn[:-5], 'name': meta.get('name', '(sin nombre)'),
                     'role': meta.get('role', ''), 'type': meta.get('type', 'objeto'),
+                    'categoria': meta.get('categoria', ''),
                     'size': d.get('size', 16), 'count': len(d.get('voxels', {})),
                     'savedAt': d.get('savedAt', '')})
     out.sort(key=lambda h: h.get('savedAt', ''), reverse=True)   # más recientes primero
@@ -671,7 +672,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     # role/icon/alias/description solo si el editor los trae: 'group' NO se toca (no hay
                     # UI para elegirlo y machacarlo mandaría una pieza de «Agentes» a «Bloques de
                     # construcción»). alias/description vienen heredados del fichero de arriba.
-                    for k in ('role', 'icon', 'alias', 'description'):
+                    for k in ('role', 'icon', 'alias', 'description', 'categoria'):
                         if meta.get(k):
                             item[k] = meta[k]
                     found = True
@@ -688,6 +689,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     'size': d.get('size', 16),
                     'file': rel_file
                 }
+                if meta.get('categoria'):
+                    nuevo['categoria'] = meta['categoria']
                 # Solo si los hay: una entrada con 'alias':'' es ruido en el índice y además el cliente
                 # registraría la cadena vacía como clave de material.
                 for k in ('alias', 'description'):

@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // BUG-ROT1 · el arnes headless (test_posturas_24.js) demuestra que las 24 posturas son 24 rotaciones
 // distintas sobre el papel. Aqui se comprueba lo otro, que es lo que el dueno ve: que mcStructGeom, en
 // el navegador de verdad y con una pieza de verdad, HORNEA 24 geometrias distintas — y que las 16 de

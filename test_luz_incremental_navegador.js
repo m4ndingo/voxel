@@ -1,3 +1,5 @@
+// @area: render
+// @necesita: servidor, playwright
 // Skylight incremental (mcRelightBox) · Chromium + SwiftShader
 //
 // El atajo de recalcular la luz solo en una caja alrededor del bloque tocado se sostiene sobre una única

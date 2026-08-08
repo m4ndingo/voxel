@@ -1,3 +1,5 @@
+// @area: caras
+// @necesita: servidor, playwright
 // Dos bloques estampados que se TOCAN comparten plano: cada uno emite su propia cara ahi (mcStructGeom solo culla
 // las caras internas de UNA estructura, porque `solid` sale de un solo doc). Las dos caras empatan en profundidad
 // y, como las dos son estructura, las dos llevan el MISMO sesgo -> el sesgo no puede desempatarlas. De ahi la regla

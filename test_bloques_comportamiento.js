@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: servidor, playwright
 // Bloques con comportamiento: el material manda, no el voxel.
 // Se carga el snippet 'mundo-autoarranque' con stubs minimos (sin navegador) y se comprueba que el
 // envoltorio de mcUpdate hace lo que dice: trepar contra un material trepable, disparar alPisar UNA

@@ -1,3 +1,5 @@
+// @area: agentes
+// @necesita: servidor, playwright
 // BUG-AG9 + BUG-AG10 · qué puede ver un agente articulado.
 //
 // El dueño: «si me pongo encima de su cabeza no debería verme puesto que los ojos no pueden mirar en

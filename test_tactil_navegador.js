@@ -1,3 +1,5 @@
+// @area: general
+// @necesita: servidor, playwright
 // test_tactil_navegador.js — los controles táctiles del Mundo, en un Chromium con pantalla táctil.
 //
 // Esto NO se puede probar headless a secas: lo que se comprueba es que un dedo mueve al jugador de

@@ -36,6 +36,24 @@ marca, nunca se reescribe entero.
 
 ---
 
+## 🗺️ Mapa de Navegación del Documento
+
+1. [🚦 ARRANQUE — Leer esto antes que nada](#-arranque--leer-esto-antes-que-nada)
+2. [💡 Qué es VoxelForge](#qué-es)
+3. [🏗️ Arquitectura del Sistema y Ficheros Clave](#arquitectura-por-qué-necesita-leer-varios-archivos)
+4. [🤖 Agentes / NPC y Esqueletos Articulados](#agentes--npc--regla-de-arquitectura-leer-antes-de-tocar-nada)
+   - [Montar en piezas de un agente](#ir-montado-en-una-pieza-de-un-agente-req-mnt1--req-mnt2)
+   - [Aviso y diagnóstico de Atascado](#el-toast-atascado-dice-por-qué-y-si-es-un-agente-dice-cuál-y-qué-pieza-req-dbg2)
+   - [Conos de Visión y Atención](#lo-que-un-agente-puede-ver-son-dos-preguntas-distintas-bug-ag9--bug-ag10)
+5. [🧱 Bloques, Materiales y Comportamientos (`game.bloques`)](#bloques-con-comportamiento-gamebloques--el-material-manda-no-el-voxel)
+6. [🧗 Física, Colisiones y Parkour](#parkour-agarrarse-al-canto-y-trepar-v127-agarre-sin-tirón-en-v128)
+7. [🎨 Iluminación, Sombras e Iluminación Incremental](#poner-un-bloque-no-puede-costar-el-mundo-entero-skylight-incremental)
+8. [🔌 Redstone y Piezas Lógicas (`redstone/`)](#-redstone--vive-fuera-de-appjs-en-redstone)
+9. [📝 Notas, Carteles 3D e Interfaz](#-una-nota-se-ve-como-un-cartel-de-verdad)
+10. [🧪 Batería de Pruebas y Runner](#-batería-de-pruebas)
+
+---
+
 ## Qué es
 
 **VoxelForge** — editor de assets **voxel** que ha crecido hasta tener un **Mundo** jugable. Son dos
@@ -2966,9 +2984,27 @@ panel de la `N`, un snippet o un agente que va dejando notas.
 En **`/map/redstone`** las diez notas ya montadas son carteles: `redstone-ejemplos.js` cuelga la nota
 de la **losa del suelo** y el Mundo planta el cartel encima, así que ya no se levanta un poste de
 tablones a mano. ⚠️ Al mover una nota hay que **borrar la vieja** (`delete mc.notes[…]`): una nota
-sobrevive a que le quiten el bloque y se quedaría flotando —con su cartel— en la bandeja del dueño.
+sobrevive a que le quiten el bloque y se quedaría flotando —con su cartel— en la bandeja del dueño.3046: pasó a ser el valor general. Guardián: `node test_notas_panel.js`.
 
-Test: `node test_notas_cartel.js` (en `/map/test`, sin persistir nada) — que la nota planta el cartel
+## 🧪 Batería de Pruebas y Runner (`correr_tests.js`)
+
+El repositorio contiene **85 ficheros `test_*.js`** en la raíz. Cada fichero incluye una cabecera declarativa:
+```javascript
+// @area: redstone | agentes | caras | fisica | render | editor | materiales | general
+// @necesita: node | servidor, playwright
+```
+
+Para ejecutar las pruebas se utiliza el runner CLI `correr_tests.js`:
+```bash
+node correr_tests.js --node               # ejecuta solo los tests de Node puro (~8.9s)
+node correr_tests.js --playwright         # ejecuta solo los tests con Chromium / servidor
+node correr_tests.js --area=redstone       # ejecuta tests de una o varias áreas
+node correr_tests.js --list                # muestra el catálogo e inventario completo
+```
+
+El runner incluye comprobación *pre-flight* automática del servidor `:8500` y de `playwright` antes de arrancar los tests de navegador.
+
+## Convenciones nota planta el cartel
 y que va `efimera` y fuera de `mcStructuresDoc`, que las 4 celdas del cartel resuelven a la nota y el
 aire de al lado no, que no corta el paso, que la `N` abre **esa** nota con su texto y su «Borrar», el
 interruptor en los dos sentidos, y que borrar la nota se lleva el cartel sin dejar la estructura

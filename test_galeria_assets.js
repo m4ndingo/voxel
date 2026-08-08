@@ -1,3 +1,5 @@
+// @area: editor
+// @necesita: servidor, playwright
 // test_galeria_assets.js — renombrar y borrar un ASSET desde la galeria, en el navegador de verdad.
 //
 // La queja del dueño: "las texturas nuevas que importo como Hielo no puedo borrarlas, en cambio las

@@ -710,11 +710,33 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .mc-picker{z-index:60}                            /* selector de galería por encima de la hotbar */
 /* Galería del Mundo: ventana más grande y bloques más pequeños → se ven muchos más de una vez (ticket 5).
    Solo afecta a #mc-picker (clase .mc-picker); el selector del Mapa (.mapa-picker sin .mc-picker) queda igual. */
-.mc-picker{width:min(880px,95vw); max-height:86vh}
-.mc-picker .mapa-picker-grid{gap:8px; padding:10px; grid-template-columns:repeat(auto-fill, minmax(74px,1fr))}
-.mc-picker .mapa-opt{padding:5px; gap:3px; border-radius:8px}
-.mc-picker .mapa-opt .mo-name{font-size:11px}
-.mc-picker .mapa-opt .mo-badge{font-size:9px}
+/* REQ-PICK1 · Selector de bloques/texturas mejorado (ancho 1200px, minmax 110px, 2 líneas a 9px en fuente del juego, buscador, filtros, menú contextual y ficha) */
+.mc-picker{width:min(1200px,96vw); max-height:86vh; font-family:var(--font-game), sans-serif}
+.mc-picker-bar{display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:8px 12px; background:rgba(0,0,0,0.25); border-bottom:1px solid rgba(255,255,255,0.1)}
+.mc-picker-search{flex:1; min-width:200px; padding:6px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.4); color:#fff; font-family:var(--font-game), sans-serif; font-size:11px}
+.mc-picker-search:focus{outline:none; border-color:#55aaff; box-shadow:0 0 6px rgba(85,170,255,0.4)}
+.mc-picker-filters{display:flex; gap:4px; flex-wrap:wrap}
+.mc-pick-filter{background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); color:#ccc; border-radius:6px; padding:4px 10px; font-family:var(--font-game), sans-serif; font-size:9px; cursor:pointer; transition:all 0.15s ease}
+.mc-pick-filter:hover{background:rgba(255,255,255,0.2); color:#fff}
+.mc-pick-filter.active{background:#3377ff; border-color:#5599ff; color:#fff; font-weight:bold}
+.mc-picker .mapa-picker-grid{gap:10px; padding:12px; grid-template-columns:repeat(auto-fill, minmax(110px,1fr))}
+.mc-picker .mapa-opt{padding:6px; gap:4px; border-radius:8px; position:relative; cursor:pointer; transition:transform 0.1s ease, box-shadow 0.1s ease}
+.mc-picker .mapa-opt:hover{transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,0.3)}
+.mc-picker .mapa-opt .mo-name{font-family:var(--font-game), sans-serif; font-size:9px; line-height:1.25; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; word-break:break-word; text-align:center}
+.mc-picker .mapa-opt .mo-badge{font-family:var(--font-game), sans-serif; font-size:9px}
+
+/* Context Menu en #mc-picker */
+.mc-ctxmenu{position:fixed; z-index:100; background:#182232; border:1px solid rgba(255,255,255,0.2); border-radius:8px; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.6); display:flex; flex-direction:column; gap:2px; min-width:140px}
+.mc-ctxmenu[hidden]{display:none !important}
+.mc-ctxitem{background:none; border:none; color:#eee; padding:6px 12px; text-align:left; font-family:var(--font-game), sans-serif; font-size:11px; cursor:pointer; border-radius:4px}
+.mc-ctxitem:hover{background:#3377ff; color:#fff}
+
+/* Ficha de Material Modal */
+.mc-card-modal{position:fixed; inset:0; z-index:110; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center}
+.mc-card-modal[hidden]{display:none !important}
+.mc-card-box{background:#151d28; border:1px solid rgba(255,255,255,0.2); border-radius:12px; width:min(450px,90vw); box-shadow:0 16px 40px rgba(0,0,0,0.7); overflow:hidden; font-family:var(--font-game), sans-serif}
+.mc-card-head{display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:rgba(255,255,255,0.05); border-bottom:1px solid rgba(255,255,255,0.1); font-weight:bold; font-size:13px; color:#fff}
+.mc-card-body{padding:16px; font-size:11px; line-height:1.6; color:#ddd}
 @media (max-width:680px){ .mc-hotbar{gap:3px; padding:4px} .mc-slot{width:33px; height:33px} }
 /* Overlay de carga del Mundo (t12): tapa el canvas con el color de cielo + spinner mientras se hornea */
 .mc-loading{position:absolute; inset:0; z-index:20; display:flex; flex-direction:column;

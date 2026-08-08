@@ -1,3 +1,5 @@
+// @area: fisica
+// @necesita: servidor, playwright
 // BUG-AG4 · «puedo subirme al torso de un agente pero no a su cabeza, que parecería sólida pero no,
 // la traspaso al subirme encima y caigo en el torso».
 //

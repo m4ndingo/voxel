@@ -1,3 +1,5 @@
+// @area: materiales
+// @necesita: node
 // BUG-SNP2 · `hab:placa-on` se avisaba como si fuera un dedo torcido de `hab:palanca-on`:
 //
 //     game.bloques.define: no existe el material "hab:placa-on". ¿Querías "hab:palanca-on"?
@@ -17,11 +19,11 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const doc = JSON.parse(fs.readFileSync('/root/voxel/data/snippets/mundo-autoarranque.json', 'utf8'));
+const doc = JSON.parse(fs.readFileSync(__dirname + '/data/snippets/mundo-autoarranque.json', 'utf8'));
 const src = doc.code;
 
 // El snippet vive dentro de una IIFE, asi que sus funciones cierran con '}' en la columna 2 (no en
-// la 0 como las de app.js) — y por eso NO vale el corte por '\n}\n' de los otros arneses.
+// la 0 como las de app.js) — y por eso NO vale el corte por '\n}' de los otros arneses.
 function extraer(nombre) {
   const ini = src.indexOf('\n  function ' + nombre + '(');
   if (ini < 0) throw new Error('no encuentro function ' + nombre + ' en el snippet');

@@ -1,3 +1,5 @@
+// @area: redstone
+// @necesita: servidor, playwright
 // Redstone r1.2 — un BLOQUE MACIZO transporta la señal a lo que tiene pegado (REQ-RS4).
 //
 // La queja del dueño: «para redstone, los bloques que reciben energía de redstone deben energizarse,
