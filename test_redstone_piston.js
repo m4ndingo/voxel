@@ -125,13 +125,14 @@ const ok = (cond, txt, extra) => {
     const monta = (C, rot, delante) => {
       const d = DIRS[frenteDe(rot)];
       const cel = k => [C[0] + d[0] * k, C[1] + d[1] * k, C[2] + d[2] * k];
-      for (let k = -1; k <= 3; k++) { const c = cel(k); pon(c[0], c[1], c[2], null); }
+      const maxK = Math.max(3, delante.length + 1);
+      for (let k = -1; k <= maxK; k++) { const c = cel(k); pon(c[0], c[1], c[2], null); }
       pon(C[0], C[1], C[2], rot ? 'hab:piston@' + rot : 'hab:piston');
       delante.forEach((clave, i) => { const c = cel(i + 1); if (clave) pon(c[0], c[1], c[2], clave); });
       const at = cel(-1);
       pon(at[0], at[1], at[2], 'hab:palanca');
       revisa(C); ticks(6);
-      return { cel, atras: at };
+      return { cel, atras: at, len: delante.length };
     };
     const conmuta = (m, C, on) => {
       mcSetBlock(m.atras[0], m.atras[1], m.atras[2], mc.name2id[on ? 'hab:palanca-on' : 'hab:palanca']);
@@ -142,7 +143,10 @@ const ok = (cond, txt, extra) => {
       for (let k = 0; k <= hasta; k++) { const c = m.cel(k); f.push(base(claveEn(c[0], c[1], c[2]))); }
       return f;
     };
-    const desmonta = m => { for (let k = -1; k <= 3; k++) { const c = m.cel(k); pon(c[0], c[1], c[2], null); } };
+    const desmonta = m => {
+      const maxK = Math.max(3, m.len + 1);
+      for (let k = -1; k <= maxK; k++) { const c = m.cel(k); pon(c[0], c[1], c[2], null); }
+    };
 
     // ── A y B · los cuatro giros, con un bloque delante y hueco detrás ─────────────────────────
     out.giros = {};
@@ -165,12 +169,12 @@ const ok = (cond, txt, extra) => {
       ticks(4);
     }
 
-    // ── C · sin hueco: dos bloques delante ────────────────────────────────────────────────────
+    // ── C · sin hueco: 13 bloques delante ────────────────────────────────────────────────────
     {
       const C = [X + 10, Y + 3, Z + 10];
-      const m = monta(C, 0, [EMPUJADO, EMPUJADO]);
+      const m = monta(C, 0, Array(13).fill(EMPUJADO));
       conmuta(m, C, true);
-      out.bloqueado = foto(m, 3);
+      out.bloqueado = foto(m, 14);
       conmuta(m, C, false);
       desmonta(m); ticks(4);
     }
@@ -255,9 +259,9 @@ const ok = (cond, txt, extra) => {
   }
 
   console.log('\nD · casos en los que NO se puede extender');
-  ok(r.bloqueado[0] === 'hab:piston', 'con dos bloques delante no se abre',
+  ok(r.bloqueado[0] === 'hab:piston', 'con 13 bloques delante no se abre',
     r.bloqueado.join(' → '));
-  ok(r.bloqueado[1] === ROCA && r.bloqueado[2] === ROCA && !r.bloqueado[3],
+  ok(r.bloqueado[1] === ROCA && r.bloqueado[13] === ROCA && !r.bloqueado[14],
     '…y no mueve nada de lo que tiene delante', r.bloqueado.join(' → '));
   if (r.borde === null) console.log('  --   el borde del mundo no estaba libre; caso no medido');
   else ok(r.borde === 'hab:piston', 'contra el borde del mundo tampoco se abre', String(r.borde));

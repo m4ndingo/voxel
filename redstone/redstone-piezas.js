@@ -51,6 +51,11 @@
   // `nivel === antes`. Registrando los dos materiales por separado, `apagada` es cada uno sí mismo,
   // el motor no toca nada, y quien decide si se extiende es el callback — que es quien sabe si cabe.
   var CABEZA = 'hab:piston-cabeza';
+  var CABEZA_PEG = 'hab:piston-pegajoso-cabeza';
+
+  // Bases reconocidas como pistón (normal y pegajoso)
+  var ES_PISTON = { 'hab:piston': 1, 'hab:piston-on': 1, 'hab:piston-pegajoso': 1, 'hab:piston-pegajoso-on': 1 };
+  var ES_PISTON_PEGAJOSO = { 'hab:piston-pegajoso': 1, 'hab:piston-pegajoso-on': 1 };
 
   function baseDe(k) { var i = k ? k.lastIndexOf('@') : -1; return i < 0 ? (k || '') : k.slice(0, i); }
   // La postura ENTERA, sin recortar: son 24 y no 16 (mcOriNorm manda). Quedarse con cuatro bits no
@@ -201,7 +206,9 @@
   function accionar(x, y, z, extender) {
     if (!mcInside(x, y, z)) return;
     var clave = mc.blockKey[mc.grid[mcIdx(x, y, z)]] || '';
-    if (baseDe(clave) !== 'hab:piston' && baseDe(clave) !== 'hab:piston-on') return;   // ya no hay pistón
+    var base = baseDe(clave);
+    if (!ES_PISTON[base]) return;   // ya no hay pistón
+    var pegajoso = !!ES_PISTON_PEGAJOSO[base];
     var ori = oriDe(clave), d = frenteDe(ori);   // empuja hacia donde MIRA, en las 24 posturas
     var ax = x + d[0], ay = y + d[1], az = z + d[2];        // donde va la cabeza
     var bx = ax + d[0], by = ay + d[1], bz = az + d[2];     // donde va lo empujado
@@ -209,23 +216,69 @@
     // (mc.structures) ocupa varias celdas y no vive en la rejilla: delante del pistón se ve como aire
     // y la cabeza se le mete dentro. Límite conocido de la v1, no un descuido.
     var reintentar = function () { accionar(x, y, z, extender); };
-    var idCuerpo = idDe(extender ? 'hab:piston-on' : 'hab:piston', ori, reintentar);
+    var baseOff = pegajoso ? 'hab:piston-pegajoso' : 'hab:piston';
+    var baseOn  = pegajoso ? 'hab:piston-pegajoso-on' : 'hab:piston-on';
+    var cab     = pegajoso ? CABEZA_PEG : CABEZA;
+    var idCuerpo = idDe(extender ? baseOn : baseOff, ori, reintentar);
     if (!idCuerpo) return;                                   // aún no está en la paleta: se reintenta sola
     var tocadas = [];
+    var bloquesAMover = [];
 
     if (extender) {
-      var idCab = idDe(CABEZA, ori, reintentar);
+      var idCab = idDe(cab, ori, reintentar);
       if (!idCab) return;                                    // aún no está en la paleta: se reintenta sola
       if (!mcInside(ax, ay, az)) return;                     // contra el borde del mundo no se abre
       var enA = mc.grid[mcIdx(ax, ay, az)];
       if (enA === idCab) return;                             // ya estaba extendido
-      if (enA) {
-        // v1: UN bloque, UNA celda. Si detrás no hay hueco, el pistón NO se extiende — como en
-        // Minecraft, y por eso el cuerpo tampoco cambia de material: abierto sin cabeza se vería roto.
-        if (!mcInside(bx, by, bz) || mc.grid[mcIdx(bx, by, bz)]) return;
-        var enAMover = enA;
-        var claveA = mc.blockKey[enA] || '';
+
+      // Nueva lógica: empujar hasta 12 bloques seguidos
+      var actualX = ax, actualY = ay, actualZ = az;
+      var esExtensible = false;
+
+      while (bloquesAMover.length <= 12) {
+        if (!mcInside(actualX, actualY, actualZ)) break;     // borde del mundo alcanzado
+        var id = mc.grid[mcIdx(actualX, actualY, actualZ)] || 0;
+        var esInamovible = (id > 0 && mc.inamovibleDoc && mc.inamovibleDoc[id] === 1);
+        if (esInamovible) {
+          esExtensible = false;
+          break;
+        }
+
+        var claveCurrent = (mc.blockKey[id] || '').toLowerCase();
+        var esFluidoCurrent = id > 0 && (claveCurrent.indexOf('agua') >= 0 || claveCurrent.indexOf('water') >= 0 ||
+                              claveCurrent.indexOf('lava') >= 0 || (game.fluidos && game.fluidos.esFluido && game.fluidos.esFluido(actualX, actualY, actualZ)));
+
+        var esReemplazable = (typeof mcIsReplaceable === 'function')
+          ? mcIsReplaceable(id, actualX, actualY, actualZ)
+          : (id === 0 || esFluidoCurrent);
+
+        if (esReemplazable || esFluidoCurrent) {
+          esExtensible = true;
+          break;
+        }
+
+        bloquesAMover.push({
+          x: actualX,
+          y: actualY,
+          z: actualZ,
+          id: id
+        });
+
+        actualX += d[0];
+        actualY += d[1];
+        actualZ += d[2];
+      }
+
+      if (!esExtensible) return; // Si no hay celda libre/reemplazable o supera 12 bloques, no se extiende.
+
+      // Mover los bloques de atrás hacia adelante
+      for (var k = bloquesAMover.length - 1; k >= 0; k--) {
+        var b = bloquesAMover[k];
+        var destX = b.x + d[0], destY = b.y + d[1], destZ = b.z + d[2];
+        var enAMover = b.id;
+        var claveA = mc.blockKey[b.id] || '';
         var baseA = baseDe(claveA);
+
         // BUG-RS13 · Al empujar una placa/botón encendido, se restaura a su estado desaccionado
         if (baseA === 'hab:placa-on') {
           var idOff = idDe('hab:placa', oriDe(claveA), reintentar);
@@ -234,18 +287,111 @@
           var idOff = idDe('hab:boton', oriDe(claveA), reintentar);
           if (idOff) enAMover = idOff;
         }
-        mcSetBlock(bx, by, bz, enAMover);                         // no hace falta vaciar A: la cabeza la pisa
-        tocadas.push([bx, by, bz]);
+
+        mcSetBlock(destX, destY, destZ, enAMover);
+        tocadas.push([destX, destY, destZ]);
+        if (typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function') {
+          game.fluidos.onBlockChange(b.x, b.y, b.z, b.id, 0);
+          game.fluidos.onBlockChange(destX, destY, destZ, 0, enAMover);
+        }
       }
+
+      // Escribir la cabeza en ax, ay, az (pisa lo que hubiera, por ejemplo, agua/lava/aire)
       mcSetBlock(ax, ay, az, idCab);
       tocadas.push([ax, ay, az]);
+      if (typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function') {
+        game.fluidos.onBlockChange(ax, ay, az, enA, idCab);
+      }
     } else {
-      // Un pistón NORMAL no tira de lo que empujó, solo recoge SU cabeza. Y solo si la cabeza sigue
-      // ahí: si alguien la ha roto y ha puesto otra cosa, esa otra cosa se respeta.
+      // ── Retracción ──
+      // Verificar que la cabeza sigue ahí (normal O pegajosa según el tipo)
       if (!mcInside(ax, ay, az)) return;
-      if (baseDe(mc.blockKey[mc.grid[mcIdx(ax, ay, az)]]) !== CABEZA) return;
-      mcSetBlock(ax, ay, az, 0);
-      tocadas.push([ax, ay, az]);
+      var baseCabAhora = baseDe(mc.blockKey[mc.grid[mcIdx(ax, ay, az)]] || '');
+      if (baseCabAhora !== CABEZA && baseCabAhora !== CABEZA_PEG) return;
+
+      // Pistón pegajoso: antes de quitar la cabeza, tirar del bloque que está delante de ella.
+      // Solo tira de UN bloque (como Minecraft), y solo si no es inamovible.
+      if (pegajoso && mcInside(bx, by, bz)) {
+        var idDelante = mc.grid[mcIdx(bx, by, bz)] || 0;
+        if (idDelante > 0) {
+          var esInamov = mc.inamovibleDoc && mc.inamovibleDoc[idDelante] === 1;
+          // No tira de otro pistón extendido, ni de inamovibles, ni de fluidos (agua/lava)
+          var claveDelante = (mc.blockKey[idDelante] || '').toLowerCase();
+          var esFluido = claveDelante.indexOf('agua') >= 0 || claveDelante.indexOf('water') >= 0 ||
+                         claveDelante.indexOf('lava') >= 0 || (typeof mcIsReplaceable === 'function' && mcIsReplaceable(idDelante, bx, by, bz)) ||
+                         (game.fluidos && ((game.fluidos.isFluid && game.fluidos.isFluid(idDelante, bx, by, bz)) || (game.fluidos.esFluido && game.fluidos.esFluido(bx, by, bz))));
+          var baseDel = baseDe(mc.blockKey[idDelante] || '');
+          var esOtroPiston = baseDel === 'hab:piston-on' || baseDel === 'hab:piston-pegajoso-on'
+                          || baseDel === CABEZA || baseDel === CABEZA_PEG;
+          if (!esInamov && !esOtroPiston && !esFluido) {
+            // Mover el bloque de (bx,by,bz) a (ax,ay,az) — la cabeza aún está ahí, se pisa
+            var idHeadOld = mc.grid[mcIdx(ax, ay, az)];
+            mcSetBlock(ax, ay, az, idDelante);
+            mcSetBlock(bx, by, bz, 0);
+            tocadas.push([ax, ay, az]);
+            tocadas.push([bx, by, bz]);
+            if (typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function') {
+              game.fluidos.onBlockChange(ax, ay, az, idHeadOld, idDelante);
+              game.fluidos.onBlockChange(bx, by, bz, idDelante, 0);
+            }
+          } else {
+            // Inamovible, fluido o pistón extendido: solo recoge la cabeza sin tirar del fluido/bloque
+            var idHeadOld = mc.grid[mcIdx(ax, ay, az)];
+            mcSetBlock(ax, ay, az, 0);
+            tocadas.push([ax, ay, az]);
+            if (typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function') {
+              game.fluidos.onBlockChange(ax, ay, az, idHeadOld, 0);
+            }
+          }
+        } else {
+          // No hay nada delante: solo recoge la cabeza
+          var idHeadOld = mc.grid[mcIdx(ax, ay, az)];
+          mcSetBlock(ax, ay, az, 0);
+          tocadas.push([ax, ay, az]);
+          if (typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function') {
+            game.fluidos.onBlockChange(ax, ay, az, idHeadOld, 0);
+          }
+        }
+      } else {
+        // Pistón NORMAL: solo recoge su cabeza
+        var idHeadOld = mc.grid[mcIdx(ax, ay, az)];
+        mcSetBlock(ax, ay, az, 0);
+        tocadas.push([ax, ay, az]);
+        if (typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function') {
+          game.fluidos.onBlockChange(ax, ay, az, idHeadOld, 0);
+        }
+      }
+
+      // Despertar agentes apoyados encima de la cabeza o bloque retraído para forzar su caída
+      if (game.esqueletos && game.esqueletos.enCaja) {
+        var agentesArriba = game.esqueletos.enCaja(ax - 0.6, ay, az - 0.6, ax + 1.6, ay + 3.0, az + 1.6);
+        if (agentesArriba && agentesArriba.length) {
+          for (var ag = 0; ag < agentesArriba.length; ag++) {
+            if (agentesArriba[ag].mov) agentesArriba[ag].mov.alto += 0.01;
+            else game.esqueletos.aturdir(agentesArriba[ag], 0.01);
+          }
+        }
+      }
+
+      // Notificar en la línea del eje para despertar a pistones bloqueados
+      for (var i = 1; i <= 13; i++) {
+        var nx1 = ax + d[0] * i, ny1 = ay + d[1] * i, nz1 = az + d[2] * i;
+        if (mcInside(nx1, ny1, nz1)) {
+          var id1 = mc.grid[mcIdx(nx1, ny1, nz1)] || 0;
+          var key1 = mc.blockKey[id1] || '';
+          if (ES_PISTON[baseDe(key1)]) {
+            game.redstone.revisar(nx1, ny1, nz1);
+          }
+        }
+        var nx2 = ax - d[0] * i, ny2 = ay - d[1] * i, nz2 = az - d[2] * i;
+        if (mcInside(nx2, ny2, nz2)) {
+          var id2 = mc.grid[mcIdx(nx2, ny2, nz2)] || 0;
+          var key2 = mc.blockKey[id2] || '';
+          if (ES_PISTON[baseDe(key2)]) {
+            game.redstone.revisar(nx2, ny2, nz2);
+          }
+        }
+      }
     }
 
     // Al abrirse, `tocadas` son exactamente las celdas que acaban de volverse macizas: la cabeza y,
@@ -255,15 +401,78 @@
 
     if (mc.grid[mcIdx(x, y, z)] !== idCuerpo) { mcSetBlock(x, y, z, idCuerpo); tocadas.push([x, y, z]); }
     // Con la geometría ya en su sitio (cabeza y cuerpo): a quien se haya quedado dentro, se le empuja.
-    if (extender) apartar(d, ax, ay, az, enA ? bx : undefined, enA ? by : undefined, enA ? bz : undefined, barridas);
-    if (tocadas.length) remallar(tocadas);
+    if (extender) {
+      var ultimoDestX = undefined, ultimoDestY = undefined, ultimoDestZ = undefined;
+      if (bloquesAMover && bloquesAMover.length > 0) {
+        var ult = bloquesAMover[bloquesAMover.length - 1];
+        ultimoDestX = ult.x + d[0];
+        ultimoDestY = ult.y + d[1];
+        ultimoDestZ = ult.z + d[2];
+      }
+      apartar(d, ax, ay, az, ultimoDestX, ultimoDestY, ultimoDestZ, barridas);
+    }
+    if (tocadas.length) {
+      remallar(tocadas);
+      for (var tIdx = 0; tIdx < tocadas.length; tIdx++) {
+        game.redstone.revisar(tocadas[tIdx][0], tocadas[tIdx][1], tocadas[tIdx][2]);
+      }
+    }
+    game.redstone.revisar(x, y, z);
   }
 
   // `alRecibirSeñal` salta con CUALQUIER cambio de nivel, y un 15 → 14 no es un flanco: el pistón ya
   // estaba fuera y tiene que quedarse fuera. Lo que cuenta es cruzar el umbral.
   function empujar(celda, nivel, antes) {
-    var ahora = nivel >= 1, era = antes >= 1;
-    if (ahora !== era) accionar(celda.x, celda.y, celda.z, ahora);
+    var clave = mc.blockKey[mc.grid[mcIdx(celda.x, celda.y, celda.z)]] || '';
+    var base = baseDe(clave);
+    var cfg = game.redstone._tabla ? game.redstone._tabla[clave] : null;
+    var nivelEfectivo = nivel;
+
+    // Un pistón NO se activa por su frente/cabeza (el bloque empujado o bloque de redstone desplegado).
+    if (cfg && cfg.noCaraFrontal) {
+      var ori = oriDe(clave), d = frenteDe(ori);
+      var ax = celda.x + d[0], ay = celda.y + d[1], az = celda.z + d[2];
+      var bx = ax + d[0], by = ay + d[1], bz = az + d[2];
+      
+      // Medir la señal que llega a celda únicamente desde las 5 caras que NO son la frontal d
+      var dirsLocal = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+      var maxOtras5 = 0;
+      for (var i = 0; i < 6; i++) {
+        var nx = celda.x + dirsLocal[i][0], ny = celda.y + dirsLocal[i][1], nz = celda.z + dirsLocal[i][2];
+        if (nx === ax && ny === ay && nz === az) continue;
+        if (nx === bx && ny === by && nz === bz) continue;
+        if (dirsLocal[i][0] === d[0] && dirsLocal[i][1] === d[1] && dirsLocal[i][2] === d[2]) continue;
+        var c = cfgEn(nx, ny, nz);
+        if (c) {
+          var s = salidaDe(nx, ny, nz, c, i ^ 1);
+          if (s > maxOtras5) maxOtras5 = s;
+        } else if (bloqueEnergizable(nx, ny, nz)) {
+          // Un bloque solido adyacente a celda no debe tomar energia del bloque de RS situado en ax/bx
+          var sb = 0;
+          for (var j = 0; j < 6; j++) {
+            var nnx = nx + dirsLocal[j][0], nny = ny + dirsLocal[j][1], nnz = nz + dirsLocal[j][2];
+            if (nnx === celda.x && nny === celda.y && nnz === celda.z) continue;
+            if (nnx === ax && nny === ay && nnz === az) continue;
+            if (nnx === bx && nny === by && nnz === bz) continue;
+            var c2 = cfgEn(nnx, nny, nnz);
+            if (!c2) continue;
+            var s2 = salidaDe(nnx, nny, nnz, c2, j ^ 1);
+            if (s2 > sb) sb = s2;
+          }
+          if (sb > maxOtras5) maxOtras5 = sb;
+        }
+      }
+      nivelEfectivo = maxOtras5;
+    }
+
+    var estaExtendido = (base === 'hab:piston-on' || base === 'hab:piston-pegajoso-on');
+    // Si el pistón está extendido, ignorar la cara frontal nos asegura que el bloque de redstone pegado
+    // no lo mantenga encendido. Sin embargo, si nivel (la señal externa global que entra al pistón)
+    // cae a 0, o si maxOtras5 es 0, el pistón debe retraerse.
+    var ahora = (nivelEfectivo >= 1);
+    if (ahora !== estaExtendido) {
+      accionar(celda.x, celda.y, celda.z, ahora);
+    }
   }
 
   // ── 0 bis. la puerta de dos celdas ─────────────────────────────────────────────────────────
@@ -372,7 +581,7 @@
     // Bloque de redstone: una fuente que NO se apaga. Es la única pieza sin pareja encendida/apagada
     // y sin `manual`, y eso no es un descuido — es la definición: no hay estado que guardar porque
     // no hay dos estados. `aplicar()` no le toca el material nunca (solo cambia el bloque cuando hay
-    // `encendida`/`apagada`), así que un bloque de redstone puesto se queda como está para siempre.
+    // `encendida`/`apagada`), así que un bloque de redstone puesto se queda como me está para siempre.
     //
     // Sin `mira` ni `soloAlFrente` a propósito: reparte 15 por sus SEIS caras. Es lo contrario del
     // repetidor y es lo que lo hace útil como cimiento — pegas cable a cualquier lado y arranca a 15.
@@ -392,13 +601,22 @@
     // recogería jamás. Sin `encendida`, `apagada` es cada uno sí mismo y el motor no le toca el bloque.
     // Ver el bloque de arriba para el porqué.
     //
-    // Sin `mira` ni `soloAlFrente`: un pistón de Minecraft se activa por cualquier lado, incluido el
-    // de atrás y el de arriba; lo único que su giro decide es hacia DÓNDE empuja. Y `emite` a 0 (por
-    // defecto): mueve bloques, no reparte señal.
-    // BUG-RS12 · La cabeza del pistón no emite ni conduce energía ni hace de puente energizable
-    'hab:piston':        { alRecibirSeñal: empujar },
-    'hab:piston-on':     { alRecibirSeñal: empujar },
+    // En Minecraft un pistón NO se activa desde su cara frontal (la cabeza).
+    'hab:piston':        { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
+    'hab:piston-on':     { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
     'hab:piston-cabeza': {},
+    // Pistón pegajoso (REQ-RS15): misma lógica que el normal, pero al retraerse tira del bloque
+    // que tenía delante. Los CUATRO materiales registrados (cuerpo off, cuerpo on, cabeza, cabeza)
+    // por la misma razón que el pistón normal: si solo fuera uno se caería de la cola.
+    'hab:piston-pegajoso':        { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
+    'hab:piston-pegajoso-on':     { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
+    'hab:piston-pegajoso-cabeza': {},
+
+    // Bloque observador (Observer): emite 15 por su parte trasera solo cuando está activo
+    'hab:observador':                       { encendida: 'hab:observador-on', soloAlAtras: true },
+    'hab:observador-on':                    { emite: 15, encendida: 'hab:observador-on', apagada: 'hab:observador', soloAlAtras: true },
+    'asset:assets/observador.vox.json':     { encendida: 'hab:observador-on', soloAlAtras: true },
+    'asset:assets/observador-on.vox.json':  { emite: 15, encendida: 'hab:observador-on', apagada: 'hab:observador', soloAlAtras: true },
   };
 
   Object.keys(CIRCUITOS).forEach(function (k) {
@@ -514,6 +732,6 @@
   }
 
   console.log('[redstone] piezas: ' + Object.keys(CIRCUITOS).length
-    + ' (cable, palanca, botón, placa, puerta, repetidor, inversor, pistón, bloque de redstone)'
+    + ' (cable, palanca, botón, placa, puerta, repetidor, inversor, pistón, pistón pegajoso, bloque de redstone, observador)'
     + ' · clic derecho o CENTRAL conmuta las manuales');
 })();

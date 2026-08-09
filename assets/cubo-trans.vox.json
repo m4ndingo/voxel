@@ -1,5 +1,6 @@
 {
   "format": "voxelforge-1",
+  "aislante": true,
   "size": {
     "x": 16,
     "y": 16,

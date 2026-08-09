@@ -1741,6 +1741,7 @@ function load(map,meta,size,pivotes,caras,atravesable){
   clearHistory();                       // documento nuevo: sin historial que cruzar
   $('#meta-name').value=state.meta.name;
   $('#meta-type').value=state.meta.type;
+  if($('#meta-categoria')) $('#meta-categoria').value=state.meta.categoria||'';
   $('#meta-atravesable').checked=state.atravesable;
   const roleEl=$('#meta-role');
   roleEl.textContent=state.meta.role||'';
@@ -1905,49 +1906,94 @@ function habBucket(t){ return t==='bloque' ? 'habitacion' : t==='textura' ? 'tex
 const HAB_TITLE={habitacion:'Habitaciones', objeto:'Objetos', habitante:'Habitantes', textura:'Texturas'};
 const HAB_EMPTY={habitacion:'Aún no hay habitaciones guardadas.', objeto:'Aún no hay objetos guardados.', habitante:'Aún no hay habitantes guardados.', textura:'Aún no hay texturas guardadas.'};
 // Orden en que se agrupa la galería SIN filtro: si se mezcla todo tal cual, las 86 texturas se comen la
-// primera pantalla y lo que uno edita a mano queda debajo del todo.
-const HAB_ORDEN=['habitante','objeto','habitacion','textura'];
+let habKind = null;
+let habSearch = '';
+let habFilter = 'all';
+
+function initHabPickerUI(){
+  if(window._habPickerInited) return;
+  window._habPickerInited = true;
+  const searchInput = $('#hab-picker-search');
+  if(searchInput){
+    searchInput.oninput = () => {
+      habSearch = (searchInput.value || '').trim().toLowerCase();
+      renderHabGrid();
+    };
+  }
+  const filterContainer = $('#hab-picker-filters');
+  if(filterContainer){
+    filterContainer.onclick = (e) => {
+      const btn = e.target.closest('.mc-pick-filter');
+      if(!btn) return;
+      filterContainer.querySelectorAll('.mc-pick-filter').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      habFilter = btn.dataset.cat || 'all';
+      renderHabGrid();
+    };
+  }
+}
+
+let habRawList = [];
+let habRawAssets = [];
+
 // Agrupa por bucket sin reordenar dentro del grupo (el sort de JS es estable): cada tipo conserva el
 // orden que traía su fuente, que es el que el dueño ya conoce, y los assets del juego siguen saliendo
 // antes que lo guardado en el servidor.
 function habOrdena(entradas){
   return entradas.slice().sort((a,b)=> HAB_ORDEN.indexOf(a.b) - HAB_ORDEN.indexOf(b.b));
 }
-// `null` = TODO. REQ-NAV1, decisión del dueño (2026-08-07): «ir a Galería es mostrar todo lo que hay y
-// punto» — sin clasificación, sin pastillas y sin recordar nada entre sesiones. El parámetro `kind`
-// sigue vivo porque los botones «Galería ▤» del panel derecho nacen junto a su roster, y ahí pedir un
-// tipo concreto sí significa algo.
-let habKind = null;
+const HAB_ORDEN=['habitante','objeto','habitacion','textura'];
+
 async function openHabitantes(kind){
   habKind = (typeof kind==='string' && HAB_TITLE[kind]) ? kind : null;
   const modal=$('#hab-modal'), grid=$('#hab-grid');
   const titleEl=$('#hab-title'); if(titleEl) titleEl.textContent = habKind ? HAB_TITLE[habKind] : 'Galería';
   modal.hidden=false;
   grid.innerHTML='<p class="hab-empty">Cargando…</p>';
-  let list;
-  try{ list=await apiHabitantes(); }
+  initHabPickerUI();
+
+  try{ habRawList=await apiHabitantes(); }
   catch(e){ grid.innerHTML='<p class="hab-empty">No se pudo conectar con el servidor.</p>'; return; }
-  // Sin `kind` no se filtra nada: sale TODO. Con `kind` (los atajos del panel derecho) se enruta por tipo.
-  if(habKind) list=list.filter(h=> habBucket(h.type)===habKind);
-  // Assets del juego del mismo tipo (assets/index.json): también se pueden CARGAR desde la galería, y
-  // cargarlos se queda con su id, así que Guardar REESCRIBE ese asset (para bifurcar está «Guardar
-  // como…»). Es la única forma de que retocar una pieza se note en los agentes que la usan: ellos
-  // guardan 'asset:assets/<id>.vox.json', y antes el id se deducía del rótulo al guardar y el dibujo
-  // acababa en un fichero nuevo que no miraba nadie. También se RENOMBRAN y se BORRAN: ya no son "de
-  // solo lectura" de hecho, porque guardar una textura la manda a /api/assets (ver save(), isTex), así
-  // que todo lo que el dueño importa aterriza aquí. Sin estos botones, cada textura nueva era para siempre.
-  let assets=[];
+  if(habKind) habRawList=habRawList.filter(h=> habBucket(h.type)===habKind);
+
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
-       assets = habKind ? idx.filter(a=> habBucket(a.type)===habKind) : idx; }catch(e){}
-  if(!list.length && !assets.length){ grid.innerHTML='<p class="hab-empty">'+(habKind?HAB_EMPTY[habKind]:'Aún no hay nada guardado.')+'<br>Crea un objeto y pulsa <b>Guardar</b>.</p>'; return; }
+       habRawAssets = habKind ? idx.filter(a=> habBucket(a.type)===habKind) : idx; }catch(e){ habRawAssets = []; }
+
+  renderHabGrid();
+}
+
+function renderHabGrid(){
+  const grid=$('#hab-grid'); if(!grid) return;
+  
+  let list = habRawList;
+  let assets = habRawAssets;
+
+  // Filtrado por búsqueda de texto
+  if(habSearch){
+    const q = habSearch;
+    list = list.filter(h => (h.name||'').toLowerCase().includes(q) || (h.id||'').toLowerCase().includes(q) || (h.role||'').toLowerCase().includes(q));
+    assets = assets.filter(a => (a.name||'').toLowerCase().includes(q) || (a.id||'').toLowerCase().includes(q) || (a.role||'').toLowerCase().includes(q) || (a.file||'').toLowerCase().includes(q));
+  }
+
+  // Filtrado por Categoría ("all", "general", "redstone")
+  if(habFilter === 'redstone'){
+    list = list.filter(h => h.categoria === 'redstone');
+    assets = assets.filter(a => a.categoria === 'redstone');
+  } else if(habFilter === 'general'){
+    list = list.filter(h => h.categoria !== 'redstone');
+    assets = assets.filter(a => a.categoria !== 'redstone');
+  }
+
+  if(!list.length && !assets.length){
+    grid.innerHTML='<p class="hab-empty">'+(habKind?HAB_EMPTY[habKind]:'No se encontraron elementos con los filtros seleccionados.')+'</p>';
+    return;
+  }
   grid.innerHTML='';
-  // Las dos fuentes se pintan en UNA pasada, no una detrás de otra: pintándolas por separado cada tipo
-  // saldría dos veces (los 8 assets de habitación arriba y las 8 del servidor mucho más abajo), que es
-  // justo lo que hace ilegible una galería de 102 piezas.
+
   const todo = habOrdena(assets.map(a=>({b:habBucket(a.type), asset:a})).concat(list.map(h=>({b:habBucket(h.type), hab:h}))));
   for(const e of todo){
     const card=document.createElement('div'); card.className='hab-card';
-    card.dataset.bucket=e.b;   // la galería mezcla los cuatro: que la tarjeta diga de cuál es
+    card.dataset.bucket=e.b;
     if(e.asset){ const a=e.asset;
     card.innerHTML=`<div class="hab-thumb"><canvas width="150" height="150"></canvas></div>
       <div class="hab-name" title="${esc(a.name)}">${(a.icon?esc(a.icon)+' ':'')}${esc(a.name)} <span class="badge" style="margin:0">asset</span></div>
@@ -1963,7 +2009,7 @@ async function openHabitantes(kind){
     getRoomData('asset:'+a.file).then(d=>drawThumb(card.querySelector('canvas'),d)).catch(()=>{});
     card.querySelector('[data-a=ficha]').onclick=()=>openFicha(a);
     card.querySelector('[data-a=load]').onclick=async()=>{
-      await loadFromUrl(a.file, a.id);   // se recuerda de qué asset viene: Guardar reescribe ESE fichero
+      await loadFromUrl(a.file, a.id);
       closeHabitantes();
     };
     card.querySelector('[data-a=ren]').onclick=()=>renameAsset(a.id,a.name);
@@ -1980,9 +2026,6 @@ async function openHabitantes(kind){
         <button class="btn sm danger" data-a="del">Borrar</button>
       </div>`;
     grid.appendChild(card);
-    // Por getRoomData, no por un fetch pelado: es EL MISMO documento que necesita la paleta del Mundo y
-    // que pide la otra galería, y sin caché se bajaba dos y tres veces (PERF-MC3: 23 documentos para una
-    // paleta de 17). Con un enlace fino eso son segundos regalados. invalidateTex() ya lo tira al guardar.
     getRoomData('hab:'+h.id).then(d=>drawThumb(card.querySelector('canvas'),d)).catch(()=>{});
     card.querySelector('[data-a=ficha]').onclick=()=>openFicha(h,'hab');
     card.querySelector('[data-a=load]').onclick=()=>loadHabitante(h.id);
@@ -3175,6 +3218,10 @@ window.addEventListener('resize',()=>{ if(modalOpen){ sizeBig(); drawIsoBig(); }
 // meta
 $('#meta-name').oninput=e=>state.meta.name=e.target.value;
 $('#meta-type').onchange=e=>state.meta.type=e.target.value;
+if($('#meta-categoria')) $('#meta-categoria').onchange=e=>{
+  if(e.target.value) state.meta.categoria=e.target.value;
+  else delete state.meta.categoria;
+};
 // No entra en el historial de deshacer: como el nombre y el tipo, es una propiedad de la FICHA, no del
 // dibujo, y un Ctrl+Z que deshiciera una casilla en vez del último trazo desconcierta más que ayuda.
 $('#meta-atravesable').onchange=e=>{
@@ -3443,7 +3490,7 @@ async function getRoomData(key){
   if(roomDataCache.has(key)) return roomDataCache.get(key);
   // Una variante girada ('…@5', ver mcClaveBase) es el MISMO documento: solo cambia cómo se hornea su
   // geometría, no lo que hay en disco. Comparte la promesa con la clave base — ni un fetch de más.
-  const base=mcClaveBase(key);
+  const base = (typeof mcFluidBase === 'function') ? mcFluidBase(mcClaveBase(key)) : mcClaveBase(key);
   if(base!==key){ const p=getRoomData(base); roomDataCache.set(key,p); return p; }
   const p=(async()=>{
     if(key.startsWith('asset:')) return fetch(key.slice(6),{cache:'no-store'}).then(r=>r.json());
@@ -3473,7 +3520,7 @@ async function getTexDef(key){
   const d=await getRoomData(key);
   // `atravesable` viaja con la def porque mcBuildPalette es el unico sitio que recorre TODOS los
   // materiales del mundo con su documento en la mano: es ahi donde se hornea mc.atraviesaDoc.
-  const def={ size:texSize(d.size), voxels:d.voxels||{}, caras:d.caras||null, atravesable:!!d.atravesable };
+  const def={ size:texSize(d.size), voxels:d.voxels||{}, caras:d.caras||null, atravesable:!!d.atravesable, aislante:!!d.aislante, inamovible:!!d.inamovible };
   texDefs.set(key,def); texReprCache.set(key, computeTexRepr(def));
   return def;
 }
@@ -5738,8 +5785,10 @@ function mcTablaFina(){
 const mcFinoPend=new Set();
 function mcCalientaFina(key){
   if(!key || mc.finoGeom[key] || mcFinoPend.has(key)) return;
+  // Para claves de nivel de fluido (hab:agua-3), compartir la geometría del fluido base (hab:agua)
+  var srcKey = (typeof mcFluidBase === 'function') ? mcFluidBase(mcClaveBase(key)) : mcClaveBase(key);
   mcFinoPend.add(key);
-  mcStructGeom(mcClaveBase(key), mcClaveOri(key)).then(g=>{ mcFinoPend.delete(key); mc.finoGeom[key]=g; mcMeshAll(); })
+  mcStructGeom(srcKey, mcClaveOri(key)).then(g=>{ mcFinoPend.delete(key); mc.finoGeom[key]=g; mcMeshAll(); })
                       .catch(e=>{ mcFinoPend.delete(key); console.warn('[mundo] geometría fina', key, e); });
 }
 // ¿me frena al andar? Es OTRA pregunta que mcSolid («¿hay materia aquí?»), y lo único que las separa es
@@ -5750,9 +5799,389 @@ function mcSolidWalk(x,y,z){ if(y<0) return true;
   if(!mcInside(x,y,z)) return false;
   const id=mc.grid[mcIdx(x,y,z)];
   if(id===0) return false;
+  if(mcIsReplaceable(id)) return false;                  // agua y lava son atravesables al caminar (igual que el aire)
   if(mc.atraviesa && mc.atraviesa[id]) return false;      // lo dice el MUNDO (snippet, game.bloques.define)
   return !(mc.atraviesaDoc && mc.atraviesaDoc[id]); }     // …o el propio MATERIAL en su .vox.json
-function mcSetBlock(x,y,z,id){ if(mcInside(x,y,z)){ mc.grid[mcIdx(x,y,z)]=id; mcDirty(x,y,z); mcGlowTocada(x,y,z); } }
+function mcIsReplaceable(idOrKey, x, y, z){
+  if(typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.isReplaceable === 'function'){
+    return game.fluidos.isReplaceable(idOrKey, x, y, z);
+  }
+  return idOrKey === 0 || idOrKey == null || idOrKey === false;
+}
+function mcIsCellReplaceable(x,y,z){
+  if(typeof mcInside === 'function' && !mcInside(x,y,z)) return false;
+  if(!mc || !mc.grid) return false;
+  const id = mc.grid[mcIdx(x,y,z)];
+  return mcIsReplaceable(id, x, y, z);
+}
+function mcSetBlock(x,y,z,id){
+  if(mcInside(x,y,z)){
+    const oldId = mc.grid[mcIdx(x,y,z)];
+    mc.grid[mcIdx(x,y,z)]=id;
+    mcDirty(x,y,z);
+    mcGlowTocada(x,y,z);
+    if(typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function'){
+      game.fluidos.onBlockChange(x, y, z, oldId, id);
+    }
+  }
+}
+
+// ── SISTEMA DE FLUIDOS (REQ-FLUID1: Agua y Lava estilo Minecraft) ──────────────────────────────────
+(function(){
+  'use strict';
+  const queue = new Map();         // 'x,y,z' -> [x,y,z]
+  const fluidLevels = new Map();   // 'x,y,z' -> level (0..7)
+  const defs = Object.create(null);
+  const maxLevelWater = 7;
+  const maxLevelLava = 4;
+  let inTick = false;
+
+  function cl(x, y, z) { return x + ',' + y + ',' + z; }
+  function dentro(x, y, z) {
+    return typeof mc !== 'undefined' && mc.grid &&
+           x >= 0 && y >= 0 && z >= 0 &&
+           x < mc.dim.x && y < mc.dim.y && z < mc.dim.z;
+  }
+  function idEn(x, y, z) {
+    return dentro(x, y, z) ? mc.grid[mcIdx(x, y, z)] : 0;
+  }
+  function claveBase(k) {
+    var i = String(k).lastIndexOf('@');
+    return i > 0 ? k.slice(0, i) : k;
+  }
+  function parseLevel(key) {
+    var m = String(key).match(/-([0-7])$/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
+  function getProps(idOrKey, x, y, z) {
+    if (idOrKey === 0 || idOrKey == null || idOrKey === false) {
+      return { isFluid: false, isReplaceable: true, fluidLevel: 0, fluidType: 'NONE' };
+    }
+    var key = (typeof idOrKey === 'number') ? ((mc.blockKey && mc.blockKey[idOrKey]) || '') : String(idOrKey);
+    var kLow = key.toLowerCase();
+    if (!kLow || kLow === 'air' || kLow === 'aire') {
+      return { isFluid: false, isReplaceable: true, fluidLevel: 0, fluidType: 'NONE' };
+    }
+    if (defs[kLow]) return defs[kLow];
+    var base = claveBase(kLow);
+    if (defs[base]) return defs[base];
+
+    var cellLvl = (x !== undefined && y !== undefined && z !== undefined) ? fluidLevels.get(cl(x, y, z)) : undefined;
+
+    if (kLow.includes('agua') || kLow.includes('water')) {
+      var lvl = (cellLvl !== undefined) ? cellLvl : parseLevel(kLow);
+      return { isFluid: true, isReplaceable: true, fluidLevel: lvl, fluidType: 'WATER' };
+    }
+    if (kLow.includes('lava')) {
+      var lvl = (cellLvl !== undefined) ? cellLvl : parseLevel(kLow);
+      return { isFluid: true, isReplaceable: true, fluidLevel: lvl, fluidType: 'LAVA' };
+    }
+
+    return { isFluid: false, isReplaceable: false, fluidLevel: 0, fluidType: 'NONE' };
+  }
+
+  function setFluid(x, y, z, type, level) {
+    if (!dentro(x, y, z)) return false;
+    if (type === 'NONE' || level == null) {
+      fluidLevels.delete(cl(x, y, z));
+      mcSetBlock(x, y, z, 0);
+      if (typeof mcMarcaBuild === 'function') mcMarcaBuild(x, z);
+      return true;
+    }
+    level = Math.max(0, Math.min(7, Math.floor(level)));
+    fluidLevels.set(cl(x, y, z), level);
+
+    var baseKey = (type === 'WATER') ? 'hab:agua' : 'hab:lava';
+    var matKey = (level > 0) ? (baseKey + '-' + level) : baseKey;
+    // Para la clave base (nivel 0) se usa mcResolveMat que busca en la paleta cargada.
+    // Para claves con nivel (hab:agua-3) se busca directamente en mc.blockKey/mc.name2id
+    // para evitar que mcResolveMat caiga al fallback "material desconocido → roca".
+    var id = -1;
+    if (level === 0) {
+      id = mcResolveMat(matKey);
+    } else {
+      if (mc.blockKey) id = mc.blockKey.indexOf(matKey);
+      if (id < 1 && mc.name2id) id = mc.name2id[matKey] || -1;
+    }
+    if (id <= 0) {
+      // El nivel aún no tiene entrada propia en la paleta: registrarlo
+      if (!mc.blockKey) mc.blockKey = ['aire', 'roca', 'tierra', 'hierba'];
+      id = mc.blockKey.indexOf(matKey);
+      if (id <= 0) {
+        id = mc.blockKey.length;
+        mc.blockKey.push(matKey);
+        if (!mc.palette) mc.palette = [];
+        // Copiar la paleta visual del fluido base (mismas caras de textura)
+        var baseId = mcResolveMat(baseKey);
+        if (baseId > 0) {
+          mc.palette[id] = mc.palette[baseId];
+          // Compartir la geometría fina del fluido base
+          if (mc.finoGeom && mc.finoGeom[baseKey] && !mc.finoGeom[matKey]) mc.finoGeom[matKey] = mc.finoGeom[baseKey];
+          // Copiar flags de renderizado (fino, recorte, atravesable)
+          if (mc.finoRejilla) mc.finoRejilla[id] = mc.finoRejilla[baseId];
+          if (mc.finoExtra) mc.finoExtra[id] = mc.finoExtra[baseId];
+          if (mc.recorte) mc.recorte[id] = mc.recorte[baseId];
+          if (mc.atraviesaDoc) mc.atraviesaDoc[id] = mc.atraviesaDoc[baseId];
+        } else {
+          mc.palette[id] = mc.palette[1] || [];
+        }
+        if (mc.name2id) mc.name2id[matKey] = id;
+        if (typeof mcMat2id !== 'undefined') mcMat2id[matKey] = id;
+      }
+    }
+    mcSetBlock(x, y, z, id);
+    if (typeof mcMarcaBuild === 'function') mcMarcaBuild(x, z);
+    return true;
+  }
+
+  function queueTick(x, y, z) {
+    if (!dentro(x, y, z)) return;
+    var k = cl(x, y, z);
+    queue.set(k, [x, y, z]);
+  }
+
+  function notifyNeighbors(x, y, z) {
+    var DIRS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+    for (var i = 0; i < DIRS.length; i++) {
+      var nx = x + DIRS[i][0], ny = y + DIRS[i][1], nz = z + DIRS[i][2];
+      if (dentro(nx, ny, nz)) {
+        queueTick(nx, ny, nz);
+      }
+    }
+    if (dentro(x, y, z)) queueTick(x, y, z);
+  }
+
+  function processCell(x, y, z) {
+    if (!dentro(x, y, z)) return false;
+    var id = idEn(x, y, z);
+    var props = getProps(id, x, y, z);
+    if (!props.isFluid) return false;
+
+    var type = props.fluidType;
+    var level = props.fluidLevel;
+    var maxLvl = (type === 'LAVA') ? maxLevelLava : maxLevelWater;
+    var didChange = false;
+
+    // 1. Recalculation / Disappearance Check (flowing fluids level > 0)
+    if (level > 0) {
+      var hasSource = false;
+      if (y + 1 < mc.dim.y) {
+        var aboveProps = getProps(idEn(x, y + 1, z), x, y + 1, z);
+        if (aboveProps.isFluid && aboveProps.fluidType === type) {
+          hasSource = true;
+        }
+      }
+      if (!hasSource) {
+        var HORIZ = [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1]];
+        for (var i = 0; i < HORIZ.length; i++) {
+          var nx = x + HORIZ[i][0], nz = z + HORIZ[i][2];
+          if (dentro(nx, y, nz)) {
+            var nProps = getProps(idEn(nx, y, nz), nx, y, nz);
+            if (nProps.isFluid && nProps.fluidType === type && nProps.fluidLevel < level) {
+              hasSource = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!hasSource) {
+        fluidLevels.delete(cl(x, y, z));
+        mcSetBlock(x, y, z, 0);
+        if (typeof mcMarcaBuild === 'function') mcMarcaBuild(x, z);
+        notifyNeighbors(x, y, z);
+        return true;
+      }
+    }
+
+    // 2. Vertical Flow Check (Downwards)
+    if (y - 1 >= 0 && dentro(x, y - 1, z)) {
+      var belowId = idEn(x, y - 1, z);
+      var belowProps = getProps(belowId, x, y - 1, z);
+      if (belowProps.isFluid && belowProps.fluidType !== type) {
+        // Colisión vertical al fluir hacia abajo
+        var solidMat = 'roca';
+        if (type === 'WATER' && belowProps.fluidType === 'LAVA') {
+          solidMat = (belowProps.fluidLevel === 0) ? 'obsidian' : 'adoquin';
+        } else if (type === 'LAVA' && belowProps.fluidType === 'WATER') {
+          solidMat = 'roca';
+        }
+        var solidId = mcResolveMat(solidMat);
+        fluidLevels.delete(cl(x, y - 1, z));
+        mcSetBlock(x, y - 1, z, solidId);
+        if (typeof mcMarcaBuild === 'function') mcMarcaBuild(x, z);
+        return true; // STOP
+      }
+      if (belowId === 0 || (belowProps.isReplaceable && !(belowProps.isFluid && belowProps.fluidType === type && belowProps.fluidLevel === 1))) {
+        setFluid(x, y - 1, z, type, 1);
+        queueTick(x, y - 1, z);
+        return true; // STOP horizontal check
+      }
+    }
+
+    // 3. Horizontal Flow Check (Sides)
+    var belowProps = getProps(idEn(x, y - 1, z), x, y - 1, z);
+    var belowIsSolid = (y - 1 < 0) || !belowProps.isReplaceable;
+    if (belowIsSolid && level + 1 <= maxLvl) {
+      var HORIZ = [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1]];
+      for (var i = 0; i < HORIZ.length; i++) {
+        var nx = x + HORIZ[i][0], nz = z + HORIZ[i][2];
+        if (dentro(nx, y, nz)) {
+          var nId = idEn(nx, y, nz);
+          var nProps = getProps(nId, nx, y, nz);
+          if (nProps.isFluid && nProps.fluidType !== type) {
+            // Colisión horizontal
+            var solidMat = 'adoquin';
+            if (type === 'WATER' && nProps.fluidType === 'LAVA') {
+              solidMat = (nProps.fluidLevel === 0) ? 'obsidian' : 'adoquin';
+            } else if (type === 'LAVA' && nProps.fluidType === 'WATER') {
+              solidMat = 'adoquin';
+            }
+            var solidId = mcResolveMat(solidMat);
+            fluidLevels.delete(cl(nx, y, nz));
+            mcSetBlock(nx, y, nz, solidId);
+            didChange = true;
+            continue;
+          }
+          if (nId === 0 || (nProps.isFluid && nProps.fluidType === type && nProps.fluidLevel > level + 1)) {
+            setFluid(nx, y, nz, type, level + 1);
+            queueTick(nx, y, nz);
+            didChange = true;
+          }
+        }
+      }
+    }
+    return didChange;
+  }
+
+  function tick() {
+    if (inTick || !queue.size) return;
+    inTick = true;
+    var changed = false;
+    try {
+      var snapshot = Array.from(queue.values());
+      queue.clear();
+      for (var i = 0; i < snapshot.length; i++) {
+        var p = snapshot[i];
+        if (processCell(p[0], p[1], p[2])) {
+          changed = true;
+        }
+      }
+    } finally {
+      inTick = false;
+      if (changed || (typeof mcBuildBox !== 'undefined' && mcBuildBox)) {
+        if (typeof mcRemeshAround === 'function' && typeof mcBuildBox !== 'undefined' && mcBuildBox) {
+          var b = mcBuildBox;
+          mcBuildBox = null;
+          mcRemeshAround(b.x0, b.z0, b.x1, b.z1);
+        } else if (typeof mcMeshAll === 'function') {
+          mcMeshAll();
+        }
+      }
+    }
+  }
+
+  function onBlockChange(x, y, z, oldId, newId) {
+    if (oldId === newId) return;
+    var oldProps = getProps(oldId, x, y, z);
+    var newProps = getProps(newId, x, y, z);
+
+    if (newProps.isFluid) {
+      var key = (mc.blockKey && mc.blockKey[newId]) || '';
+      var lvl = parseLevel(key);
+      fluidLevels.set(cl(x, y, z), lvl);
+      queueTick(x, y, z);
+    } else {
+      fluidLevels.delete(cl(x, y, z));
+    }
+    if (oldProps.isFluid || oldProps.isReplaceable !== newProps.isReplaceable) {
+      notifyNeighbors(x, y, z);
+    }
+  }
+
+  var api = {
+    define: function(key, props) {
+      if (!key) return;
+      defs[String(key).toLowerCase()] = props;
+    },
+    info: function(x, y, z) {
+      var id = idEn(x, y, z);
+      var p = getProps(id, x, y, z);
+      return {
+        x: x, y: y, z: z,
+        id: id,
+        key: (mc.blockKey && mc.blockKey[id]) || '',
+        isFluid: p.isFluid,
+        isReplaceable: p.isReplaceable,
+        fluidLevel: p.fluidLevel,
+        fluidType: p.fluidType
+      };
+    },
+    getProps: getProps,
+    isReplaceable: function(idOrKey, x, y, z) {
+      return getProps(idOrKey, x, y, z).isReplaceable;
+    },
+    isFluid: function(idOrKey, x, y, z) {
+      return getProps(idOrKey, x, y, z).isFluid;
+    },
+    setFluid: setFluid,
+    queueTick: queueTick,
+    notifyNeighbors: notifyNeighbors,
+    onBlockChange: onBlockChange,
+    tick: tick,
+    queueSize: function() { return queue.size; },
+    // Reconstruye fluidLevels desde mc.grid al recargar el mundo.
+    // Las claves con sufijo de nivel (hab:agua-3, hab:lava-5) codifican el nivel en el nombre.
+    rebuild: function() {
+      fluidLevels.clear();
+      queue.clear();
+      if (!mc || !mc.grid || !mc.blockKey || !mc.dim) return;
+      for (var y = 0; y < mc.dim.y; y++)
+        for (var z = 0; z < mc.dim.z; z++)
+          for (var x = 0; x < mc.dim.x; x++) {
+            var id = mc.grid[mcIdx(x, y, z)];
+            if (id === 0) continue;
+            var key = mc.blockKey[id];
+            if (!key) continue;
+            var kLow = key.toLowerCase();
+            if (kLow.includes('agua') || kLow.includes('water') || kLow.includes('lava')) {
+              var lvl = parseLevel(kLow);
+              fluidLevels.set(cl(x, y, z), lvl);
+            }
+          }
+    }
+  };
+
+  function envolverRayosX() {
+    if (typeof window === 'undefined') return;
+    var antes = window.mcXrayExtra;
+    if (typeof antes !== 'function') antes = null;
+    else if (antes._fluidos) antes = antes._orig;
+
+    var envuelto = function (clave, s, x, y, z) {
+      var t = antes ? (antes(clave, s, x, y, z) || '') : '';
+      if (s || x === undefined) return t;
+      var f = api.info(x, y, z);
+      if (!f || !f.isFluid) return t;
+      var icon = (f.fluidType === 'LAVA') ? '🔥' : '💧';
+      var tipoNom = (f.fluidType === 'WATER') ? 'agua' : (f.fluidType === 'LAVA') ? 'lava' : f.fluidType.toLowerCase();
+      var lvlTxt = (f.fluidLevel === 0) ? 'nivel 0 (origen)' : ('nivel ' + f.fluidLevel);
+      var fTxt = icon + ' ' + tipoNom + ' · ' + lvlTxt;
+      return t ? (t + '\n' + fTxt) : fTxt;
+    };
+    envuelto._fluidos = true;
+    envuelto._orig = antes;
+    window.mcXrayExtra = envuelto;
+  }
+
+  if (typeof window !== 'undefined') {
+    window.game = window.game || {};
+    window.game.fluidos = api;
+    window.mcFluids = api;
+    envolverRayosX();
+  }
+})();
 
 // ── Emisores que viven en la REJILLA ──────────────────────────────────────────────────────────────────
 // La luz de bloque nació cuando una pieza luminosa solo podía existir estampada suelta, así que
@@ -6002,6 +6431,14 @@ function mcEsFinaEnRejilla(key){
 // sola como cualquier otro material que venga del fichero. Y como mc._geoFina[id] ya devuelve la
 // geometría horneada de ESE id, el mallado, la sombra y la colisión por forma salen girados gratis.
 function mcClaveBase(k){ return typeof k==='string' ? k.replace(/@\d{1,2}$/,'') : k; }
+// Base de fluido: quita el sufijo de nivel (-0 a -7) de claves como 'hab:agua-3' → 'hab:agua'.
+// Se usa para cargar la geometría del fluido base, ya que todos los niveles comparten modelo 3D.
+function mcFluidBase(k){
+  if(typeof k!=='string') return k;
+  var lo=k.toLowerCase();
+  if(!(lo.includes('agua')||lo.includes('lava')||lo.includes('water'))) return k;
+  return k.replace(/-[0-7]$/,'');
+}
 function mcClaveOri(k){ const m=typeof k==='string' && /@(\d{1,2})$/.exec(k); return m ? mcOriNorm(+m[1]) : 0; }
 function mcClaveConOri(k,ori){ ori=mcOriNorm(ori); return ori ? mcClaveBase(k)+'@'+ori : mcClaveBase(k); }
 // Al girar el fantasma (R / Shift+R) la pieza pasa a ser OTRO material, y darlo de alta es descargar +
@@ -6499,6 +6936,8 @@ async function mcBuildPaletteImpl(onProgress){
   let hueco=false;                          // ¿alguna textura trae agujeros? (ver el final de la función)
   let recorte=null;                         // …y CUÁLES, por id de bloque: el mesher lo necesita bloque a bloque
   let atravDoc=null;                        // se crea solo si algún material se declara atravesable (coste cero si no)
+  let aisDoc=null;                          // se crea solo si algún material se declara aislante (coste cero si no)
+  let inamDoc=null;                         // se crea solo si algún material se declara inamovible (coste cero si no)
   let fino=null;                            // …y CUÁLES no llenan su celda (flor/mata): se dibujan con su geometría real
   for(let bi=0; bi<mc.blocks.length; bi++){
     const b=mc.blocks[bi], id=bi+1; let faces=null;
@@ -6521,6 +6960,12 @@ async function mcBuildPaletteImpl(onProgress){
       // El "atravesable" del documento vale también para el camino de TERRENO. Aquí no se sabe qué es
       // «hierba»: solo se copia lo que el material dice de sí mismo, igual que el snippet copia su tabla.
       if(def.atravesable){ if(!atravDoc) atravDoc=new Uint8Array(mc.blocks.length+1); atravDoc[id]=1; }
+      if(def.aislante){ if(!aisDoc) aisDoc=new Uint8Array(mc.blocks.length+1); aisDoc[id]=1; }
+      var kLow = b.key.toLowerCase();
+      if(def.inamovible || kLow.indexOf('obsidiana') >= 0 || kLow.indexOf('obsidian') >= 0){
+        if(!inamDoc) inamDoc=new Uint8Array(mc.blocks.length+1);
+        inamDoc[id]=1;
+      }
     }catch(e){}
     // ¿La pieza CABE en la celda pero su PIEL no cubre el cubo (una flor, una mata, una llama)? Entonces la
     // proyección a las 6 caras —que es lo que acaba de hornearse arriba— no puede parecerse al dibujo: da una
@@ -6531,7 +6976,7 @@ async function mcBuildPaletteImpl(onProgress){
     // Se hornea la geometría ya, porque mcMeshChunk es síncrono y no puede esperarla (ver mcCalientaFina).
     // El sufijo `@<ori>` (ver mcClaveBase) es lo único que distingue a una variante girada de su original:
     // misma pieza, misma textura, misma huella; lo que cambia es CON QUÉ GIRO se hornea su geometría.
-    const kBase=mcClaveBase(b.key), kOri=mcClaveOri(b.key);
+    const kBase=mcFluidBase(mcClaveBase(b.key)), kOri=mcClaveOri(b.key);
     _t=performance.now();
     if(kBase.startsWith('asset:') || kBase.startsWith('hab:')) try{
       const rec=await mcStructCells(kBase);
@@ -6571,6 +7016,8 @@ async function mcBuildPaletteImpl(onProgress){
   mc.atlasHasAlpha=hueco;
   mc.recorte=recorte;
   mc.atraviesaDoc=atravDoc;                 // se rehornea entero en cada mcBuildPalette (también desde mcAddBlock)
+  mc.aislanteDoc=aisDoc;                    // se rehornea entero en cada mcBuildPalette
+  mc.inamovibleDoc=inamDoc;                 // se rehornea entero en cada mcBuildPalette
   mc.finoRejilla=fino;                      // ídem: la paleta manda, y mc.finoExtra (snippet) sigue mandando encima
   mcLoadNote('Atlas '+AW+'x'+AH+': atlasHasAlpha='+mc.atlasHasAlpha
     +(mc.atlasHasAlpha?' (shader con discard)':' (shader opaco, early-z)'));
@@ -6968,6 +7415,19 @@ function mcSunUniforms(L, S){
   gl.uniform1i(L.uSunMap, 1);                                       // unidad 1 (la 0 es el atlas)
 }
 
+function mcGetFluidHeight(x, y, z) {
+  if (typeof game === 'undefined' || !game.fluidos) return 1.0;
+  const fInfo = game.fluidos.info(x, y, z);
+  if (!fInfo || !fInfo.isFluid) return 1.0;
+  if (y + 1 < mc.dim.y) {
+    const aboveInfo = game.fluidos.info(x, y + 1, z);
+    if (aboveInfo && aboveInfo.isFluid && aboveInfo.fluidType === fInfo.fluidType) {
+      return 1.0; // Cascada vertical de fluido: conecta sin hueco con la celda superior
+    }
+  }
+  return Math.max(0.125, (16 - fInfo.fluidLevel * 2) / 16);
+}
+
 // Mesha un chunk: por cada cara con vecino aire emite un quad (culling de caras internas) → VBO. O(chunk).
 function mcMeshChunk(cx,cz){
   const gl=mc.gl, dim=mc.dim;
@@ -6992,15 +7452,36 @@ function mcMeshChunk(cx,cz){
     const id=mc.grid[mcIdx(x,y,z)]; if(!id) continue;
     if(GEO && GEO[id]){ finas.push(x,y,z,id); continue; }   // no es un cubo: se emite abajo con sus voxels
     const rects=mc.palette[id]; if(!rects) continue;
+
+    const fluidH = mcGetFluidHeight(x, y, z);
+
     for(let f=0;f<6;f++){
       const F=MC_FACES[f], d=F.dir;
       const ax=x+d[0], ay=y+d[1], az=z+d[2];
-      if(mcTapaCara(ax,ay,az)) continue;   // el vecino la tapa => cara interna, se pela (un bloque de recorte no tapa)
+      if(fluidH >= 0.999 && mcTapaCara(ax,ay,az)) continue;   // el vecino la tapa => cara interna
+
+      if (fluidH < 0.999) {
+        if (f === 1 && y > 0 && mcTapaCara(x, y - 1, z)) continue;
+        if (f !== 0 && f !== 1) {
+          if (mcInside(ax, ay, az)) {
+            const nId = mc.grid[mcIdx(ax, ay, az)];
+            if (nId > 0) {
+              const nH = mcGetFluidHeight(ax, ay, az);
+              if (nH >= fluidH) continue;
+            }
+          }
+        }
+      }
+
       const r=rects[F.tex], C=F.corners;
       let s=F.s;
       if(lightLut){ let lv=MC_MAXLIGHT; if(mcInside(ax,ay,az)){ const li=mcIdx(ax,ay,az); lv=Math.max(L[li], BL?BL[li]:0); } s*=lightLut[lv]; }   // fuera de la rejilla = cielo abierto; max(skylight, luz de bloque)
       const uv=[[r.u0,r.v0],[r.u1,r.v0],[r.u1,r.v1],[r.u0,r.v1]];
-      for(const k of [0,1,2,0,2,3]){ const c=C[k]; verts.push(x+c[0], y+c[1], z+c[2], uv[k][0], uv[k][1], s); }
+      for(const k of [0,1,2,0,2,3]){
+        const c=C[k];
+        const vy = y + c[1] * fluidH;
+        verts.push(x+c[0], vy, z+c[2], uv[k][0], uv[k][1], s);
+      }
     }
   }
   // ── Las celdas que NO son cubos, fundidas en la malla del chunk ──────────────────────────────────────
@@ -7015,7 +7496,8 @@ function mcMeshChunk(cx,cz){
     // Traslada un flujo fino (stride 9) a la celda de mundo y hornea la luz del entorno por CARA con su
     // celda-muestra: exactamente la misma cuenta que mcBuildStructMesh, pero acumulando en un array común
     // en vez de subir una VBO por instancia.
-    const copia=(src,count,sc,out,ox,oy,oz)=>{
+    const copia=(src,count,sc,out,ox,oy,oz,fH)=>{
+      const scaleH = (typeof fH === 'number' && fH > 0) ? fH : 1.0;
       for(let f=0, nf=count/6; f<nf; f++){
         let k=1;
         if(lightLut && sc){
@@ -7023,13 +7505,14 @@ function mcMeshChunk(cx,cz){
           if(mcInside(wx,wy,wz)){ const li=mcIdx(wx,wy,wz); k=lightLut[Math.max(L[li], BL?BL[li]:0)]; }   // fuera de rejilla = cielo (k=1)
         }
         for(let v=0;v<6;v++){ const b=(f*6+v)*9;
-          out.push(src[b]+ox, src[b+1]+oy, src[b+2]+oz, src[b+3], src[b+4], src[b+5], src[b+6]*k, src[b+7], src[b+8]); }
+          out.push(src[b]+ox, oy + src[b+1] * scaleH, src[b+2]+oz, src[b+3], src[b+4], src[b+5], src[b+6]*k, src[b+7], src[b+8]); }
       }
     };
     for(let i=0;i<finas.length;i+=4){
       const x=finas[i], y=finas[i+1], z=finas[i+2], g=GEO[finas[i+3]];
-      copia(g.colLocal,   g.colCount,   g.colSC,   fcol,   x,y,z);
-      copia(g.alphaLocal, g.alphaCount, g.alphaSC, falpha, x,y,z);
+      const fH = mcGetFluidHeight(x, y, z);
+      copia(g.colLocal,   g.colCount,   g.colSC,   fcol,   x,y,z, fH);
+      copia(g.alphaLocal, g.alphaCount, g.alphaSC, falpha, x,y,z, fH);
     }
   }
   const key=cx+','+cz; let ch=mc.chunks.get(key);
@@ -7762,6 +8245,42 @@ function mcAgentShove(){
 }
 function mcUpdate(dt){
   if(dt<=0) return; dt=Math.min(dt,0.05);   // clamp para no atravesar bloques en un frame lento
+  // Aplicar empuje de corriente de fluido si el jugador está dentro
+  if (typeof game !== 'undefined' && game.fluidos) {
+    var px = Math.floor(mc.pos[0]), py = Math.floor(mc.pos[1]), pz = Math.floor(mc.pos[2]);
+    var fInfo = game.fluidos.info(px, py, pz);
+    if (!fInfo || !fInfo.isFluid) fInfo = game.fluidos.info(px, py + 1, pz);
+    if (fInfo && fInfo.isFluid) {
+      var type = fInfo.fluidType;
+      var L = fInfo.fluidLevel;
+      var vx = 0, vz = 0;
+      var HORIZ = [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1]];
+      for (var i = 0; i < HORIZ.length; i++) {
+        var dx = HORIZ[i][0], dz = HORIZ[i][2];
+        var nx = px + dx, nz = pz + dz;
+        var nId = (typeof mcInside === 'function' && mcInside(nx, py, nz)) ? (mc.grid[mcIdx(nx, py, nz)] || 0) : 0;
+        var nProps = game.fluidos.getProps(nId, nx, py, nz);
+        var nL = L;
+        if (nProps.isFluid && nProps.fluidType === type) {
+          nL = nProps.fluidLevel;
+        } else if (nId === 0 || nProps.isReplaceable) {
+          nL = 8;
+        }
+        if (nL !== L) {
+          vx += dx * (nL - L);
+          vz += dz * (nL - L);
+        }
+      }
+      var len = Math.hypot(vx, vz);
+      if (len > 0) {
+        var pushSpeed = 1.5 * dt;
+        var nxPos = mc.pos[0] + (vx / len) * pushSpeed;
+        var nzPos = mc.pos[2] + (vz / len) * pushSpeed;
+        if (!mcCollides(nxPos, mc.pos[1], mc.pos[2])) mc.pos[0] = nxPos;
+        if (!mcCollides(mc.pos[0], mc.pos[1], nzPos)) mc.pos[2] = nzPos;
+      }
+    }
+  }
   // Auto-curación: si acabamos INCRUSTADOS (sala mallada tras aparecer, estampada encima, resize…).
   // El empujón horizontal de un agente que te embiste se resuelve SIEMPRE: eso aparta, no aúpa.
   // Lo que va detrás (mcUnstick) sube HACIA ARRIBA, y por eso está APAGADO por defecto (game.autoUnstick,
@@ -8345,7 +8864,10 @@ function mcMatKind(key, isStruct){
   const ck=(isStruct?'s|':'b|')+key; let t=mcKindCache.get(ck);
   if(t===undefined){
     const c=mc.catalog && mc.catalog.find(o=>o.key===key);
-    t=(isStruct?'estructura':'bloque')+' · '+(c ? c.badge : (String(key).slice(0,4)==='hab:' ? 'guardada' : 'asset'));
+    const isFl = (typeof game !== 'undefined' && game.fluidos && game.fluidos.isFluid(key)) ||
+                 (c && (c.categoria === 'fluido' || c.badge === 'fluido')) ||
+                 (String(key).toLowerCase().includes('agua') || String(key).toLowerCase().includes('lava'));
+    t=(isStruct?'estructura':'bloque')+' · '+(isFl ? 'fluido' : (c ? c.badge : (String(key).slice(0,4)==='hab:' ? 'guardada' : 'asset')));
     mcKindCache.set(ck,t);
   }
   return t;
@@ -8363,9 +8885,22 @@ var mcXrayExtra=null;
 // llamada es basura para el GC a 60 fps. Quien no la necesite se queda con dos parámetros: los
 // enganches viejos siguen valiendo tal cual.
 function mcXrayExtraTexto(key, s, x, y, z){
-  if(!mcXrayExtra) return '';
-  try{ return mcXrayExtra(key, s, x, y, z) || ''; }
-  catch(e){ mcXrayExtra=null; console.warn('mcXrayExtra desenganchado:', e && e.message); return ''; }
+  let t = '';
+  if(mcXrayExtra){
+    try{ t = mcXrayExtra(key, s, x, y, z) || ''; }
+    catch(e){ mcXrayExtra=null; console.warn('mcXrayExtra desenganchado:', e && e.message); }
+  }
+  if(!s && x !== undefined && typeof game !== 'undefined' && game.fluidos){
+    const f = game.fluidos.info(x, y, z);
+    if(f && f.isFluid){
+      const icon = (f.fluidType === 'LAVA') ? '🔥' : '💧';
+      const tipoNom = (f.fluidType === 'WATER') ? 'agua' : (f.fluidType === 'LAVA') ? 'lava' : f.fluidType.toLowerCase();
+      const lvlTxt = (f.fluidLevel === 0) ? 'nivel 0 (origen)' : ('nivel ' + f.fluidLevel);
+      const fTxt = icon + ' ' + tipoNom + ' · ' + lvlTxt;
+      t = t ? (t + '\n' + fTxt) : fTxt;
+    }
+  }
+  return t;
 }
 function mcUpdateXrayLabels(){
   const box=$('#mc-xray-labels'); if(!box) return;
@@ -8518,7 +9053,7 @@ function mcRaycast(maxd, hitStruct){   // desde el ojo, dirección de mirada; de
   const golpe=(t,fina)=>({ cell:[x,y,z], normal:[nx,ny,nz], dist:t, fina:fina,
                            point:[o[0]+d[0]*t, o[1]+d[1]*t, o[2]+d[2]*t] });
   for(let i=0;i<cap;i++){
-    if(mcSolid(x,y,z)) return golpe(tEnter, false);
+    if(mcSolid(x,y,z) && !(typeof mcIsCellReplaceable === 'function' && mcIsCellReplaceable(x,y,z))) return golpe(tEnter, false);
     // Estructuras: NO basta con que la estructura toque la celda — hay que atravesar un voxel fino LLENO.
     // Una escalera es casi toda aire dentro de su celda; dar por sólida la celda entera hacía que el rayo
     // se parase en su caja y el bloque nuevo saliera flotando delante, en vez de pegarse a la pared del fondo.
@@ -8654,6 +9189,8 @@ async function mcRestampAll(){
 // terreno y una textura puede estar horneada dentro de una sala ya colocada.
 // Nunca lanza: el guardado ya fue bien y el catch de save() diría "guardado local" sin serlo.
 async function mcRefreshSavedKey(key){
+  _idxAssetsP = null;
+  _habEnVuelo = null;
   try{ await mcRefreshSaved(key); }catch(e){ console.warn('No se pudo refrescar el Mundo tras guardar', key, e); }
 }
 async function mcRefreshSaved(key){
@@ -8731,7 +9268,7 @@ function mcBreak(){
       if(s){ mcPushHist({t:'s-', sp:{key:s.key,ox:s.ox,oy:s.oy,oz:s.oz,rot:s.rot|0}}); mcRemoveStruct(s); return; }
     }
     const bx=Math.floor(px), by=Math.floor(py), bz=Math.floor(pz);
-    if(by>=0 && mcSolid(bx,by,bz)){ const before=mc.grid[mcIdx(bx,by,bz)]; mcSetBlock(bx,by,bz,0); mcPushHist({t:'b',x:bx,y:by,z:bz,before,after:0}); mcRemeshAround(bx,bz); mcScheduleSave(); return; }
+    if(by>=0 && mcSolid(bx,by,bz) && !mcIsCellReplaceable(bx,by,bz)){ const before=mc.grid[mcIdx(bx,by,bz)]; mcSetBlock(bx,by,bz,0); mcPushHist({t:'b',x:bx,y:by,z:bz,before,after:0}); mcRemeshAround(bx,bz); mcScheduleSave(); return; }
   }
 }
 // Cuarto de vuelta (0..3) para que el FRENTE de la sala mire al jugador: se toma de hacia dónde mira (yaw),
@@ -8740,7 +9277,7 @@ function mcPlace(){
   mcRevealHotbar();                       // colocar (bloque o estructura) trae la hotbar de vuelta
   const hit=mcRaycast(mcReach(), true); if(!hit) return;   // hitStruct: se puede pegar a las caras de una estructura fina (cristal/llama…), no solo al terreno
   const c=hit.cell, n=hit.normal, nx=c[0]+n[0], ny=c[1]+n[1], nz=c[2]+n[2];
-  if(!mcInside(nx,ny,nz) || mcSolid(nx,ny,nz)) return;
+  if(!mcInside(nx,ny,nz) || (mcSolid(nx,ny,nz) && !mcIsCellReplaceable(nx,ny,nz))) return;
   const sk=mc.slotStruct[mc.sel];
   if(sk){ const rot=mcPreviewOri();
     // Poner y estampar son la MISMA función cuando la pieza se ve igual en la rejilla (mcCabeEnRejilla):
@@ -9595,8 +10132,8 @@ function mcSlotStructKeys(){ try{ const a=JSON.parse(localStorage.getItem('vf_mc
 async function mcBuildCatalog(){
   const cat=[];
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
-    idx.filter(a=>a.type==='bloque'||a.type==='textura').forEach(a=>cat.push({key:'asset:'+a.file, name:a.name, icon:a.icon||(a.type==='textura'?'🎨':'🏠'), badge:a.type, categoria:a.categoria||''})); }catch(e){}
-  try{ (await apiHabitantes()).filter(h=>h.type==='bloque'||h.type==='textura').forEach(h=>cat.push({key:'hab:'+h.id, name:h.name, icon:h.icon||(h.type==='textura'?'🎨':'🏠'), badge:'guardada', categoria:h.categoria||''})); }catch(e){}
+    idx.filter(a=>a.type!=='habitacion').forEach(a=>cat.push({key:'asset:'+a.file, name:a.name, icon:a.icon||(a.type==='textura'?'🎨':'🏠'), badge:a.type, categoria:a.categoria||''})); }catch(e){}
+  try{ (await apiHabitantes()).filter(h=>h.type!=='habitacion').forEach(h=>cat.push({key:'hab:'+h.id, name:h.name, icon:h.icon||(h.type==='textura'?'🎨':'🏠'), badge:'guardada', categoria:h.categoria||''})); }catch(e){}
   mc.catalog=cat; mcKindCache.clear();   // el badge de cada clave alimenta la etiqueta de rayos-X (mcMatKind)
   return cat;
 }
@@ -9661,7 +10198,7 @@ async function mcOpenPicker(slot){
   $('#mc-picker-title').textContent='Bloque o textura · ranura '+(slot+1);
   g.innerHTML='<p class="hab-empty">Cargando galería…</p>';
   pk.hidden=false;
-  if(!mc.catalog) try{ await mcBuildCatalog(); }catch(e){}
+  try{ await mcBuildCatalog(); }catch(e){}
   mcRenderPickerGrid();
   $('#mc-picker-remove').hidden=!mc.hotbar[slot];
 }
@@ -9684,25 +10221,11 @@ function mcRenderPickerGrid(){
     // Identificación de Redstone (data-driven: lee meta.categoria del JSON)
     const isRs = c.categoria === 'redstone';
 
-    // Estructura vs Bloque
-    const rec = (mc.structs && mc.structs[c.key] && mc.structs[c.key].w != null) 
-      ? mc.structs[c.key] 
-      : { w: 1, h: 1, d: 1, count: 1, blockLike: true };
-    const isPureBlock = rec.blockLike && rec.w === 1 && rec.h === 1 && rec.d === 1 && c.badge === 'bloque';
-    const isEstructura = (rec.w > 1 || rec.h > 1 || rec.d > 1 || !rec.blockLike) && c.badge !== 'textura';
-
-    // 2. Filtros por categoría EXCLUSIVOS
+    // 2. Filtros por categoría (Redstone vs General)
     if(mcPickFilter === 'redstone'){
       if(!isRs) return;
-    } else if(isRs && mcPickFilter !== 'all'){
-      // Redstone NUNCA aparece en las pestañas Bloques, Texturas ni Estructuras
-      return;
-    } else if(mcPickFilter === 'bloque'){
-      if(c.badge === 'textura' || isEstructura) return;
-    } else if(mcPickFilter === 'textura'){
-      if(c.badge !== 'textura') return;
-    } else if(mcPickFilter === 'estructura'){
-      if(c.badge === 'textura' || isPureBlock) return;
+    } else if(mcPickFilter === 'general'){
+      if(isRs) return;
     }
 
     shown++;
@@ -9717,11 +10240,6 @@ function mcRenderPickerGrid(){
       if(rRec.w>1||rRec.h>1||rRec.d>1){
         const bd=o.querySelector('.mo-badge'); if(bd) bd.textContent=rRec.count+' bloques';
       }
-      // Re-verificar exclusividad asíncrona si rec cambió tras cargar
-      const asyncEstruct = (rRec.w > 1 || rRec.h > 1 || rRec.d > 1 || !rRec.blockLike) && c.badge !== 'textura';
-      const asyncPure = rRec.blockLike && rRec.w === 1 && rRec.h === 1 && rRec.d === 1 && c.badge === 'bloque';
-      if(mcPickFilter === 'bloque' && asyncEstruct) o.remove();
-      if(mcPickFilter === 'estructura' && asyncPure) o.remove();
     }).catch(()=>{});
 
     o.onclick=()=>mcAssignSlot(slot,c.key,c.name);
@@ -9771,6 +10289,7 @@ async function mcShowItemCard(c){
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 16px">
       <div><strong>Tipo:</strong> ${isEstruct ? 'Estructura' : 'Bloque 16³'}</div>
+      <div><strong>Categoría:</strong> ${c.categoria === 'redstone' ? 'Redstone ⚡' : 'General'}</div>
       <div><strong>Dimensiones:</strong> ${rec.w} × ${rec.h} × ${rec.d}</div>
       <div><strong>Total bloques:</strong> ${rec.count}</div>
       <div><strong>Geometría:</strong> ${rec.blockLike ? 'Bloque macizo 16³' : 'Estructura fina'}</div>
@@ -10053,7 +10572,10 @@ const MC_MAT_ALIAS={ stone:'asset:assets/roca.vox.json', smooth_stone:'asset:ass
   grass:'asset:assets/hierba.vox.json', wood:'asset:assets/tablones.vox.json',
   planks:'asset:assets/tablones.vox.json', sand:'asset:assets/arena.vox.json',
   log:'asset:assets/tronco.vox.json', obsidian:'asset:assets/obsidiana.vox.json',
-  red_concrete:'asset:assets/red_concrete.vox.json', red_concrete_block:'asset:assets/red_concrete.vox.json' };
+  red_concrete:'asset:assets/red_concrete.vox.json', red_concrete_block:'asset:assets/red_concrete.vox.json',
+  water:'hab:agua', agua:'hab:agua', water_source:'hab:agua', agua_source:'hab:agua',
+  water_source_block:'hab:agua',
+  lava:'hab:lava', lava_source:'hab:lava', lava_source_block:'hab:lava' };
 // Foto de los alias de fábrica ANTES de que mcIndexAssets añada los del índice. Un nombre corto de la
 // ficha no puede pisar ninguno de estos: un script que dice 'stone' tiene que seguir poniendo roca.
 // El servidor comprueba lo mismo al guardar (ALIAS_FIJOS, server.py) — si añades uno aquí, allí también.
@@ -10069,7 +10591,14 @@ function mcMatKey(m, mLow){
   // sufijo se vuelve a pegar, así que game.setVoxel(x,y,z,'flor@1') vale igual que la clave larga.
   const ori=mcClaveOri(m);
   if(ori){ const kb=mcMatKey(mcClaveBase(m), mcClaveBase(mLow)); return kb ? mcClaveConOri(kb, ori) : kb; }
-  let key = MC_MAT_ALIAS[mLow] || (mc.name2id[m]?mc.blockKey[mc.name2id[m]]:null);
+  let key = MC_MAT_ALIAS[mLow] || (mc.name2id && mc.name2id[m] ? mc.blockKey[mc.name2id[m]] : null);
+  if(!key && (mLow.includes('agua') || mLow.includes('water'))){
+    // Si ya trae sufijo de nivel (-0 a -7), conservarlo; si no, usar la base
+    key = /-[0-7]$/.test(mLow) ? (mLow.startsWith('hab:') ? mLow : 'hab:'+mLow) : 'hab:agua';
+  }
+  if(!key && mLow.includes('lava')){
+    key = /-[0-7]$/.test(mLow) ? (mLow.startsWith('hab:') ? mLow : 'hab:'+mLow) : 'hab:lava';
+  }
   if(!key && mcAssetsRegistry[mLow]) key = 'asset:' + mcAssetsRegistry[mLow];
   if(!key && mcAssetsRegistry[mLow.replace(/\s+/g, '_')]) key = 'asset:' + mcAssetsRegistry[mLow.replace(/\s+/g, '_')];
   return key || m;
@@ -10083,12 +10612,27 @@ function mcResolveMat(material){
   const mLow = m.toLowerCase();
   const key = mcMatKey(m, mLow);
   let id = mc.blockKey.indexOf(key); if(id<1) id = mc.name2id[m] || mc.name2id[mLow] || -1;
+  // Fallback de fluidos: solo para claves BASE (sin sufijo de nivel). Las variantes con nivel
+  // (hab:agua-3, hab:lava-5) NO caen aquí: necesitan su propia entrada en mc.blockKey y setFluid
+  // se encarga de registrarlas.
+  if(id<1 && !/-[0-7]$/.test(mLow)){
+    if(mLow.includes('agua') || mLow.includes('water')){
+      id = mc.blockKey.indexOf('hab:agua');
+      if(id<1) id = mc.blockKey.indexOf('agua');
+      if(id<1) id = (mc.name2id && (mc.name2id['hab:agua'] || mc.name2id['agua'])) || -1;
+    }
+    if(id<1 && mLow.includes('lava')){
+      id = mc.blockKey.indexOf('hab:lava');
+      if(id<1) id = mc.blockKey.indexOf('lava');
+      if(id<1) id = (mc.name2id && (mc.name2id['hab:lava'] || mc.name2id['lava'])) || -1;
+    }
+  }
   if(id<1){                                          // desconocido (p.ej. '#hex' no aplica al terreno) → roca + aviso 1 vez
     // El aviso va TAMBIÉN por toast: el dueño construye desde el móvil, y ahí un console.warn es
     // indistinguible de «el script no hace nada» — que es justo cómo se ve un muro entero de roca
-    // cuando el nombre del material estaba mal. La ficha de la galería dice cuál es el bueno.
     if(!mcWarnedMat[m]){ console.warn('setVoxel: material desconocido "'+m+'" → uso roca. Precarga texturas con game.addMaterial("'+m+'") o usa un nombre de la paleta.'); toast('Material desconocido «'+m+'» → uso roca (mira la ficha en la galería)'); mcWarnedMat[m]=true; }
     id=mc.name2id['roca']||1;
+    return id;
   }
   mcMat2id[m]=id; return id;
 }
@@ -10420,6 +10964,7 @@ function mcTick(now){
   if(!mc.fpsT) mc.fpsT=now;
   if(now-mc.fpsT>=500){ mc.fps=mc.fpsN*1000/(now-mc.fpsT); game.fps=mc.fps; mc.fpsN=0; mc.fpsT=now; }
   if(mc.grid) mcUpdate(dt);
+  if(typeof game !== 'undefined' && game.fluidos) game.fluidos.tick();
   if(mc.agents.size){ mcAgentsTick(now); mcAgentsSmoothUpdate(dt); }   // agentes/NPC: ticks lógicos + interpolación continua de renderizado
   // Construir/romper CONTINUO: mientras se mantiene el botón (y el puntero está bloqueado), repite la acción
   // a intervalos (no cada frame). El estampado de estructuras NO se repite (una pieza por pulsación).
@@ -10627,6 +11172,9 @@ async function openWorld(){
     if(hasVox) mcBake(doc);              // conserva lo construido
     else if(doc && doc.fresh) { mcGenFlat(); mcMeshAll(); }   // mundo recién nacido (sin fichero) → terreno plano
     else mcBake(doc || {voxels:{}});     // vacío GUARDADO (p.ej. wipeMap) → vacío total, sin voxels
+    // Reconstruir fluidLevels desde las claves de bloque (hab:agua-3 → nivel 3) para que
+    // mcGetFluidHeight dibuje las alturas correctas tras recargar.
+    if(typeof game !== 'undefined' && game.fluidos && game.fluidos.rebuild) game.fluidos.rebuild();
     mcLoadStop();
     mcHideLoading();
     mcLoadReport();
@@ -11737,6 +12285,7 @@ if(!_enMundo){ loadServerAssets(); refreshHabitantesList(); }
 if(!restore()){ setSize(16,16,16); state.voxels=presetBarril(); }
 $('#meta-name').value=state.meta.name;
 $('#meta-type').value=state.meta.type;
+if($('#meta-categoria')) $('#meta-categoria').value=state.meta.categoria||'';
 $('#meta-role').textContent=state.meta.role||'';
 $('#meta-role').hidden=!state.meta.role;
 $('#meta-atravesable').checked=state.atravesable;

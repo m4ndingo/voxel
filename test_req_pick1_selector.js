@@ -35,20 +35,20 @@ const { chromium } = require('playwright');
 
     // 3. Comprobar filtro por categoría Redstone y exclusividad
     await page.fill('#mc-picker-search', '');
-    await page.click('.mc-pick-filter[data-cat="redstone"]');
+    await page.click('#mc-picker-filters .mc-pick-filter[data-cat="redstone"]');
     await page.waitForTimeout(100);
     const countRedstone = await page.evaluate(() => document.querySelectorAll('#mc-picker-grid .mapa-opt').length);
     t('Filtro por categoría Redstone funciona', countRedstone > 0, 'elementos rs = ' + countRedstone);
 
-    // Comprobar que en la pestaña Estructuras NO hay elementos con categoria='redstone' (data-driven)
-    await page.click('.mc-pick-filter[data-cat="estructura"]');
+    // Comprobar que en la pestaña General NO hay elementos con categoria='redstone' (data-driven)
+    await page.click('#mc-picker-filters .mc-pick-filter[data-cat="general"]');
     await page.waitForTimeout(100);
-    const hasRsInEstruct = await page.evaluate(() => {
+    const hasRsInGeneral = await page.evaluate(() => {
       // Leer las keys visibles y comprobar contra el catálogo
       const keys = Array.from(document.querySelectorAll('#mc-picker-grid .mapa-opt')).map(el => el.dataset.key);
       return keys.some(k => mc.catalog && mc.catalog.find(c => c.key === k && c.categoria === 'redstone'));
     });
-    t('Pestaña Estructuras excluye componentes con categoria=redstone', !hasRsInEstruct);
+    t('Pestaña General excluye componentes con categoria=redstone', !hasRsInGeneral);
 
     // 4. Comprobar tooltip y title en elemento
     const titleVal = await page.evaluate(() => {
@@ -58,7 +58,7 @@ const { chromium } = require('playwright');
     t('Las celdas incluyen atributo title con nombre y clave', titleVal && titleVal.includes('('), 'title = ' + titleVal);
 
     // 5. Comprobar menú contextual (clic derecho)
-    await page.click('.mc-pick-filter[data-cat="all"]');
+    await page.click('#mc-picker-filters .mc-pick-filter[data-cat="all"]');
     await page.waitForTimeout(100);
     const itemBound = await page.evaluate(() => {
       const el = document.querySelector('#mc-picker-grid .mapa-opt');

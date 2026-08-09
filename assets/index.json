@@ -213,13 +213,18 @@
   },
   {
     "id": "bloque_redstone",
-    "name": "Bloque de Redstone",
+    "name": "Bloque de redstone",
     "role": "Bloque · fuente permanente (redstone block)",
     "icon": "🟥",
     "type": "textura",
     "group": "Bloques de construcción",
-    "size": 16,
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
     "file": "assets/bloque_redstone.vox.json",
+    "description": "Bloque de redstone — fuente permanente de señal (emite 15 por sus seis caras).",
     "categoria": "redstone"
   },
   {
@@ -721,5 +726,67 @@
     },
     "file": "assets/escalera.vox.json",
     "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir."
+  },
+  {
+    "id": "zz-pieza-test",
+    "name": "ZZ Pieza De Prueba",
+    "role": "Pieza de agente · de pruebas",
+    "icon": "🧪",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/zz-pieza-test.vox.json"
+  },
+  {
+    "id": "piston",
+    "name": "Pistón",
+    "role": "Bloque · pistón normal (piston)",
+    "icon": "🟤",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/piston.vox.json",
+    "description": "Pistón — empuja una fila de hasta 12 bloques al recibir señal de redstone.",
+    "categoria": "redstone"
+  },
+  {
+    "id": "piston_pegajoso",
+    "name": "Pistón pegajoso",
+    "role": "Bloque · pistón pegajoso (sticky piston)",
+    "icon": "🟢",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/piston_pegajoso.vox.json",
+    "description": "Pistón pegajoso — empuja bloques al extenderse y los arrastra al retraerse.",
+    "categoria": "redstone"
+  },
+  {
+    "id": "observador",
+    "name": "Observador",
+    "role": "Bloque · detector de actualizaciones (observer)",
+    "icon": "👁️",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/observador.vox.json",
+    "description": "Observador — emite un pulso de redstone por la cara trasera cuando detecta un cambio enfrente.",
+    "categoria": "redstone"
   }
 ]

@@ -631,7 +631,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # se reescribe ESE; deducir el id del nombre bifurcaba en silencio (guardar «Torso de zombie»
             # escribía torso-de-zombie.vox.json y el bicho vivo seguía con torso-zombie.vox.json).
             # Sin id => alta nueva, y ahí sí manda el nombre.
-            idd = re.sub(r'[^A-Za-z0-9_.-]', '', str(d.get('id') or '')) or slugify(name)
+            # Extraer id sin extensión si viene como ruta (ej: 'assets/bloque_redstone.vox.json' -> 'bloque_redstone')
+            raw_id = str(d.get('id') or '')
+            if raw_id.startswith('assets/'): raw_id = raw_id[7:]
+            if raw_id.endswith('.vox.json'): raw_id = raw_id[:-9]
+            idd = re.sub(r'[^A-Za-z0-9_.-]', '', raw_id) or slugify(name)
             filename = f'{idd}.vox.json'
             asset_path = os.path.join(BASE, 'assets', filename)
             # El editor no conoce alias/icon/description (no hay campos para ellos en el panel «Objeto»), y
@@ -672,9 +676,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     # role/icon/alias/description solo si el editor los trae: 'group' NO se toca (no hay
                     # UI para elegirlo y machacarlo mandaría una pieza de «Agentes» a «Bloques de
                     # construcción»). alias/description vienen heredados del fichero de arriba.
-                    for k in ('role', 'icon', 'alias', 'description', 'categoria'):
+                    for k in ('role', 'icon', 'alias', 'description'):
                         if meta.get(k):
                             item[k] = meta[k]
+                    if meta.get('categoria'):
+                        item['categoria'] = meta['categoria']
+                    else:
+                        item.pop('categoria', None)
                     found = True
                     break
 

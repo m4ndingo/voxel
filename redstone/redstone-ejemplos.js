@@ -62,9 +62,12 @@
                 'hab:puerta', 'hab:puerta-abierta', 'hab:puerta-alta', 'hab:puerta-alta-abierta',
                 'hab:repetidor', 'hab:repetidor-on',
                 'hab:inversor', 'hab:inversor-on',
+                'hab:piston-pegajoso', 'hab:piston-pegajoso-on', 'hab:piston-pegajoso-cabeza',
+                'asset:assets/bloque_redstone.vox.json',
                 // Las giradas son OTRA entrada de paleta («hab:repetidor@2»), no la misma con un
                 // atributo: si no se precargan, la pieza de vuelta de los lazos sale ROCA.
-                'hab:repetidor@2', 'hab:repetidor-on@2', 'hab:inversor@2', 'hab:inversor-on@2'];
+                'hab:repetidor@2', 'hab:repetidor-on@2', 'hab:inversor@2', 'hab:inversor-on@2',
+                'hab:piston-pegajoso@2', 'hab:piston-pegajoso-on@2'];
   // ⚠️ `mc.name2id` NO vale para saber si un material está cargado: indexa por MOTE corto («adoquin»)
   // y un asset entra en la paleta con su clave larga («asset:assets/adoquin.vox.json»), así que
   // preguntar por la clave da null aunque esté puesto. Quien sabe la verdad es la paleta.
@@ -213,33 +216,20 @@
   pon(4, 5, 'hab:boton');                           // SET  — toca el lazo de ida
   pon(8, 8, 'hab:boton');                           // RESET — toca el lazo de vuelta
 
-  // ── 7 · AND: la puerta de dos llaves ───────────────────────────────────────────────────────
-  // El 4 dice que con NOR se construye cualquier cosa. Esto es cobrar esa promesa con la pieza más
-  // pedida: AND(a,b) = NO(NO a O NO b). El «O» no cuesta ninguna pieza —dos cables que se tocan ya
-  // son un OR—, así que una AND son tres inversores y un empalme.
-  //
-  //   palanca A ─ NO ─┐
-  //                   ├─ empalme ─ NO ─ puerta
-  //   palanca B ─ NO ─┘
-  //
-  // Las dos entradas van por cables SEPARADOS a propósito: si los cables de A y B se tocasen serían
-  // el mismo nudo y el circuito no podría distinguir «una» de «las dos».
+  // ── 7 · T-Flip-Flop (Selector / Reloj por bloque flotante) ──────────────────────────────────
+  // Convierte un pulso corto (botón) en una señal permanente ON/OFF alternando la posición de un
+  // BLOQUE DE REDSTONE mediante un pistón pegajoso. Al pulsar el botón, el pistón da un toque rápido
+  // empujando o retirando el bloque de redstone de la línea de señal.
   parcela(6);
-  cartel('7 · AND: LA PUERTA DE DOS LLAVES. La hoja solo se abre con las DOS palancas subidas; con '
-       + 'una sola no. No hay ninguna pieza AND: son tres inversores. Esto es lo que quería decir el '
-       + 'cartel 4 con que el NOR basta — las demás puertas no se fabrican, se montan.');
-  pon(3, 4, 'hab:palanca');                         // A
-  pon(4, 4, 'hab:cable');
-  pon(5, 4, 'hab:inversor-on');                     // NO A (con la palanca abajo, luce)
-  pon(3, 10, 'hab:palanca');                        // B
-  pon(4, 10, 'hab:cable');
-  pon(5, 10, 'hab:inversor-on');                    // NO B
-  columna(6, 4, 10, 'hab:cable');                   // el empalme: aquí se hace el OR de las dos
-  pon(7, 7, 'hab:inversor');                        // …y el NOT que lo convierte en AND
-  fila(8, 11, 7, 'hab:cable');                      // a la hoja de abajo; la de arriba va sola
-  for (dy = 0; dy < 2; dy++) columna(12, 2, 13, MURO, dy);
-  pon(12, 7, 'hab:puerta');
-  pon(12, 7, 'hab:puerta-alta', 1);
+  cartel('7 · T-FLIP-FLOP CON PISTÓN PEGAJOSO. Un pulso corto del botón conmuta el estado entre ON y '
+       + 'OFF de forma permanente. El pistón pegajoso desplaza el bloque de redstone alternativamente '
+       + 'hacia la línea del circuito, reteniendo la señal.');
+  pon(3, 7, 'hab:boton');                           // Entrada por botón
+  pon(4, 7, 'hab:cable');
+  pon(5, 7, 'hab:piston-pegajoso');                 // Pistón pegajoso (mira a +X)
+  pon(6, 7, 'asset:assets/bloque_redstone.vox.json');
+  fila(8, 11, 7, 'hab:cable');
+  pon(12, 7, LAMPARA_OFF);
 
   // ── 8 · XOR: el interruptor de pasillo ─────────────────────────────────────────────────────
   // La función que NO sale de una sola puerta, y la que todo el mundo tiene en casa: dos

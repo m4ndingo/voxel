@@ -125,11 +125,14 @@ const nuevo = (nombre) => ({
   ok('y el id viejo ya no responde', (await pide('GET', '/api/agentes/test-agente-uno')).code === 404);
 
   // ── Borrar es mandar a la papelera ──────────────────────────────────────────────────────────
+  await new Promise(r => setTimeout(r, 15));
   const antesDel = fs.readdirSync('data/habitantes_trash').length;
-  ok('DELETE responde ok', (await pide('DELETE', '/api/agentes/test-agente-dos')).code === 200);
+  const delRes = await pide('DELETE', '/api/agentes/test-agente-dos');
+  ok('DELETE responde ok', delRes.code === 200);
   ok('...y ya no existe', (await pide('GET', '/api/agentes/test-agente-dos')).code === 404);
-  ok('...pero esta en la papelera, no borrado',
-    fs.readdirSync('data/habitantes_trash').length > antesDel);
+  const trashFiles = fs.readdirSync('data/habitantes_trash');
+  const enPapelera = trashFiles.some(f => f.endsWith('__test-agente-dos.json'));
+  ok('...pero esta en la papelera, no borrado', enPapelera);
   ok('borrar lo que no hay da 404', (await pide('DELETE', '/api/agentes/no-existe-jamas')).code === 404);
 
   // ── El zombie sigue intacto despues de todo el trajin ───────────────────────────────────────

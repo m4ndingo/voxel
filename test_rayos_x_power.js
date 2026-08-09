@@ -58,6 +58,9 @@ const ok = (nom, cond, extra) => {
       let gy = -1;
       for (let y = mc.dim.y - 10; y > 1; y--) if (mc.grid[mcIdx(x, y, z)]) { gy = y; break; }
       if (gy < 1) continue;
+      const idSuelo = mc.grid[mcIdx(x, gy, z)];
+      const claveSuelo = mc.blockKey[idSuelo] || '';
+      if (claveSuelo.startsWith('hab:')) continue;
       let libre = true;
       for (let y = gy + 1; y <= gy + 4 && libre; y++) for (let d = -1; d <= 4; d++) if (mc.grid[mcIdx(x + d, y, z)]) libre = false;
       if (libre) { sitio = [x, gy + 1, z]; break; }
@@ -169,10 +172,12 @@ const ok = (nom, cond, extra) => {
     JSON.stringify(cable1) + ' · info recibe ' + inf[1].recibe);
   ok('el segundo cable, uno menos (pérdida de 1 por salto)', cable2 === '⚡ ' + (inf[1].recibe - 1),
     JSON.stringify(cable2));
-  ok('recibe ≠ saca sale con flecha (un inversor suelto)', inversor === '⚡ 0 → 15',
+  ok('recibe ≠ saca sale con flecha (un inversor suelto)', inversor === '⚡ 0 → 15 (1t)',
     JSON.stringify(inversor) + ' · info ' + inf[5].recibe + '/' + inf[5].saca);
-  ok('la etiqueta coincide con info() en las cuatro', [0, 1, 2, 5].every(i =>
-    r.eti[i] === '⚡ ' + inf[i].recibe + (inf[i].saca !== inf[i].recibe ? ' → ' + inf[i].saca : '')),
+  ok('la etiqueta coincide con info() en las cuatro', [0, 1, 2, 5].every(i => {
+    var ret = (i === 5) ? ' (1t)' : '';
+    return r.eti[i] === '⚡ ' + inf[i].recibe + (inf[i].saca !== inf[i].recibe ? ' → ' + inf[i].saca : '') + ret;
+  }),
     [0, 1, 2, 5].map(i => r.eti[i]).join(' | '));
 
   console.log('\nUn bloque macizo solo la enseña si de verdad está haciendo de puente');

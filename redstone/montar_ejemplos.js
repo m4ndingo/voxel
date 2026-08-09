@@ -139,15 +139,16 @@ const ok = (nom, cond, extra) => {
     ticks(60);
     out.e6seAcuerda = leo(5, 6, 3);
 
-    // 7 · AND: la hoja solo se abre con las dos palancas subidas
-    const and = [], A7 = en(6, 3, 4), B7 = en(6, 3, 10);
-    for (const [a, bb] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-      R.encender(A7[0], A7[1], A7[2], !!a); R.encender(B7[0], B7[1], B7[2], !!bb); ticks(20);
-      and.push(leo(6, 12, 7) === 'hab:puerta-abierta');
-    }
-    out.and = and;
-    out.e7hojaArriba = leo(6, 12, 7, 1);              // con las dos subidas, que abra ENTERA
-    R.encender(A7[0], A7[1], A7[2], false); R.encender(B7[0], B7[1], B7[2], false); ticks(20);
+    // 7 · T-Flip-Flop con pistón pegajoso: alternar estado con el botón
+    const btn = en(6, 3, 7);
+    const estadoIni = leo(6, 9, 7);
+    R.encender(btn[0], btn[1], btn[2], true); ticks(2);
+    R.encender(btn[0], btn[1], btn[2], false); ticks(60);
+    const estadoTras1 = leo(6, 9, 7);
+    R.encender(btn[0], btn[1], btn[2], true); ticks(2);
+    R.encender(btn[0], btn[1], btn[2], false); ticks(60);
+    const estadoTras2 = leo(6, 9, 7);
+    out.tflipflop = [estadoIni, estadoTras1, estadoTras2];
 
     // 8 · XOR: luce con UNA palanca subida, no con ninguna y no con las dos
     const xor = [], A8 = en(7, 3, 4), B8 = en(7, 3, 10);
@@ -232,12 +233,10 @@ const ok = (nom, cond, extra) => {
   ok('SET lo enciende y SIGUE encendido al soltarlo', r.e6trasSet === 'hab:antorcha', r.e6trasSet);
   ok('y se acuerda sin que nadie lo sujete', r.e6seAcuerda === 'hab:antorcha', r.e6seAcuerda);
 
-  console.log('\n7 · AND (la puerta de dos llaves)');
-  ok('0,0 cerrada', r.and[0] === false, JSON.stringify(r.and));
-  ok('1,0 cerrada', r.and[1] === false, JSON.stringify(r.and));
-  ok('0,1 cerrada', r.and[2] === false, JSON.stringify(r.and));
-  ok('1,1 ABIERTA', r.and[3] === true, JSON.stringify(r.and));
-  ok('y abre la hoja de arriba también', r.e7hojaArriba === 'hab:puerta-alta-abierta', r.e7hojaArriba);
+  console.log('\n7 · T-Flip-Flop con pistón pegajoso');
+  ok('nace apagada', r.tflipflop[0] === 'hab:cable', r.tflipflop[0]);
+  ok('primer pulso la enciende', r.tflipflop[1] === 'hab:cable-on', r.tflipflop[1]);
+  ok('segundo pulso la apaga', r.tflipflop[2] === 'hab:cable', r.tflipflop[2]);
 
   console.log('\n8 · XOR (el interruptor de pasillo)');
   ok('0,0 apagada', r.xor[0] === false, JSON.stringify(r.xor));

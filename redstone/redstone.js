@@ -95,7 +95,7 @@
       if (!k) continue;
       var cfg = tabla[k] || tabla[claveBase(k)];   // 'flor@1' hereda de 'flor': el giro no cambia el circuito
       if (cfg) porId[id] = cfg;
-      if (aislantes[k] || aislantes[claveBase(k)]) aisId[id] = 1;
+      if (aislantes[k] || aislantes[claveBase(k)] || (mc.aislanteDoc && mc.aislanteDoc[id])) aisId[id] = 1;
     }
     porIdLen = mc.blockKey.length;
     return porId;
@@ -153,7 +153,7 @@
   // (BUG-RS7). Un sufijo que no sea una postura conocida se lee como «sin girar», nunca como otra.
   function oriDe(k) {
     var i = String(k).lastIndexOf('@');
-    if (i <= 0) return 0;
+    if (i < 0) return 0;
     var n = +String(k).slice(i + 1);
     if (!isFinite(n)) return 0;
     return (typeof mcOriNorm === 'function') ? mcOriNorm(n) : ((n >= 0 && n <= 23) ? (n | 0) : 0);
@@ -161,8 +161,10 @@
   // Cambiar de material NO puede cambiar cómo está puesta la pieza. Todo cambio de bloque de una
   // celda pasa por aquí para devolverle su orientación; si no, encender una placa la endereza.
   function conOri(quiero, x, y, z) {
-    var ori = oriDe(claveEn(x, y, z));
-    return ori ? claveBase(quiero) + '@' + ori : quiero;
+    var k = claveEn(x, y, z);
+    var hasOri = String(k).lastIndexOf('@') >= 0;
+    var ori = oriDe(k);
+    return hasOri ? claveBase(quiero) + '@' + ori : quiero;
   }
   // Hacia dónde MIRA una pieza. Su frente es el +X de su dibujo, y a dónde va ese +X con la postura
   // puesta lo dice el motor (mcOriPerm), que lo saca de la MISMA composición con la que gira los
@@ -190,6 +192,7 @@
     // detrás y sale por delante, y nada más. Sin esto un repetidor alimenta de lado el cable de al
     // lado, y una fila de repetidores puestos hombro con hombro se contagia entre sí.
     if (cfg.soloAlFrente && hacia !== undefined && hacia !== frenteDe(x, y, z)) return 0;
+    if (cfg.soloAlAtras && hacia !== undefined && hacia !== atrasDe(x, y, z)) return 0;
     if (cfg.conduce) return potencia.get(cl(x, y, z)) || 0;
     if (!cfg.emite) return 0;
     return encendidaEn(x, y, z, cfg) ? cfg.emite : 0;
@@ -207,6 +210,15 @@
     var id = idEn(x, y, z);
     if (!id) return false;              // aire
     if (cacheIds()[id]) return false;   // es circuito: ya tiene sus propias reglas, no hace de puente
+    if (mc && mc.blockKey) {
+      var key = mc.blockKey[id];
+      if (key) {
+        var kLow = key.toLowerCase();
+        if (kLow.indexOf('agua') >= 0 || kLow.indexOf('water') >= 0 || kLow.indexOf('lava') >= 0) {
+          return false; // Los fluidos no conducen redstone
+        }
+      }
+    }
     return !aisId[id];
   }
 
@@ -268,6 +280,70 @@
   function encolarVecinos(x, y, z) {
     if (cfgEn(x, y, z) || potencia.has(cl(x, y, z))) encolar(x, y, z, true);    // esta es la que estrena
     encolarPuenteando(x, y, z);
+    
+    // Notificar observadores que miran directamente a la celda que ha cambiado (x,y,z)
+    for (var i = 0; i < 6; i++) {
+      var nx = x + DIRS[i][0], ny = y + DIRS[i][1], nz = z + DIRS[i][2];
+      var c = cfgEn(nx, ny, nz);
+      if (c && (c._clave === 'hab:observador' || c._clave === 'hab:observador-on' || c._clave === 'asset:assets/observador.vox.json' || c._clave === 'asset:assets/observador-on.vox.json')) {
+        var dirFrente = frenteDe(nx, ny, nz);
+        if (DIRS[dirFrente][0] === -DIRS[i][0] && DIRS[dirFrente][1] === -DIRS[i][1] && DIRS[dirFrente][2] === -DIRS[i][2]) {
+          var kObs = cl(nx, ny, nz);
+          if (!apagones.has('obs:' + kObs)) {
+            var claveObsAct = c._clave;
+            var esAssetObs = claveObsAct.indexOf('asset:') === 0;
+            var baseTargetOn = esAssetObs ? 'asset:assets/observador-on.vox.json' : 'hab:observador-on';
+            var baseTargetOff = esAssetObs ? 'asset:assets/observador.vox.json' : 'hab:observador';
+            
+            var quieroOn = conOri(baseTargetOn, nx, ny, nz);
+            var idOn = mc.name2id ? (mc.name2id[quieroOn] || mc.name2id[baseTargetOn]) : 0;
+            var quieroOff = conOri(baseTargetOff, nx, ny, nz);
+            var idOff = mc.name2id ? (mc.name2id[quieroOff] || mc.name2id[baseTargetOff]) : 0;
+            if (idOn && idOff) {
+              yoEscribiendo = true;
+              try { mcSetBlock(nx, ny, nz, idOn); } finally { yoEscribiendo = false; }
+              potencia.set(kObs, 15);
+              remallar([[nx, ny, nz]]);
+              encolar(nx, ny, nz, true);
+              encolarPuenteando(nx, ny, nz);
+              var dirAtras = atrasDe(nx, ny, nz);
+              var rx = nx + DIRS[dirAtras][0], ry = ny + DIRS[dirAtras][1], rz = nz + DIRS[dirAtras][2];
+              var cRx = cfgEn(rx, ry, rz);
+              if (cRx) {
+                encolar(rx, ry, rz, true);
+                if (typeof cRx.alRecibirSeñal === 'function') {
+                  var ant = potencia.get(cl(rx, ry, rz)) || 0;
+                  try { cRx.alRecibirSeñal({ x: rx, y: ry, z: rz, clave: mc.blockKey[idEn(rx, ry, rz)] }, 15, ant); } catch (e) {}
+                }
+              }
+              pedirDrenado();
+
+              var obsX = nx, obsY = ny, obsZ = nz;
+              apagones.set('obs:' + kObs, setTimeout(function() {
+                yoEscribiendo = true;
+                try { mcSetBlock(obsX, obsY, obsZ, idOff); } finally { yoEscribiendo = false; }
+                potencia.delete(kObs);
+                remallar([[obsX, obsY, obsZ]]);
+                encolar(obsX, obsY, obsZ, true);
+                encolarPuenteando(obsX, obsY, obsZ);
+                var dirAtrasOff = atrasDe(obsX, obsY, obsZ);
+                var rxOff = obsX + DIRS[dirAtrasOff][0], ryOff = obsY + DIRS[dirAtrasOff][1], rzOff = obsZ + DIRS[dirAtrasOff][2];
+                var cRxOff = cfgEn(rxOff, ryOff, rzOff);
+                if (cRxOff) {
+                  encolar(rxOff, ryOff, rzOff, true);
+                  if (typeof cRxOff.alRecibirSeñal === 'function') {
+                    var antOff = potencia.get(cl(rxOff, ryOff, rzOff)) || 15;
+                    try { cRxOff.alRecibirSeñal({ x: rxOff, y: ryOff, z: rzOff, clave: mc.blockKey[idEn(rxOff, ryOff, rzOff)] }, 0, antOff); } catch (e) {}
+                  }
+                }
+                pedirDrenado();
+                apagones.delete('obs:' + kObs);
+              }, 100));
+            }
+          }
+        }
+      }
+    }
   }
 
   // Vecinos de circuito, y los de más allá de un bloque macizo. Nunca encadena bloque → bloque, así
@@ -357,6 +433,9 @@
         var p = it[1], x = p[0], y = p[1], z = p[2];
         var cfg = cfgEn(x, y, z);
         if (!cfg) { potencia.delete(it[0]); continue; }          // ahí ya no hay nada del circuito
+        if (cfg._clave === 'hab:observador' || cfg._clave === 'hab:observador-on' || cfg._clave === 'asset:assets/observador.vox.json' || cfg._clave === 'asset:assets/observador-on.vox.json') {
+          continue; // Los observadores no calculan señal de entrada
+        }
 
         var nivel = señalQueLlega(x, y, z, cfg);
         var antes = potencia.get(it[0]) || 0;
@@ -561,6 +640,7 @@
         pulso: Math.max(0, Math.floor(+cfg.pulso || 0)),                    // ms hasta soltarse sola
         mira: !!cfg.mira,                       // escucha solo por su espalda (el giro de la clave)
         soloAlFrente: !!cfg.soloAlFrente,       // …y además emite SOLO por delante (el repetidor)
+        soloAlAtras: !!cfg.soloAlAtras,         // …y además emite SOLO por detrás (el observador)
         propaga: !!cfg.propaga,
         alRecibirSeñal: typeof cfg.alRecibirSeñal === 'function' ? cfg.alRecibirSeñal
                       : (typeof cfg.alRecibirSenal === 'function' ? cfg.alRecibirSenal : null)
@@ -781,6 +861,7 @@
     },
 
     _tabla: tabla, _potencia: potencia, _cola: cola, _esperando: esperando,
+    _encolarVecinos: encolarVecinos,
     _pasada: function () { return pasada; }
   };
 
@@ -803,9 +884,14 @@
     var cfg = cfgEn(x, y, z);
     if (cfg) {
       var recibe = potencia.get(cl(x, y, z)) || 0, saca = salidaDe(x, y, z, cfg);
-      return '⚡ ' + recibe + (saca !== recibe ? ' → ' + saca : '');
+      var ret = cfg.retardo ? ' (' + cfg.retardo + 't)' : '';
+      return '⚡ ' + recibe + (saca !== recibe ? ' → ' + saca : '') + ret;
     }
-    if (!bloqueEnergizable(x, y, z)) return '';
+    if (!bloqueEnergizable(x, y, z)) {
+      var id = idEn(x, y, z);
+      if (id && aisId && aisId[id]) return '🚫 aislante';
+      return '';
+    }
     var fuerte = energiaDeBloque(x, y, z, false);
     if (fuerte) return '⚡ ' + fuerte;
     var debil = energiaDeBloque(x, y, z, true);
