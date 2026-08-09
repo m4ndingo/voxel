@@ -2,9 +2,9 @@
 // REDSTONE · EJEMPLOS — nueve circuitos que se pueden tocar, cada uno con su cartel
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 //
-// Pensado para /map/redstone, pero funciona en cualquier mapa: monta nueve parcelas en tres calles,
-// cada una con un circuito COMPLETO y un cartel delante que explica qué es. El orden no es
-// decorativo, es el argumento entero de por qué esto es una máquina y no una luz de navidad:
+// Pensado para /map/redstone, pero funciona en cualquier mapa: monta diez parcelas (3×3 + una
+// delante), cada una con un circuito COMPLETO y un cartel delante que explica qué es. El orden no
+// es decorativo, es el argumento entero de por qué esto es una máquina y no una luz de navidad:
 //
 //   1 palanca → lámpara      entrada, cable, salida: el redstone en su versión mínima
 //   2 tendido largo          la señal SE GASTA (−1 por bloque) y el repetidor la repone
@@ -15,6 +15,7 @@
 //   7 AND                    la promesa del 4, cobrada: dos NOT y un NOR y ya hay una AND
 //   8 XOR                    cinco inversores: la función que NO se saca de una sola puerta
 //   9 la señal SUBE          aquí el cable es 3D (en Minecraft el polvo va por el suelo y punto)
+//  10 observador             detecta un cambio DELANTE y emite un pulso por DETRÁS
 //
 // ⚠️ Los tres lazos realimentados (5, 6 y 8) llevan un repetidor de VUELTA que no es adorno: el
 // cable pierde 1 por bloque y muere a los 15, así que un lazo que dé la vuelta a la parcela no
@@ -43,11 +44,11 @@
   var SUELO = 14;        // el mundo plano de serie termina en hierba a y=14…
   var Y = SUELO + 1;     // …y los circuitos van encima, a ras de suelo
   var ANCHO = 26, FONDO = 16;                       // tamaño de una parcela
-  // ⚠️ Las dos calles de atrás NO cambian de sitio al abrir una tercera, y no es pereza: las notas
-  // de los carteles van indexadas por coordenada, así que una parcela que se mueve deja su nota
-  // vieja colgada en la bandeja del dueño para siempre. La calle nueva se abre DELANTE (z menor),
-  // que es además por donde se entra.
-  var COLS = [4, 33, 62], FILAS = [30, 52, 72];     // 3 columnas × 3 filas dentro de un mundo de 96
+  // ⚠️ Las calles ya montadas NO cambian de sitio al abrir otra, y no es pereza: las notas de los
+  // carteles van indexadas por coordenada, así que una parcela que se mueve deja su nota vieja
+  // colgada en la bandeja del dueño para siempre. La calle nueva se abre DELANTE (z menor),
+  // APPEND a FILAS — no insertar al principio o se mudan las nueve de siempre.
+  var COLS = [4, 33, 62], FILAS = [30, 52, 72, 8];  // 3×3 + fila del observador delante de la entrada
 
   var LOSA   = 'asset:assets/adoquin.vox.json';     // el suelo de cada parcela, para que se vea dónde acaba
   var MURO   = 'asset:assets/ladrillo_piedra.vox.json';
@@ -67,7 +68,10 @@
                 // Las giradas son OTRA entrada de paleta («hab:repetidor@2»), no la misma con un
                 // atributo: si no se precargan, la pieza de vuelta de los lazos sale ROCA.
                 'hab:repetidor@2', 'hab:repetidor-on@2', 'hab:inversor@2', 'hab:inversor-on@2',
-                'hab:piston-pegajoso@2', 'hab:piston-pegajoso-on@2'];
+                'hab:piston-pegajoso@2', 'hab:piston-pegajoso-on@2',
+                // Observador: los dibujos viven en assets/ (no hay hab:). Hace falta el ON en paleta
+                // o el pulso no puede pintar el material encendido.
+                'asset:assets/observador.vox.json', 'asset:assets/observador-on.vox.json'];
   // ⚠️ `mc.name2id` NO vale para saber si un material está cargado: indexa por MOTE corto («adoquin»)
   // y un asset entra en la paleta con su clave larga («asset:assets/adoquin.vox.json»), así que
   // preguntar por la clave da null aunque esté puesto. Quien sabe la verdad es la paleta.
@@ -288,6 +292,19 @@
   for (dy = 10; dy <= 20; dy++) pon(8, 4, 'hab:cable', dy);  // segundo tramo
   pon(8, 4, LAMPARA_OFF, 21);                                // el farol, visible desde toda la calle
 
+  // ── 10 · observador ────────────────────────────────────────────────────────────────────────
+  // Mira hacia +X (@0): delante una palanca (al conmutarla CAMBIA el bloque ⇒ dispara), detrás
+  // cable + lámpara. Un clic en la palanca tiene que hacer un destello corto en la lámpara.
+  parcela(9);
+  cartel('10 · OBSERVADOR. Mira a la palanca de delante: al conmutarla DETECTA el cambio y emite '
+       + 'un pulso corto por DETRÁS (la lámpara parpadea). No conduce la señal de la palanca: solo '
+       + 'el flanco. Es el sensor de «algo ha cambiado aquí».');
+  pon(8, 8, 'asset:assets/observador.vox.json');   // frente +X → mira (9,8)
+  pon(9, 8, 'hab:palanca');                        // el cambio que lo dispara
+  pon(7, 8, 'hab:cable');                          // salida por −X
+  pon(6, 8, 'hab:cable');
+  pon(5, 8, LAMPARA_OFF);
+
   // ── el cartel de la entrada ────────────────────────────────────────────────────────────────
   // Estuvo en z=46 mientras las calles eran dos. Al abrir la tercera por delante se ha mudado, y el
   // sitio viejo se limpia a mano: si no, quedan el poste y —peor— su nota, que seguiría contando en
@@ -298,10 +315,11 @@
   var EX = 48, EZ = 24;
   for (dy = 0; dy < 4; dy++) for (d2 = -1; d2 <= 1; d2++) setVoxel(EX + d2, Y + dy, EZ, 0);
   delete mc.notes[EX + ',' + (Y + 2) + ',' + EZ];        // la del poste de tablones de antes
-  carteles.push([EX, SUELO, EZ, 'MUNDO REDSTONE · nueve circuitos que se pueden tocar. De izquierda a '
-    + 'derecha y de delante a atrás: 1 lámpara · 2 el cable se gasta · 3 puerta con placa · 4 NOR · '
-    + '5 reloj · 6 memoria · 7 AND · 8 XOR · 9 la señal sube. Cada uno tiene su cartel. '
-    + 'Clic derecho (o el botón CENTRAL) para accionar palancas y botones.']);
+  carteles.push([EX, SUELO, EZ, 'MUNDO REDSTONE · diez circuitos que se pueden tocar. Delante del '
+    + 'cartel: 10 observador. Detrás, de izquierda a derecha y de delante a atrás: 1 lámpara · 2 el '
+    + 'cable se gasta · 3 puerta con placa · 4 NOR · 5 reloj · 6 memoria · 7 AND · 8 XOR · 9 la '
+    + 'señal sube. Cada uno tiene su cartel. Clic derecho (o el botón CENTRAL) para accionar '
+    + 'palancas y botones.']);
 
   endBatch();
 
@@ -322,7 +340,7 @@
 
   var guardado = false;
   if (game.saveWorld) guardado = await game.saveWorld();
-  console.log('[ejemplos] 9 circuitos + ' + carteles.length + ' carteles en «'
+  console.log('[ejemplos] 10 circuitos + ' + carteles.length + ' carteles en «'
     + (typeof mcMapName === 'function' ? mcMapName() || 'default' : '?') + '»'
     + (guardado === false ? ' · NO se pudo guardar' : ' · guardado'));
   if (window.toast) toast('Ejemplos de redstone montados');

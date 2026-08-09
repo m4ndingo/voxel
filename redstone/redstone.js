@@ -277,71 +277,101 @@
   // que al arrancarla parecía un bloque cualquiera y la lámpara del otro lado del muro se quedaba
   // encendida. El filtro que de verdad importa sigue en pie: solo se ENCOLA lo que tiene cfg, así
   // que la ráfaga del TNT sigue dejando la cola vacía; lo que sube son lecturas de array (7 → 43).
+  // ¿Esta cfg es un observador (apagado o encendido, hab: o asset:)?
+  function esObservador(c) {
+    if (!c || !c._clave) return false;
+    var b = claveBase(c._clave);
+    return b === 'hab:observador' || b === 'hab:observador-on'
+      || b === 'asset:assets/observador.vox.json' || b === 'asset:assets/observador-on.vox.json';
+  }
+  // Pareja on/off del observador según si la celda es asset o hab. Los ficheros reales viven en
+  // assets/; hab: se conserva por si alguien los genera en la galería.
+  function parejaObservador(clave) {
+    var b = claveBase(clave || '');
+    if (b.indexOf('asset:') === 0) {
+      return {
+        on: 'asset:assets/observador-on.vox.json',
+        off: 'asset:assets/observador.vox.json'
+      };
+    }
+    return { on: 'hab:observador-on', off: 'hab:observador' };
+  }
+  // Pulso del observador: se enciende un instante (~100 ms) y emite 15 por DETRÁS. Si el material
+  // encendido aún no está en la paleta (precargar:false), se carga y se reintenta — sin eso el
+  // disparo fallaba en silencio al colocar el observador desde la galería (solo bajaba el off).
+  function dispararObservador(nx, ny, nz, c) {
+    var kObs = cl(nx, ny, nz);
+    if (apagones.has('obs:' + kObs)) return;
+    var par = parejaObservador(c._clave);
+    var quieroOn = conOri(par.on, nx, ny, nz);
+    var quieroOff = conOri(par.off, nx, ny, nz);
+    var idOn = mc.name2id ? (mc.name2id[quieroOn] || mc.name2id[par.on]) : 0;
+    var idOff = mc.name2id ? (mc.name2id[quieroOff] || mc.name2id[par.off]) : 0;
+    // La celda YA es el off: si la clave orientada no está indexada, vale el id actual.
+    if (!idOff) idOff = idEn(nx, ny, nz);
+    if (!idOn) {
+      cargarYReintentar(par.on, nx, ny, nz, function () {
+        var c2 = cfgEn(nx, ny, nz);
+        if (c2 && esObservador(c2)) dispararObservador(nx, ny, nz, c2);
+      });
+      return;
+    }
+    if (!idOff) return;
+
+    yoEscribiendo = true;
+    try { mcSetBlock(nx, ny, nz, idOn); } finally { yoEscribiendo = false; }
+    potencia.set(kObs, 15);
+    remallar([[nx, ny, nz]]);
+    encolar(nx, ny, nz, true);
+    encolarPuenteando(nx, ny, nz);
+    var dirAtras = atrasDe(nx, ny, nz);
+    var rx = nx + DIRS[dirAtras][0], ry = ny + DIRS[dirAtras][1], rz = nz + DIRS[dirAtras][2];
+    var cRx = cfgEn(rx, ry, rz);
+    if (cRx) {
+      encolar(rx, ry, rz, true);
+      if (typeof cRx.alRecibirSeñal === 'function') {
+        var ant = potencia.get(cl(rx, ry, rz)) || 0;
+        try { cRx.alRecibirSeñal({ x: rx, y: ry, z: rz, clave: mc.blockKey[idEn(rx, ry, rz)] }, 15, ant); } catch (e) {}
+      }
+    }
+    pedirDrenado();
+
+    var obsX = nx, obsY = ny, obsZ = nz, idOffFinal = idOff;
+    apagones.set('obs:' + kObs, setTimeout(function () {
+      yoEscribiendo = true;
+      try { mcSetBlock(obsX, obsY, obsZ, idOffFinal); } finally { yoEscribiendo = false; }
+      potencia.delete(kObs);
+      remallar([[obsX, obsY, obsZ]]);
+      encolar(obsX, obsY, obsZ, true);
+      encolarPuenteando(obsX, obsY, obsZ);
+      var dirAtrasOff = atrasDe(obsX, obsY, obsZ);
+      var rxOff = obsX + DIRS[dirAtrasOff][0], ryOff = obsY + DIRS[dirAtrasOff][1], rzOff = obsZ + DIRS[dirAtrasOff][2];
+      var cRxOff = cfgEn(rxOff, ryOff, rzOff);
+      if (cRxOff) {
+        encolar(rxOff, ryOff, rzOff, true);
+        if (typeof cRxOff.alRecibirSeñal === 'function') {
+          var antOff = potencia.get(cl(rxOff, ryOff, rzOff)) || 15;
+          try { cRxOff.alRecibirSeñal({ x: rxOff, y: ryOff, z: rzOff, clave: mc.blockKey[idEn(rxOff, ryOff, rzOff)] }, 0, antOff); } catch (e) {}
+        }
+      }
+      pedirDrenado();
+      apagones.delete('obs:' + kObs);
+    }, 100));
+  }
+
   function encolarVecinos(x, y, z) {
     if (cfgEn(x, y, z) || potencia.has(cl(x, y, z))) encolar(x, y, z, true);    // esta es la que estrena
     encolarPuenteando(x, y, z);
-    
+
     // Notificar observadores que miran directamente a la celda que ha cambiado (x,y,z)
     for (var i = 0; i < 6; i++) {
       var nx = x + DIRS[i][0], ny = y + DIRS[i][1], nz = z + DIRS[i][2];
       var c = cfgEn(nx, ny, nz);
-      if (c && (c._clave === 'hab:observador' || c._clave === 'hab:observador-on' || c._clave === 'asset:assets/observador.vox.json' || c._clave === 'asset:assets/observador-on.vox.json')) {
-        var dirFrente = frenteDe(nx, ny, nz);
-        if (DIRS[dirFrente][0] === -DIRS[i][0] && DIRS[dirFrente][1] === -DIRS[i][1] && DIRS[dirFrente][2] === -DIRS[i][2]) {
-          var kObs = cl(nx, ny, nz);
-          if (!apagones.has('obs:' + kObs)) {
-            var claveObsAct = c._clave;
-            var esAssetObs = claveObsAct.indexOf('asset:') === 0;
-            var baseTargetOn = esAssetObs ? 'asset:assets/observador-on.vox.json' : 'hab:observador-on';
-            var baseTargetOff = esAssetObs ? 'asset:assets/observador.vox.json' : 'hab:observador';
-            
-            var quieroOn = conOri(baseTargetOn, nx, ny, nz);
-            var idOn = mc.name2id ? (mc.name2id[quieroOn] || mc.name2id[baseTargetOn]) : 0;
-            var quieroOff = conOri(baseTargetOff, nx, ny, nz);
-            var idOff = mc.name2id ? (mc.name2id[quieroOff] || mc.name2id[baseTargetOff]) : 0;
-            if (idOn && idOff) {
-              yoEscribiendo = true;
-              try { mcSetBlock(nx, ny, nz, idOn); } finally { yoEscribiendo = false; }
-              potencia.set(kObs, 15);
-              remallar([[nx, ny, nz]]);
-              encolar(nx, ny, nz, true);
-              encolarPuenteando(nx, ny, nz);
-              var dirAtras = atrasDe(nx, ny, nz);
-              var rx = nx + DIRS[dirAtras][0], ry = ny + DIRS[dirAtras][1], rz = nz + DIRS[dirAtras][2];
-              var cRx = cfgEn(rx, ry, rz);
-              if (cRx) {
-                encolar(rx, ry, rz, true);
-                if (typeof cRx.alRecibirSeñal === 'function') {
-                  var ant = potencia.get(cl(rx, ry, rz)) || 0;
-                  try { cRx.alRecibirSeñal({ x: rx, y: ry, z: rz, clave: mc.blockKey[idEn(rx, ry, rz)] }, 15, ant); } catch (e) {}
-                }
-              }
-              pedirDrenado();
-
-              var obsX = nx, obsY = ny, obsZ = nz;
-              apagones.set('obs:' + kObs, setTimeout(function() {
-                yoEscribiendo = true;
-                try { mcSetBlock(obsX, obsY, obsZ, idOff); } finally { yoEscribiendo = false; }
-                potencia.delete(kObs);
-                remallar([[obsX, obsY, obsZ]]);
-                encolar(obsX, obsY, obsZ, true);
-                encolarPuenteando(obsX, obsY, obsZ);
-                var dirAtrasOff = atrasDe(obsX, obsY, obsZ);
-                var rxOff = obsX + DIRS[dirAtrasOff][0], ryOff = obsY + DIRS[dirAtrasOff][1], rzOff = obsZ + DIRS[dirAtrasOff][2];
-                var cRxOff = cfgEn(rxOff, ryOff, rzOff);
-                if (cRxOff) {
-                  encolar(rxOff, ryOff, rzOff, true);
-                  if (typeof cRxOff.alRecibirSeñal === 'function') {
-                    var antOff = potencia.get(cl(rxOff, ryOff, rzOff)) || 15;
-                    try { cRxOff.alRecibirSeñal({ x: rxOff, y: ryOff, z: rzOff, clave: mc.blockKey[idEn(rxOff, ryOff, rzOff)] }, 0, antOff); } catch (e) {}
-                  }
-                }
-                pedirDrenado();
-                apagones.delete('obs:' + kObs);
-              }, 100));
-            }
-          }
-        }
+      if (!c || !esObservador(c)) continue;
+      var dirFrente = frenteDe(nx, ny, nz);
+      // El observador mira hacia la celda tocada: su frente = opuesto al vector vecino→observador
+      if (DIRS[dirFrente][0] === -DIRS[i][0] && DIRS[dirFrente][1] === -DIRS[i][1] && DIRS[dirFrente][2] === -DIRS[i][2]) {
+        dispararObservador(nx, ny, nz, c);
       }
     }
   }
@@ -433,8 +463,8 @@
         var p = it[1], x = p[0], y = p[1], z = p[2];
         var cfg = cfgEn(x, y, z);
         if (!cfg) { potencia.delete(it[0]); continue; }          // ahí ya no hay nada del circuito
-        if (cfg._clave === 'hab:observador' || cfg._clave === 'hab:observador-on' || cfg._clave === 'asset:assets/observador.vox.json' || cfg._clave === 'asset:assets/observador-on.vox.json') {
-          continue; // Los observadores no calculan señal de entrada
+        if (esObservador(cfg)) {
+          continue; // Los observadores no calculan señal de entrada: su pulso lo dispara el cambio delante
         }
 
         var nivel = señalQueLlega(x, y, z, cfg);
@@ -844,7 +874,19 @@
       var g = mc.grid, NX = mc.dim.x, NY = mc.dim.y, NZ = mc.dim.z, n = 0;
       for (var z = 0; z < NZ; z++) for (var y = 0; y < NY; y++) {
         var fila = y * NX + z * NX * NY;
-        for (var x = 0; x < NX; x++) if (ids[g[fila + x]]) { cola.set(cl(x, y, z), [x, y, z]); n++; }
+        for (var x = 0; x < NX; x++) {
+          var id = g[fila + x];
+          var cfg = ids[id];
+          if (!cfg) continue;
+          // El observador-on es un pulso momentáneo (~100 ms) que nunca debería persistir en disco.
+          // Si el mundo se guardó con uno encendido, se devuelve a off para no atascarlo para siempre.
+          if (esObservador(cfg) && claveBase(mc.blockKey[id] || '').indexOf('-on') > 0) {
+            var par = parejaObservador(cfg._clave);
+            var idOff = mc.name2id[conOri(par.off, x, y, z)] || mc.name2id[par.off];
+            if (idOff && idOff !== id) { g[fila + x] = idOff; }
+          }
+          cola.set(cl(x, y, z), [x, y, z]); n++;
+        }
       }
       if (n) { forzar = true; pedirDrenado(); console.log('[redstone] repaso: ' + n + ' celda(s) de circuito'); }
       return n;

@@ -612,11 +612,14 @@
     'hab:piston-pegajoso-on':     { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
     'hab:piston-pegajoso-cabeza': {},
 
-    // Bloque observador (Observer): emite 15 por su parte trasera solo cuando está activo
+    // Bloque observador (Observer): detecta un cambio DELANTE y emite 15 por DETRÁS un instante.
+    // Los dibujos viven en assets/; hab: se registra por si aparecen en la galería de habitantes.
+    // ⚠️ `encendida` del asset tiene que ser el asset-on, no hab: — si no, al disparar se pedía un
+    // material que no existe y el pulso no salía nunca (solo estaba en la paleta el off).
     'hab:observador':                       { encendida: 'hab:observador-on', soloAlAtras: true },
     'hab:observador-on':                    { emite: 15, encendida: 'hab:observador-on', apagada: 'hab:observador', soloAlAtras: true },
-    'asset:assets/observador.vox.json':     { encendida: 'hab:observador-on', soloAlAtras: true },
-    'asset:assets/observador-on.vox.json':  { emite: 15, encendida: 'hab:observador-on', apagada: 'hab:observador', soloAlAtras: true },
+    'asset:assets/observador.vox.json':     { encendida: 'asset:assets/observador-on.vox.json', soloAlAtras: true },
+    'asset:assets/observador-on.vox.json':  { emite: 15, encendida: 'asset:assets/observador-on.vox.json', apagada: 'asset:assets/observador.vox.json', soloAlAtras: true },
   };
 
   Object.keys(CIRCUITOS).forEach(function (k) {

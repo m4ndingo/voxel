@@ -46,7 +46,7 @@ const ok = (nom, cond, extra) => {
     const ticks = n => { for (let i = 0; i < n; i++) R.tick(); };
     const espera = ms => new Promise(f => setTimeout(f, ms));
     const Y = 15;
-    const COLS = [4, 33, 62], FILAS = [30, 52, 72];
+    const COLS = [4, 33, 62], FILAS = [30, 52, 72, 8];
     const P = n => ({ x: COLS[n % 3], z: FILAS[(n / 3) | 0] });
     const en = (n, px, pz, dy) => { const q = P(n); return [q.x + px, Y + (dy || 0), q.z + pz]; };
     const leo = (n, px, pz, dy) => base(clave.apply(null, en(n, px, pz, dy)));
@@ -171,6 +171,20 @@ const ok = (nom, cond, extra) => {
     R.encender(P9[0], P9[1], P9[2], false); ticks(20);
     out.e9trasApagar = leo(8, 8, 4, 21);
 
+    // 10 · observador: conmutar la palanca DELANTE dispara un pulso por DETRÁS
+    const obs = en(9, 8, 8), palObs = en(9, 9, 8), lampObs = en(9, 5, 8);
+    out.e10antes = leo(9, 5, 8);
+    out.e10obs = leo(9, 8, 8);
+    R.conmutar(palObs[0], palObs[1], palObs[2]);
+    ticks(4);
+    out.e10durante = leo(9, 5, 8);
+    out.e10obsDurante = leo(9, 8, 8);
+    out.e10potObs = (R._potencia && R._potencia.get(obs[0] + ',' + obs[1] + ',' + obs[2])) || 0;
+    await espera(180);
+    ticks(4);
+    out.e10despues = leo(9, 5, 8);
+    out.e10obsDespues = leo(9, 8, 8);
+
     out.notas = Object.keys(mc.notes).length;
     // Cada nota tiene que haber plantado su cartel, y NINGUNO puede acabar en el documento: los
     // carteles se derivan de las notas y van marcados efímeros. Si algún día se guardaran, el mapa
@@ -185,8 +199,8 @@ const ok = (nom, cond, extra) => {
 
   console.log('\nMateriales y montaje');
   ok('todas las piezas están en la paleta', r.materiales.length === 0, r.materiales.join(','));
-  ok('hay 10 carteles (9 circuitos + la entrada)', r.notas === 10, r.notas);
-  ok('y cada nota ha plantado el suyo', r.carteles === 10, r.carteles + ' cartel(es)');
+  ok('hay 11 carteles (10 circuitos + la entrada)', r.notas === 11, r.notas);
+  ok('y cada nota ha plantado el suyo', r.carteles === 11, r.carteles + ' cartel(es)');
   ok('que no se guardan en el mundo (son efímeros)', r.cartelesEnDoc === 0, r.cartelesEnDoc + ' en el documento');
   ok('el spawn queda delante del cartel de entrada', !!r.spawn, JSON.stringify(r.spawn));
 
