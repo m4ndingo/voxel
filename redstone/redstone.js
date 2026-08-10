@@ -779,7 +779,9 @@
       hayCircuito = true;
       invalidar();
       c.power = c.emite;   // el nombre viejo, por si algo de fuera lo lee
-      console.log('[redstone] ' + clave + (c.emite ? ' · emite ' + c.emite : '')
+      // `callado`: la misma pieza se registra una vez por espacio de nombres (hab: y asset:), y
+      // anunciar las dos sería doblar el arranque en líneas que dicen lo mismo.
+      if (!cfg.callado) console.log('[redstone] ' + clave + (c.emite ? ' · emite ' + c.emite : '')
         + (c.conduce ? ' · cable (pérdida ' + c.conduce.perdida + ')' : '')
         + (c.encendida ? ' · se enciende como ' + c.encendida : '')
         + (c.invertida ? ' · INVERTIDA (luce sin señal)' : '')

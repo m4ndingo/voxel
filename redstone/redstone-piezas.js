@@ -50,12 +50,13 @@
   // «estrenada» (redstone.js:265) y la siguiente pasada la re-abre saltándose el atajo de
   // `nivel === antes`. Registrando los dos materiales por separado, `apagada` es cada uno sí mismo,
   // el motor no toca nada, y quien decide si se extiende es el callback — que es quien sabe si cabe.
-  var CABEZA = 'hab:piston-cabeza';
-  var CABEZA_PEG = 'hab:piston-pegajoso-cabeza';
+  // Todo esto son NOMBRES de pieza, sin espacio de nombres: ver nombreDe()/comoLa() más abajo.
+  var CABEZA = 'piston-cabeza';
+  var CABEZA_PEG = 'piston-pegajoso-cabeza';
 
-  // Bases reconocidas como pistón (normal y pegajoso)
-  var ES_PISTON = { 'hab:piston': 1, 'hab:piston-on': 1, 'hab:piston-pegajoso': 1, 'hab:piston-pegajoso-on': 1 };
-  var ES_PISTON_PEGAJOSO = { 'hab:piston-pegajoso': 1, 'hab:piston-pegajoso-on': 1 };
+  // Nombres reconocidos como pistón (normal y pegajoso)
+  var ES_PISTON = { 'piston': 1, 'piston-on': 1, 'piston-pegajoso': 1, 'piston-pegajoso-on': 1 };
+  var ES_PISTON_PEGAJOSO = { 'piston-pegajoso': 1, 'piston-pegajoso-on': 1 };
 
   function baseDe(k) { var i = k ? k.lastIndexOf('@') : -1; return i < 0 ? (k || '') : k.slice(0, i); }
   // La postura ENTERA, sin recortar: son 24 y no 16 (mcOriNorm manda). Quedarse con cuatro bits no
@@ -79,6 +80,29 @@
     var a = mcRotXZ(1, 0, ori & 3, 2, 2), o = mcRotXZ(0, 0, ori & 3, 2, 2);    // respaldo: solo horizontal
     return [a[0] - o[0], 0, a[1] - o[1]];
   }
+
+  // ── El mismo dibujo, dos puertas de entrada ────────────────────────────────────────────────
+  // Una pieza puede llegar al mundo por la galería de habitantes (`hab:piston-pegajoso-on`) o
+  // empotrada en assets (`asset:assets/piston-pegajoso-on.vox.json`). Es el MISMO dibujo: lo único
+  // que cambia es de dónde salió, y eso es justo lo que cambia al exportar de una instancia e
+  // importar en otra. Con las claves `hab:` escritas a mano, ese pistón dejaba de ser un pistón al
+  // cruzar de mundo: el motor no lo encontraba en la tabla y se quedaba de adorno.
+  //
+  // Así que lo que identifica una pieza aquí es su NOMBRE —`piston-pegajoso-on`—, y el espacio de
+  // nombres se ARRASTRA: lo que hay puesto en la celda decide en cuál se buscan sus parejas, para no
+  // mezclar (un pistón de assets se extiende con la cabeza de assets, no con la de la galería).
+  // Es lo mismo que ya hacía `conOri` con el giro, pero con la procedencia.
+  var RE_ASSET = /^asset:assets\/(.+)\.vox\.json$/;
+  function nombreDe(clave) {              // 'asset:assets/piston-on.vox.json@3' → 'piston-on'
+    var k = baseDe(clave || '');
+    if (k.indexOf('hab:') === 0) return k.slice(4);
+    var m = RE_ASSET.exec(k);
+    return m ? m[1] : '';
+  }
+  function comoLa(claveRef, nombre) {     // `nombre`, en el MISMO espacio de nombres que claveRef
+    return RE_ASSET.test(baseDe(claveRef || '')) ? 'asset:assets/' + nombre + '.vox.json' : 'hab:' + nombre;
+  }
+  function ambas(nombre) { return ['hab:' + nombre, 'asset:assets/' + nombre + '.vox.json']; }
 
   var avisados = {};
   function unaVez(k, msg) {
@@ -206,9 +230,9 @@
   function accionar(x, y, z, extender) {
     if (!mcInside(x, y, z)) return;
     var clave = mc.blockKey[mc.grid[mcIdx(x, y, z)]] || '';
-    var base = baseDe(clave);
-    if (!ES_PISTON[base]) return;   // ya no hay pistón
-    var pegajoso = !!ES_PISTON_PEGAJOSO[base];
+    var nom = nombreDe(clave);
+    if (!ES_PISTON[nom]) return;   // ya no hay pistón
+    var pegajoso = !!ES_PISTON_PEGAJOSO[nom];
     var ori = oriDe(clave), d = frenteDe(ori);   // empuja hacia donde MIRA, en las 24 posturas
     var ax = x + d[0], ay = y + d[1], az = z + d[2];        // donde va la cabeza
     var bx = ax + d[0], by = ay + d[1], bz = az + d[2];     // donde va lo empujado
@@ -216,9 +240,12 @@
     // (mc.structures) ocupa varias celdas y no vive en la rejilla: delante del pistón se ve como aire
     // y la cabeza se le mete dentro. Límite conocido de la v1, no un descuido.
     var reintentar = function () { accionar(x, y, z, extender); };
-    var baseOff = pegajoso ? 'hab:piston-pegajoso' : 'hab:piston';
-    var baseOn  = pegajoso ? 'hab:piston-pegajoso-on' : 'hab:piston-on';
-    var cab     = pegajoso ? CABEZA_PEG : CABEZA;
+    // El cuerpo y la cabeza salen del MISMO sitio del que salió este pistón: si vino de assets, su
+    // cabeza es la de assets. Mezclarlos daría un pistón con cabeza prestada (o sin cabeza, si esa
+    // instancia no tiene la otra).
+    var baseOff = comoLa(clave, pegajoso ? 'piston-pegajoso' : 'piston');
+    var baseOn  = comoLa(clave, pegajoso ? 'piston-pegajoso-on' : 'piston-on');
+    var cab     = comoLa(clave, pegajoso ? CABEZA_PEG : CABEZA);
     var idCuerpo = idDe(extender ? baseOn : baseOff, ori, reintentar);
     if (!idCuerpo) return;                                   // aún no está en la paleta: se reintenta sola
     var tocadas = [];
@@ -277,14 +304,14 @@
         var destX = b.x + d[0], destY = b.y + d[1], destZ = b.z + d[2];
         var enAMover = b.id;
         var claveA = mc.blockKey[b.id] || '';
-        var baseA = baseDe(claveA);
+        var nomA = nombreDe(claveA);
 
         // BUG-RS13 · Al empujar una placa/botón encendido, se restaura a su estado desaccionado
-        if (baseA === 'hab:placa-on') {
-          var idOff = idDe('hab:placa', oriDe(claveA), reintentar);
+        if (nomA === 'placa-on') {
+          var idOff = idDe(comoLa(claveA, 'placa'), oriDe(claveA), reintentar);
           if (idOff) enAMover = idOff;
-        } else if (baseA === 'hab:boton-on') {
-          var idOff = idDe('hab:boton', oriDe(claveA), reintentar);
+        } else if (nomA === 'boton-on') {
+          var idOff = idDe(comoLa(claveA, 'boton'), oriDe(claveA), reintentar);
           if (idOff) enAMover = idOff;
         }
 
@@ -306,8 +333,8 @@
       // ── Retracción ──
       // Verificar que la cabeza sigue ahí (normal O pegajosa según el tipo)
       if (!mcInside(ax, ay, az)) return;
-      var baseCabAhora = baseDe(mc.blockKey[mc.grid[mcIdx(ax, ay, az)]] || '');
-      if (baseCabAhora !== CABEZA && baseCabAhora !== CABEZA_PEG) return;
+      var nomCabAhora = nombreDe(mc.blockKey[mc.grid[mcIdx(ax, ay, az)]] || '');
+      if (nomCabAhora !== CABEZA && nomCabAhora !== CABEZA_PEG) return;
 
       // Pistón pegajoso: antes de quitar la cabeza, tirar del bloque que está delante de ella.
       // Solo tira de UN bloque (como Minecraft), y solo si no es inamovible.
@@ -320,9 +347,9 @@
           var esFluido = claveDelante.indexOf('agua') >= 0 || claveDelante.indexOf('water') >= 0 ||
                          claveDelante.indexOf('lava') >= 0 || (typeof mcIsReplaceable === 'function' && mcIsReplaceable(idDelante, bx, by, bz)) ||
                          (game.fluidos && ((game.fluidos.isFluid && game.fluidos.isFluid(idDelante, bx, by, bz)) || (game.fluidos.esFluido && game.fluidos.esFluido(bx, by, bz))));
-          var baseDel = baseDe(mc.blockKey[idDelante] || '');
-          var esOtroPiston = baseDel === 'hab:piston-on' || baseDel === 'hab:piston-pegajoso-on'
-                          || baseDel === CABEZA || baseDel === CABEZA_PEG;
+          var nomDel = nombreDe(mc.blockKey[idDelante] || '');
+          var esOtroPiston = nomDel === 'piston-on' || nomDel === 'piston-pegajoso-on'
+                          || nomDel === CABEZA || nomDel === CABEZA_PEG;
           if (!esInamov && !esOtroPiston && !esFluido) {
             // Mover el bloque de (bx,by,bz) a (ax,ay,az) — la cabeza aún está ahí, se pisa
             var idHeadOld = mc.grid[mcIdx(ax, ay, az)];
@@ -379,7 +406,7 @@
         if (mcInside(nx1, ny1, nz1)) {
           var id1 = mc.grid[mcIdx(nx1, ny1, nz1)] || 0;
           var key1 = mc.blockKey[id1] || '';
-          if (ES_PISTON[baseDe(key1)]) {
+          if (ES_PISTON[nombreDe(key1)]) {
             game.redstone.revisar(nx1, ny1, nz1);
           }
         }
@@ -387,7 +414,7 @@
         if (mcInside(nx2, ny2, nz2)) {
           var id2 = mc.grid[mcIdx(nx2, ny2, nz2)] || 0;
           var key2 = mc.blockKey[id2] || '';
-          if (ES_PISTON[baseDe(key2)]) {
+          if (ES_PISTON[nombreDe(key2)]) {
             game.redstone.revisar(nx2, ny2, nz2);
           }
         }
@@ -424,7 +451,6 @@
   // estaba fuera y tiene que quedarse fuera. Lo que cuenta es cruzar el umbral.
   function empujar(celda, nivel, antes) {
     var clave = mc.blockKey[mc.grid[mcIdx(celda.x, celda.y, celda.z)]] || '';
-    var base = baseDe(clave);
     var cfg = game.redstone._tabla ? game.redstone._tabla[clave] : null;
     var nivelEfectivo = nivel;
 
@@ -465,7 +491,8 @@
       nivelEfectivo = maxOtras5;
     }
 
-    var estaExtendido = (base === 'hab:piston-on' || base === 'hab:piston-pegajoso-on');
+    var nom = nombreDe(clave);
+    var estaExtendido = (nom === 'piston-on' || nom === 'piston-pegajoso-on');
     // Si el pistón está extendido, ignorar la cara frontal nos asegura que el bloque de redstone pegado
     // no lo mantenga encendido. Sin embargo, si nivel (la señal externa global que entra al pistón)
     // cae a 0, o si maxOtras5 es 0, el pistón debe retraerse.
@@ -500,28 +527,30 @@
   // la una a la otra y la puerta no se cerraba jamás), abría con un tick de diferencia y al final
   // justo del alcance abría solo la mitad. Ya no hace falta, y encima una puerta de Minecraft
   // tampoco conduce señal.
-  var ES_BAJA = { 'hab:puerta': 1, 'hab:puerta-abierta': 1 };
-  var ES_ALTA = { 'hab:puerta-alta': 1, 'hab:puerta-alta-abierta': 1 };
+  var ES_BAJA = { 'puerta': 1, 'puerta-abierta': 1 };            // por NOMBRE, sin espacio de nombres
+  var ES_ALTA = { 'puerta-alta': 1, 'puerta-alta-abierta': 1 };
 
   function claveEn(x, y, z) {
     return mcInside(x, y, z) ? (mc.blockKey[mc.grid[mcIdx(x, y, z)]] || '') : '';
   }
 
   function moverPuerta(x, y, z, abrir) {
-    if (!ES_BAJA[baseDe(claveEn(x, y, z))]) return;   // ya no hay puerta ahí: la han roto o cambiado
-    var ori = oriDe(claveEn(x, y, z));
+    var claveBaja = claveEn(x, y, z);
+    if (!ES_BAJA[nombreDe(claveBaja)]) return;       // ya no hay puerta ahí: la han roto o cambiado
+    var ori = oriDe(claveBaja);
     var reintentar = function () { moverPuerta(x, y, z, abrir); };
     // La orientación se ARRASTRA a las dos hojas: una puerta puesta con '@3' se abre en '@3', y la
     // mitad de arriba tiene que girar con ella o queda cruzada sobre el vano.
-    var idAbajo = idDe(abrir ? 'hab:puerta-abierta' : 'hab:puerta', ori, reintentar);
+    // Las dos hojas se buscan en el mismo espacio de nombres del que salió la de abajo.
+    var idAbajo = idDe(comoLa(claveBaja, abrir ? 'puerta-abierta' : 'puerta'), ori, reintentar);
     if (!idAbajo) return;                             // aún no está en la paleta: se reintenta sola
 
     // Arriba solo se toca si de verdad hay media puerta. Una puerta de una sola celda sigue siendo
     // legítima —es la de antes— y lo que el dueño haya puesto ahí encima no se pisa: esto MUEVE una
     // puerta, no la construye.
     var ay = y + 1, idArriba = 0;
-    if (ES_ALTA[baseDe(claveEn(x, ay, z))]) {
-      idArriba = idDe(abrir ? 'hab:puerta-alta-abierta' : 'hab:puerta-alta', ori, reintentar);
+    if (ES_ALTA[nombreDe(claveEn(x, ay, z))]) {
+      idArriba = idDe(comoLa(claveBaja, abrir ? 'puerta-alta-abierta' : 'puerta-alta'), ori, reintentar);
       if (!idArriba) return;                          // ⚠️ sin la de arriba no se mueve NINGUNA
     }
 
@@ -540,15 +569,20 @@
   }
 
   // ── 1. la señal ────────────────────────────────────────────────────────────────────────────
+  // ⚠️ Las claves de esta tabla son NOMBRES de pieza, sin espacio de nombres, y lo mismo las parejas
+  // (`encendida`, `apagada`). El bucle de registro de más abajo las da de alta en los dos sitios de
+  // los que puede venir un dibujo —`hab:` y `asset:assets/…vox.json`—, así que una pieza exportada
+  // de otra instancia e importada aquí como asset sigue siendo la misma pieza. No escribir `hab:` a
+  // mano aquí: eso es lo que dejaba fuera a la mitad de los mundos.
   var CIRCUITOS = {
     // Cable. La pérdida de 1 por salto es la de Minecraft: da tendidos de 15 bloques de alcance.
-    'hab:cable':     { conduce: { perdida: 1 }, encendida: 'hab:cable-on' },
+    'cable':     { conduce: { perdida: 1 }, encendida: 'cable-on' },
 
     // Entradas. Las tres son el MISMO material manual con pareja; solo cambia quién las suelta:
     // la palanca se queda como la dejes, el botón y la placa se sueltan solos.
-    'hab:palanca':   { manual: true, emite: 15, encendida: 'hab:palanca-on' },
-    'hab:boton':     { manual: true, emite: 15, encendida: 'hab:boton-on', pulso: MS_PULSO },
-    'hab:placa':     { manual: true, emite: 15, encendida: 'hab:placa-on', pulso: MS_PULSO },
+    'palanca':   { manual: true, emite: 15, encendida: 'palanca-on' },
+    'boton':     { manual: true, emite: 15, encendida: 'boton-on', pulso: MS_PULSO },
+    'placa':     { manual: true, emite: 15, encendida: 'placa-on', pulso: MS_PULSO },
 
     // Salidas.
     // La puerta ocupa DOS celdas pero es UNA puerta: alimentas la de abajo y ella arrastra a la de
@@ -556,8 +590,8 @@
     // `encendida` a propósito — quien mueve las dos hojas es el callback, y tiene que poder negarse.
     // Ojo con quitar cualquiera de los dos: si la puerta abierta dejara de ser circuito se caería de
     // la cola y no volvería a cerrarse nunca.
-    'hab:puerta':          { alRecibirSeñal: abrirPuerta },
-    'hab:puerta-abierta':  { alRecibirSeñal: abrirPuerta },
+    'puerta':          { alRecibirSeñal: abrirPuerta },
+    'puerta-abierta':  { alRecibirSeñal: abrirPuerta },
 
     // Repetidor: reemite a 15 (recupera el tendido) y llega tarde a propósito. El retraso NO es
     // decoración — es lo que permite realimentar sin que el circuito se resuelva dentro de la misma
@@ -568,7 +602,7 @@
     // `soloAlFrente` termina ese trabajo, y es lo que le faltaba (BUG-RS2): con `mira` a secas el
     // repetidor seguía repartiendo por los otros CINCO lados, así que dos puestos hombro con hombro
     // se alimentaban de costado y una fila entera se contagiaba. Entra por detrás, sale por delante.
-    'hab:repetidor': { emite: 15, encendida: 'hab:repetidor-on', retardo: 2, mira: true, soloAlFrente: true },
+    'repetidor': { emite: 15, encendida: 'repetidor-on', retardo: 2, mira: true, soloAlFrente: true },
 
     // Inversor (la antorcha de Minecraft): luce cuando NO le llega señal. Es el NOT, y con el OR que
     // ya hace el cable da un NOR — con NOR sola se construye cualquier función booleana, así que no
@@ -576,7 +610,7 @@
     // permite cerrar un anillo de inversores sin que se realimente a sí mismo: o sea, la memoria.
     // Aquí NO va `soloAlFrente`: una antorcha alumbra los cinco lados que no son su espalda, y de eso
     // vive el anillo de antorchas que hace de memoria. Ésa es la diferencia con el repetidor.
-    'hab:inversor':  { invertida: true, emite: 15, encendida: 'hab:inversor-on', retardo: 1, mira: true },
+    'inversor':  { invertida: true, emite: 15, encendida: 'inversor-on', retardo: 1, mira: true },
 
     // Bloque de redstone: una fuente que NO se apaga. Es la única pieza sin pareja encendida/apagada
     // y sin `manual`, y eso no es un descuido — es la definición: no hay estado que guardar porque
@@ -593,7 +627,7 @@
     // Ojo con no confundirlo con 'asset:assets/red_concrete.vox.json', que es decoración y no emite
     // nada: si un hormigón rojo enciende algo es porque alguien le ha pegado un cable y hace de
     // puente, como cualquier otro bloque macizo (r1.2). Por eso éste va moteado y aquél es liso.
-    'asset:assets/bloque_redstone.vox.json': { emite: 15 },
+    'bloque_redstone': { emite: 15 },
 
     // Pistón. Los DOS materiales llevan la misma configuración a propósito: no son «apagado» y
     // «encendido» de una pareja (para eso está `encendida`), son dos estados que gestiona el callback,
@@ -602,31 +636,43 @@
     // Ver el bloque de arriba para el porqué.
     //
     // En Minecraft un pistón NO se activa desde su cara frontal (la cabeza).
-    'hab:piston':        { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
-    'hab:piston-on':     { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
-    'hab:piston-cabeza': {},
+    'piston':        { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
+    'piston-on':     { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
+    'piston-cabeza': {},
     // Pistón pegajoso (REQ-RS15): misma lógica que el normal, pero al retraerse tira del bloque
     // que tenía delante. Los CUATRO materiales registrados (cuerpo off, cuerpo on, cabeza, cabeza)
     // por la misma razón que el pistón normal: si solo fuera uno se caería de la cola.
-    'hab:piston-pegajoso':        { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
-    'hab:piston-pegajoso-on':     { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
-    'hab:piston-pegajoso-cabeza': {},
+    'piston-pegajoso':        { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
+    'piston-pegajoso-on':     { alRecibirSeñal: empujar, _forzar: true, noCaraFrontal: true },
+    'piston-pegajoso-cabeza': {},
 
     // Bloque observador (Observer): detecta un cambio DELANTE y emite 15 por DETRÁS un instante.
-    // Los dibujos viven en assets/; hab: se registra por si aparecen en la galería de habitantes.
-    // ⚠️ `encendida` del asset tiene que ser el asset-on, no hab: — si no, al disparar se pedía un
-    // material que no existe y el pulso no salía nunca (solo estaba en la paleta el off).
-    'hab:observador':                       { encendida: 'hab:observador-on', soloAlAtras: true },
-    'hab:observador-on':                    { emite: 15, encendida: 'hab:observador-on', apagada: 'hab:observador', soloAlAtras: true },
-    'asset:assets/observador.vox.json':     { encendida: 'asset:assets/observador-on.vox.json', soloAlAtras: true },
-    'asset:assets/observador-on.vox.json':  { emite: 15, encendida: 'asset:assets/observador-on.vox.json', apagada: 'asset:assets/observador.vox.json', soloAlAtras: true },
+    // Los dibujos viven en assets/, pero también pueden estar en la galería: por eso esto llevaba a
+    // mano las cuatro filas, dos por espacio de nombres. Ya no hace falta — el registro las expande,
+    // y traduce `encendida`/`apagada` al espacio de la que se está registrando (era justo el fallo
+    // de entonces: al disparar se pedía un material que en ese mundo no existía y el pulso no salía
+    // nunca). Lo que aquí era la excepción es ahora la regla para todas las piezas.
+    'observador':                       { encendida: 'observador-on', soloAlAtras: true },
+    'observador-on':                    { emite: 15, encendida: 'observador-on', apagada: 'observador', soloAlAtras: true },
   };
 
-  Object.keys(CIRCUITOS).forEach(function (k) {
-    var cfg = {};
-    for (var p in CIRCUITOS[k]) cfg[p] = CIRCUITOS[k][p];
-    cfg.precargar = false;
-    game.redstone.define(k, cfg);
+  // Cada pieza se registra DOS VECES, una por espacio de nombres, y las parejas (`encendida`,
+  // `apagada`) se traducen al mismo: el `hab:placa` se enciende como `hab:placa-on` y el
+  // `asset:assets/placa.vox.json` como `asset:assets/placa-on.vox.json`. Sin esto, una pieza
+  // importada desde otra instancia —que llega por assets— no era circuito, y con las parejas sin
+  // traducir se pedía al encender un material que en ese mundo no existe: el pulso no salía nunca.
+  // Registrar de más no cuesta: con `precargar: false` una clave que no aparezca en ningún mundo es
+  // una entrada de tabla y nada más.
+  Object.keys(CIRCUITOS).forEach(function (nombre) {
+    ambas(nombre).forEach(function (clave, i) {
+      var cfg = {};
+      for (var p in CIRCUITOS[nombre]) cfg[p] = CIRCUITOS[nombre][p];
+      if (cfg.encendida) cfg.encendida = comoLa(clave, cfg.encendida);
+      if (cfg.apagada) cfg.apagada = comoLa(clave, cfg.apagada);
+      cfg.precargar = false;
+      cfg.callado = i > 0;        // la pieza se anuncia una vez, no una por puerta de entrada
+      game.redstone.define(clave, cfg);
+    });
   });
 
   // ── 2. la física ───────────────────────────────────────────────────────────────────────────
@@ -634,10 +680,14 @@
   // abierta se cruza — que es toda la gracia de abrirla.
   if (game.bloques && game.bloques.define) {
     // Las DOS hojas de la puerta abierta, o te comes la de arriba con la cabeza al pasar.
-    ['hab:cable', 'hab:cable-on', 'hab:placa', 'hab:placa-on',
-     'hab:puerta-abierta', 'hab:puerta-alta-abierta',
-     'hab:boton', 'hab:boton-on']
-      .forEach(function (k) { game.bloques.define(k, { atravesable: true }); });
+    // Por NOMBRE y en los dos espacios, igual que el circuito: un cable importado como asset con el
+    // que se tropieza al andar está tan roto como uno que no conduce.
+    ['cable', 'cable-on', 'placa', 'placa-on',
+     'puerta-abierta', 'puerta-alta-abierta',
+     'boton', 'boton-on']
+      .forEach(function (n) {
+        ambas(n).forEach(function (k) { game.bloques.define(k, { atravesable: true }); });
+      });
 
     // La placa se enciende al pisarla, y se SOSTIENE mientras sigas dentro.
     //
@@ -665,7 +715,7 @@
       latidos[k] = t;
       game.redstone.encender(c.x, c.y, c.z, true);
     }
-    ['hab:placa', 'hab:placa-on'].forEach(function (k) {
+    ambas('placa').concat(ambas('placa-on')).forEach(function (k) {
       game.bloques.define(k, {
         atravesable: true,
         alPisar: function (c) { game.redstone.encender(c.x, c.y, c.z, true); },

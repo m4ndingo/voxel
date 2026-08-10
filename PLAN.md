@@ -87,6 +87,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ~~[BUG-RS20](#-bug-rs20)~~ | ~~dos **observadores en fila** no se propagan: el de atrás no detecta que el de delante cambió de estado~~ | ✅ resuelto 2026-08-10 | confirmada la sospecha: `dispararObservador` escribe con `yoEscribiendo=true` y el envoltorio de `mcSetBlock` se salta `encolarVecinos`. Se extrae el bucle a `notificarObservadoresVecinos(x,y,z)` y se llama explícitamente tras el `mcSetBlock` protegido (encendido **y** apagado). Cascada A→B→A cortada por `apagones.has(...)` |
 | ~~[BUG-RS21](#-bug-rs21)~~ | ~~dos observadores en serie con antorcha al final: al **poner** un bloque delante hay **1 parpadeo**, al **quitar** hay **2**. Los correctos son **2 en ambos casos** (Minecraft)~~ | ✅ resuelto 2026-08-10 | el corte por `apagones.has(...)` **descartaba** flancos legítimos durante el pulso del observador. Ahora se **encolan** en `pendientesObs` y se re-disparan al terminar el pulso. Efecto secundario buscado: dos observadores enfrentados oscilan a 100 ms (reloj cara a cara de Minecraft). La marca temporal `apagones.set('obs:'+k, 1)` **antes** de notificar corta la recursión síncrona sin descartar el flanco |
 | [BUG-RS22](#-bug-rs22) | el **observador mirando una placa de presión pisada** emite **1 pulso cada ~1 s** aunque la placa no cambie de estado (el flanco de subida sí es correcto) | ✅ resuelto 2026-08-10 | la sospecha era buena y se quedó corta: la placa SÍ parpadeaba (`pulso` vencía y el despachador la re-encendía), y además `encender()` avisaba a los observadores aunque no cambiara el bloque. Capacidad nueva `alSeguirPisando` + sin cambio de bloque no hay flanco. `test_placa_observador.js` |
+| [BUG-RS23](#-bug-rs23) | una pieza **exportada de otra instancia e importada aquí** deja de ser circuito: llega como `asset:assets/piston-pegajoso-on.vox.json` y la tabla solo conocía `hab:piston-pegajoso-on` | ✅ resuelto 2026-08-10 | las piezas se identifican por NOMBRE y se registran en los dos espacios de nombres; el espacio se arrastra a las parejas (cabeza, hoja alta, variante -on). `test_piezas_importadas.js` |
 | [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
 | ~~[REQ-PERF1](#-req-perf1)~~ | ~~**profiler con callstack automático** que se activa cuando los fps caen por debajo de un umbral, con niveles de verbosidad, para identificar el cuello real~~ | ✅ resuelto 2026-08-10 | `game.perfAssert = 120` (fps mínimo), `game.perfVerbosity = 1..3`. `mcTick` mide su duración; si el frame cae bajo el assert, vuelca al `console.log` las funciones llamadas + calls + ms + max. Se desarma tras un dump; `game.perfDump()` re-arma. Con `perfAssert = 0` (defecto) las envolturas se retiran → coste 0 |
 | ~~[REQ-PERF2](#-req-perf2)~~ | ~~**modo de renderizado "fast" (unlit)** desde F12 — sin luces ni sombras, para depurar el motor bajando todo el coste de renderizado~~ | ✅ resuelto 2026-08-10 | `game.renderMode = 'fast'`/`'normal'`. `fast` combina `sunShade=1` (sin sombra) + `interiorDark=1` (sin skylight) + short-circuit en `mcComputeBlockLight` (sin luz de bloque). Al cambiar re-malla el mundo para reflejar el shading. Restaura los valores al volver a `normal` |
@@ -3069,6 +3070,54 @@ de verdad lo que tenga al lado mientras estés encima. Eso destapó que
 las celdas y el pistón nuevo se quedaba sordo, con un «recibe: 15» heredado); antes lo tapaba el
 propio parpadeo, que devolvía el flanco por accidente. Arreglado en el test —`revisarCaja` + frames
 tras limpiar—, y pasa igual con el motor de antes y con el de ahora.
+
+---
+
+### 🟡 BUG-RS23 · Una pieza importada de otra instancia deja de ser circuito — ✅ resuelto 2026-08-10
+
+**Reporte del dueño, literal:**
+
+> «tengo problemas para que el motor de redstone me identifique bien los assets cuando los exporto
+> desde otra instancia y los importo en esta. por ejemplo, el piston pegajoso en la otra instancia usa
+> "hab:piston-pegajoso-on" para scripting, pero si lo exporto e importo en esta instancia se llama
+> "asset:assets/piston-pegajoso-on.vox.json" por lo que no funciona en el mapa»
+
+**Qué pasaba.** Es el mismo dibujo, pero entra por otra puerta: por la galería de habitantes es
+`hab:<n>` y empotrado es `asset:assets/<n>.vox.json`. La tabla `CIRCUITOS` de `redstone-piezas.js`
+tenía las claves `hab:` **escritas a mano**, así que la pieza importada no aparecía en la tabla: ni
+circuito, ni `atravesable`, ni cabeza al extenderse. En este repo se veía a simple vista —
+`assets/piston-pegajoso*.vox.json` existe y `data/habitantes/` no tiene ningún pegajoso: el pistón
+pegajoso **no funcionaba aquí en absoluto**.
+
+Ya había un parche puntual del mismo problema: el observador llevaba a mano sus **cuatro** filas (dos
+por espacio de nombres), con un aviso de que la `encendida` del asset tenía que ser el asset-on «o el
+pulso no sale nunca». Eso era la pista de que el defecto era general, no del observador.
+
+**El arreglo — la pieza se identifica por su NOMBRE:**
+
+- `CIRCUITOS` pasa a ir por nombre pelado (`piston-pegajoso-on`), y el bucle de registro la da de
+  alta **en los dos espacios**, traduciendo `encendida`/`apagada` al que toca. Las cuatro filas a
+  mano del observador se van: lo que era la excepción es ahora la regla.
+- `nombreDe(clave)` / `comoLa(claveRef, nombre)` / `ambas(nombre)`: el espacio de nombres se
+  **arrastra** desde lo que hay puesto en la celda, igual que `conOri` hace con el giro. Un pistón de
+  assets se extiende con **su** cabeza de assets; una puerta de la galería mueve **su** hoja alta.
+  Mezclarlos pediría un material que ese mundo puede no tener.
+- Lo mismo en la mitad de física: `atravesable` del cable/placa/botón/puerta y el `alSeguirPisando`
+  de la placa (BUG-RS22) se declaran en los dos espacios.
+- `callado: true` en la gemela, para no doblar el log de arranque con líneas que dicen lo mismo.
+
+**Verificado:** `test_piezas_importadas.js` (nuevo) monta el pistón pegajoso **entero en assets**:
+antes 4 fallos («no es circuito», no se extiende, sin cabeza, no empuja), ahora verde, incluido el
+tirón al retraerse. La segunda mitad del test repite el montaje con `hab:piston` para que reconocer
+lo importado no le quite el sitio a lo de siempre. Sin regresión en `test_redstone_piston.js`,
+`test_piston_empuja.js`, `test_bug_rs12_*`, `test_bug_rs13_piston_placa.js`, `test_redstone_puerta.js`,
+`test_redstone_giro.js`, `test_redstone_dsl.js`, `test_redstone_bloques.js`,
+`test_observador_redstone.js`, `test_placa_observador.js`, `test_barra_tres_botones.js`,
+`test_redstone_bloque_fuente.js`, `test_redstone_postura_al_accionar.js`.
+
+**Límite conocido:** el puente es por **nombre de fichero**. `piston-pegajoso-on` se reconoce venga de
+donde venga, pero si al importar se le cambia el nombre al fichero, deja de ser esa pieza — como
+pasaría en la galería.
 
 ---
 

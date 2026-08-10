@@ -2688,6 +2688,19 @@ que ya existían:
 `encender(x,y,z,on)` sí protesta (una vez) si la celda no es `manual` — porque ahí sí es un error de
 quien escribe el circuito.
 
+⚠️ **Una pieza se identifica por su NOMBRE, no por el espacio de nombres.** La tabla `CIRCUITOS` va
+por nombre pelado (`piston-pegajoso-on`) y el bucle de registro la da de alta **dos veces**, en
+`hab:<n>` y en `asset:assets/<n>.vox.json`, traduciendo `encendida`/`apagada` al mismo espacio (las
+gemelas se registran con `callado:true` para no doblar el log de arranque). Los ayudantes son
+`nombreDe(clave)` (quita espacio de nombres y `@giro`), `comoLa(claveRef, nombre)` (ese nombre en el
+espacio de **la clave que hay puesta**) y `ambas(nombre)`. Motivo: el mismo dibujo entra por la
+galería o empotrado en `assets/` según de dónde venga, y **exportar de una instancia e importar en
+otra cambia justo eso** — con las claves `hab:` escritas a mano, un pistón importado dejaba de ser un
+pistón. El espacio se **arrastra**, igual que el giro con `conOri`: un pistón de assets se extiende
+con la cabeza de assets y una puerta de la galería mueve su hoja alta de la galería; mezclarlos pide
+un material que ese mundo puede no tener. `game.bloques.define` (lo `atravesable`, la placa) va por la
+misma vía. Lo cubre `test_piezas_importadas.js`.
+
 **El enganche es un envoltorio de `mcSetBlock`**, que es el embudo de poner, romper, pintar,
 deshacer/rehacer, `setVoxel` y la carga diferida de una textura. Lo que **no** pasa por ahí es generar
 o cargar el mundo entero (escriben `mc.grid` directo) — y ahí no queremos notificaciones: 10⁷ celdas se
