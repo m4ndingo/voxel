@@ -71,8 +71,14 @@ const piezas = fs.readFileSync(__dirname + '/redstone/redstone-piezas.js', 'utf8
 
     const blkEmpujadoA = mc.blockKey[mc.grid[mcIdx(X + 2, Y, Z)]];
 
-    // Limpiar A
+    // Limpiar A. Dejar aire NO basta: hay que dejar también el circuito a cero y darle sus frames,
+    // o B arranca con la señal de A todavía anotada en esas celdas y el pistón nuevo no llega a ver
+    // ningún flanco (se queda sordo con «recibe: 15» de mentira). A esto se llegó por B: desde
+    // BUG-RS22 la placa que ocupas se mantiene encendida, así que ya no hay parpadeo que le
+    // devolviera el flanco por accidente.
     mcSetBlock(X - 1, Y, Z, 0); mcSetBlock(X, Y, Z, 0); mcSetBlock(X + 1, Y, Z, 0); mcSetBlock(X + 2, Y, Z, 0);
+    R.revisarCaja(X - 3, Y - 3, Z - 3, X + 3, Y + 3, Z + 3);
+    for (let i = 0; i < 10; i++) await new Promise(r => requestAnimationFrame(r));
 
     // ── PARTE B · Jugador pisando la placa delante del pistón se empuja al avanzar la cabeza ──
     const idPlacaOff = mc.name2id['hab:placa'];
@@ -86,8 +92,15 @@ const piezas = fs.readFileSync(__dirname + '/redstone/redstone-piezas.js', 'utf8
     mc.pos[2] = Z + 0.5;
     mc.vel[0] = 0; mc.vel[1] = 0; mc.vel[2] = 0;
 
-    for (let i = 0; i < 5; i++) await new Promise(r => requestAnimationFrame(r));
+    // La marca se toma AQUI, antes de dejar correr un solo frame, y no después de asentar. Desde
+    // BUG-RS22 la placa se SOSTIENE mientras la ocupas (alSeguirPisando) en vez de irse soltando
+    // sola, así que un jugador plantado encima la mantiene encendida — y la placa está pegada al
+    // pistón, o sea que es ELLA quien lo extiende, sin esperar a la palanca. Eso es lo correcto (en
+    // Minecraft pasa igual), pero deja el pistón ya extendido antes de tocar la palanca: midiendo
+    // desde después de asentar, el empujón caía fuera de la ventana y parecía no haber existido.
+    // Lo que se comprueba es lo mismo de siempre: quien está sobre la placa acaba una celda más allá.
     const posX0 = mc.pos[0];
+    for (let i = 0; i < 5; i++) await new Promise(r => requestAnimationFrame(r));
 
     // Encender palanca
     mcSetBlock(X - 1, Y, Z, mc.name2id['hab:palanca-on']);

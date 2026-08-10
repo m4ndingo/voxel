@@ -413,10 +413,12 @@
     }, 100));
   }
 
-  function encolarVecinos(x, y, z) {
+  // `sinFlanco` = la celda hay que repasarla pero NO ha cambiado de bloque, así que no hay nada que
+  // observar (ver encender()). Todo lo demás sigue igual: lo que se salta es el flanco, no el repaso.
+  function encolarVecinos(x, y, z, sinFlanco) {
     if (cfgEn(x, y, z) || potencia.has(cl(x, y, z))) encolar(x, y, z, true);    // esta es la que estrena
     encolarPuenteando(x, y, z);
-    notificarObservadoresVecinos(x, y, z);
+    if (!sinFlanco) notificarObservadoresVecinos(x, y, z);
   }
 
   // Un cambio de bloque en (x,y,z) dispara los observadores vecinos que le tengan a él DELANTE.
@@ -917,12 +919,19 @@
 
       var k = cl(x, y, z);
       if (apagones.has(k)) { clearTimeout(apagones.get(k)); apagones.delete(k); }
-      if (mc.grid[mcIdx(x, y, z)] !== id) {
+      var cambia = mc.grid[mcIdx(x, y, z)] !== id;
+      if (cambia) {
         yoEscribiendo = true;
         try { mcSetBlock(x, y, z, id); } finally { yoEscribiendo = false; }
         remallar([[x, y, z]]);
       }
-      encolarVecinos(x, y, z);
+      // Sin cambio de bloque NO hay flanco, y un observador solo reacciona a flancos. La celda sí
+      // se re-encola (el circuito puede estar por repasar: es lo que hace útil re-encender algo ya
+      // encendido), pero se salta notificarObservadoresVecinos, que es lo que encolarVecinos añade
+      // de más. Se veía en cuanto algo re-encendía a ritmo lo que ya estaba encendido —una placa de
+      // presión sosteniéndose mientras la pisas—: el observador que la miraba pulsaba a ese ritmo
+      // sin que la placa hubiera cambiado jamás de estado (BUG-RS22).
+      encolarVecinos(x, y, z, !cambia);
       pedirDrenado();
 
       // `pulso` la suelta sola: es la diferencia entre una palanca (se queda) y un botón o una placa

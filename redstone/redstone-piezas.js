@@ -639,12 +639,38 @@
      'hab:boton', 'hab:boton-on']
       .forEach(function (k) { game.bloques.define(k, { atravesable: true }); });
 
-    // La placa se enciende al pisarla. alPisar se dispara al ENTRAR en la celda, así que no hay
-    // forma de saber que te has bajado: por eso la placa lleva `pulso` y se suelta sola. Es un botón
-    // de suelo más que una placa de peso, y prefiero eso a una placa que se quede pegada.
-    game.bloques.define('hab:placa', {
-      atravesable: true,
-      alPisar: function (c) { game.redstone.encender(c.x, c.y, c.z, true); },
+    // La placa se enciende al pisarla, y se SOSTIENE mientras sigas dentro.
+    //
+    // `alPisar` solo da el flanco de entrada; el de salida no existe (nadie avisa de que te has
+    // bajado), así que la placa se apoyaba únicamente en su `pulso` para volver sola. Eso la hacía
+    // parpadear con alguien quieto encima: vencía el pulso, se soltaba, y el despachador la veía
+    // como celda+CLAVE nueva y la re-encendía el mismo frame. Con el jugador sin moverse un palmo,
+    // un observador mirándola pulsaba cada ~1 s (BUG-RS22) — y hacía bien, porque la placa SÍ
+    // estaba cambiando de estado en bucle. `alSeguirPisando` es el latido que faltaba: cada tick
+    // mientras la ocupes, re-arma el pulso sin tocar el bloque (encender() sobre algo ya encendido
+    // no escribe la celda), así que el estado deja de parpadear.
+    //
+    // El `pulso` se queda a propósito, y ahora sí en su papel: es el que la suelta cuando te bajas
+    // —el latido para de llegar— y el seguro de que un latido perdido nunca la deje pegada. 1,2 s
+    // es lo que tarda de verdad la placa de Minecraft en soltarse (20 ticks de juego).
+    //
+    // El latido va en los DOS materiales: en cuanto se enciende, la celda pasa a ser `hab:placa-on`
+    // y el `alSeguirPisando` que se consulta es el SUYO. Con uno solo, el latido se daría una vez y
+    // no volvería nunca, que es exactamente el fallo de antes.
+    var MS_LATIDO = 250;      // muy por debajo del pulso; a 60 fps sería re-encolar vecinos 60 v/s
+    var latidos = {};
+    function sostener(c) {
+      var k = c.x + ',' + c.y + ',' + c.z, t = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      if (latidos[k] && t - latidos[k] < MS_LATIDO) return;
+      latidos[k] = t;
+      game.redstone.encender(c.x, c.y, c.z, true);
+    }
+    ['hab:placa', 'hab:placa-on'].forEach(function (k) {
+      game.bloques.define(k, {
+        atravesable: true,
+        alPisar: function (c) { game.redstone.encender(c.x, c.y, c.z, true); },
+        alSeguirPisando: sostener,
+      });
     });
   }
 

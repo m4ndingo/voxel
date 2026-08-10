@@ -86,6 +86,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ~~[BUG-RS19](#-bug-rs19)~~ | ~~el **observador** se coloca como **bloque** sin girar pero como **estructura** al rotarlo con `R`; y al activarlo, la variante encendida **pierde el `@n`** y apunta a otra dirección~~ | ✅ resuelto 2026-08-10 | **dos arreglos**: (1) `mcRecFina` en `app.js` — una línea: la única pieza de redstone con `pielCubre=true` y `blockLike=false` (observador, 4092 vox) ya entra por ruta fina; (2) `dispararObservador` en `redstone/redstone.js` — quitar el fallback `mc.name2id[quieroOn] \|\| mc.name2id[par.on]` que caía a la clave sin girar cuando `observador-on@n` aún no estaba en la paleta |
 | ~~[BUG-RS20](#-bug-rs20)~~ | ~~dos **observadores en fila** no se propagan: el de atrás no detecta que el de delante cambió de estado~~ | ✅ resuelto 2026-08-10 | confirmada la sospecha: `dispararObservador` escribe con `yoEscribiendo=true` y el envoltorio de `mcSetBlock` se salta `encolarVecinos`. Se extrae el bucle a `notificarObservadoresVecinos(x,y,z)` y se llama explícitamente tras el `mcSetBlock` protegido (encendido **y** apagado). Cascada A→B→A cortada por `apagones.has(...)` |
 | ~~[BUG-RS21](#-bug-rs21)~~ | ~~dos observadores en serie con antorcha al final: al **poner** un bloque delante hay **1 parpadeo**, al **quitar** hay **2**. Los correctos son **2 en ambos casos** (Minecraft)~~ | ✅ resuelto 2026-08-10 | el corte por `apagones.has(...)` **descartaba** flancos legítimos durante el pulso del observador. Ahora se **encolan** en `pendientesObs` y se re-disparan al terminar el pulso. Efecto secundario buscado: dos observadores enfrentados oscilan a 100 ms (reloj cara a cara de Minecraft). La marca temporal `apagones.set('obs:'+k, 1)` **antes** de notificar corta la recursión síncrona sin descartar el flanco |
+| [BUG-RS22](#-bug-rs22) | el **observador mirando una placa de presión pisada** emite **1 pulso cada ~1 s** aunque la placa no cambie de estado (el flanco de subida sí es correcto) | ✅ resuelto 2026-08-10 | la sospecha era buena y se quedó corta: la placa SÍ parpadeaba (`pulso` vencía y el despachador la re-encendía), y además `encender()` avisaba a los observadores aunque no cambiara el bloque. Capacidad nueva `alSeguirPisando` + sin cambio de bloque no hay flanco. `test_placa_observador.js` |
 | [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
 | ~~[REQ-PERF1](#-req-perf1)~~ | ~~**profiler con callstack automático** que se activa cuando los fps caen por debajo de un umbral, con niveles de verbosidad, para identificar el cuello real~~ | ✅ resuelto 2026-08-10 | `game.perfAssert = 120` (fps mínimo), `game.perfVerbosity = 1..3`. `mcTick` mide su duración; si el frame cae bajo el assert, vuelca al `console.log` las funciones llamadas + calls + ms + max. Se desarma tras un dump; `game.perfDump()` re-arma. Con `perfAssert = 0` (defecto) las envolturas se retiran → coste 0 |
 | ~~[REQ-PERF2](#-req-perf2)~~ | ~~**modo de renderizado "fast" (unlit)** desde F12 — sin luces ni sombras, para depurar el motor bajando todo el coste de renderizado~~ | ✅ resuelto 2026-08-10 | `game.renderMode = 'fast'`/`'normal'`. `fast` combina `sunShade=1` (sin sombra) + `interiorDark=1` (sin skylight) + short-circuit en `mcComputeBlockLight` (sin luz de bloque). Al cambiar re-malla el mundo para reflejar el shading. Restaura los valores al volver a `normal` |
@@ -2996,6 +2997,78 @@ siempre y el sistema queda desincronizado. La opción correcta es **encolar** el
 cuando el sistema esté listo (aquí: al terminar el pulso). Es el mismo patrón que usa el propio
 motor con su cola `cola`/`drenar` para la propagación de señal — y aquí se replica a escala del
 observador con `pendientesObs`.
+
+---
+
+### 🟡 BUG-RS22 · El observador mirando una placa de presión pisada pulsa solo cada ~1 s — ✅ resuelto 2026-08-10
+
+**Reporte del dueño, literal:**
+
+> «el observador de redstone se comporta extraño. si coloco una placa de presión y un observador
+> mirándola, el observador se enciende al subir (eso está ok) pero cada ~1 s genera 1 pulso redstone;
+> no debería generar pulsos si la placa no cambia de estado»
+
+**Montaje:** una `hab:placa` en el suelo y un `hab:observador@n` mirándola. El jugador se queda
+quieto encima.
+
+- **Correcto:** al pisar (flanco de subida) el observador emite **un** pulso.
+- **Incorrecto:** a partir de ahí sigue emitiendo **1 pulso cada ~1 s** mientras el jugador no se
+  mueva. Sin cambio de estado no debería haber ningún pulso más hasta que la placa se suelte.
+
+**Sin investigar** (regla de tickets: se escriben, no se investigan). Lo que sigue es **hipótesis a
+comprobar antes de tocar nada**, no diagnóstico:
+
+- La placa está declarada con `pulso: MS_PULSO` en `CIRCUITOS` (`redstone/redstone-piezas.js`) y se
+  re-arma sola mientras se la pisa. Si ese re-armado pasa por `placa` → `placa-on` de verdad, el
+  observador estaría haciendo **exactamente su trabajo**: hay un cambio de bloque real cada ~1 s. En
+  ese caso el defecto está en cómo se sostiene la placa pisada, **no en el observador**, y el arreglo
+  va allí.
+- Contrastar con Minecraft antes de decidir el comportamiento esperado (una placa pisada se mantiene
+  encendida y estable; no repulsa) — ver la regla de verificar los «en Minecraft es así».
+
+**Cómo reproducir:** en `/map/test`, estampar placa + observador enfrentados, pisar y mirar
+`game.redstone.info(x,y,z)` del observador y del cable de salida a lo largo de varios segundos.
+
+**Riesgo de regresión:** BUG-RS20/BUG-RS21 dejaron el observador con `pendientesObs` (flancos
+encolados durante el pulso). Cualquier cambio aquí tiene que volver a pasar por esos dos casos.
+
+**Resuelto 2026-08-10.** El observador nunca tuvo la culpa, y eran **dos** defectos, no uno:
+
+1. **La placa parpadeaba de verdad.** `alPisar` es un flanco de ENTRADA y el de salida no existe
+   (nadie avisa de que te has bajado), así que la placa se sostenía solo con su `pulso`: vencía, se
+   soltaba, y el despachador la veía como celda+CLAVE nueva y la re-encendía el mismo frame. Medido:
+   con el jugador quieto 4 s, **4 sueltas y 4 re-encendidos**. El observador reportaba cambios que
+   estaban ocurriendo.
+2. **`encender()` disparaba observadores sin cambio de bloque.** Re-encender algo ya encendido no
+   escribe la celda, pero llamaba a `encolarVecinos`, que incluye `notificarObservadoresVecinos`. Con
+   la placa ya estable, el observador seguía pulsando **al ritmo del re-armado**.
+
+**El arreglo, en tres piezas:**
+
+- **`alSeguirPisando(c)`**, capacidad nueva de `game.bloques` (`data/snippets/mundo-autoarranque.json`,
+  puesta con `parche_snp_placa.py`): lo contrario de `alPisar`, se dispara **cada tick mientras la
+  entidad siga dentro** de la celda. Vale para el jugador (`pisar()`) y para los agentes
+  (`pisadaAgente()`, con la misma válvula `fisica:{placas:false}`). Sin `veces`: contar es de `alPisar`.
+- **La placa la usa en sus DOS materiales** (`hab:placa` y `hab:placa-on`; en cuanto se enciende, el
+  `alSeguirPisando` que se consulta es el de la variante *-on*), con un latido de 250 ms. El `pulso`
+  se queda a propósito: ahora es lo que la suelta al bajarte (deja de llegar el latido) y el seguro
+  de que un latido perdido no la deje pegada. 1,2 s ≈ los 20 ticks de juego que tarda de verdad la
+  placa de Minecraft.
+- **`encolarVecinos(x, y, z, sinFlanco)`** en el motor: sin cambio de bloque se repasa el circuito
+  pero **no se notifica a los observadores**, porque no hay flanco que observar.
+
+**Verificado:** `test_placa_observador.js` (nuevo, RED antes → verde ahora): 2 pulsos en toda la
+prueba, uno por flanco; la placa se enciende 1 vez y se suelta 1 vez. Sin regresión en
+`test_observador_redstone.js`, `test_agente_pisa_placa.js`, `test_redstone_dsl.js`,
+`test_redstone_puerta.js`, `test_redstone_bloques.js`. `test_bug_rs13_piston_placa.js` necesitó
+higiene propia (ver abajo).
+
+**Efecto de lado, y es el correcto:** una placa ocupada ahora **mantiene la señal**, así que alimenta
+de verdad lo que tenga al lado mientras estés encima. Eso destapó que
+`test_bug_rs13_piston_placa.js` no limpiaba el circuito entre sus dos partes (dejaba señal anotada en
+las celdas y el pistón nuevo se quedaba sordo, con un «recibe: 15» heredado); antes lo tapaba el
+propio parpadeo, que devolvía el flanco por accidente. Arreglado en el test —`revisarCaja` + frames
+tras limpiar—, y pasa igual con el motor de antes y con el de ahora.
 
 ---
 
