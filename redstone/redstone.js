@@ -111,6 +111,13 @@
   var esperando = new Map();    // 'x,y,z' → { x, y, z, nivel, cuando } — cuenta atrás en pasadas
   var pasada = 0;               // el «reloj» del circuito: una pasada de drenar() = un tic
   var apagones = new Map();     // 'x,y,z' → id de setTimeout de un `pulso` en curso
+  // Flancos ACUMULADOS mientras un observador está en pulso. Un observador que recibe un cambio
+  // delante mientras él mismo está encendido no puede re-encenderse (ya está on), pero el flanco
+  // no se puede perder: se anota aquí y se procesa al terminar el pulso. Esto es lo que permite
+  // (a) propagar los DOS flancos (subida y bajada) de un observador vecino a lo largo de una
+  // cadena — sin esto solo llega el primero, BUG-RS21 —, y (b) montar relojes cara a cara al
+  // estilo Minecraft: dos observadores enfrentados se re-disparan mutuamente cada pulso.
+  var pendientesObs = new Map();
   var drenando = false;
   var yoEscribiendo = false;    // centinela: mis propios mcSetBlock no vuelven a encolar
   // Salida rápida: sin materiales declarados, el envoltorio de mcSetBlock es una llamada de más y
@@ -299,18 +306,37 @@
   // Pulso del observador: se enciende un instante (~100 ms) y emite 15 por DETRÁS. Si el material
   // encendido aún no está en la paleta (precargar:false), se carga y se reintenta — sin eso el
   // disparo fallaba en silencio al colocar el observador desde la galería (solo bajaba el off).
+  //
+  // Contrato con la propagación (BUG-RS21):
+  // - En reposo (apagones vacío): enciende ahora, agenda apagado a 100 ms.
+  // - En pulso: NO descartar. Anotar en pendientesObs y re-disparar al terminar el pulso. Así
+  //   propagan los dos flancos (subida y bajada) del vecino a lo largo de una cadena de
+  //   observadores, y dos observadores enfrentados oscilan a 100 ms (reloj cara a cara).
+  // - Recursión síncrona (dos observadores mirándose se llaman entre sí desde el mismo frame):
+  //   se corta con la marca temporal `apagones.set('obs:'+k, 1)` que se pone ANTES de notificar.
+  //   La segunda llamada síncrona ve apagones y cae por la rama de pendientesObs.
   function dispararObservador(nx, ny, nz, c) {
     var kObs = cl(nx, ny, nz);
-    if (apagones.has('obs:' + kObs)) return;
+    if (apagones.has('obs:' + kObs)) {
+      // Ya en pulso: anotar el flanco y re-disparar cuando el pulso actual termine.
+      pendientesObs.set(kObs, true);
+      return;
+    }
     var par = parejaObservador(c._clave);
     var quieroOn = conOri(par.on, nx, ny, nz);
     var quieroOff = conOri(par.off, nx, ny, nz);
-    var idOn = mc.name2id ? (mc.name2id[quieroOn] || mc.name2id[par.on]) : 0;
-    var idOff = mc.name2id ? (mc.name2id[quieroOff] || mc.name2id[par.off]) : 0;
+    // La variante ORIENTADA manda: cambiar de material (off→on→off) no puede cambiar cómo está puesta
+    // la pieza. Un fallback al par.on sin girar (que sí suele estar en la paleta, porque cargarlo
+    // desde la galería lo registra) escribe la clave sin `@n` en la celda, y el observador encendido
+    // aparece apuntando a otro sitio — BUG-RS19 secuela: hasta BUG-RS19 los observadores no cabían
+    // en la rejilla girados, así que este camino nunca se activaba con @n; ahora sí.
+    var idOn = mc.name2id ? mc.name2id[quieroOn] : 0;
+    var idOff = mc.name2id ? mc.name2id[quieroOff] : 0;
     // La celda YA es el off: si la clave orientada no está indexada, vale el id actual.
     if (!idOff) idOff = idEn(nx, ny, nz);
     if (!idOn) {
-      cargarYReintentar(par.on, nx, ny, nz, function () {
+      // Se carga la ORIENTADA (mcAltaVariante la registra sin re-hornear el atlas si la base está).
+      cargarYReintentar(quieroOn, nx, ny, nz, function () {
         var c2 = cfgEn(nx, ny, nz);
         if (c2 && esObservador(c2)) dispararObservador(nx, ny, nz, c2);
       });
@@ -318,12 +344,21 @@
     }
     if (!idOff) return;
 
+    // Marca temporal ANTES de escribir y notificar: si la cascada notifica a un observador que
+    // acaba mirando a éste (caso cara a cara), la re-entrada síncrona ve apagones=true y cae por
+    // pendientesObs en vez de recursionar hasta colgar el navegador.
+    apagones.set('obs:' + kObs, 1);
+
     yoEscribiendo = true;
     try { mcSetBlock(nx, ny, nz, idOn); } finally { yoEscribiendo = false; }
     potencia.set(kObs, 15);
-    remallar([[nx, ny, nz]]);
+    if(api.pulsoVisible !== false) remallar([[nx, ny, nz]]);   // PERF-RS1: si el pulso no se ve, no mesh
     encolar(nx, ny, nz, true);
     encolarPuenteando(nx, ny, nz);
+    // BUG-RS20: el envoltorio de mcSetBlock se saltó encolarVecinos por yoEscribiendo, así que hay
+    // que notificar a mano a los observadores que tenían a esta celda delante. Un observador que
+    // acaba de disparar YA es ese «cambio delante» para su vecino de atrás.
+    notificarObservadoresVecinos(nx, ny, nz);
     var dirAtras = atrasDe(nx, ny, nz);
     var rx = nx + DIRS[dirAtras][0], ry = ny + DIRS[dirAtras][1], rz = nz + DIRS[dirAtras][2];
     var cRx = cfgEn(rx, ry, rz);
@@ -337,13 +372,25 @@
     pedirDrenado();
 
     var obsX = nx, obsY = ny, obsZ = nz, idOffFinal = idOff;
+    // Sustituye la marca temporal por el timer de apagado real.
     apagones.set('obs:' + kObs, setTimeout(function () {
       yoEscribiendo = true;
       try { mcSetBlock(obsX, obsY, obsZ, idOffFinal); } finally { yoEscribiendo = false; }
       potencia.delete(kObs);
-      remallar([[obsX, obsY, obsZ]]);
+      if(api.pulsoVisible !== false) remallar([[obsX, obsY, obsZ]]);   // PERF-RS1: si el pulso no se ve, no mesh
       encolar(obsX, obsY, obsZ, true);
       encolarPuenteando(obsX, obsY, obsZ);
+      // LIBERAR apagones ANTES de notificar. La bajada del pulso es un flanco legítimo: los
+      // observadores vecinos que estén en pulso (típico en cadena B→A: al bajar B, A puede estar
+      // aún en su primer pulso) tienen que poder anotar el flanco en pendientesObs. Si liberáramos
+      // después, la anotación se saltaría este flanco. Como estamos DENTRO del setTimeout de este
+      // observador, no puede re-entrar síncronamente a sí mismo aquí.
+      apagones.delete('obs:' + kObs);
+      // BUG-RS20: el flanco de bajada del observador también es un cambio de bloque, así que hay
+      // que notificar a los observadores vecinos aquí también. Sin esto, la propagación funcionaría
+      // en el disparo pero no en el pulso completo (encendido→apagado), dejando a los observadores
+      // en cadena parpadeando desincronizados.
+      notificarObservadoresVecinos(obsX, obsY, obsZ);
       var dirAtrasOff = atrasDe(obsX, obsY, obsZ);
       var rxOff = obsX + DIRS[dirAtrasOff][0], ryOff = obsY + DIRS[dirAtrasOff][1], rzOff = obsZ + DIRS[dirAtrasOff][2];
       var cRxOff = cfgEn(rxOff, ryOff, rzOff);
@@ -355,15 +402,31 @@
         }
       }
       pedirDrenado();
-      apagones.delete('obs:' + kObs);
+      // Si durante el pulso se acumularon flancos (BUG-RS21), procesar UNO ahora — se re-dispara
+      // como un nuevo pulso. Con la cadencia natural de 100 ms el observador «reacciona a la
+      // subida y a la bajada» del vecino y la antorcha final ve 2 parpadeos por cada evento.
+      if (pendientesObs.has(kObs)) {
+        pendientesObs.delete(kObs);
+        var c2 = cfgEn(obsX, obsY, obsZ);
+        if (c2 && esObservador(c2)) dispararObservador(obsX, obsY, obsZ, c2);
+      }
     }, 100));
   }
 
   function encolarVecinos(x, y, z) {
     if (cfgEn(x, y, z) || potencia.has(cl(x, y, z))) encolar(x, y, z, true);    // esta es la que estrena
     encolarPuenteando(x, y, z);
+    notificarObservadoresVecinos(x, y, z);
+  }
 
-    // Notificar observadores que miran directamente a la celda que ha cambiado (x,y,z)
+  // Un cambio de bloque en (x,y,z) dispara los observadores vecinos que le tengan a él DELANTE.
+  // Extraído de encolarVecinos porque las escrituras del propio motor (dispararObservador) van
+  // protegidas por yoEscribiendo=true —para no re-encolarse a sí mismas—, y ese mismo centinela
+  // hace que el envoltorio de mcSetBlock salte encolarVecinos. Sin este helper, un observador que
+  // cambia de estado no puede propagar su cambio a otro observador que lo tenga delante (BUG-RS20).
+  // La cascada A→B→A no se hace infinita: apagones.has(...) al principio de dispararObservador
+  // corta las re-entradas mientras dura el pulso de un observador ya disparado.
+  function notificarObservadoresVecinos(x, y, z) {
     for (var i = 0; i < 6; i++) {
       var nx = x + DIRS[i][0], ny = y + DIRS[i][1], nz = z + DIRS[i][2];
       var c = cfgEn(nx, ny, nz);
@@ -395,6 +458,33 @@
   function pedirDrenado() {
     if (pendiente || (!cola.size && !esperando.size)) return;   // `esperando` también reclama pasadas
     pendiente = requestAnimationFrame(function () { pendiente = 0; drenar(); });
+  }
+
+  // Coalescencia de re-mallado (PERF-RS1). Un pulso de observador (dispararObservador) llamaba a
+  // `remallar([[nx,ny,nz]])` inmediatamente tras cada mcSetBlock, dos veces por pulso (subida y
+  // bajada). Con la cadena de 2^N pulsos que introducen BUG-RS20/21, se llamaba a mcRemeshAround
+  // 2·2^N veces por evento, cada una re-mallando un chunk 16×48×16 (y sus vecinos). Ahora todas las
+  // celdas tocadas en el mismo tick del event loop se acumulan aquí y se procesan al terminar el
+  // rAF con UNA sola llamada, con la caja envolvente. `drenar()` mantiene su `tocadas[]` local pero
+  // lo vuelca también aquí — un único punto de re-mallado.
+  var tocadasRemallar = [];
+  var rafRemallar = 0;
+  function procesarRemallar() {
+    rafRemallar = 0;
+    if (!tocadasRemallar.length) return;
+    var x0 = tocadasRemallar[0][0], x1 = x0, z0 = tocadasRemallar[0][2], z1 = z0;
+    for (var i = 1; i < tocadasRemallar.length; i++) {
+      var t = tocadasRemallar[i];
+      if (t[0] < x0) x0 = t[0]; else if (t[0] > x1) x1 = t[0];
+      if (t[2] < z0) z0 = t[2]; else if (t[2] > z1) z1 = t[2];
+    }
+    tocadasRemallar.length = 0;
+    mcRemeshAround(x0, z0, x1, z1);
+    if (typeof mcScheduleSave === 'function') mcScheduleSave();
+  }
+  function pedirRemallar(x, y, z) {
+    tocadasRemallar.push([x, y, z]);
+    if (!rafRemallar) rafRemallar = requestAnimationFrame(procesarRemallar);
   }
 
   // Cuánta señal LLEGA a una celda desde sus vecinos: el máximo de lo que presentan los 6.
@@ -606,15 +696,12 @@
 
   // Un solo re-mallado para TODO el drenado, no uno por lámpara: la caja de mcRemeshAround acepta
   // dos esquinas, así que un circuito entero cuesta lo que su caja envolvente.
+  // PERF-RS1: no llama a mcRemeshAround directamente — vuelca las celdas al buffer coalescido de
+  // pedirRemallar, que agenda UNA sola re-mallada al final del rAF con la caja envolvente de todo
+  // lo tocado en el mismo tick. Sin esto, una cadena de N observadores costaba 2·2^N llamadas.
   function remallar(tocadas) {
-    var x0 = tocadas[0][0], x1 = x0, z0 = tocadas[0][2], z1 = z0;
-    for (var i = 1; i < tocadas.length; i++) {
-      var t = tocadas[i];
-      if (t[0] < x0) x0 = t[0]; else if (t[0] > x1) x1 = t[0];
-      if (t[2] < z0) z0 = t[2]; else if (t[2] > z1) z1 = t[2];
-    }
-    mcRemeshAround(x0, z0, x1, z1);
-    if (typeof mcScheduleSave === 'function') mcScheduleSave();
+    for (var i = 0; i < tocadas.length; i++) tocadasRemallar.push(tocadas[i]);
+    if (!rafRemallar) rafRemallar = requestAnimationFrame(procesarRemallar);
   }
 
   var avisados = Object.create(null);
@@ -646,6 +733,12 @@
   // ── API pública ─────────────────────────────────────────────────────────────────────────────
   var api = {
     version: VERSION,
+    // PERF-RS1: si `false`, los pulsos del observador NO disparan re-mallado del chunk. El circuito
+    // sigue funcionando (mc.grid cambia, la señal se propaga, la antorcha conectada se enciende),
+    // pero el observador NO cambia visualmente durante el pulso. Ahorra 1 mcMeshChunk por flanco:
+    // ~2 ms/flanco en GPU real, 10× en SwiftShader. Poner a false si los fps caen con muchos
+    // observadores; poner a true (defecto) para el efecto visual del pulso.
+    pulsoVisible: true,
 
     define: function (clave, cfg) {
       if (!clave || typeof clave !== 'string') { console.warn('[redstone] define(clave, cfg): falta la clave'); return null; }
@@ -880,9 +973,11 @@
           if (!cfg) continue;
           // El observador-on es un pulso momentáneo (~100 ms) que nunca debería persistir en disco.
           // Si el mundo se guardó con uno encendido, se devuelve a off para no atascarlo para siempre.
+          // Solo se toca si la variante ORIENTADA de off está en la paleta: caer al par.off sin girar
+          // dejaría el observador con la orientación cambiada (BUG-RS19 secuela).
           if (esObservador(cfg) && claveBase(mc.blockKey[id] || '').indexOf('-on') > 0) {
             var par = parejaObservador(cfg._clave);
-            var idOff = mc.name2id[conOri(par.off, x, y, z)] || mc.name2id[par.off];
+            var idOff = mc.name2id[conOri(par.off, x, y, z)];
             if (idOff && idOff !== id) { g[fila + x] = idOff; }
           }
           cola.set(cl(x, y, z), [x, y, z]); n++;
@@ -893,7 +988,7 @@
     },
 
     // Drena YA, sin esperar al rAF. Es lo que usan los tests (y va bien para depurar a mano).
-    tick: function () { if (pendiente) { cancelAnimationFrame(pendiente); pendiente = 0; } drenar(); return cola.size; },
+    tick: function () { if (pendiente) { cancelAnimationFrame(pendiente); pendiente = 0; } drenar(); if (rafRemallar) { cancelAnimationFrame(rafRemallar); procesarRemallar(); } return cola.size; },
 
     // Re-evalúa una caja entera. Hace falta al PLANTAR un circuito con setVoxel: durante el lote las
     // escrituras se encolan, pero si el material aún no estaba en la paleta la celda quedó pendiente.
@@ -963,6 +1058,28 @@
     window.mcXrayExtra = envuelto;
   }
   envolverRayosX();
+
+  // PERF-RS1 · REQ-PERF1: auto-instrumentación. Cuando el profiler está activo, las funciones
+  // internas críticas del motor de redstone se reasignan a versiones envueltas que suman tiempo en
+  // el mismo acumulador de frame que ve `game.perfDump()`. Coste cuando el profiler está apagado:
+  // 1 comparación por llamada (dentro de `game._perfMedir`). El motor de redstone dispara mucho
+  // trabajo entre `mcTick` (setTimeouts de pulsos, cascadas de dispararObservador...) que era
+  // invisible al profiler global. Con esto sí sale en el volcado como `rs.dispararObservador`, etc.
+  if (typeof game !== 'undefined' && typeof game._perfMedir === 'function') {
+    var _rsw = function (nombre, fn) {
+      return function () {
+        var self = this, args = arguments;
+        return game._perfMedir(nombre, function () { return fn.apply(self, args); });
+      };
+    };
+    dispararObservador = _rsw('rs.dispararObservador', dispararObservador);
+    encolarVecinos = _rsw('rs.encolarVecinos', encolarVecinos);
+    notificarObservadoresVecinos = _rsw('rs.notificarObservadoresVecinos', notificarObservadoresVecinos);
+    drenar = _rsw('rs.drenar', drenar);
+    procesarRemallar = _rsw('rs.procesarRemallar', procesarRemallar);
+    encolarPuenteando = _rsw('rs.encolarPuenteando', encolarPuenteando);
+    aplicar = _rsw('rs.aplicar', aplicar);
+  }
 
   window.game.redstone = api;
   console.log('[redstone] ' + VERSION + ' listo. game.redstone.define(...) · .info(x,y,z) · .lista()');

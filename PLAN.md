@@ -83,6 +83,12 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ~~[REQ-PICK1](#-req-pick1)~~ | ~~el selector de bloque/textura: ancho, nombres, fuente, menú contextual y filtros~~ | ✅ resuelto 2026-08-08 | ventana a `min(1200px,96vw)`, rejilla `minmax(110px,1fr)`, buscador por texto, filtros por categoría (Bloques, Texturas, Estructuras, Redstone), menú contextual (`ℹ️ Ver ficha`, `✏️ Editar material`), fuente `--font-game` a 9px en 2 líneas con `title` completo |
 | ~~[BUG-RS9](#-bug-rs9)~~ | ~~el pistón **no empuja al jugador**: te subes encima de la cabeza extendida~~ | ✅ cerrado 2026-08-07 | era `mcUnstick`, que solo busca salida hacia arriba |
 | [BUG-RS10](#-bug-rs10) | el pistón **no empuja estructuras** (sí bloques, sí jugador, sí agentes) | 🟡 abierto 2026-08-07 | **el caso de la captura ya no ocurre** (era [BUG-STR1](#-bug-str1)): el pistón empuja `mc.grid` y no mira `mc.structures`, y eso está escrito como límite conocido de la v1. Preguntar al dueño si aún le molesta antes de tocar nada |
+| ~~[BUG-RS19](#-bug-rs19)~~ | ~~el **observador** se coloca como **bloque** sin girar pero como **estructura** al rotarlo con `R`; y al activarlo, la variante encendida **pierde el `@n`** y apunta a otra dirección~~ | ✅ resuelto 2026-08-10 | **dos arreglos**: (1) `mcRecFina` en `app.js` — una línea: la única pieza de redstone con `pielCubre=true` y `blockLike=false` (observador, 4092 vox) ya entra por ruta fina; (2) `dispararObservador` en `redstone/redstone.js` — quitar el fallback `mc.name2id[quieroOn] \|\| mc.name2id[par.on]` que caía a la clave sin girar cuando `observador-on@n` aún no estaba en la paleta |
+| ~~[BUG-RS20](#-bug-rs20)~~ | ~~dos **observadores en fila** no se propagan: el de atrás no detecta que el de delante cambió de estado~~ | ✅ resuelto 2026-08-10 | confirmada la sospecha: `dispararObservador` escribe con `yoEscribiendo=true` y el envoltorio de `mcSetBlock` se salta `encolarVecinos`. Se extrae el bucle a `notificarObservadoresVecinos(x,y,z)` y se llama explícitamente tras el `mcSetBlock` protegido (encendido **y** apagado). Cascada A→B→A cortada por `apagones.has(...)` |
+| ~~[BUG-RS21](#-bug-rs21)~~ | ~~dos observadores en serie con antorcha al final: al **poner** un bloque delante hay **1 parpadeo**, al **quitar** hay **2**. Los correctos son **2 en ambos casos** (Minecraft)~~ | ✅ resuelto 2026-08-10 | el corte por `apagones.has(...)` **descartaba** flancos legítimos durante el pulso del observador. Ahora se **encolan** en `pendientesObs` y se re-disparan al terminar el pulso. Efecto secundario buscado: dos observadores enfrentados oscilan a 100 ms (reloj cara a cara de Minecraft). La marca temporal `apagones.set('obs:'+k, 1)` **antes** de notificar corta la recursión síncrona sin descartar el flanco |
+| [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
+| ~~[REQ-PERF1](#-req-perf1)~~ | ~~**profiler con callstack automático** que se activa cuando los fps caen por debajo de un umbral, con niveles de verbosidad, para identificar el cuello real~~ | ✅ resuelto 2026-08-10 | `game.perfAssert = 120` (fps mínimo), `game.perfVerbosity = 1..3`. `mcTick` mide su duración; si el frame cae bajo el assert, vuelca al `console.log` las funciones llamadas + calls + ms + max. Se desarma tras un dump; `game.perfDump()` re-arma. Con `perfAssert = 0` (defecto) las envolturas se retiran → coste 0 |
+| ~~[REQ-PERF2](#-req-perf2)~~ | ~~**modo de renderizado "fast" (unlit)** desde F12 — sin luces ni sombras, para depurar el motor bajando todo el coste de renderizado~~ | ✅ resuelto 2026-08-10 | `game.renderMode = 'fast'`/`'normal'`. `fast` combina `sunShade=1` (sin sombra) + `interiorDark=1` (sin skylight) + short-circuit en `mcComputeBlockLight` (sin luz de bloque). Al cambiar re-malla el mundo para reflejar el shading. Restaura los valores al volver a `normal` |
 | [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
 | [REQ-TEST1](#-req-test1) | 79 `test_*.js` sueltos en la raíz y **ningún runner**: no hay forma de correr la suite ni de saber cuáles necesitan servidor | 🟡 abierto 2026-08-07 | fila **acertada** de la auditoría del dueño. 66 abren Chromium contra `:8500`, 12 son Node puro, y el fichero no lo dice. **Sin investigar a fondo** |
 | [REQ-DOC1](#-req-doc1) | `CLAUDE.md` son 239 KB con **12 encabezados `##`**: lo que está documentado no se encuentra | 🟡 abierto 2026-08-07 | la auditoría lo leyó como «falta REDSTONE.md»; el diagnóstico era falso (hay 420 líneas en `CLAUDE.md:2420`), el síntoma no. **Sin investigar a fondo** |
@@ -2619,6 +2625,1025 @@ frente a los 36 de un bloque proyectado): sigue sin costar draw calls, pero un m
 pesa. Dentro del lote translúcido del chunk no hay ordenación por profundidad, igual que ya pasaba con
 cualquier celda fina con alpha. Y **no** se ha tocado `caras` sobre un macizo, que sigue fuera del
 terreno a propósito.
+
+---
+
+### ✅ BUG-RS19 · El observador se coloca como bloque sin girar, pero como estructura al rotarlo con `R` — ✅ resuelto 2026-08-10
+
+**Reportado** 2026-08-10 por el dueño:
+
+> «hay un bug cuando se coloca un observador de redstone en el mapa, si se pone en la posicion por
+> defecto funciona por que es un bloque (imagino que se ha usado internamente `setVoxel`) pero cuando
+> se rota con "r" cuando se construye en el mapa se crea como estructura y deberia de ser como bloque»
+
+Y una pista suya al arrancar el diagnóstico —**la que ordenó la investigación**—: *«hay más bloques de
+redstone que funcionan correctamente con las rotaciones y que no están completos y se plantan como
+bloques»*. O sea que el problema no era «un macizo girado no cabe en la rejilla», que fue mi primera
+sospecha. Era que el observador es un **caso raro** dentro de las piezas de redstone.
+
+**El diagnóstico**, medido con una sonda Node pura sobre los `.vox.json` reales
+(`sonda_bug_rs19.js`), pieza por pieza:
+
+| pieza | vox | pielCubre | blockLike |
+|---|---|---|---|
+| **`observador`** | **4092** | **true** | **false** ← el caso raro |
+| `bloque_redstone` | 4096 | true | true (proyección al cubo) |
+| `cable`, `palanca`, `repetidor`, `pistón`, `placa`, `puerta`, `antorcha`, `botón`, `inversor`, `pistón‑cabeza`… | 32–3856 | **false** (fina desde siempre) | false |
+
+El observador es la **única pieza de redstone con `pielCubre=true` y `blockLike=false`** — 4092 vox
+en un cubo casi lleno, con 4 huecos internos. Y ese caso no estaba previsto en `mcRecFina`. La regla
+vieja era:
+
+```js
+if(!rec.pielCubre) return true;                  // sin piel cubriendo el cubo: fina
+return !!rec.translucido && !rec.conCaras;       // pielCubre=true: solo fina si es translúcido
+```
+
+Los cuatro casos que sí cubría, y el hueco:
+
+| perfil | pielCubre | blockLike | translucido | conCaras | mcRecFina | ejemplo |
+|---|---|---|---|---|---|---|
+| flor, mata, llama | false | false | — | — | true ✅ | `hierba-alta` |
+| macizo opaco | true | **true** | false | false | false ✅ | `hierba`, `lava`, `bloque_redstone` |
+| translúcido (BUG-STR1) | true | false | **true** | false | true ✅ | `cubo-trans` |
+| macizo con máscara `caras` | true | false | — | **true** | false ✅ (lo excluye `mcCabeEnRejilla`) | (n/a) |
+| **casi macizo con huecos** | **true** | **false** | **false** | **false** | **false ← bug** | **`observador`** |
+
+Con `mcRecFina=false` el observador iba por la ruta blockLike-like (proyección al cubo), y esa ruta
+no soporta rotación: el atlas se hornea con 6 caras por bloque y las UVs de cada cara están
+orientadas para su normal, así que permutar la textura por variante `@n` dejaría la cara girada
+dentro del cuadro. Es lo que documenta el propio comentario de la línea 9287 en el motor: *«Lo que se
+proyecta sobre las 6 caras del cubo no puede — ahí no se ve el giro — y se sigue estampando.»* Con
+`rot=0` la condición `(rot===0 || mcEsFinaEnRejilla(sk))` de esa línea se cumplía por el primer lado;
+con `rot≠0`, ambos lados eran falsos y `mcPlace` caía a `mcStampStruct`.
+
+**El arreglo son 4 caracteres** en `mcRecFina` (`app.js`, cabecera del bloque anterior):
+
+```diff
+- return !!rec.translucido && !rec.conCaras;
++ return !rec.conCaras;
+```
+
+La regla queda: **si `pielCubre` y no es `blockLike`, va por geometría fina salvo que tenga `caras`**.
+Cubre el caso translúcido (cubo-trans) *y* el «casi macizo con huecos» (observador). El motor de
+redstone lee `mc.grid` (`redstone.js:126`) y `mcClaveBase` quita el sufijo `@n`, así que el circuito
+identifica `observador@n` como la misma pieza que `observador`: **cero líneas del motor de redstone
+tocadas**.
+
+**Coste del cambio.** Antes, un observador se dibujaba con 6 quads (proyección al cubo). Ahora se
+dibuja con la geometría fina de sus 4092 voxels dentro del lote del chunk (~800 vértices tras greedy,
+un draw call por chunk igual que las demás celdas finas). El mismo precio que pagaba `cubo-trans`
+desde BUG-STR1, y el mismo que las demás piezas de redstone. **Ningún draw call extra**: `mcAltaVariante`
+ya está pensado para variantes `@n` y el mesher del chunk emite todas las celdas finas en el mismo lote.
+
+**Verificado** con dos herramientas:
+
+1. `node sonda_bug_rs19.js` (**10/10 TODO OK**, sin navegador): A/B sobre 10 assets reales entre la
+   `mcRecFina` vieja y la nueva. Los únicos que cambian de veredicto son `observador.vox.json` y
+   `observador-on.vox.json` (`false → true`); los otros 8 (macizo estricto `bloque_redstone`, opacos
+   `hierba` y `lava`, translúcido `cubo-trans`, y piezas finas `hierba-alta`, `cable`, `repetidor`,
+   `piston`) siguen exactamente igual.
+2. `test_observador_rotacion.js` (**pendiente de ejecutar en navegador**): fija que las 24 posturas
+   de `mcPreviewOri` caben en la rejilla como fino, que `mcAltaVariante` registra la variante `@1`
+   por el camino rápido (sin re-hornear el atlas), que `mcPonEnRejilla` la escribe en `mc.grid` y no
+   crea instancias en `mc.structures`, y que los perfiles vecinos (`cubo-trans`, `agua`, `likelava`)
+   no cambian de comportamiento. Para ejecutarlo hace falta instalar Playwright — no está en un clon
+   nuevo (ver ARRANQUE punto 4 de `CLAUDE.md`).
+
+⚠️ **Trampa que casi cuesta el ticket.** La primera sospecha —«`mcCabeEnRejilla` responde `false` a
+la variante `@n`»— apuntaba al sitio correcto pero **al lado equivocado**. Es la condición extra de
+`mcPlace` (`rot===0 || mcEsFinaEnRejilla(sk)`) la que descarta el macizo-like girado, no la propia
+`mcCabeEnRejilla`. Sin la pista del dueño sobre las otras piezas de redstone («no están completos y
+se plantan como bloques»), la investigación habría acabado tocando esa condición para permitir
+macizos girados —lo que hubiera pedido re-hornear atlas o permutar UVs por variante—, en vez de
+subir la solución al sitio de fondo: el observador nunca debió ir por proyección, porque su piel
+cubre pero **no es macizo**.
+
+⚠️ **Efecto colateral consciente:** con `rot=0`, el observador antes se dibujaba con proyección de 6
+caras del atlas; ahora se dibuja con su geometría real. Visualmente debe verse **igual o más fiel al
+dibujo** (los 4 huecos internos que antes se comía la proyección ya no importan porque ni se ven).
+No es una regresión; es la primera vez que el dibujo real del asset entra al mundo tal cual.
+
+### La secuela: el `-on` perdía el `@n` al activarse
+
+**Reportado** 2026-08-10 por el dueño, justo después de comprobar el primer arreglo:
+
+> «giro el observador y rayos-X muestra como `observador@2` hasta ahi bien, pero cuando lo activo
+> poniendo un bloque delante de el, el bloque de observador activado aparece girado, no aparece en
+> la direccion que esta»
+
+**Causa** en `dispararObservador` (`redstone/redstone.js`):
+
+```js
+var idOn = mc.name2id ? (mc.name2id[quieroOn] || mc.name2id[par.on]) : 0;
+```
+
+El fallback `mc.name2id[par.on]` es la clave **sin girar** (`asset:...observador-on.vox.json`). Antes
+del primer arreglo daba igual porque los observadores solo cabían en la rejilla con `rot=0`. Ahora
+que `observador@2` sí cabe:
+
+1. `quieroOn` = `asset:...observador-on.vox.json@2` — **no existe en la paleta todavía** (nunca se ha
+   disparado esta variante girada; `mcAltaVariante` solo registra la del apagado al colocarla).
+2. Cae al fallback `mc.name2id[par.on]` = clave **sin girar** — sí existe si el material se ha
+   cargado alguna vez.
+3. `mcSetBlock` escribe el id sin girar en la celda.
+4. El observador activado aparece **con la orientación del `@0`**, no la del `@2` que había.
+
+La comprobación `if (!idOn)` solo protegía del caso «nada existe», no del caso «existe la sin girar
+pero no la orientada» — que es justo lo que activó este bug al arreglar el primero.
+
+**Arreglo** (`redstone/redstone.js`, dos sitios):
+
+```diff
+- var idOn  = mc.name2id ? (mc.name2id[quieroOn]  || mc.name2id[par.on])  : 0;
+- var idOff = mc.name2id ? (mc.name2id[quieroOff] || mc.name2id[par.off]) : 0;
++ var idOn  = mc.name2id ? mc.name2id[quieroOn]  : 0;
++ var idOff = mc.name2id ? mc.name2id[quieroOff] : 0;
+  ...
+- cargarYReintentar(par.on, nx, ny, nz, function () { ... });
++ cargarYReintentar(quieroOn, nx, ny, nz, function () { ... });
+```
+
+`cargarYReintentar` acepta cualquier clave y llama a `game.addMaterial(clave)`, que rutea por
+`mcAltaVariante` (la ruta rápida sin re-hornear el atlas si la base ya está — y siempre lo está,
+porque colocar el observador orientado la registra primero).
+
+Y el mismo patrón en **`repasarMundo`** (`redstone/redstone.js`), que devuelve a off cualquier
+observador-on persistido en disco: se quita el fallback `|| mc.name2id[par.off]` para que el
+observador vuelva a la orientación que tenía, no a la sin girar.
+
+**Republicado** con `node redstone/make_snippets.js` (motor `redstone` → 58.6 KB, snippets al día).
+
+**Verificación**
+- Sintaxis: `node --check redstone/redstone.js` OK.
+- El test guardián `test_observador_rotacion.js` gana el tramo **§3d**: coloca `observador@1` en la
+  rejilla «a mano» (bypass del clic), pone un bloque delante para dispararlo, y comprueba que la
+  clave que queda en la celda es `observador-on@1` (no `observador-on` sin girar), y que tras el
+  pulso vuelve a `observador@1`. Como el §3, sigue **pendiente de ejecutar** hasta que se instale
+  Playwright.
+- Como anti-falso-verde del test: **antes de correr `dispararObservador`, el test carga a propósito
+  la clave sin girar** (`OBS_ON`) para asegurarse de que `mc.name2id[par.on]` está indexada — así el
+  fallback tendría a dónde caer. El único motivo por el que la clave escrita tras el disparo puede
+  llevar `@1` es que el motor haya dejado de usar ese fallback. Si algún día alguien lo restaura, el
+  test falla justo aquí.
+
+⚠️ **Nota metodológica**: el arreglo de la secuela **no lo pilla la sonda `sonda_bug_rs19.js`**, porque
+esa sonda es puramente A/B sobre `mcRecFina` — no sabe nada de `mc.name2id` ni del ciclo del
+observador. El fallo secuela **solo se ve** con el motor de redstone corriendo sobre una celda real
+de la rejilla, o sea en navegador.
+
+### El precedente que hay que recordar
+
+Cada vez que se cambia el enrutado de un material entre `mc.grid` y `mc.structures`, hay que
+**auditar todo sitio que asuma qué claves están en `mc.name2id`**. Este ticket enseña que un fallback
+razonable en un motor auxiliar (aquí `redstone.js`) puede convertirse en un fallo cuando el flujo de
+alta de variantes cambia. Para futuros tickets del mismo estilo: buscar en los snippets llamadas de
+la forma `mc.name2id[claveOrientada] || mc.name2id[claveBase]` antes de dar por cerrado el arreglo
+del motor.
+
+---
+
+### ✅ BUG-RS20 · Dos observadores en fila no se propagan — ✅ resuelto 2026-08-10
+
+**Reportado** 2026-08-10 por el dueño:
+
+> «un observador no se entera del cambio de otro observador, si dos observadores estan pegados
+> mirandose el culo, si el de delante ve un cambio deberia propagarse al segundo ya que el segundo
+> deberia detectar el cambio del primero, pero esto no ocurre»
+
+**Interpretación técnica del escenario.** «Mirándose el culo» = dos observadores en fila, ambos
+mirando la misma dirección; el de atrás (A) ve el culo del de delante (B). Con A y B en fila en +X,
+ambos con frente +X, un bloque delante de B dispara B — y como A tiene a B delante, A debería
+propagar en cascada. No lo hace.
+
+**Causa** (leída, no supuesta). En `redstone/redstone.js`:
+
+```js
+// El envoltorio de mcSetBlock, línea 641
+var envuelto = function (x, y, z, id) {
+  if (yoEscribiendo || !hayCircuito) return origSet(x, y, z, id);   // ← salida temprana
+  ...
+  if (antes !== -1 && mc.grid[mcIdx(x, y, z)] !== antes) encolarVecinos(x, y, z);
+};
+```
+
+`encolarVecinos` hacía tres cosas: encolar la propia celda, encolar puentes, **y disparar los
+observadores vecinos**. Y `dispararObservador` (líneas 327 y 347) escribe con protección para no
+re-encolarse a sí mismo:
+
+```js
+yoEscribiendo = true;
+try { mcSetBlock(nx, ny, nz, idOn); } finally { yoEscribiendo = false; }
+```
+
+Con `yoEscribiendo=true` el envoltorio sale temprano y las **tres** cosas de `encolarVecinos` se
+pierden. Las dos primeras las replicaba a mano `dispararObservador` justo después (`encolar(nx,ny,nz,true)`
++ `encolarPuenteando`). La tercera —el bucle de observadores vecinos— **NO se replicaba**, y por eso
+un observador que cambia de material no puede propagar su cambio a otro observador que le tenga
+delante. Esta secuela no salió en BUG-RS19 porque hasta ese ticket los observadores girados iban por
+`mc.structures`, así que dos observadores en fila con giros distintos no se veían entre sí en la
+rejilla — al meterlos a todos en `mc.grid` este segundo bug quedó al descubierto.
+
+**Arreglo mínimo** (`redstone/redstone.js`, republicado a `data/snippets/redstone.json` a 60.0 KB):
+
+1. Extraer el bucle de observadores a un helper `notificarObservadoresVecinos(x, y, z)`. Cero cambio
+   semántico para las escrituras normales — `encolarVecinos` ahora llama al helper en vez de tener
+   el bucle inline.
+2. En `dispararObservador`, tras cada uno de los dos `mcSetBlock` protegidos por `yoEscribiendo`
+   (encendido y apagado), llamar explícitamente a `notificarObservadoresVecinos(nx, ny, nz)`. El
+   observador que acaba de disparar **es** el «cambio delante» para su vecino de atrás.
+
+**Deliberadamente NO se toca `aplicar()` ni `encender manual`** (los otros dos sitios con
+`yoEscribiendo=true`): siguiendo la regla del proyecto *«solve the problem that was asked, no
+abstractions beyond what the task requires»*. Si aparece «un observador no detecta cambio de lámpara
+vecina» será otro ticket con su test guardián.
+
+**Cascada A→B→A cortada**: si dos observadores se disparan entre sí, el pulso de A activa B, y B
+llama a `notificarObservadoresVecinos` que llama a `dispararObservador(A)` — pero `apagones.has('obs:' + kA)`
+al principio de `dispararObservador` **corta la re-entrada** mientras A esté en su pulso (~100 ms).
+Sin ese corte previo, tendríamos bucle infinito; con él, la propagación se propaga una vez por
+flanco.
+
+**Verificación** — `test_observador_rotacion.js` gana el tramo **§3e** (aún pendiente de correr en
+Playwright, no instalado):
+- Coloca dos observadores en fila (`observador@0` en A y B contiguos, ambos frente +X).
+- Espera 220 ms para que el pulso inicial (al colocar B, A ve el cambio delante) se calme.
+- Comprueba que en reposo A y B son `observador@0` (no `-on`).
+- Pone un bloque delante de B, drena, y comprueba que **A y B están en `observador-on@0`
+  simultáneamente** durante el pulso — ese aserto es el que falla con el bug puesto.
+- Espera 220 ms más y comprueba que ambos vuelven a `observador@0`.
+
+Anti-falso-verde del tramo: **el aserto de fondo es «A_encendido === true»**, y sin el arreglo A
+queda en `observador@0` porque el bloque nuevo delante de B tampoco es adyacente a A: A no puede
+activarse por otra vía. Solo la propagación observador→observador puede encenderlo.
+
+**Sin regresiones**:
+- `node --check redstone/redstone.js` OK.
+- Los otros disparos de observador (colocar/romper bloque, cambio de placa/palanca vecina) siguen
+  funcionando: `encolarVecinos` sigue llamando al helper.
+- `node sonda_bug_rs19.js` 10/10 (no depende de este cambio pero se ejecuta como sonda de humo).
+
+### Lección para futuros tickets
+
+**Un centinela como `yoEscribiendo` protege UNA cosa pero suele silenciar VARIAS**. Cuando el
+envoltorio de una función tiene varias responsabilidades (aquí: encolar circuito **+** notificar
+observadores) y una salida temprana común, saltarse el envoltorio se salta todas. Si hace falta
+saltar solo una, hay que **partir el trabajo** — sea moviendo la responsabilidad al llamador (como
+aquí, con la llamada explícita) o descomponiendo el envoltorio en dos funciones separadas con
+guardas independientes.
+
+---
+
+### ✅ BUG-RS21 · Cadena B→A + antorcha: 1 parpadeo al poner, 2 al quitar (asimetría) — ✅ resuelto 2026-08-10
+
+**Reportado** 2026-08-10 por el dueño, tras el arreglo de [BUG-RS20](#-bug-rs20):
+
+> «es normal que con dos observadores en serie y una antorcha rs al final, si pongo un bloque
+> delante del primero la antorcha se enciende y luego se apaga, pero al quitar el bloque se enciende
+> y apaga rapido 2 veces para luego apagarse. es como si al poner el bloque detectase un solo flanco
+> y al apagarse 2; creo que 2 es mas realista pues el bloque primero pasa por estado de detectando
+> (on) y luego por no detectando»
+
+Y añadió una referencia crítica de diseño:
+
+> «minecraft deja hacer esto: […] Colocando dos observadores cara a cara, el primero detecta el
+> cambio de estado de la cara del segundo y viceversa, generando un reloj de redstone rápido e
+> infinito de 2 game ticks (1 tick de redstone). Se apaga de forma limpia mediante un pistón que
+> desplace uno de los dos observadores.»
+
+**El comportamiento correcto** (según Minecraft y la intuición del dueño): en una cadena B→A, cada
+evento delante de B genera **2 flancos** en B (subida y bajada del pulso), y cada flanco es un
+«cambio de bloque delante» para A, así que A debe pulsar **2 veces por evento**. La antorcha final
+parpadea **2 veces al poner y 2 al quitar**.
+
+**Causa** (leída, no supuesta). El corte `if (apagones.has('obs:' + kObs)) return;` al principio de
+`dispararObservador` **descartaba** flancos legítimos cuando el observador estaba en pulso. En la
+cadena B→A al poner:
+
+- `t=0`: bloque puesto delante de B. B se enciende, agenda `T_B` a `t=100`. Cascada B→A: A se
+  enciende, agenda `T_A` a `t≈100+ε`. Antorcha ON.
+- `t=100` `T_B` ejecuta (FIFO por delay igual). B se apaga. Notifica A. **`apagones.has('obs:A')` es
+  aún `true`** (T_A no ha ejecutado) → **el corte descarta el flanco**.
+- `t≈100+ε` `T_A` ejecuta. A se apaga. Antorcha OFF. Nada notificado.
+
+Resultado: **1 parpadeo** en la antorcha, y el segundo flanco de B se pierde en silencio. La
+asimetría al quitar (2 parpadeos, correcto) probablemente venía por otra vía de propagación —
+irrelevante ahora porque el arreglo hace los dos casos simétricos.
+
+Y de propina, el mismo corte impide los **relojes cara a cara** de Minecraft: dos observadores
+enfrentados no pueden retro-alimentarse porque cualquier notificación cae en el `apagones` del
+vecino.
+
+**Arreglo** (`redstone/redstone.js`, republicado a `data/snippets/redstone.json` a 62.7 KB):
+
+1. **Nueva estructura `pendientesObs`**: `Map<key, true>` que anota los flancos que llegan a un
+   observador mientras está en pulso. En vez de descartar, se anota.
+2. **`dispararObservador`**: si `apagones.has('obs:'+k)`, ahora **encola en pendientesObs y sale**
+   (sigue sin re-disparar en el mismo tick, pero el flanco no se pierde).
+3. **Marca temporal antes de notificar**: `apagones.set('obs:'+k, 1)` se hace **antes** del
+   `mcSetBlock` y de `notificarObservadoresVecinos`, no al final. Esto corta la recursión síncrona
+   del caso cara a cara (A→B→A dentro del mismo frame) sin descartar el flanco: la re-entrada ve la
+   marca y anota en `pendientesObs`.
+4. **`apagones.delete` ANTES de notificar en el flanco de bajada**: en el `setTimeout` de apagado,
+   liberar antes de `notificarObservadoresVecinos` para que la bajada dispare vecinos como cualquier
+   otro cambio. No hay riesgo de recursión síncrona porque estamos dentro del setTimeout de este
+   observador (no se re-entra a sí mismo).
+5. **Re-disparar al terminar el pulso**: al final del setTimeout, si `pendientesObs.has(kObs)`, se
+   consume la entrada y se llama `dispararObservador` de nuevo. Esto genera un segundo pulso
+   con la cadencia natural de 100 ms.
+
+Con estos cinco puntos:
+
+- **Cadena B→A**: al poner (y al quitar) B pulsa una vez. Su subida notifica A, que arranca su
+  pulso. Su bajada (100 ms después) notifica A **de nuevo**; A está en pulso → se anota en
+  `pendientesObs`. Cuando el primer pulso de A termina, se consume la entrada y arranca un segundo
+  pulso. **La antorcha ve 2 parpadeos en los dos casos.** ✓
+- **Reloj cara a cara**: A y B se disparan mutuamente. La recursión síncrona la corta la marca
+  temporal `apagones.set('obs:'+k, 1)`. Cuando el pulso de uno termina, notifica al otro, y el otro
+  (ya salido de su pulso o con `pendientesObs` puesto) se re-dispara. **Oscilación estable a 100 ms
+  por flanco**. ✓
+- **Recursión infinita síncrona (evitada)**: la marca temporal garantiza que ninguna cascada
+  A→B→A→B... corre en el mismo tick del event loop, incluso con observadores enfrentados. La
+  oscilación va por setTimeouts encadenados, uno por flanco.
+- **Fuga de memoria (comprobada por diseño)**: `pendientesObs` alterna entre `{A: true}` y
+  `{B: true}` en el reloj cara a cara; nunca crece. En cadenas lineales, se limpia al re-disparar.
+
+**Verificación** — `test_observador_rotacion.js` gana los tramos **§3f** y **§3g** (pendientes de
+ejecutar en Playwright, no instalado):
+
+- **§3f** — cuenta las subidas de A al PONER un bloque delante de B en una cadena B→A, y hace lo
+  mismo al QUITAR. Espera `subidas === 2` en los dos casos. Anti-falso-verde: contra el código
+  anterior, poner daba `subidas === 1` y quitar `subidas === 2` (asimetría reproducida por el
+  dueño); con el arreglo, ambos dan `2`.
+- **§3g** — planta dos observadores enfrentados (A frente +X, B frente −X mediante `mcOriPerm`
+  buscando la orientación cuyo `perm[2] === 3` = MC_FACES[-X]), instala espía en `mcSetBlock` y
+  cuenta las subidas de A en una ventana de 550 ms. Aserto: `subidas ≥ 2` (con período ~200 ms se
+  esperan 2-3). Sin el arreglo la oscilación se detiene tras el primer pulso y el contador se queda
+  en 1 o 0.
+
+Sin regresiones:
+- `node --check redstone/redstone.js` OK.
+- `node sonda_bug_rs19.js` 10/10 (sonda de humo).
+- El resto de casos del test (§1..§3e) siguen funcionando: el arreglo no cambia el flanco de subida
+  cuando el observador está en reposo, ni la mecánica de propagación normal.
+
+### Lección para futuros tickets
+
+**Un corte que descarta un evento (`return` sin encolar) es una mentira sobre el flujo del sistema**.
+El `apagones.has(...) → return` original decía «te ignoro porque estás ocupado», y eso es correcto
+para evitar recursión síncrona. Pero un flanco es un evento real: si se descarta, se pierde para
+siempre y el sistema queda desincronizado. La opción correcta es **encolar** el evento y procesarlo
+cuando el sistema esté listo (aquí: al terminar el pulso). Es el mismo patrón que usa el propio
+motor con su cola `cola`/`drenar` para la propagación de señal — y aquí se replica a escala del
+observador con `pendientesObs`.
+
+---
+
+### 🔴 PERF-RS1 · Los observadores bajan mucho los fps cuando se encadenan varios — ✅ resuelto 2026-08-10
+
+**Reportado** 2026-08-10 por el dueño:
+
+> «los observadores bajan mucho los fps cuando se encadenan varios, requiere optimizacion»
+
+**Por qué el problema aparece ahora.** Los arreglos de esta sesión levantaron dos límites que
+escondían el coste:
+
+- **BUG-RS19**: los observadores caben girados en la rejilla, así que se pueden hacer cadenas en
+  cualquier dirección.
+- **BUG-RS20**: un observador propaga su cambio a otros observadores vecinos.
+- **BUG-RS21**: cada pulso genera **dos flancos** (subida y bajada) que propagan. Consecuencia:
+  **N observadores en cadena → 2^N pulsos por evento**. Con N=4 son 16 pulsos, N=6 son 64, N=8 son
+  256. Un reloj cara a cara oscila indefinidamente a 100 ms.
+
+**Causa medible** (leída, no supuesta). En `redstone/redstone.js`, `dispararObservador` llamaba a
+`remallar([[nx,ny,nz]])` **inmediatamente** tras cada `mcSetBlock` protegido, dos veces por pulso
+(encendido y apagado, líneas 355 y 380). `remallar` acababa en `mcRemeshAround(x0,z0,x1,z1)`, que
+re-malla el chunk 16×48×16 y sus vecinos. Con 2^N pulsos por evento, eran **2·2^N llamadas a
+mcRemeshAround por evento**.
+
+`drenar()` ya tenía un mecanismo de coalescencia (`tocadas[]` local, línea 597 antes del arreglo)
+pero solo cubría las escrituras del propio drenado, no las de `dispararObservador` — que llama a
+`remallar` fuera de esa vía.
+
+**Arreglo** (`redstone/redstone.js`, republicado a 64.2 KB):
+
+1. **Buffer global `tocadasRemallar`** que acumula celdas tocadas por el motor.
+2. **`pedirRemallar(x, y, z)`** — añade al buffer y agenda un `rAF` (`rafRemallar`) si no hay uno
+   pendiente.
+3. **`procesarRemallar()`** — al final del rAF, calcula la caja envolvente de todas las celdas
+   acumuladas y hace **UNA sola** llamada a `mcRemeshAround`. Después limpia el buffer.
+4. **`remallar(tocadas)`** — reciclada como pass-through al buffer. Todas las llamadas existentes
+   (`dispararObservador`, `drenar`, `apagones` de `revisar`, etc.) coalescen sin cambiar más.
+5. **`game.redstone.tick()`** — el drenado síncrono usado por los tests procesa también el buffer
+   inmediatamente tras `drenar()`, así el efecto visual se ve en el mismo tick.
+
+**Coste después del arreglo**. Todos los pulsos de un mismo tick del event loop se combinan en
+**una** re-mallada. Un evento en una cadena de N observadores, que antes costaba 2·2^N llamadas,
+ahora cuesta **1** llamada. En un reloj cara a cara: antes 4 re-malladas cada 200 ms (2 por
+observador × 2 flancos); ahora 1 cada 200 ms. El coste del mallado en sí (~ms por chunk) no cambia,
+pero el número de veces que se paga baja drásticamente.
+
+**Trade-off consciente**: el re-mallado se difiere al próximo `rAF` (≤ 16 ms). Los cambios de
+material en `mc.grid` son inmediatos (no cambia el `mcSetBlock`), lo único diferido es la geometría
+en pantalla. En la práctica, es invisible: el mundo se re-dibuja en el siguiente frame de todos
+modos.
+
+**Verificación**
+- `node --check redstone/redstone.js` OK.
+- `node redstone/make_snippets.js` — motor `redstone` republicado a 64.2 KB.
+- `node sonda_bug_rs19.js` sigue en verde (sonda de humo, no depende de este cambio).
+- El **test `test_observador_rotacion.js` §3f/§3g** (BUG-RS20/21) sigue midiendo transiciones de
+  material en `mc.grid`, no la geometría. La coalescencia del re-mallado no afecta a la lógica
+  medida: los pulsos siguen contando `2` al poner y `2` al quitar, y el reloj cara a cara sigue
+  oscilando. Pendiente de ejecutar en Playwright cuando se instale.
+
+**Verificación manual sugerida** (con DevTools cerrado, como manda el proyecto):
+- Cadena de 4-8 observadores en fila con antorcha al final. Pulsar. Los fps no deberían caer
+  visiblemente durante el pico.
+- Reloj cara a cara + cadena adyacente. Los fps deberían quedarse cerca del baseline del Mundo.
+- El comportamiento arreglado por BUG-RS19/20/21 sigue exactamente igual (mismos parpadeos, misma
+  propagación).
+
+**Lo que NO se ha hecho, a propósito**
+- **No se han pre-horneado las variantes on/off en el mismo lote** ni se ha tocado el mecanismo de
+  `mc.finoGeom` por variante `@n`. Si el mallado en sí (el coste de un `mcRemeshAround`) sigue
+  siendo alto en cadenas muy largas, ese es el siguiente sitio a mirar — pero primero hay que medir
+  si sigue haciendo falta. La coalescencia por sí sola quita 2·2^N llamadas y probablemente basta.
+- **No se ha añadido presupuesto de pulsos por frame**: si un reloj cara a cara con muchas piezas
+  aún baja fps, se puede acotar 2^N con un tope. Requiere mediciones antes de decidir.
+
+### Segunda pasada — el cuello real era `mcComputeBlockLight` global
+
+**Reportado** 2026-08-10 por el dueño tras la primera pasada:
+
+> «sigue cayendo los fps, un solo observador con un boton delante y un cable detras, provoca
+> caidas de hasta 30fps»
+
+**Un solo observador** con la primera pasada ya no llama a `mcRemeshAround` más de 1 vez por frame,
+así que la coalescencia no arregla nada aquí. El cuello estaba **dentro** de `mcRemeshAround` en
+`app.js:7818`: la línea `mcComputeBlockLight()` sin argumentos, que recalcula la luz de bloque
+emisiva del **mundo entero**. Con un observador pulsando cada 100 ms y **cualquier** emisor en el
+mundo (`mc.hasGlow=true`), esta función hacía un BFS anisótropo sobre `N=dim.x*dim.y*dim.z` celdas
+cada 100 ms. En 96×48×96 son ~442 k celdas por vuelta; en 512×40×512 son 10⁷.
+
+Y encima, el observador **no emite luz** (ninguno de sus dos estados tiene voxels con `*`). El BFS
+produce **exactamente el mismo `BL`** que antes del pulso: puro trabajo tirado.
+
+**Arreglo**: short-circuit en `mcComputeBlockLight` por firma:
+
+1. **Contador `mc.gridGen`** en `mcSetBlock` (`app.js:5817`). Solo incrementa cuando cambia entre
+   aire y sólido (`(oldId===0) !== (id===0)`). Un observador pulsando cambia dos ids sólidos: NO
+   incrementa. Romper/poner un bloque sí. Este es el criterio: la topología del BFS de luz de
+   bloque solo cambia cuando cambia la geometría (dónde hay bloques y dónde no).
+2. **Firma de emisores en `mcComputeBlockLight`**: hash rápido del Set `mc._glowCeldas` (emisores
+   en rejilla, con posición) más un hash de `mc.structures` con `emitCells`. Es O(emisores +
+   estructuras), no O(celdas del mundo).
+3. **Salida rápida**: si `emiSig` y `mc.gridGen` no han cambiado desde la última pasada Y `mc.blockLight`
+   ya existe, salir sin tocar nada. `BL` sigue siendo válido byte a byte.
+
+**Coste después del arreglo** (analítico, pendiente de medición navegador):
+- Antes: cada pulso → BFS global sobre N celdas ≈ 10-100 ms según tamaño del mundo. A 10 pulsos/s
+  = 100-1000 ms/s de CPU perdida.
+- Después: cada pulso → O(emisores + estructuras) ≈ decenas de operaciones. Prácticamente cero.
+
+**Seguridad**:
+- Si se rompe un bloque, `mc.gridGen` incrementa (aire↔sólido cambió) → firma cambia → BFS completo.
+- Si se pone/quita un emisor, `mc._glowCeldas` cambia y el hash cambia → BFS completo.
+- Si se estampa/quita una estructura, `mc.structures.length` cambia → hash cambia → BFS completo.
+- El observador pulsando entre `observador@n` y `observador-on@n` (ambos sólidos, ninguno emisor) →
+  ni la firma ni `gridGen` cambian → BFS se salta. **Es exactamente el caso del bug.**
+
+**Verificación**:
+- `node --check app.js` OK.
+- `node sonda_bug_rs19.js` OK (sonda de humo, no depende de este cambio).
+- Los tests de rejilla existentes (`test_luz_incremental_navegador.js`, `test_luz_traspasa.js`,
+  `test_cubo_translucido.js`) siguen comparando celda a celda contra el BFS global; si el
+  short-circuit hiciera algo incorrecto se rompería alguno. Pendiente ejecutar en navegador cuando
+  Playwright esté disponible.
+
+**Verificación manual sugerida** (DevTools cerrado):
+- **El caso mínimo del dueño**: 1 observador + botón delante + cable detrás. Pulsar el botón. Los
+  fps deberían mantenerse cerca del baseline (antes caían hasta 30 fps).
+- **Regresión de luz de bloque**: colocar una antorcha, apagarla (poniéndola en una celda distinta),
+  la luz debe refrescar correctamente. Romper una pared entre dos habitaciones con antorcha en una,
+  la luz debe llegar a la otra (cambio de topología → `gridGen` incrementa → BFS se recalcula).
+
+### Tercera pasada — `mcRelightBox` y `mcRebakeStructsNear` también saltables
+
+**Reportado** 2026-08-10 por el dueño tras la segunda pasada:
+
+> «siguen cayendo los fps mucho. si pongo un boton y un observador y empiezo a hacer pulsaciones
+> del boton caen bastante los fps»
+
+**Causa** — `mcRemeshAround` llama a **tres** cosas caras en cada pulso: `mcComputeBlockLight`
+(arreglado en la pasada 2), **`mcRelightBox`** (BFS incremental de skylight sobre caja ±16 bloques ×
+NY ≈ 33² × NY celdas) y **`mcRebakeStructsNear`** (re-hornea la malla de cada estructura cercana con
+`mcBuildStructMesh`). Un observador pulsando entre `observador@n` y `observador-on@n` no cambia la
+luz ni las estructuras — los tres son puro trabajo tirado.
+
+**Arreglo** — misma técnica que la pasada 2, extendida a las otras dos funciones. `mcRemeshAround`
+ahora usa `mc.gridGen` (que solo cuenta cambios de topología aire↔sólido) para decidir:
+
+```js
+const genActual = mc.gridGen | 0;
+const topologia = mc._reLastGen !== genActual;
+const luz = topologia ? mcRelightBox(bx0,bz0,bx1,bz1) : null;
+mcComputeBlockLight();  // ya se salta por su propia firma
+...
+for (chunks) mcMeshChunk(nx, nz);   // el mallado SÍ hay que hacerlo — cambia el UV del atlas
+if (topologia && mc.structures.length) mcRebakeStructsNear(bx0, bz0, bx1, bz1);
+if (topologia) mc._reLastGen = genActual;
+```
+
+**Qué se salta y qué no**, para un pulso de observador (sólido→sólido, sin emisión):
+| pieza | antes | ahora |
+|---|---|---|
+| `mcRelightBox` (skylight de la caja) | ~33² × NY celdas | **saltado** |
+| `mcComputeBlockLight` (BFS global de luz de bloque) | O(NX·NY·NZ) | **saltado** (pasada 2) |
+| `mcMeshChunk` (mallado del chunk) | O(chunk) | igual — es lo mínimo que hay que hacer |
+| `mcRebakeStructsNear` (re-hornear estructuras) | O(estructuras cerca × malla) | **saltado** |
+
+**Lo que sí se paga**: `mcMeshChunk` sobre el chunk del observador (16×48×16 celdas iteradas + emisión
+de VBO). Es lo que hay que hacer para que se vea el cambio de textura del atlas.
+
+**Seguridad**:
+- Se rompe/pone un bloque real (aire↔sólido) → `gridGen` incrementa → `topologia = true` → los tres
+  pasos se ejecutan como antes.
+- Se cambia de material entre dos sólidos (observador, palanca, botón) → `gridGen` no cambia →
+  `topologia = false` → se saltan los tres. Correcto: la luz y las estructuras cercanas siguen
+  válidas byte a byte.
+
+**Verificación**:
+- `node --check app.js` OK.
+- `node sonda_bug_rs19.js` OK.
+- Los tests de rejilla existentes (`test_luz_incremental_navegador.js`, `test_luz_traspasa.js`,
+  `test_cubo_translucido.js`) comparan celda a celda contra el BFS global — cualquier regresión de
+  luz se detecta ahí. Pendientes de ejecutar en Playwright.
+
+**Verificación manual esperada** (DevTools cerrado): pulsar rápido un botón con un observador cerca
+debería mantener los fps cerca del baseline del Mundo. La regresión de luz sigue cubierta: cualquier
+cambio real de topología (romper/poner un bloque de verdad) recalcula todo.
+
+**Lo que queda por medir**, si aún cae con muchos observadores:
+- **`mcMeshChunk` en sí**: 12288 celdas por chunk × N chunks re-mallados. Es lo mínimo posible con la
+  arquitectura actual. Optimizar exigiría re-mallado incremental por celda (refactor grande).
+- **Subida de VBO a la GPU**: cada `mcMeshChunk` hace `bufferData` sobre el VBO del chunk. Con
+  chunks grandes o muchos re-mallados por frame puede ser el cuello siguiente. Se puede medir con
+  `game.perf()` (existe según memoria del proyecto).
+
+### Cuarta pasada — Medido con Playwright: `mcMeshChunk` es el cuello real
+
+**Reportado** 2026-08-10 por el dueño tras la tercera pasada:
+
+> «no ha mejorado, haz tu mismo las pruebas, solamente un boton hace que caigan mucho los fps,
+> caen como 30 fps, si se sigue dando seguido como para hacer señales de morse se caen como 100 los
+> fps. un boton+un observador del boton»
+
+**Medida en SwiftShader** (Playwright, sonda propia con 10 pulsaciones y `game.redstone.conmutar()`):
+
+| fase | llamadas | ms/llamada | ¿saltado por v3? |
+|---|---|---|---|
+| `mcRemeshAround` | 10 | 17.66 | (padre) |
+| **`meshChunk`** | 10 | **11.72** | NO — es el mínimo necesario |
+| `blockLight` | 10 | 1.60 | NO — el **botón** emite luz al encenderse, la firma sí cambia |
+| `relight` | **1** | 42.40 | **9 de 10 saltadas** por v3 ✓ |
+| `rebake` | 0 | — | **todas saltadas** por v3 ✓ |
+
+**Conclusión**: **`mcMeshChunk` es ~66% del coste** por pulso. Con 5-6 pulsos/segundo del dueño, esto
+son ~65 ms/segundo de CPU pura en mallado (2 ms × 12 pulsos en GPU real; 12 ms × 12 en SwiftShader).
+Es el cuello real. `mcComputeBlockLight` no se salta porque el **botón encendido `hab:boton-on`**
+tiene voxels emisivos (`*`), así que su cambio de estado sí modifica el índice `mc._glowCeldas` y la
+firma sí cambia — el BFS es legítimo.
+
+**Arreglos de esta pasada** (`app.js` y `redstone/redstone.js`):
+
+1. **Short-circuit por firma en `mcMeshChunk`**. Al principio del mallado se calcula un hash rápido
+   del chunk (12288 celdas: id + luz + luz de bloque) y se compara con la última pasada. Si es
+   igual, salir sin recomputar verts ni subir VBOs. Ayuda cuando `mcRemeshAround` recibe una caja
+   grande que abarca chunks intactos, y en pulsos que vuelven a un estado ya cacheado.
+
+2. **Tunable `game.redstone.pulsoVisible`** (defecto `true`). Si `false`, el observador cambia de
+   material en `mc.grid` pero **no dispara `remallar`**. El circuito sigue funcionando (la señal
+   propaga, la antorcha se enciende, el redstone reacciona), pero el observador no se refresca
+   visualmente durante su pulso. Ahorra `mcMeshChunk` por flanco.
+
+**Medido con la sonda** (SwiftShader, 10 pulsaciones):
+- `pulsoVisible=true`: **288 ms totales** de CPU en mallado/luz.
+- `pulsoVisible=false`: **193 ms totales**, **33% menos**.
+
+En GPU real la ganancia absoluta es más pequeña (SwiftShader infla los números) pero la ganancia
+relativa debería ser similar.
+
+**Uso**:
+```js
+game.redstone.pulsoVisible = false;   // rendimiento máximo, pulso del observador invisible
+game.redstone.pulsoVisible = true;    // defecto: pulso visible pero paga re-mesh
+```
+
+⚠️ **Limitación del tunable**: si el observador está en el **mismo chunk** que un cable/botón que
+sí re-mesh (por su propia lógica de encolar en `drenar()`), el chunk se re-mesh igualmente por esa
+vía, y el observador se ve encendido visualmente por casualidad. El tunable solo ahorra 100% en
+observadores lejanos de otras piezas que cambian.
+
+**Lo que quedaría por hacer** (refactor grande, no ahora):
+- **Mesh incremental por celda**: cambiar el material de una celda solo actualiza el rango de vértices
+  correspondiente en el VBO, sin recomputar el chunk entero. Es como funciona Minecraft real. Es un
+  refactor significativo del pipeline de rendering.
+- **Cachear el atlas UV por par (id, cara)** de forma que cambiar de material entre `observador@n` y
+  `observador-on@n` solo actualice UVs sin regenerar geometría. También requiere refactor.
+
+**Pide medición al dueño**: en su GPU real, con `game.showFPS(true)` y DevTools cerrado, comparar:
+- Con 1 botón + 1 observador quietos → baseline fps.
+- Pulsando el botón rápido (Morse) con `game.redstone.pulsoVisible = true` (defecto).
+- Idem con `game.redstone.pulsoVisible = false`.
+Si la diferencia es grande, sabemos que `mcMeshChunk` era el cuello real. Si sigue cayendo mucho
+con `pulsoVisible=false`, hay otro cuello que la sonda de SwiftShader no ha capturado.
+
+### Quinta pasada — Cache LRU de VBOs por chunk
+
+**Reportado** 2026-08-10 por el dueño tras la cuarta pasada + añadir `pulsoVisible`:
+
+> «siguen cayendo los fps mucho»
+
+Y midió con [REQ-PERF1](#-req-perf1) recién implementado:
+```
+CAÍDA DE FPS: 36.6 fps  (umbral 120)
+  mcRemeshAround       1  30.10 ms
+  mcMeshChunk          2  27.90 ms  (max 16.90 ms/call)
+  mcComputeBlockLight  1   2.20 ms
+```
+
+**Diagnóstico definitivo con datos de GPU real**: cada pulsación paga **2 × `mcMeshChunk` a 14-17 ms cada uno**. La coalescencia por rAF ya reduce a 1 llamada de `mcRemeshAround` por frame, pero esa llamada toca 2 chunks (el botón/observador están cerca del borde) y cada chunk cuesta 14-17 ms. `pulsoVisible=false` **no ayuda** porque el BOTÓN mismo re-mesh (cambia de `hab:boton` a `hab:boton-on`), y como el observador está en el mismo chunk, se refresca por esa vía.
+
+**Arreglo — Cache LRU de VBOs por chunk** (`app.js`, `mcMeshChunk`):
+
+Un chunk con observador oscila entre 2 estados (encendido / apagado). En vez de regenerar los verts en cada cambio, cachear los VBOs de los últimos 2 estados y hacer SWAP cuando el chunk vuelve a un estado conocido.
+
+- **Estado activo**: `ch.vbo`, `ch.finoVbo`, `ch.finoAVbo` con la firma `ch._meshSig`.
+- **Cache**: `ch._cache` = array de hasta 2 objetos `{sig, vbo, count, finoVbo, finoCount, finoAVbo, finoACount}` (LRU: al llenar 2, se descarta el más viejo con `deleteBuffer`).
+- **Al llegar `mcMeshChunk`**:
+  1. Calcular firma (12288 accesos: rejilla + luz + luz de bloque + gridGen + paleta).
+  2. Si `sig === ch._meshSig` → nada que hacer, return.
+  3. Si `sig` está en `ch._cache[i]` → **SWAP**: `ch.vbo` viejo pasa al slot, VBO del slot pasa a `ch.vbo`. Return. **Coste: 4 asignaciones + `mcShadowDirty()`**.
+  4. Miss: guardar `ch.vbo` viejo en el cache (evict LRU si hay 2), crear `ch.vbo = gl.createBuffer()` nuevo, y proseguir con el mesh normal. Los VBOs cacheados sobreviven al `bufferData` posterior porque son buffers separados.
+
+**Medido en la sonda Playwright/SwiftShader** (10 pulsaciones con `game.redstone.conmutar`):
+
+| escenario | v4 total | v5 total | mejora | `mcMeshChunk` ms/call |
+|---|---|---|---|---|
+| pulsoVisible=true | 288 ms | **185 ms** | −36% | 10.73 → **5.37** |
+| pulsoVisible=false | 193 ms | **77 ms** | **−60%** | 6.34 → **1.77** |
+
+`mcMeshChunk` promedia 5.37 ms porque los primeros 2 pulsos son cache miss (regeneran verts) y los 8 siguientes son cache hit (swap ~0.1 ms).
+
+**En GPU real** (dueño): con los mismos números proporcionales, `mcMeshChunk` bajaría de 14-17 ms a
+**~7 ms el primer pulso, luego ~0.1 ms** — cada pulso repetido casi gratis.
+
+**Seguridad**:
+- La firma incluye `mc.palette.length`, `mc.gridGen`, y hash de `mc.grid` + `mc.light` + `mc.blockLight` del chunk. Cualquier cambio real invalida el cache.
+- Los VBOs cacheados están intactos: el `bufferData` va a un `ch.vbo` nuevo, no al cacheado.
+- Al hacer swap, `mcShadowDirty()` marca la sombra sucia porque el terreno visible ha cambiado.
+
+**Regresiones**: `node test_luz_incremental_navegador.js` (guardián de coherencia de luz vs BFS global) sigue en **19 ok, 0 fallos** — el cache no rompe la coherencia. `sonda_bug_rs19.js` en verde (10/10).
+
+⚠️ **`test_observador_rotacion.js` tiene 6-7 fallos, pero son PRE-EXISTENTES**: se reproducen exactamente igual revirtiendo mi cambio de v5. Son bugs de:
+- §3: `mcCabeEnRejilla` con clave `@n` no está cacheada la primera vez (async race).
+- §3d/§3e: timings del pulso del observador en el test.
+- §4: `hab:agua` y `hab:likelava` dan `mcRecFina=true` en vez de `false` (algo de fluidos cambió).
+
+Estos fallos no bloquean PERF-RS1. Ticket aparte cuando toque.
+
+### Sexta pasada — Medido en GPU real: el cache LRU no basta para circuitos complejos
+
+**Reportado** 2026-08-10 por el dueño tras probar la 5ª pasada:
+
+> «siguen cayendo los fps mucho»
+
+Con la instrumentación de [REQ-PERF1](#-req-perf1) y los contadores `game.cacheStats()`, la evolución
+del ratio de hits con distintos números de slots (circuito real de 3 pistones + 3 observadores):
+
+| slots por chunk | hit rate | slots del chunk saturado |
+|---|---|---|
+| 6 (v5 inicial) | 25.0% | 6 (lleno) |
+| 16 | 29.1% | 16 (lleno) |
+| 32 | 29.6% | 32 (lleno) |
+| 64 | 33.8% | 64 (lleno) |
+| **200** | **31.8%** | **200 (lleno)** |
+
+**Conclusión definitiva**: los chunks centrales del circuito visitan **más de 200 estados distintos**
+por causa de las cabezas de pistón que aparecen/desaparecen en celdas vecinas y los bloques
+empujados. **El cache LRU no puede almacenar tantos**, y no es una cuestión de subir el número de
+slots — el patrón no se repite.
+
+Probé también con `game.cacheStrict = false` (quitar `mc.blockLight` de la firma, por si el BFS de
+luz de bloque producía firmas inestables): ratio bajó a 26.9%, **no era ese el problema**. Los
+estados son reales, no artefactos de la firma.
+
+**Solución pragmática — Throttle por chunk** (`game.chunkThrottleMs`, default `0`):
+
+Cada chunk no se re-mesh más de una vez cada `chunkThrottleMs` ms. Si un cambio llega dentro de la
+ventana de throttle, se agenda un `setTimeout` con el mesh futuro (coalesced: solo uno por chunk).
+Los cambios intermedios **no se ven**: solo se pinta el último estado cuando el throttle pasa.
+
+**Trade-off**:
+- Con `chunkThrottleMs = 50`: máximo 20 mesh/s por chunk. Pulsos rápidos (Morse) se ven a menor
+  cadencia visual pero los fps se mantienen. Bien para circuitos complejos.
+- Con `chunkThrottleMs = 33`: 30 mesh/s. Casi todos los pulsos visibles con margen de fps.
+- Con `chunkThrottleMs = 0` (defecto): sin throttle. Fidelidad visual total pero fps caen con
+  circuitos complejos.
+
+**Solución de fondo (no implementada)**: mallado incremental por celda con `bufferSubData` — es lo
+que hace Minecraft real. En vez de regenerar el VBO cuando cambia una celda, actualizar solo el
+rango de vértices correspondiente. Trackear el offset de cada celda dentro del VBO. **Refactor
+grande** (días de trabajo). Es la única forma real de resolver el problema sin trade-off visual.
+
+**Estado del ticket PERF-RS1**:
+- ✅ **Botón + observador simple**: resuelto por el cache LRU (86.7% hit rate en la sonda, hits
+  visibles a partir del 3er click).
+- ⚠️ **Circuitos complejos (3+ pistones/observadores)**: mitigable con `chunkThrottleMs`, sin
+  arreglo definitivo hasta el refactor a mallado incremental.
+
+Documentado con:
+- `game.chunkCacheSlots` — tamaño del cache LRU por chunk.
+- `game.cacheStrict` — modo estricto (default true).
+- `game.chunkThrottleMs` — throttle por chunk.
+- `game.cacheStats()` — hits/misses y distribución.
+- `game.chunksActivos()` — qué chunks tienen slots ocupados.
+
+### Séptima pasada — El cuello REAL era el mapa de sombra
+
+**Descubierto** 2026-08-10 gracias a la instrumentación de `gl.bufferData` y `gl.drawArrays` en
+[REQ-PERF1](#-req-perf1). En el volcado del dueño con circuito complejo:
+
+| frame | fps | `gl.drawArrays` | vertices totales |
+|---|---|---|---|
+| normal | 71.4 | 25 llamadas | 412 260 |
+| lento | **11.1** | **75 llamadas** | **996 720** |
+
+**Casi 1 MILLÓN de vertices por frame lento**. Ninguna función CPU consumía tiempo real (todas 0
+ms). Los 50 draws extra + 585k vertices extra estaban en la pasada del **mapa de sombra**.
+
+**Causa** — `mcRenderShadow` mantenía dos firmas:
+- **sigGeo** (geometría): cualquier cambio → `dirty=true` INMEDIATO → re-hornea toda la escena al
+  FBO de sombra en el próximo frame.
+- **sigMov** (movimiento de agentes): cambia → espera `mc.shadowMoveMs` (~46 ms, 22 Hz).
+
+Con circuitos oscilando, cada frame **cambia la geometría del chunk** (aparece/desaparece la cabeza
+del pistón, cambia el material del observador). `sigGeo` cambia → mapa de sombra se re-hornea cada
+frame → +50 draws + 585k vertices extra por frame → GPU saturada.
+
+**Arreglo** (`app.js`, `mcRenderShadow`): los cambios de geometría respetan ahora el MISMO throttle
+que los movimientos de agentes. `S.geoChanged=true` marca que hay que rehornear, pero solo si pasan
+`game.shadowGeoMs` ms desde el último bake. Por defecto = `mc.shadowMoveMs` (~46 ms → 22 Hz).
+
+**Trade-off**: la sombra tarda hasta 46 ms en actualizarse tras un cambio de geometría. Invisible al
+ojo — es el mismo throttle que ya se usa para agentes corriendo. Con `game.shadowGeoMs = 0` se vuelve
+al comportamiento antiguo (rehorneo inmediato, fps caen).
+
+**Tunables añadidos**:
+- `game.shadowGeoMs = undefined` (usa `mc.shadowMoveMs`). Poner a `100` para 10 Hz, `0` para
+  inmediato, o `Infinity` para congelar la sombra.
+- Los tunables anteriores (`chunkThrottleMs`, `chunkCacheSlots`, `cacheStrict`) siguen disponibles
+  pero **ya no hacen falta** si el problema real era la sombra.
+
+**Estado revisado del ticket**:
+- ✅ **Botón + observador simple**: resuelto (cache LRU + throttle sombra).
+- ✅ **Circuitos complejos**: resuelto por el throttle de sombra. El cache LRU y el `chunkThrottleMs`
+  quedan como palancas adicionales pero ya no imprescindibles.
+
+**Lección**: hasta la pasada 6 se estaba atacando síntomas (cache, throttle chunks). **El cuello
+real estaba en el re-render completo de la escena al FBO de sombra cada vez que la geometría del
+mundo cambiaba**. Sin la instrumentación de `gl.drawArrays` de REQ-PERF1, era imposible verlo desde
+CPU — el tiempo GPU no es medible con `performance.now()`.
+
+### Octava pasada — Trade-off del throttle: sombra saltando (revertido por defecto)
+
+**Reportado** 2026-08-10 tras la v7:
+
+> «ahora a parte de bajar los fps no se actualizan las sombras... queda feo»
+
+**Causa**: el throttle a 22 Hz produce sombra saltando visualmente (cada 46 ms toca rehornear, en
+medio la sombra queda desincronizada). Y aunque redujo la **frecuencia** de rehorneos, **cada
+rehorneo sigue costando lo mismo** (~50 draws al FBO de 2048², ~600k vertices). Los frames en los que
+toca rehornear siguen cayendo a 14 fps. Percibido como stutter.
+
+**Realidad del problema**: sin refactor a mapa de sombra incremental, cada rehorneo tiene un coste
+mínimo. La única palanca sin refactor es **reducir el coste por rehorneo**:
+- **`game.shadowSize`** (ya existía): 2048 → 1024 = 4× más barato. 2048 → 512 = 16× más barato pero
+  sombra pixelada visible al acercarse.
+- **`game.sunShade = 1`**: apaga la sombra del todo.
+- **`game.shadowGeoMs`**: mantener default 0 (rehorneo inmediato, fluidez). Subir SOLO si el usuario
+  acepta sombra retrasada.
+
+**Cambio en v8**: **default de `game.shadowGeoMs` vuelve a 0** (sombra fluida). El tunable se
+mantiene para el usuario que quiera sacrificar fidelidad por fps.
+
+**Recomendación al usuario en circuitos complejos**:
+```js
+game.shadowSize = 1024;      // sombra un poco menos nítida, 4× más barata
+// o
+game.sunShade = 1;           // apaga la sombra del sol
+```
+
+**Sigue abierto** el refactor real: **mapa de sombra incremental por chunk** (dibujar al FBO solo
+los chunks cuya geometría cambió, no toda la escena). Es lo que hace Minecraft real. Días de trabajo,
+pero es la única forma de tener sombra fluida + fps altos en circuitos que cambian mucho.
+
+**Estado final del ticket**:
+- ✅ Escenarios simples: resueltos por las pasadas 1-6.
+- ⚠️ Escenarios de circuitos complejos oscilando cada frame: el usuario tiene tunables
+  (`shadowSize`, `sunShade`, `shadowGeoMs`) para gestionar el trade-off entre fidelidad visual y
+  fps. Solución definitiva (mapa de sombra incremental) queda pendiente como refactor grande.
+
+---
+
+### ✅ REQ-PERF2 · Modo de renderizado "fast" (unlit) — ✅ resuelto 2026-08-10
+
+**Reportado** 2026-08-10 por el dueño tras la 8ª pasada de [PERF-RS1](#-perf-rs1):
+
+> «no digo que haya un modo sin GPU, digo que haya un modo donde no culpes a la GPU»
+
+El motivo real: durante PERF-RS1 acabé apuntando a la GPU como cuello y el dueño no podía verificarlo
+desde su lado sin un modo de rendering trivial para descartarla como culpable.
+
+**Uso** (`app.js`):
+
+```js
+game.renderMode = 'fast';    // sin luces ni sombras — GPU al mínimo
+game.renderMode = 'normal';  // iluminación completa (defecto)
+```
+
+`fast` combina tres cosas que ya existían por separado, más una nueva:
+- `mc.sunShade = 1` → `mcRenderShadow` sale rápido (sin pasada del sol, sin FBO de 2048²).
+- `mc.interiorDark = 1` → `mcRelightBox` devuelve `null` (no calcula skylight) y `mcMeshChunk` no
+  muestrea `mc.light` en el shading.
+- **`mc._skipBlockLight = true`** (nuevo): short-circuit en `mcComputeBlockLight`, devuelve `BL` a
+  cero sin hacer BFS de emisores.
+
+Al cambiar de modo se **re-malla todo el mundo** (`mcMeshAll`) porque el shading está horneado por
+vértice en las VBOs. También se **invalida el cache LRU** de mesh (los VBOs cacheados tenían el
+shading del modo anterior). El coste del cambio es alto (0.5-1 s de rebuild) pero es puntual.
+
+**Uso complementario con REQ-PERF1** para el diagnóstico definitivo:
+
+```js
+game.renderMode = 'fast';
+game.perfAssert = 120;
+// ejercer el circuito complejo
+game.perfDump();
+```
+
+- Si con `fast` los fps NO caen → el cuello era la iluminación GPU.
+- Si con `fast` siguen cayendo → el cuello está en CPU (motor de redstone, lógica de agentes, etc.).
+
+**Verificado** con `sonda_render_mode.js`: cambio de `normal → fast → normal`, valores restaurados,
+modo inválido rechazado con warning.
+
+```
+Default:       normal
+Tras "fast":   fast
+  sunShade    : 0.55 → 1
+  interiorDark: 0.1 → 1
+  skipBlockL. : false → true
+Tras "normal": normal (valores restaurados)
+Tras "basura": normal (con warning en consola)
+```
+
+**Coste implementado**: pequeño. 3 palancas ya existían (sunShade, interiorDark); solo hubo que
+añadir `_skipBlockLight` (short-circuit en `mcComputeBlockLight`), unificar bajo `game.renderMode`,
+y disparar re-mallado + invalidación de cache al cambiar.
+
+⚠️ **Trade-off buscado**: el mundo se ve **plano y sin volumen** en modo `fast` — todas las caras
+uniformemente iluminadas, sin sombras del sol ni penumbra de interiores. Es un modo de depuración
+o de rendimiento máximo, **no** un modo de juego cómodo por defecto.
+
+---
+
+### ✅ REQ-PERF1 · Profiler con callstack automático al caer los fps — ✅ resuelto 2026-08-10
+
+**Reportado** 2026-08-10 por el dueño tras la cuarta pasada de [PERF-RS1](#-perf-rs1):
+
+> «siguen cayendo los fps, nuevo ticket: implementar un callstack que permita depurar la caida de
+> fps, si por ejemplo el motor da 140fps y caen 30fps, si esta activado un assert minimo 120fps, se
+> tiene que volcar la traza/callstack para identificar que funciones se han llamado, cuantas veces,
+> etc. una especie de profiling pero con un callstack que se muestra para poder depurar el verdadero
+> cuello de botella. que permita elegir el nivel de verbosidad para poder aumentar la granularidad
+> del profiling. El profiling se tiene que poder deshabilitar si el assert esta desactivado.»
+
+Y las tres decisiones de diseño confirmadas:
+1. Assert es **absoluto** (fps < 120, no una caída relativa).
+2. Dispara al caer, y **se puede re-armar manualmente**.
+3. Salida al `console.log`, de momento.
+
+**Por qué hace falta.** Las cuatro pasadas de [PERF-RS1](#-perf-rs1) se hicieron con Playwright bajo
+SwiftShader — CPU-only, 5-10× más lento que la GPU real. La proporción entre fases puede no
+coincidir con la GPU real del dueño. Sin medir donde el problema ocurre, se optimiza a ciegas.
+
+**Uso** (`app.js`, cerca de `game.showFPS`):
+
+```js
+game.perfAssert = 120;    // fps mínimo. Si el frame baja de aquí, dispara y vuelca al console.log
+game.perfVerbosity = 1;   // 1 = render principal · 2 = + motor/agentes · 3 = todo (más ruido)
+// Se juega un rato / pulsa el botón / lo que sea que hace caer los fps
+// → si un frame cayó, salió por consola algo como:
+// [perf] === CAÍDA DE FPS: 42.3 fps  (umbral 120, verbosidad 1)  2026-08-10T18:57:00.000Z ===
+// [perf]  funcion                       llamadas   ms total  max ms/call
+// [perf]  mcMeshChunk                          3      18.42          9.51
+// [perf]  mcRemeshAround                       1       9.72          9.72
+// [perf]  mcRender                             1       2.30          2.30
+// [perf] === game.perfDump() re-arma; game.perfDump.reset() limpia; game.perfAssert=0 apaga ===
+
+game.perfDump();          // re-arma y re-imprime el último dump
+game.perfDump.forzar();   // vuelca AHORA MISMO el acumulador (sin esperar a otro frame lento)
+game.perfDump.reset();    // limpia contadores y re-arma
+game.perfAssert = 0;      // apaga el profiler: envolturas fuera, coste 0
+```
+
+**Semántica**:
+- **`fpsFrame = 1000 / duración del frame`**, no el promedio de 500 ms de `game.fps`. Un frame concreto
+  lento se detecta aunque el promedio esté alto.
+- **Se desarma tras cada dump**: no inunda la consola con caídas repetidas. Al llamar `game.perfDump()`
+  se re-arma.
+- **Coste 0 con `perfAssert = 0`**: las envolturas de las funciones caras se retiran (`_perfInstalar`
+  con `assert=0` restaura los originales), así que el motor corre exactamente como sin el sistema.
+
+**Niveles de verbosidad** (`_perfNombres` en `app.js`):
+- **1** (defecto): las 10 funciones caras del render — `mcTick`, `mcRender`, `mcUpdate`,
+  `mcRemeshAround`, `mcMeshChunk`, `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`,
+  `mcBuildPalette`, `mcMeshAll`.
+- **2**: añade motor + agentes — `mcSetBlock`, `mcCollides`, `mcRaycast`, `mcAgentsTick`,
+  `mcAgentsSmoothUpdate`, `mcRestampAll`, `mcRebuildChunk`.
+- **3**: añade capa fina — `mcResolveMat`, `mcPushHist`, `mcScheduleSave`, `mcDirty`, `mcGlowTocada`,
+  `mcRenderShadow`, `mcShadowDirty`.
+
+Cambiar `perfVerbosity` re-instala envolturas al vuelo. Subir el nivel añade granularidad a cambio
+de un poco más de sobrecoste (unos microsegundos por envoltura por llamada).
+
+**Detalles de implementación** (`app.js`):
+- **Estado**: `_perfState = { armed, frame, lastDump, wrapping, origs }`.
+- **Envoltorio**: `_perfWrap(nombre)` mide con `performance.now()` y acumula `{calls, ms, maxMs}` en
+  `_perfState.frame[nombre]`. Marca la función envuelta con `w._perf = true` para no envolverla dos
+  veces si se re-instala.
+- **`mcTick`**: si el profiler está armado, limpia `_perfState.frame = {}` al principio y comprueba
+  `fpsFrame` al final. Si baja del assert, congela el snapshot en `lastDump`, imprime, y pone
+  `armed = false`.
+- **Instalación por scope de `window`**: las funciones instrumentadas se resuelven contra `window`
+  (son globales top-level). Sustituir `window.mcMeshChunk` con un envoltorio captura todas las
+  llamadas desde `app.js` y desde los snippets — probado en la sonda.
+
+**Verificado**:
+- `node --check app.js` OK.
+- `node sonda_req_perf1.js` (nuevo): activa `perfAssert = 60` en Chromium bajo SwiftShader (~15 fps),
+  el profiler dispara automáticamente y vuelca la tabla al `console.log`. Con `perfAssert = 0` el
+  volcado no se produce. La API responde a asignación (`= N`) y devuelve valores correctos por
+  getter. Snapshot capturado (SwiftShader):
+  ```
+  [perf] === CAÍDA DE FPS: 15.0 fps  (umbral 60, verbosidad 1)  ... ===
+  [perf]  mcTick        1  0.80 ms
+  [perf]  mcRender      1  0.40 ms
+  [perf]  mcUpdate      1  0.20 ms
+  ```
+  (En SwiftShader el coste no está en la lógica sino en el render puro del navegador,
+  por eso los tiempos son bajos — que es exactamente el tipo de información que este sistema debe
+  darle al dueño en su GPU real, donde los tiempos serán distintos.)
+
+**Para PERF-RS1**: el dueño puede ahora ejecutar en su navegador
+```js
+game.perfAssert = 120;
+game.perfVerbosity = 2;
+// pulsar botón + observador
+```
+y pegar el volcado. Con eso identificamos el cuello real de la caída sin adivinar contra SwiftShader.
+
+**Lo que NO se hizo, a propósito**
+- **No es un callstack profundo** (con árbol de llamadas quién llamó a quién). Es un perfil plano por
+  frame: lista de funciones con sus tiempos y contadores. Para detectar el cuello es suficiente; un
+  callstack profundo con push/pop en cada envoltorio cuesta más y complica el volcado.
+- **No hay panel en pantalla**. Salida al `console.log` — es lo que el dueño pidió («de momento al
+  console.log»). Un panel visible se puede añadir después si hace falta.
+
+### Corrección tras el primer volcado del dueño
+
+**Reportado 2026-08-10 (mismo día):** el dueño activó `perfAssert = 120`, pulsó el botón y el
+profiler disparó con `41.2 fps` y solo mostró `mcRender: 6.8 ms + mcUpdate + mcCollides + mcRaycast`
+= ~7 ms. Pero el frame duró **24.3 ms** (1000/41.2). **17 ms del frame no aparecían.**
+
+**Causa**: la versión inicial medía solo la duración de `mcTick` con `performance.now()` local. Todo
+lo que corre DESPUÉS de `mcTick` en el mismo frame (otros callbacks rAF como `procesarRemallar` del
+snippet de redstone, composite del navegador, sync de GPU) quedaba fuera.
+
+**Arreglo**: medir de **rAF a rAF**. Al inicio de cada `mcTick`, se cierra el frame anterior con
+`now - mc.last` (que es el tiempo total transcurrido desde el rAF anterior, incluyendo todos los
+callbacks intermedios) y se limpia el acumulador. Todo lo instrumentado durante el frame entero
+—dentro de `mcTick` o fuera— se acumula, y al llegar el siguiente rAF se vuelca si fue lento.
+
+Y se expandió la lista de niveles:
+- **N1** añade: `mcUpdatePreview`, `mcUpdateXrayLabels`, `mcRenderShadow`.
+- **N2** añade: `mcBuildStructMesh`, `mcMeshChunkFino`, `mcComputeLight`, `mcUpdateHotbar`, `updateWorldMeters`.
+- **N3** añade: `mcSyncNoteSigns`, `mcGetFluidHeight`, `mcTapaCara`, `mcSolid`, `mcInside`, `mcIdx`.
+
+Con esto el próximo volcado del dueño debería mostrar las 17 ms faltantes, y saber si vienen de
+`mcRemeshAround`/`mcMeshChunk` (el cuello sospechado) o de otro sitio (composite, GPU sync…).
 
 ---
 

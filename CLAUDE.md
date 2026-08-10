@@ -789,6 +789,23 @@ del dueño se colgaba con eso. Son **cuatro piezas**, y las cuatro hacen falta:
    Guardián: `test_cubo_translucido.js`. De regalo, el **pistón** ya lo empuja: empuja `mc.grid`, y el
    cubo por fin está ahí (`sonda_str1_piston.js`).
 
+6. **Un macizo «CASI COMPLETO» también va por ahí** (BUG-RS19). El **observador** es el único material
+   del juego con `pielCubre=true` y `blockLike=false`: 4092 voxels (cubre las 6 caras del cubo pero le
+   faltan 4 huecos internos), sin alpha, sin `caras`, sin `atravesable`. El caso no estaba previsto en
+   `mcRecFina` y el observador acababa por la ruta blockLike-like — que **no gira**: el atlas se
+   hornea con 6 caras por bloque y sus UVs están orientadas para su normal, así que permutar la
+   textura por variante `@n` deja la cara girada dentro del cuadro. Efecto visible: el observador
+   sin girar iba a `mc.grid`, girado con `R` caía a `mcStampStruct`. La regla queda ahora **`pielCubre
+   && !blockLike && !conCaras ⇒ geometría fina`**, así el observador (y cualquier futuro «casi macizo»)
+   entra en la rejilla en las 24 posturas — el giro va gratis en la clave `@n` porque `mcStructGeom`
+   la hornea por `(base, ori)` y `mcAltaVariante` la registra sin re-hornear el atlas. Todas las demás
+   piezas de redstone (cable, palanca, repetidor, pistón, placa, puerta, antorcha, botón, inversor…)
+   ya iban por esta ruta porque tienen `pielCubre=false`; el observador era el único afectado.
+   Guardianes: `sonda_bug_rs19.js` (A/B puro en Node sobre 10 assets reales, sin navegador) y
+   `test_observador_rotacion.js` (24 posturas caben en la rejilla como fino, `mcAltaVariante` registra
+   la variante `@1` por el camino rápido, y `mcPonEnRejilla` la escribe en `mc.grid` sin crear
+   estructuras).
+
 **Lo que `setVoxel` avisa se reduce a lo que de verdad no cabe en una celda**: la **FORMA** (la piel no
 cubre el cubo **y ocupa varias celdas**, así que cada una se proyecta suelta como un cubo lleno). La
 **transparencia real** ya no es motivo de aviso desde BUG-STR1: cabe, y se mezcla.

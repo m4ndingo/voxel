@@ -4981,6 +4981,289 @@ function updateOSDbuttons(){
 Object.defineProperty(game, 'showOSDbuttons', { enumerable:true,   // `game.showOSDbuttons(true)` o `= true`
   get(){ const f=v=>applyShowOSDbuttons(v===undefined?!_showOSD:v); f.valueOf=()=>_showOSD; f.toString=()=>String(_showOSD); return f; },
   set(v){ applyShowOSDbuttons(v); } });
+
+// ── REQ-PERF1 · Profiler condicional con volcado al caer los fps ────────────────────────────
+// El motor va a 140 fps y pulsar un botón + observador lo tira a 30. Las cuatro pasadas de PERF-RS1
+// se hicieron con Playwright/SwiftShader (5-10× más lento que GPU real), así que la proporción de
+// fases medida ahí puede no ser la del dueño. Este profiler mide EN EL NAVEGADOR DEL DUEÑO:
+//   - Cuando `game.perfAssert > 0`, envuelve funciones caras del motor (según `perfVerbosity`).
+//   - Al final de cada `mcTick` calcula el fps del frame (1000/ms del frame, NO el promedio de
+//     500ms). Si cae por debajo del assert, vuelca la tabla acumulada al console.log y desarma.
+//   - `game.perfDump()` re-arma y re-vuelca. `game.perfDump.forzar()` vuelca ahora mismo, sin
+//     esperar a otra caída.
+//   - Con `perfAssert = 0` (defecto) el sistema está APAGADO: las envolturas se retiran y el motor
+//     corre exactamente igual que sin el profiler. Coste medible = 0.
+let _perfAssert = 0, _perfVerbosity = 1;
+const _perfState = { armed: true, frame: {}, lastDump: null, wrapping: false, origs: {} };
+function _perfNombres(v){
+  // Niveles como capas: cada uno amplía la instrumentación. Ver PLAN.md §REQ-PERF1.
+  // ⚠️ El frame en Chrome incluye: mcTick + otros callbacks rAF (procesarRemallar del snippet de
+  // redstone, agentes, fluidos) + composite + GPU. Como el profiler mide de rAF a rAF, TODO lo
+  // instrumentado en ese intervalo suma, aunque se ejecute fuera de mcTick.
+  // Los métodos con `.` son propiedades anidadas — se resuelven navegando desde window.
+  const N1 = ['mcTick','mcRender','mcUpdate','mcRemeshAround','mcMeshChunk','mcComputeBlockLight','mcRelightBox','mcRebakeStructsNear','mcBuildPalette','mcMeshAll','mcUpdatePreview','mcUpdateXrayLabels','mcRenderShadow'];
+  const N2 = N1.concat(['mcSetBlock','mcCollides','mcRaycast','mcAgentsTick','mcAgentsSmoothUpdate','mcRestampAll','mcBuildStructMesh','mcMeshChunkFino','mcRelightSkylight','mcComputeLight','mcRebakeStructs','mcUpdateHotbar','updateWorldMeters',
+    'mcStampStruct','mcAgentMesh','mcFreeStruct','mcCarryEfimera','mcUploadAtlas','mcAddBlock','mcResolveMat',
+    // Motor de redstone: métodos públicos. Capturan el tiempo del click y del drenado internos.
+    'game.redstone.encender','game.redstone.conmutar','game.redstone.tick','game.redstone.revisar','game.redstone.revisarCaja']);
+  const N3 = N2.concat(['mcResolveMat','mcPushHist','mcScheduleSave','mcDirty','mcGlowTocada','mcShadowDirty','mcSyncNoteSigns','mcNoteSignsDesfasados','mcGetFluidHeight','mcTapaCara','mcSolid','mcInside','mcIdx']);
+  return v>=3 ? N3 : v>=2 ? N2 : v>=1 ? N1 : [];
+}
+// Navega hasta el "propietario" y el nombre final desde un identificador tipo "game.redstone.tick".
+// Ejemplo: "game.redstone.tick" → { obj: window.game.redstone, key: 'tick', label: 'game.redstone.tick' }.
+function _perfResolver(nombre){
+  const parts = nombre.split('.');
+  let obj = window;
+  for(let i=0; i<parts.length-1; i++){ obj = obj && obj[parts[i]]; if(!obj) return null; }
+  const key = parts[parts.length-1];
+  return (obj && typeof obj[key] === 'function') ? { obj, key, label: nombre } : null;
+}
+function _perfWrap(nombre){
+  const r = _perfResolver(nombre); if(!r) return null;
+  const orig = r.obj[r.key];
+  if(orig._perf) return null;   // ya envuelto
+  const label = r.label;
+  const w = function(){
+    const t = performance.now();
+    const res = orig.apply(this, arguments);
+    const dt = performance.now() - t;
+    const e = _perfState.frame[label] || (_perfState.frame[label] = { calls:0, ms:0, maxMs:0 });
+    e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt;
+    return res;
+  };
+  w._perf = true;
+  w._orig = orig;
+  w._ref = r;
+  return w;
+}
+function _perfInstalar(){
+  // Restaurar todas primero (si perfVerbosity bajó, hay que desinstalar las que sobran).
+  for(const n in _perfState.origs){
+    const info = _perfState.origs[n];
+    if(info && info.obj && info.obj[info.key] && info.obj[info.key]._perf){
+      info.obj[info.key] = info.orig;
+    }
+  }
+  _perfState.origs = {};
+  _perfState.wrapping = false;
+  if(_perfAssert <= 0) return;
+  const nombres = _perfNombres(_perfVerbosity);
+  const noEncontradas = [];
+  for(const n of nombres){
+    const r = _perfResolver(n);
+    if(!r){ noEncontradas.push(n); continue; }
+    if(r.obj[r.key]._perf) continue;   // no re-envolver
+    const w = _perfWrap(n); if(!w) continue;
+    _perfState.origs[n] = { obj: r.obj, key: r.key, orig: r.obj[r.key] };
+    r.obj[r.key] = w;
+  }
+  _perfState.wrapping = nombres.length>0;
+  if(noEncontradas.length && !_perfState._avisadas){
+    _perfState._avisadas = true;
+    console.log('[perf] funciones no encontradas (no se instrumentan):', noEncontradas);
+  }
+  // Instrumentar WebGL: bufferData (subir a GPU) y drawArrays (pintar). Ayuda a ver si la caída de
+  // fps viene de saturar la GPU con muchos buffers/draws, cosa invisible en el resto del profiler.
+  if(_perfVerbosity>=2 && mc.gl && !mc.gl.bufferData._perf){
+    const gl = mc.gl;
+    const _bd = gl.bufferData.bind(gl);
+    const _da = gl.drawArrays.bind(gl);
+    const wbd = function(target, data, usage){
+      const t = performance.now();
+      const r = _bd(target, data, usage);
+      const dt = performance.now() - t;
+      const bytes = (data && data.byteLength)|0;
+      const e = _perfState.frame['gl.bufferData'] || (_perfState.frame['gl.bufferData'] = { calls:0, ms:0, maxMs:0, bytes:0 });
+      e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt; e.bytes = (e.bytes|0) + bytes;
+      return r;
+    };
+    const wda = function(mode, first, count){
+      const t = performance.now();
+      const r = _da(mode, first, count);
+      const dt = performance.now() - t;
+      const e = _perfState.frame['gl.drawArrays'] || (_perfState.frame['gl.drawArrays'] = { calls:0, ms:0, maxMs:0, vertices:0 });
+      e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt; e.vertices = (e.vertices|0) + (count|0);
+      return r;
+    };
+    wbd._perf = true; wda._perf = true; wbd._orig = _bd; wda._orig = _da;
+    gl.bufferData = wbd;
+    gl.drawArrays = wda;
+    _perfState._glWrapped = { gl, bufferData: _bd, drawArrays: _da };
+  } else if(_perfVerbosity<2 && _perfState._glWrapped){
+    // Desinstrumentar WebGL si bajó verbosidad.
+    _perfState._glWrapped.gl.bufferData = _perfState._glWrapped.bufferData;
+    _perfState._glWrapped.gl.drawArrays = _perfState._glWrapped.drawArrays;
+    _perfState._glWrapped = null;
+  }
+}
+function _perfComprobarFrame(fpsFrame){
+  if(_perfAssert<=0 || !_perfState.armed) return;
+  if(fpsFrame >= _perfAssert) return;
+  _perfState.lastDump = { fpsFrame, umbral:_perfAssert, verbosity:_perfVerbosity,
+    cuando:new Date().toISOString(), acc:JSON.parse(JSON.stringify(_perfState.frame)) };
+  // REQ-PERF1: modo continuo. Si perfContinuo=true, NO se desarma tras un dump → sigue disparando en
+  // cada frame lento. Útil para ver el patrón de un circuito activo. Con perfContinuo=false (defecto)
+  // dispara UNA vez y se rearma con game.perfDump().
+  if(!(typeof game !== 'undefined' && game.perfContinuo)){
+    _perfState.armed = false;
+  }
+  _perfImprimir(_perfState.lastDump);
+}
+function _perfImprimir(d){
+  if(!d){ console.log('[perf] sin datos — dispara al caer los fps por debajo de game.perfAssert, o llama game.perfDump.forzar()'); return; }
+  console.log('[perf] === CAÍDA DE FPS: ' + d.fpsFrame.toFixed(1) + ' fps  (umbral ' + d.umbral + ', verbosidad ' + d.verbosity + ')  ' + d.cuando + ' ===');
+  const entries = Object.entries(d.acc).sort((a,b)=>b[1].ms - a[1].ms);
+  if(!entries.length){ console.log('[perf]  (frame sin funciones instrumentadas — sube perfVerbosity)'); }
+  else {
+    console.log('[perf]  ' + 'funcion'.padEnd(28) + '  ' + 'llamadas'.padStart(8) + '  ' + 'ms total'.padStart(9) + '  ' + 'max ms/call'.padStart(11) + '  extra');
+    for(const [n,e] of entries){
+      let extra = '';
+      if(e.bytes!==undefined) extra = (e.bytes/1024).toFixed(1) + ' KB subidos';
+      else if(e.vertices!==undefined) extra = e.vertices + ' vertices';
+      console.log('[perf]  ' + n.padEnd(28) + '  ' + String(e.calls).padStart(8) + '  ' + e.ms.toFixed(2).padStart(9) + '  ' + e.maxMs.toFixed(2).padStart(11) + (extra ? '  ' + extra : ''));
+    }
+  }
+  console.log('[perf] === game.perfDump() re-arma; game.perfDump.reset() limpia; game.perfAssert=0 apaga ===');
+}
+Object.defineProperty(game, 'perfAssert', { enumerable:true,
+  get(){ return _perfAssert; },
+  set(v){ _perfAssert = Math.max(0, +v || 0); _perfInstalar(); _perfState.armed = true; _perfState.frame = {}; }
+});
+Object.defineProperty(game, 'perfVerbosity', { enumerable:true,
+  get(){ return _perfVerbosity; },
+  set(v){ _perfVerbosity = Math.max(0, Math.min(3, +v || 0)); if(_perfAssert>0) _perfInstalar(); }
+});
+game.perfDump = function(){ _perfImprimir(_perfState.lastDump); _perfState.armed = true; };
+game.perfDump.reset = function(){ _perfState.frame = {}; _perfState.lastDump = null; _perfState.armed = true; };
+game.perfDump.forzar = function(){
+  const snap = { fpsFrame: mc.fps || 0, umbral: _perfAssert, verbosity: _perfVerbosity,
+    cuando: new Date().toISOString(), acc: JSON.parse(JSON.stringify(_perfState.frame)) };
+  _perfImprimir(snap);
+  _perfState.frame = {};
+  _perfState.armed = true;
+};
+
+// PERF-RS1: contadores del cache LRU de mcMeshChunk. game.cacheStats() imprime hits/misses y ratio.
+game.chunkCacheSlots = 32;   // aumenta si un chunk tiene muchos estados oscilantes (circuitos complejos)
+game.cacheStrict = true;     // false = firma ignora luz de bloque (test: si sube ratio, la luz era ruidosa)
+// PERF-RS1: throttle por chunk. ms mínimos entre dos meshes del mismo chunk. 0 = sin throttle
+// (fidelidad visual máxima, fps pueden caer con circuitos complejos). 50-100 = fps estables pero
+// pulsos rápidos pueden verse a menor cadencia. Solo hace falta si el cache LRU (chunkCacheSlots)
+// no absorbe todos los estados oscilantes — pruébalo si game.cacheStats() sigue con ratio bajo tras
+// subir chunkCacheSlots.
+game.chunkThrottleMs = 0;
+// PERF-RS1: throttle del re-horneado del mapa de sombra por cambios de GEOMETRÍA. undefined = usa
+// mc.shadowMoveMs (mismo que agentes, ~46 ms). 0 = re-hornear inmediato (comportamiento antiguo,
+// sombra fluida pero puede tirar fps con circuitos oscilando). NOTA: por defecto se deja en 0
+// (fluidez visual) porque un throttle a 22 Hz produce sombra saltando y "queda feo". Si tu escenario
+// tolera el retardo, sube a 46+. Alternativa mejor: bajar `game.shadowSize` (2048 → 1024 o 512)
+// para que cada rehorneo cueste menos.
+game.shadowGeoMs = 0;
+
+// REQ-PERF2: modo de renderizado. Combina palancas existentes bajo un solo interruptor.
+//   'normal' (defecto): iluminación completa (skylight + luz de bloque + sombra proyectada).
+//   'fast'            : sin luces ni sombras. Rendering trivial — permite jugar el mundo con coste
+//                       GPU mínimo. Sirve para diagnosticar si un problema de fps es CPU o GPU: si
+//                       con renderMode='fast' los fps NO caen → cuello en GPU/iluminación. Si
+//                       siguen cayendo → cuello en CPU (lógica del motor, redstone, agentes).
+// Al cambiar de modo se re-mallan todos los chunks porque el shading horneado en las VBO depende
+// de la luz.
+let _renderMode = 'normal';
+let _renderModeBackup = null;
+function _aplicarRenderMode(v){
+  v = String(v || 'normal').toLowerCase();
+  if(v !== 'normal' && v !== 'fast'){ console.warn('[renderMode] valores válidos: normal, fast (recibí ' + v + ')'); return; }
+  if(v === _renderMode) return;
+  if(v === 'fast'){
+    _renderModeBackup = { sunShade: mc.sunShade, interiorDark: mc.interiorDark };
+    mc.sunShade = 1;         // apaga la pasada del sol (mcRenderShadow sale rápido)
+    mc.interiorDark = 1;     // apaga skylight (mcRelightBox no hace nada, mesh no muestrea mc.light)
+    mc._skipBlockLight = true;   // apaga BFS de luz de bloque (mcComputeBlockLight sale rápido)
+  } else {
+    // 'normal'
+    if(_renderModeBackup){
+      mc.sunShade = _renderModeBackup.sunShade;
+      mc.interiorDark = _renderModeBackup.interiorDark;
+      _renderModeBackup = null;
+    }
+    mc._skipBlockLight = false;
+  }
+  _renderMode = v;
+  // El shading está horneado en las VBOs (shade por vértice), así que hay que re-mallar todo el
+  // mundo para reflejar el nuevo modo. Invalidar el cache LRU del mesh.
+  if(mc.chunks){
+    for(const ch of mc.chunks.values()){
+      ch._meshSig = undefined;
+      if(ch._cache && mc.gl){
+        for(const s of ch._cache){
+          if(s.vbo) mc.gl.deleteBuffer(s.vbo);
+          if(s.finoVbo) mc.gl.deleteBuffer(s.finoVbo);
+          if(s.finoAVbo) mc.gl.deleteBuffer(s.finoAVbo);
+        }
+      }
+      ch._cache = null;
+    }
+  }
+  if(mc.grid && mc.active) mcMeshAll();
+  if(typeof mcShadowDirty === 'function') mcShadowDirty();
+  console.log('[renderMode] cambiado a "' + v + '"' + (v==='fast' ? ' — sin luces ni sombras (coste GPU mínimo)' : ' — iluminación completa'));
+}
+Object.defineProperty(game, 'renderMode', {
+  enumerable: true,
+  get(){ return _renderMode; },
+  set(v){ _aplicarRenderMode(v); }
+});
+game.cacheStats = function(){
+  const h=mc._cacheHits|0, m=mc._cacheMisses|0, t=h+m;
+  const pct = t>0 ? (100*h/t).toFixed(1) : '0.0';
+  const maxSlots = (game.chunkCacheSlots|0) || 32;
+  let slots = 0, chunksConSlots = 0, chunksActivos = 0;
+  const distribucion = {};
+  if(mc.chunks) for(const ch of mc.chunks.values()){
+    const n = ch._cache ? ch._cache.length : 0;
+    slots += n;
+    if(n>0){ chunksConSlots++; distribucion[n] = (distribucion[n]|0)+1; }
+    if(ch._meshSig !== undefined) chunksActivos++;
+  }
+  console.log('[cache] mcMeshChunk cache: ' + h + ' hits, ' + m + ' misses (' + pct + '% hit rate)');
+  console.log('[cache] slots ocupados: ' + slots + ' en ' + chunksConSlots + ' chunks (max ' + (maxSlots*mc.chunks.size) + ' con ' + maxSlots + ' slots × ' + mc.chunks.size + ' chunks)');
+  console.log('[cache] distribución (nº chunks por nº slots ocupados):', distribucion);
+  console.log('[cache] Sube game.chunkCacheSlots si algún chunk tiene los ' + maxSlots + ' slots ocupados.');
+  return { hits: h, misses: m, ratio: t>0 ? h/t : 0, slots, chunksConSlots };
+};
+game.cacheStats.reset = function(){ mc._cacheHits = 0; mc._cacheMisses = 0; };
+
+// REQ-PERF1: helper para que snippets externos (redstone, agentes...) se autoinstrumenten. El
+// snippet llama a `game._perfMedir('rs.dispararObservador', function(){ return orig.apply(...) })`
+// y el tiempo se suma al mismo `_perfState.frame` que ven las envolturas globales. Coste cero
+// cuando el profiler está apagado (una comparación y salida rápida).
+game._perfMedir = function(nombre, fn){
+  if(_perfAssert <= 0) return fn();
+  const t = performance.now();
+  const r = fn();
+  const dt = performance.now() - t;
+  const e = _perfState.frame[nombre] || (_perfState.frame[nombre] = { calls:0, ms:0, maxMs:0 });
+  e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt;
+  return r;
+};
+
+// PERF-RS1: lista los chunks que están siendo re-mesheados con frecuencia. Ejecuta reset(), pulsa
+// algo, y luego llama a game.chunksActivos() para ver qué chunks tienen los slots llenos — así se
+// identifican los chunks que oscilan (deberían ser los del botón/observador y sus vecinos).
+game.chunksActivos = function(){
+  if(!mc.chunks){ console.log('[cache] no hay chunks'); return; }
+  const filas = [];
+  for(const [k, ch] of mc.chunks.entries()){
+    if(ch._cache && ch._cache.length>0){
+      filas.push({ chunk: k, slots: ch._cache.length, sigActual: ch._meshSig });
+    }
+  }
+  filas.sort((a,b) => b.slots - a.slots);
+  console.log('[cache] chunks con slots ocupados (' + filas.length + '):');
+  for(const f of filas) console.log('  chunk (' + f.chunk + ')  slots=' + f.slots + '  sigActual=' + f.sigActual);
+  return filas;
+};
+
 const applyPaintAlpha=v=>{ state.alpha=Math.max(0,Math.min(1,+v)); if(state.tex) state.tex=null; syncColor(); return state.alpha; };
 Object.defineProperty(game, 'paintAlpha', { enumerable:true,   // `game.paintAlpha(0.5)` o `game.paintAlpha=0.5`: opacidad del pincel (0..1)
   get(){ const f=v=>applyPaintAlpha(v===undefined?state.alpha:v); f.valueOf=()=>state.alpha; f.toString=()=>String(state.alpha); return f; },
@@ -5818,6 +6101,10 @@ function mcSetBlock(x,y,z,id){
   if(mcInside(x,y,z)){
     const oldId = mc.grid[mcIdx(x,y,z)];
     mc.grid[mcIdx(x,y,z)]=id;
+    // PERF-RS1: contador de topología. Solo cuenta cambios entre aire y sólido; los cambios de
+    // material sólido↔sólido (p. ej. un observador pulsando) NO tocan la propagación del BFS de
+    // luz de bloque, así que mcComputeBlockLight puede saltarse el trabajo si nada más cambió.
+    if((oldId===0) !== (id===0)) mc.gridGen = (mc.gridGen|0) + 1;
     mcDirty(x,y,z);
     mcGlowTocada(x,y,z);
     if(typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function'){
@@ -6409,6 +6696,12 @@ function mcCabeEnRejilla(key){
 //   terreno se hornea sin alpha (buildTexFaces fija d[o+3]=255) y el shader solo recorta. Sí, geometría real:
 //   el flujo fino del chunk tiene su propia pasada con BLEND (finoAVbo), así que mezcla de verdad SIN dejar
 //   de ser una celda de rejilla. Esto es lo que BUG-STR1 arregla; antes se la echaba del terreno entera.
+// · la piel cubre PERO NO es blockLike por faltar voxels — casi macizo con huecos internos, típico del
+//   observador (4092 vox: los 4 huecos internos no se ven, pero la ficha ya no cuenta como macizo). La
+//   proyección al cubo se comería el defecto de voxeles… y además NO GIRA: el atlas se hornea con
+//   6 caras por bloque y las UVs de cada cara están orientadas para su normal; permutar la textura por
+//   variante `@n` deja la cara girada dentro del cuadro. Sí, geometría real — que sí soporta rot en la
+//   clave (mcStructGeom hornea por (base, ori)) y girar sale gratis. Es BUG-RS19.
 // · la piel cubre y tiene `caras`: sigue fuera del terreno (mcCabeEnRejilla), porque una máscara sobre un
 //   macizo enseñaría el otro lado en vez de lo de dentro. No es lo mismo que la translucidez y no se toca.
 function mcRecFina(rec){
@@ -6416,7 +6709,7 @@ function mcRecFina(rec){
   if(rec.w>1 || rec.h>1 || rec.d>1) return false;
   if(rec.blockLike) return false;
   if(!rec.pielCubre) return true;
-  return !!rec.translucido && !rec.conCaras;
+  return !rec.conCaras;   // pielCubre && !blockLike && !conCaras: translúcido O «casi macizo» (BUG-RS19)
 }
 function mcEsFinaEnRejilla(key){
   return mcRecFina(key && mc.structs[mcClaveBase(key)]);
@@ -7366,9 +7659,19 @@ function mcRenderShadow(){
   // mueve no llegaba nunca al mapa: se veía la panza al sol y sin sombra debajo.
   for(const a of mc.agents.values()){ sigGeo+=a.count;
     sigMov+=(a.renderX||0)*7 + (a.renderY||0)*13 + (a.renderZ||0)*17; }
-  if(sigGeo!==S.sigGeo){ S.sigGeo=sigGeo; S.dirty=true; }
+  if(sigGeo!==S.sigGeo){ S.sigGeo=sigGeo; S.geoChanged=true; }
   if(sigMov!==S.sigMov){ S.sigMov=sigMov; S.moved=true; }
   const ahora=performance.now();
+  // PERF-RS1: los cambios de GEOMETRÍA (colocar/romper, cambiar material de una celda fina) marcaban
+  // dirty=true inmediato, forzando re-hornear el mapa de sombra CADA FRAME cuando había pistones/
+  // observadores oscilando (medido: 75 draws + 996k vertices por frame → 11 fps). Con game.shadowGeoMs
+  // (defecto = mc.shadowMoveMs) se les aplica el MISMO throttle que a los movimientos de agentes:
+  // rehorneo máximo cada ~46 ms (22 Hz). Trade-off: latencia visual en la sombra de ~50 ms cuando
+  // cambia la geometría. Puesto a 0 = rehorneo inmediato como antes.
+  const geoThrottleMs = (typeof game !== 'undefined' && game.shadowGeoMs !== undefined) ? (game.shadowGeoMs|0) : (mc.shadowMoveMs|0);
+  if(S.geoChanged && (geoThrottleMs<=0 || ahora-(S.lastBake||0)>=geoThrottleMs)){
+    S.dirty=true; S.geoChanged=false;
+  }
   if(!S.dirty && S.moved && ahora-(S.lastBake||0)>=mc.shadowMoveMs) S.dirty=true;
   if(!S.dirty) return S;                                            // nada que rehacer todavía
   S.moved=false; S.lastBake=ahora;
@@ -7432,6 +7735,113 @@ function mcGetFluidHeight(x, y, z) {
 function mcMeshChunk(cx,cz){
   const gl=mc.gl, dim=mc.dim;
   const x0=cx*MC_CHUNK, z0=cz*MC_CHUNK, x1=Math.min(x0+MC_CHUNK,dim.x), z1=Math.min(z0+MC_CHUNK,dim.z);
+  // PERF-RS1: throttle por chunk. Si el chunk se re-mesheó hace menos de game.chunkThrottleMs, se
+  // agenda un mesh futuro y se sale. Los cambios intermedios NO se ven (se descartan en favor del
+  // último estado cuando el throttle pase). Sacrifica fidelidad visual (pulsos cortos invisibles)
+  // por fps estables. `chunkThrottleMs=0` (defecto) desactiva. Escenarios: circuitos con muchas
+  // piezas oscilando rápido donde el cache LRU no da abasto (más estados que slots).
+  const _throttleMs = (typeof game !== 'undefined' && game.chunkThrottleMs|0) || 0;
+  if(_throttleMs > 0){
+    const chT = mc.chunks.get(cx+','+cz);
+    if(chT && chT._lastMeshT){
+      const _now = performance.now(), _dt = _now - chT._lastMeshT;
+      if(_dt < _throttleMs){
+        // Agendar un mesh futuro (solo uno por chunk, se coalesce).
+        if(!chT._meshTimer){
+          const espera = _throttleMs - _dt;
+          chT._meshTimer = setTimeout(function(){
+            chT._meshTimer = 0;
+            mcMeshChunk(cx, cz);
+          }, espera);
+        }
+        return;
+      }
+    }
+    if(chT) chT._lastMeshT = performance.now();
+  }
+  // PERF-RS1: firma barata + cache LRU de N estados por chunk. Si el chunk vuelve a un estado ya
+  // cacheado (típico de un observador/botón que oscila entre 2 materiales), hacer SWAP de VBOs en
+  // vez de regenerar los verts. Ahorra 14-17 ms/mesh en GPU real. La firma es lo bastante barata
+  // (12288 accesos Uint16 + hash) para pagarla incluso en cache miss.
+  //
+  // ⚠️ Un ciclo botón+observador visita 4 estados distintos. Con más piezas oscilando (3 pistones +
+  // 3 observadores = 2³×2³ = 64 estados posibles), el cache tiene que ser al menos tan grande como
+  // el nº de estados por chunk para dar hit fiable. `game.chunkCacheSlots` permite ajustar; con
+  // circuitos complejos puede querer subir a 64. Coste memoria: ~30 KB/slot × slots × chunks activos
+  // (con 32 slots y 3 chunks activos ≈ 3 MB).
+  const _CACHE_SLOTS = (typeof game !== 'undefined' && game.chunkCacheSlots|0) || 32;
+  // ⚠️ Test de diagnóstico: si game.cacheStrict=false, la firma NO incluye mc.blockLight. Sirve para
+  // ver si la luz de bloque hace la firma inestable (el BFS anisótropo puede producir sutiles
+  // diferencias entre visitas al mismo estado). Riesgo: si dos estados difieren solo en luz, el
+  // swap muestra el shade del estado viejo. Solo para depuración.
+  const _CACHE_STRICT = (typeof game === 'undefined') || game.cacheStrict !== false;
+  const chunkKeyEarly = cx+','+cz;
+  const chEarly = mc.chunks.get(chunkKeyEarly);
+  let _sigCalc = 0, _sigListo = false;
+  if(chEarly){
+    let sig = (mc.palette.length|0) * 1000003 + (mc.gridGen|0);
+    const g0=mc.grid, L0=mc.light, BL0=_CACHE_STRICT ? mc.blockLight : null;
+    const NX=dim.x, sxyEarly=NX*dim.y;
+    for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
+      const i=x+y*NX+z*sxyEarly;
+      sig = ((sig*31 + g0[i]) | 0);
+      if(L0){ sig = ((sig*7 + L0[i]) | 0); }
+      if(BL0){ sig = ((sig*11 + BL0[i]) | 0); }
+    }
+    _sigCalc = sig; _sigListo = true;
+    // Estado idéntico al último mesh: nada que hacer.
+    if(chEarly._meshSig === sig){ mc._cacheHits = (mc._cacheHits|0) + 1; return; }
+    // Cache hit: intercambiar el estado activo con el slot cacheado (ping-pong de punteros VBO).
+    if(chEarly._cache){
+      for(let idx=0; idx<chEarly._cache.length; idx++){
+        if(chEarly._cache[idx].sig === sig){
+          const slot = chEarly._cache[idx];
+          const saliente = {
+            sig: chEarly._meshSig, vbo: chEarly.vbo, count: chEarly.count,
+            finoVbo: chEarly.finoVbo, finoCount: chEarly.finoCount,
+            finoAVbo: chEarly.finoAVbo, finoACount: chEarly.finoACount,
+            aabb: chEarly.aabb,
+          };
+          chEarly._meshSig = slot.sig;
+          chEarly.vbo = slot.vbo; chEarly.count = slot.count;
+          chEarly.finoVbo = slot.finoVbo; chEarly.finoCount = slot.finoCount;
+          chEarly.finoAVbo = slot.finoAVbo; chEarly.finoACount = slot.finoACount;
+          chEarly.aabb = slot.aabb;
+          // El saliente pasa al slot; movemos el slot al final del array (LRU: reciente al final).
+          chEarly._cache.splice(idx, 1);
+          chEarly._cache.push(saliente);
+          mc._cacheHits = (mc._cacheHits|0) + 1;
+          mcShadowDirty();   // el terreno visible cambió → sombra sucia
+          return;
+        }
+      }
+    }
+    // Cache miss: guardar el estado ACTUAL (viejo) en cache antes de generar el nuevo. Los VBOs
+    // viejos quedan intactos en el cache; se crean nuevos para no sobrescribirlos con bufferData.
+    mc._cacheMisses = (mc._cacheMisses|0) + 1;
+    if(chEarly._meshSig !== undefined && chEarly.vbo && chEarly.count>0){
+      if(!chEarly._cache) chEarly._cache = [];
+      chEarly._cache.push({
+        sig: chEarly._meshSig, vbo: chEarly.vbo, count: chEarly.count,
+        finoVbo: chEarly.finoVbo, finoCount: chEarly.finoCount,
+        finoAVbo: chEarly.finoAVbo, finoACount: chEarly.finoACount,
+        aabb: chEarly.aabb,
+      });
+      while(chEarly._cache.length > _CACHE_SLOTS){
+        // Evict el más viejo (LRU). Liberar sus VBOs.
+        const ev = chEarly._cache.shift();
+        if(ev.vbo) gl.deleteBuffer(ev.vbo);
+        if(ev.finoVbo) gl.deleteBuffer(ev.finoVbo);
+        if(ev.finoAVbo) gl.deleteBuffer(ev.finoAVbo);
+      }
+      // Reemplazar VBO principal por uno nuevo (los del cache ya no son ch.vbo). Los finos se
+      // reasignan según haga falta en el bloque `sube` de más abajo.
+      chEarly.vbo = gl.createBuffer();
+      chEarly.finoVbo = null; chEarly.finoCount = 0;
+      chEarly.finoAVbo = null; chEarly.finoACount = 0;
+    }
+    chEarly._meshSig = sig;
+  }
   const verts=[];   // interleaved: x,y,z, u,v, shade
   // t7 · penumbra de interiores por SKYLIGHT: la sombra de cada cara se atenúa según la LUZ del hueco de aire al
   // que da (mc.light, calculada en mcComputeLight difundiendo la luz del cielo por el aire). lightLut mapea nivel
@@ -7531,6 +7941,20 @@ function mcMeshChunk(cx,cz){
     ch[cntProp]=n;
   };
   sube('finoVbo','finoCount', fcol); sube('finoAVbo','finoACount', falpha);
+  // PERF-RS1: si el chunk se acaba de crear (no existía chEarly), _sigListo=false y hay que
+  // guardar la firma ahora. Si existía y la firma ya se calculó arriba, ya está guardada.
+  if(!_sigListo){
+    let sig = (mc.palette.length|0) * 1000003 + (mc.gridGen|0);
+    const strict = (typeof game === 'undefined') || game.cacheStrict !== false;
+    const g0=mc.grid, L0=mc.light, BL0=strict ? mc.blockLight : null, NX=dim.x, sxyE2=NX*dim.y;
+    for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
+      const i=x+y*NX+z*sxyE2;
+      sig = ((sig*31 + g0[i]) | 0);
+      if(L0){ sig = ((sig*7 + L0[i]) | 0); }
+      if(BL0){ sig = ((sig*11 + BL0[i]) | 0); }
+    }
+    ch._meshSig = sig;
+  }
   mcShadowDirty();   // el terreno cambió de forma → el mapa del sol ya no vale
 }
 // t7 · SKYLIGHT: propaga la luz del cielo por el aire → mc.light[idx] en 0..MC_MAXLIGHT. Reciben luz plena (cielo)
@@ -7674,6 +8098,11 @@ function mcComputeBlockLight(){
   const nueva=!(mc.blockLight&&mc.blockLight.length===N);
   const BL=nueva? (mc.blockLight=new Uint8Array(N)) : mc.blockLight;
   if(nueva) mc._blCero=true;          // recién creada: los typed arrays nacen a cero
+  // REQ-PERF2: modo 'fast' apaga el BFS de luz de bloque. Devuelve BL a cero y sale.
+  if(mc._skipBlockLight){
+    if(!mc._blCero){ BL.fill(0); mc._blCero=true; }
+    return;
+  }
   const lv0=Math.min(MC_MAXLIGHT, mc.glowLevel|0);
   // Emisores puestos en la REJILLA (una antorcha con setVoxel): mcRecomputeHasGlow solo mira mc.structures, así que
   // sin esto la bandera se quedaba en false y la función se iba por el atajo de abajo. Solo la ENCIENDE: apagarla
@@ -7686,6 +8115,22 @@ function mcComputeBlockLight(){
     if(!mc._blCero){ BL.fill(0); mc._blCero=true; }
     return;
   }
+  // PERF-RS1: si NADA que afecte al BFS ha cambiado desde la última pasada, saltar. La firma
+  // captura (a) el conjunto de emisores en la rejilla —posiciones, no solo el tamaño— y (b) las
+  // estructuras emisoras vivas, y compara con el contador de topología mc.gridGen. Un observador
+  // pulsando cambia mc.grid[i] entre dos ids sólidos, así que gridGen NO se incrementa (ver
+  // mcSetBlock), la firma queda igual y esta función es un no-op. En un mundo grande con emisores
+  // esto ahorra decenas de ms por pulso — el motivo real por el que un solo observador tiraba fps.
+  let emiSig = 0;
+  for(const idx of GE) emiSig = (emiSig*31 + idx) | 0;
+  for(const s of mc.structures){ const ec=s.emitCells;
+    if(ec && ec.length){ emiSig = (emiSig*31 + s.ox*73 + s.oy*37 + s.oz*41 + ec.length) | 0; } }
+  const gridGen = mc.gridGen|0;
+  if(!nueva && mc._blEmiSig===emiSig && mc._blGridGen===gridGen){
+    return;   // el BL actual sigue siendo válido: exactos mismos emisores y misma topología
+  }
+  mc._blEmiSig = emiSig;
+  mc._blGridGen = gridGen;
   BL.fill(0); mc._blCero=false;
   const focus=Math.max(0, Math.min(1, mc.glowFocus));   // 0=omnidireccional (antorcha), 1=haz estrecho
   const NARROW=Math.round(focus*5);   // penalización de paso PERPENDICULAR al haz: 0=isótropo (diamante ancho), 5=haz fino
@@ -7812,8 +8257,17 @@ function mcResizeWorld(nx,ny,nz){
 function mcRemeshAround(x,z,x1c,z1c){
   if(x1c===undefined){ x1c=x; z1c=z; }
   const bx0=Math.min(x,x1c), bx1=Math.max(x,x1c), bz0=Math.min(z,z1c), bz1=Math.max(z,z1c);
-  const luz=mcRelightBox(bx0,bz0,bx1,bz1);   // el skylight, SOLO alrededor: el barrido global costaba 684 ms en 512×40×512
-  mcComputeBlockLight();         // …e igual para la luz de bloque emisiva (el hueco reabierto puede dejarla pasar/taparla)
+  // PERF-RS1: `mcRelightBox` hace un BFS incremental sobre una caja de ±MC_RELIGHT_R×NY×±MC_RELIGHT_R
+  // celdas (~30 KB en 96³, 3× más en mundos grandes) y `mcRebakeStructsNear` re-hornea la malla de cada
+  // estructura cercana. Los dos son caros y solo cambian su resultado si la TOPOLOGÍA de la rejilla
+  // cambió (aire↔sólido) — un observador pulsando entre `observador@n` y `observador-on@n` NO toca
+  // gridGen (ver mcSetBlock), así que la luz de esa caja sigue siendo la misma byte a byte y las
+  // estructuras cercanas también. Saltarse los dos deja SOLO el re-mallado del chunk, que es lo
+  // mínimo necesario para que el cambio de textura del atlas se vea.
+  const genActual = mc.gridGen|0;
+  const topologia = mc._reLastGen !== genActual;
+  const luz = topologia ? mcRelightBox(bx0,bz0,bx1,bz1) : null;   // el skylight, SOLO alrededor: el barrido global costaba 684 ms en 512×40×512
+  mcComputeBlockLight();         // ya se salta por su propia firma cuando nada relevante cambió (PERF-RS1)
   // Antes se re-mallaba un 3×3 fijo «por si acaso». Ahora se sabe qué celdas cambiaron de luz, así que se re-malla
   // exactamente eso: normalmente 1 chunk en vez de 9. El ±1 en bloques es la GEOMETRÍA — si la celda tocada está en el
   // borde del chunk, la cara que se ve es la del vecino y hay que rehacerlo también.
@@ -7826,7 +8280,9 @@ function mcRemeshAround(x,z,x1c,z1c){
   // Las estructuras hornean su shade al construir la instancia (posición-independiente): una edición del terreno que
   // reabre/tapa el paso de luz re-oscurece/aclara el terreno vecino pero NO la estructura por sí sola. Re-hornean
   // las cercanas re-muestreando la luz fresca (skylight + luz de bloque) → abrir el techo aclara también la figura.
-  if(mc.structures.length) mcRebakeStructsNear(bx0,bz0,bx1,bz1);
+  // PERF-RS1: solo si la luz PUDO cambiar (topología distinta desde la última pasada); si no, la malla sería idéntica.
+  if(topologia && mc.structures.length) mcRebakeStructsNear(bx0,bz0,bx1,bz1);
+  if(topologia) mc._reLastGen = genActual;
 }
 // Re-hornea el shade de las estructuras cuyo AABB solapa el vecindario del edit (la luz se difunde ≤MC_MAXLIGHT bloques,
 // +1 de margen): reconstruye su instancia con mcBuildStructMesh, que vuelve a muestrear max(skylight, luz de bloque) por
@@ -10958,6 +11414,17 @@ game.saveWorld=async function(){
 };
 function mcTick(now){
   if(!mc.active) return;
+  // REQ-PERF1: cerrar el frame anterior y comprobar. `now - mc.last` es la duración TOTAL del frame
+  // anterior desde su inicio de rAF hasta el inicio del actual — incluye mcTick, callbacks de OTROS
+  // rAF (p. ej. procesarRemallar del snippet de redstone), composite del navegador y espera de GPU.
+  // Todo lo instrumentado durante ese intervalo está acumulado en _perfState.frame; se vuelca aquí
+  // si el frame fue lento, y se limpia para el frame actual.
+  const _perfOn = _perfAssert>0;
+  if(_perfOn && mc.last){
+    const dtFrame = now - mc.last;
+    if(dtFrame > 0) _perfComprobarFrame(1000 / dtFrame);
+  }
+  if(_perfOn) _perfState.frame = {};
   const dt=mc.last ? (now-mc.last)/1000 : 0;
   // FPS reales de pantalla ~cada 0.5s (calca playTick)
   mc.fpsN++;

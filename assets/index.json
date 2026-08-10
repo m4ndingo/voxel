@@ -776,7 +776,7 @@
   {
     "id": "observador",
     "name": "Observador",
-    "role": "Bloque · detector de actualizaciones (observer)",
+    "role": "Bloque · detector de actualizaciones activo (observer-on)",
     "icon": "👁️",
     "type": "textura",
     "group": "Bloques de construcción",
@@ -786,7 +786,7 @@
       "z": 16
     },
     "file": "assets/observador.vox.json",
-    "description": "Observador — emite un pulso de redstone por la cara trasera cuando detecta un cambio enfrente.",
+    "description": "Observador activo — emite 15 por la cara trasera.",
     "categoria": "redstone"
   },
   {
