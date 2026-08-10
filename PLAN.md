@@ -90,6 +90,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | [BUG-RS23](#-bug-rs23) | una pieza **exportada de otra instancia e importada aquí** deja de ser circuito: llega como `asset:assets/piston-pegajoso-on.vox.json` y la tabla solo conocía `hab:piston-pegajoso-on` | ✅ resuelto 2026-08-10 | las piezas se identifican por NOMBRE y se registran en los dos espacios de nombres; el espacio se arrastra a las parejas (cabeza, hoja alta, variante -on). `test_piezas_importadas.js` |
 | [BUG-FLUID3](#-bug-fluid3) | un **fluido exportado de otra instancia** (`hab:agua`) se importa aquí como `asset:assets/agua.vox.json` y **no se ve bien**; pasa igual con la lava | ✅ resuelto 2026-08-10 | no era el motor de fluidos: era que `setFluid` y `mcMatKey` tenían `hab:agua`/`hab:lava` escritos a mano, así que los niveles copiaban la paleta de un material inexistente → **roca**. `mcNombreMat` + `mcClaveDeNombre` en `app.js`. `test_fluido_importado.js` |
 | [REQ-GAL3](#-req-gal3) | poder **cambiar el espacio de nombres de una pieza desde la galería** (mover `asset:` ↔ `hab:`) | 🔴 abierto 2026-08-10 | idea del dueño al hilo de BUG-FLUID3. No es el arreglo de los importados (el motor ya no depende del espacio), sino la herramienta para **colocar** una pieza donde la quieres. Redactado, sin investigar |
+| [REQ-SHADOW2](#-req-shadow2) | materiales **sin sombra**: que `white-wool` (y el que se elija) no **reciba** ni **proyecte** sombra, para nubes semirrealistas | 🔴 abierto 2026-08-10 | configurable desde el **autorun**, no cableado al material. Redactado, sin investigar |
 | [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
 | ~~[REQ-PERF1](#-req-perf1)~~ | ~~**profiler con callstack automático** que se activa cuando los fps caen por debajo de un umbral, con niveles de verbosidad, para identificar el cuello real~~ | ✅ resuelto 2026-08-10 | `game.perfAssert = 120` (fps mínimo), `game.perfVerbosity = 1..3`. `mcTick` mide su duración; si el frame cae bajo el assert, vuelca al `console.log` las funciones llamadas + calls + ms + max. Se desarma tras un dump; `game.perfDump()` re-arma. Con `perfAssert = 0` (defecto) las envolturas se retiran → coste 0 |
 | ~~[REQ-PERF2](#-req-perf2)~~ | ~~**modo de renderizado "fast" (unlit)** desde F12 — sin luces ni sombras, para depurar el motor bajando todo el coste de renderizado~~ | ✅ resuelto 2026-08-10 | `game.renderMode = 'fast'`/`'normal'`. `fast` combina `sunShade=1` (sin sombra) + `interiorDark=1` (sin skylight) + short-circuit en `mcComputeBlockLight` (sin luz de bloque). Al cambiar re-malla el mundo para reflejar el shading. Restaura los valores al volver a `normal` |
@@ -3196,6 +3197,32 @@ BUG-GAL1/GAL2 y `test_galeria_namespace.js`), así que la pieza que falta es un 
 galería» explícito. Y lo caro no es copiar el fichero: es que **los voxels del mundo guardan la clave
 larga**, así que mover una pieza deja el mundo apuntando a una clave que ya no existe — o hace falta
 reescribir el mundo, o dejar la vieja como alias.
+
+---
+
+### 🔴 REQ-SHADOW2 · Materiales sin sombra (nubes) — 🔴 abierto 2026-08-10
+
+**Petición del dueño, literal:**
+
+> «algunos materiales como white-wool quiero que tengan propiedades de iluminacion que sean que no
+> tengan "receive shadows" ni "cast shadows" para poder hacer unas nubes semirealistas con esos
+> materiales. que sea algo configurable nivel de autorun por si quiero elegir otro material»
+
+**Sin investigar.** Dos banderas por MATERIAL, no por celda: **no proyecta** (nada se oscurece por
+tenerlo encima) y **no recibe** (se pinta a luz plena, venga lo que venga de arriba). El caso de uso
+manda: una nube de `white-wool` flotando no puede dejar un pegote de sombra en el suelo ni salir ella
+gris por su propia panza.
+
+**Nota importante para quien lo coja:** en el Mundo hay **DOS sombras distintas** y «receive shadows»
+es ambiguo entre ellas — el *skylight* (oclusión ambiental horneada, lo que oscurece bajo techo) y la
+sombra proyectada del sol, que es un **mapa de sombra en GPU** (`mcRenderShadow`). Lo primero que hay
+que cerrar con el dueño es si quiere las dos apagadas o solo la del sol; para «nubes semirrealistas»
+suena a **las dos**.
+
+**Forma esperada:** lo pide para el **autorun**, o sea la misma vía que el resto de comportamientos —
+`game.bloques.define('hab:white-wool', { ... })` en `mundo-autoarranque`, con `app.js` exponiendo la
+capacidad (un array por id, patrón `mc.atraviesa`/`mc.sunExtra`) y el snippet decidiendo a qué
+material se le aplica. **No** cablear `white-wool` en el motor: él quiere poder elegir otro.
 
 ---
 
