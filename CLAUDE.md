@@ -410,6 +410,20 @@ cuatro, enseña la clave exacta `asset:assets/<id>.vox.json` y deja editar `alia
   redstone, sin ir más lejos— y lo **duplicaba** en la otra galería con el mismo id, donde el circuito
   (`hab:cable`) ya no lo encontraba. Un id sin espacio de nombres no identifica nada: `cable` puede
   existir en las dos galerías a la vez. Lo cubre `test_galeria_namespace.js`.
+- ⚠️ **El MISMO dibujo entra por dos puertas, y exportar/importar cambia justo cuál.** Una pieza de la
+  galería es `hab:<n>` y empotrada en el repo es `asset:assets/<n>.vox.json`; al exportar de una
+  instancia e importar en otra pasa de la primera a la segunda. Por eso **ninguna tabla del motor puede
+  llevar claves `hab:` escritas a mano**: la pieza importada no aparece en ella y deja de comportarse
+  (fue BUG-RS23 en redstone y BUG-FLUID3 en los fluidos, donde el agua importada fluía con la cara de
+  **roca** porque sus niveles copiaban la paleta de un `hab:agua` que aquí no existe). Los dos
+  ayudantes del motor son **`mcNombreMat(clave)`** → nombre pelado (sin espacio de nombres, sin `@giro`
+  y sin `-nivel` de fluido: `asset:assets/agua.vox.json-3` → `agua`) y **`mcClaveDeNombre(nombre)`** →
+  la clave que le toca a ese nombre **en este mundo**: primero lo que ya está en la paleta (da igual
+  por dónde entrara), luego el índice de assets, y de última `hab:<n>`. La regla es que el espacio de
+  nombres **se arrastra** de lo que hay puesto, nunca se elige a mano — así el nivel de un agua de
+  `assets/` sale de `assets/`, y el de una de la galería, de la galería. Ojo con el orden en
+  `mcMatKey`: la rama de fluidos va **antes** que el índice de assets, así que una clave a pelo ahí lo
+  tapa entero. Lo cubren `test_fluido_importado.js` y `test_piezas_importadas.js`.
 Las 3 **habitaciones** (Taberna/Herrería/Mazmorra) están **a escala de personaje**: `make_rooms.js`
 dibuja en unidades gruesas (geometría 28×28×13) pero escribe bloques finos S=4 → assets
 **112×112×52** con paredes de 40 frente a personajes 32³; solo guarda la **cáscara** (superficie,

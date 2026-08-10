@@ -6179,7 +6179,10 @@ function mcSetBlock(x,y,z,id){
     level = Math.max(0, Math.min(7, Math.floor(level)));
     fluidLevels.set(cl(x, y, z), level);
 
-    var baseKey = (type === 'WATER') ? 'hab:agua' : 'hab:lava';
+    // El espacio de nombres se ARRASTRA de lo que haya en ESTE mundo (ver mcClaveDeNombre): un agua
+    // importada de otra instancia entra como 'asset:assets/agua.vox.json', y con 'hab:agua' a pelo
+    // sus niveles se registraban copiando la paleta de un material que aquí no existe → roca gris.
+    var baseKey = mcClaveDeNombre((type === 'WATER') ? 'agua' : 'lava');
     var matKey = (level > 0) ? (baseKey + '-' + level) : baseKey;
     // Para la clave base (nivel 0) se usa mcResolveMat que busca en la paleta cargada.
     // Para claves con nivel (hab:agua-3) se busca directamente en mc.blockKey/mc.name2id
@@ -6731,6 +6734,37 @@ function mcFluidBase(k){
   var lo=k.toLowerCase();
   if(!(lo.includes('agua')||lo.includes('lava')||lo.includes('water'))) return k;
   return k.replace(/-[0-7]$/,'');
+}
+// El MISMO dibujo entra por DOS puertas: desde la galería de habitantes es 'hab:<n>' y empotrado en el
+// repo es 'asset:assets/<n>.vox.json'. Exportar de una instancia e importar en otra cambia justo eso, así
+// que cualquier tabla con claves 'hab:' escritas a mano deja de reconocer la pieza al cruzar de instancia
+// (es el mismo defecto que BUG-RS23 en el motor de redstone, un piso más abajo).
+// mcNombreMat deja una clave en su NOMBRE pelado: sin espacio de nombres, sin giro y sin nivel de fluido.
+//   'hab:agua' · 'asset:assets/agua.vox.json@3' · 'asset:assets/blocks_mock/agua.vox.json-3' → 'agua'
+function mcNombreMat(k){
+  if(typeof k!=='string') return '';
+  let s=mcFluidBase(mcClaveBase(k));
+  if(s.startsWith('hab:')) s=s.slice(4);
+  else if(s.startsWith('asset:')) s=s.slice(6).replace(/\.vox\.json$/i,'').replace(/^.*\//,'');
+  return s.toLowerCase();
+}
+// …y mcClaveDeNombre hace el viaje de vuelta: qué clave le toca a ese nombre EN ESTE MUNDO. Primero lo
+// que ya está en la paleta (da igual por qué puerta entrara), luego el índice de assets, y de último
+// 'hab:<n>', que es lo que se hacía antes de esto. La caché se tira cuando crece la paleta, que es
+// exactamente cuando puede aparecer la clave buena (setFluid da de alta sus niveles al vuelo).
+let mcNomCache={}, mcNomCacheN=-1;
+function mcClaveDeNombre(nombre){
+  const n=String(nombre||'').toLowerCase(); if(!n) return n;
+  const N=(mc && mc.blockKey) ? mc.blockKey.length : 0;
+  if(N!==mcNomCacheN){ mcNomCache={}; mcNomCacheN=N; }
+  if(n in mcNomCache) return mcNomCache[n];
+  let k=null;
+  for(let i=1;i<N;i++){
+    const bk=mc.blockKey[i];
+    if(bk && !/-[0-7]$/.test(bk) && mcNombreMat(bk)===n){ k=mcClaveBase(bk); break; }
+  }
+  if(!k && mcAssetsRegistry[n]) k='asset:'+mcAssetsRegistry[n];
+  return (mcNomCache[n]=(k||('hab:'+n)));
 }
 function mcClaveOri(k){ const m=typeof k==='string' && /@(\d{1,2})$/.exec(k); return m ? mcOriNorm(+m[1]) : 0; }
 function mcClaveConOri(k,ori){ ori=mcOriNorm(ori); return ori ? mcClaveBase(k)+'@'+ori : mcClaveBase(k); }
@@ -11048,12 +11082,17 @@ function mcMatKey(m, mLow){
   const ori=mcClaveOri(m);
   if(ori){ const kb=mcMatKey(mcClaveBase(m), mcClaveBase(mLow)); return kb ? mcClaveConOri(kb, ori) : kb; }
   let key = MC_MAT_ALIAS[mLow] || (mc.name2id && mc.name2id[m] ? mc.blockKey[mc.name2id[m]] : null);
-  if(!key && (mLow.includes('agua') || mLow.includes('water'))){
-    // Si ya trae sufijo de nivel (-0 a -7), conservarlo; si no, usar la base
-    key = /-[0-7]$/.test(mLow) ? (mLow.startsWith('hab:') ? mLow : 'hab:'+mLow) : 'hab:agua';
-  }
-  if(!key && mLow.includes('lava')){
-    key = /-[0-7]$/.test(mLow) ? (mLow.startsWith('hab:') ? mLow : 'hab:'+mLow) : 'hab:lava';
+  // Fluidos: agua y lava pueden vivir en CUALQUIERA de los dos espacios de nombres, y cuál sea depende
+  // de por dónde entraron en este mundo (ver mcClaveDeNombre). Tanto la tabla de motes de arriba como
+  // esta rama llevaban 'hab:agua' escrito a mano —y esta rama va ANTES que el índice de assets—, así
+  // que un agua importada de otra instancia ('asset:assets/agua.vox.json') se resolvía siempre a una
+  // clave que aquí NO existe, y de ahí a roca. Si la clave que ya tenemos existe en este mundo se
+  // respeta tal cual (una petición explícita manda); si no, se vuelve a pedir por NOMBRE.
+  const nFl = (mLow.includes('agua') || mLow.includes('water')) ? 'agua'
+            : mLow.includes('lava') ? 'lava' : null;
+  if(nFl && !(key && ((mc.name2id && mc.name2id[key] > 0) || (mc.blockKey && mc.blockKey.indexOf(key) > 0)))){
+    const lv = /-([0-7])$/.exec(mLow);       // si ya trae sufijo de nivel (-0 a -7), conservarlo
+    key = mcClaveDeNombre(nFl) + (lv ? '-'+lv[1] : '');
   }
   if(!key && mcAssetsRegistry[mLow]) key = 'asset:' + mcAssetsRegistry[mLow];
   if(!key && mcAssetsRegistry[mLow.replace(/\s+/g, '_')]) key = 'asset:' + mcAssetsRegistry[mLow.replace(/\s+/g, '_')];
@@ -11072,15 +11111,13 @@ function mcResolveMat(material){
   // (hab:agua-3, hab:lava-5) NO caen aquí: necesitan su propia entrada en mc.blockKey y setFluid
   // se encarga de registrarlas.
   if(id<1 && !/-[0-7]$/.test(mLow)){
-    if(mLow.includes('agua') || mLow.includes('water')){
-      id = mc.blockKey.indexOf('hab:agua');
-      if(id<1) id = mc.blockKey.indexOf('agua');
-      if(id<1) id = (mc.name2id && (mc.name2id['hab:agua'] || mc.name2id['agua'])) || -1;
-    }
-    if(id<1 && mLow.includes('lava')){
-      id = mc.blockKey.indexOf('hab:lava');
-      if(id<1) id = mc.blockKey.indexOf('lava');
-      if(id<1) id = (mc.name2id && (mc.name2id['hab:lava'] || mc.name2id['lava'])) || -1;
+    const nFl = (mLow.includes('agua') || mLow.includes('water')) ? 'agua'
+              : mLow.includes('lava') ? 'lava' : null;
+    if(nFl){
+      const kFl = mcClaveDeNombre(nFl);        // el agua de ESTE mundo, venga de la galería o de assets/
+      id = mc.blockKey.indexOf(kFl);
+      if(id<1) id = mc.blockKey.indexOf(nFl);
+      if(id<1) id = (mc.name2id && (mc.name2id[kFl] || mc.name2id[nFl])) || -1;
     }
   }
   if(id<1){                                          // desconocido (p.ej. '#hex' no aplica al terreno) → roca + aviso 1 vez

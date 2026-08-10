@@ -88,7 +88,8 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ~~[BUG-RS21](#-bug-rs21)~~ | ~~dos observadores en serie con antorcha al final: al **poner** un bloque delante hay **1 parpadeo**, al **quitar** hay **2**. Los correctos son **2 en ambos casos** (Minecraft)~~ | ✅ resuelto 2026-08-10 | el corte por `apagones.has(...)` **descartaba** flancos legítimos durante el pulso del observador. Ahora se **encolan** en `pendientesObs` y se re-disparan al terminar el pulso. Efecto secundario buscado: dos observadores enfrentados oscilan a 100 ms (reloj cara a cara de Minecraft). La marca temporal `apagones.set('obs:'+k, 1)` **antes** de notificar corta la recursión síncrona sin descartar el flanco |
 | [BUG-RS22](#-bug-rs22) | el **observador mirando una placa de presión pisada** emite **1 pulso cada ~1 s** aunque la placa no cambie de estado (el flanco de subida sí es correcto) | ✅ resuelto 2026-08-10 | la sospecha era buena y se quedó corta: la placa SÍ parpadeaba (`pulso` vencía y el despachador la re-encendía), y además `encender()` avisaba a los observadores aunque no cambiara el bloque. Capacidad nueva `alSeguirPisando` + sin cambio de bloque no hay flanco. `test_placa_observador.js` |
 | [BUG-RS23](#-bug-rs23) | una pieza **exportada de otra instancia e importada aquí** deja de ser circuito: llega como `asset:assets/piston-pegajoso-on.vox.json` y la tabla solo conocía `hab:piston-pegajoso-on` | ✅ resuelto 2026-08-10 | las piezas se identifican por NOMBRE y se registran en los dos espacios de nombres; el espacio se arrastra a las parejas (cabeza, hoja alta, variante -on). `test_piezas_importadas.js` |
-| [BUG-FLUID3](#-bug-fluid3) | un **fluido exportado de otra instancia** (`hab:agua`) se importa aquí como `asset:assets/agua.vox.json` y **no se ve bien**; pasa igual con la lava | 🔴 abierto 2026-08-10 | mismo síntoma que [BUG-RS23](#-bug-rs23) pero en el sistema de fluidos ([REQ-FLUID1](#-req-fluid1)): sin investigar |
+| [BUG-FLUID3](#-bug-fluid3) | un **fluido exportado de otra instancia** (`hab:agua`) se importa aquí como `asset:assets/agua.vox.json` y **no se ve bien**; pasa igual con la lava | ✅ resuelto 2026-08-10 | no era el motor de fluidos: era que `setFluid` y `mcMatKey` tenían `hab:agua`/`hab:lava` escritos a mano, así que los niveles copiaban la paleta de un material inexistente → **roca**. `mcNombreMat` + `mcClaveDeNombre` en `app.js`. `test_fluido_importado.js` |
+| [REQ-GAL3](#-req-gal3) | poder **cambiar el espacio de nombres de una pieza desde la galería** (mover `asset:` ↔ `hab:`) | 🔴 abierto 2026-08-10 | idea del dueño al hilo de BUG-FLUID3. No es el arreglo de los importados (el motor ya no depende del espacio), sino la herramienta para **colocar** una pieza donde la quieres. Redactado, sin investigar |
 | [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
 | ~~[REQ-PERF1](#-req-perf1)~~ | ~~**profiler con callstack automático** que se activa cuando los fps caen por debajo de un umbral, con niveles de verbosidad, para identificar el cuello real~~ | ✅ resuelto 2026-08-10 | `game.perfAssert = 120` (fps mínimo), `game.perfVerbosity = 1..3`. `mcTick` mide su duración; si el frame cae bajo el assert, vuelca al `console.log` las funciones llamadas + calls + ms + max. Se desarma tras un dump; `game.perfDump()` re-arma. Con `perfAssert = 0` (defecto) las envolturas se retiran → coste 0 |
 | ~~[REQ-PERF2](#-req-perf2)~~ | ~~**modo de renderizado "fast" (unlit)** desde F12 — sin luces ni sombras, para depurar el motor bajando todo el coste de renderizado~~ | ✅ resuelto 2026-08-10 | `game.renderMode = 'fast'`/`'normal'`. `fast` combina `sunShade=1` (sin sombra) + `interiorDark=1` (sin skylight) + short-circuit en `mcComputeBlockLight` (sin luz de bloque). Al cambiar re-malla el mundo para reflejar el shading. Restaura los valores al volver a `normal` |
@@ -3122,7 +3123,7 @@ pasaría en la galería.
 
 ---
 
-### 🔴 BUG-FLUID3 · Un fluido importado de otra instancia no se ve bien — 🔴 abierto 2026-08-10
+### 🔴 BUG-FLUID3 · Un fluido importado de otra instancia no se ve bien — ✅ resuelto 2026-08-10
 
 **Reporte del dueño, literal:**
 
@@ -3131,17 +3132,70 @@ pasaría en la galería.
 > "asset:assets/agua.vox.json" por lo que no se ve correctamente, esto pasa con otros fluidos como la
 > lava»
 
-**Sin investigar.** Es el mismo síntoma que [BUG-RS23](#-bug-rs23) —el espacio de nombres cambia al
-cruzar de instancia— pero en otro sistema: el de fluidos ([REQ-FLUID1](#-req-fluid1)), que tiene sus
-propias tablas (`game.fluidos`, `agua.json`, `lava.json`) y su propio render. El arreglo de BUG-RS23
-es solo del motor de redstone, así que **no** alcanza a esto.
+Y el dueño acotó él mismo el diagnóstico, que era el bueno:
 
-En el repo se ve la importación: `assets/agua.vox.json` es nuevo y `assets/lava.vox.json` ha cambiado
-de arriba abajo.
+> «el codigo de fluidos esta bien, lo que esta mal es que no encuentra los assets porque ha cambiado
+> el espacio de nombres entre la exportacion e importacion»
 
-**Por dónde empezar cuando toque:** ver si las tablas de fluidos van por clave `hab:` escrita a mano
-(como iba `CIRCUITOS`) y, si es así, si vale la misma solución —identificar por nombre pelado y dar
-de alta en los dos espacios— o si además hay algo del **dibujo/alpha** que se pierde al empotrar.
+**Qué pasaba.** El motor de fluidos **reconoce por nombre** (`getProps` mira si la clave contiene
+`agua`/`lava`), así que el agua importada sí era agua: fluía, se replegaba y te mojabas. Lo que no
+iba era **de qué material se dibuja lo que corre**. Un fluido con nivel es un material propio
+(`…-1`…`…-7`) que `setFluid` da de alta al vuelo copiando paleta y geometría del **fluido base**, y
+ese base estaba escrito a mano:
+
+```js
+var baseKey = (type === 'WATER') ? 'hab:agua' : 'hab:lava';   // ← aquí
+```
+
+En esta instancia `data/habitantes/` no tiene ningún agua ni lava (solo `agua-profunda` y `likelava`,
+que son otra cosa), así que `mcResolveMat('hab:agua')` caía en «material desconocido → roca» y el
+nivel se registraba **con la paleta de la roca**. La fuente se veía bien y el reguero salía gris.
+
+Lo mismo, y peor, en `mcMatKey`: su rama de fluidos va **antes** que el índice de assets, así que
+`'hab:agua'` a pelo tapaba `asset:assets/agua.vox.json` y el índice no llegaba a mirarse nunca — ni
+siquiera para autocargarlo.
+
+**El arreglo — dos ayudantes en `app.js`, y ninguna tabla con claves a mano:**
+
+- `mcNombreMat(clave)` deja la clave en su **nombre pelado**: sin espacio de nombres, sin `@giro` y sin
+  `-nivel`. `hab:agua`, `asset:assets/agua.vox.json@3` y `asset:assets/blocks_mock/agua.vox.json-3`
+  son los tres `agua`. Compara **exacto**, así que `agua-profunda` no es `agua`.
+- `mcClaveDeNombre(nombre)` hace el viaje de vuelta: la clave que le toca a ese nombre **en este
+  mundo** — primero lo que ya está en la paleta (da igual por qué puerta entrara), luego el índice de
+  assets, y de última `hab:<n>`, que es lo que se hacía antes. Cacheado y tirado cuando crece la
+  paleta, que es justo cuando puede aparecer la clave buena.
+- `setFluid`, `mcMatKey` y el fallback de `mcResolveMat` piden el fluido **por nombre**. Una clave
+  completa y presente en el mundo se respeta tal cual: una petición explícita sigue mandando.
+
+Es la misma regla que [BUG-RS23](#-bug-rs23) un piso más abajo: **el espacio de nombres se arrastra de
+lo que hay puesto**, no se elige. El nivel de un agua de `assets/` sale de `assets/`; el de una de la
+galería, de la galería.
+
+**Verificado:** `test_fluido_importado.js` (nuevo) derrama agua y lava importadas y mira lo que el
+dueño ve —de qué paleta y de qué fichero sale la celda que corre—, no solo si «es fluido». Con el
+motor de antes: **11 fallos**; ahora verde. `test_req_fluid1_sistema_fluidos.js` sigue 12/12 y
+`test_setvoxel_autocarga.js` 21/21.
+
+**Lo que este arreglo NO hace:** mover la pieza de galería. Si la quieres como `hab:agua` para
+escribirlo así en los snippets, eso es [REQ-GAL3](#-req-gal3).
+
+---
+
+### 🔴 REQ-GAL3 · Cambiar el espacio de nombres de una pieza desde la galería — 🔴 abierto 2026-08-10
+
+**Petición del dueño, literal:**
+
+> «tal vez deberia de poderse modificar el espacio de nombres desde la galeria»
+
+**Sin investigar.** Salió al hilo de [BUG-FLUID3](#-bug-fluid3), pero es otra cosa: aquello era que el
+motor dependiera del espacio de nombres (ya no depende); esto es poder **decidir** en cuál vive una
+pieza — mover `asset:assets/<n>.vox.json` ↔ `hab:<n>` desde la ficha, sin exportar e importar a mano.
+
+**Lo que habrá que mirar cuando toque:** guardar ya enruta por el ORIGEN del dibujo (`serverKind`, ver
+BUG-GAL1/GAL2 y `test_galeria_namespace.js`), así que la pieza que falta es un «mover a la otra
+galería» explícito. Y lo caro no es copiar el fichero: es que **los voxels del mundo guardan la clave
+larga**, así que mover una pieza deja el mundo apuntando a una clave que ya no existe — o hace falta
+reescribir el mundo, o dejar la vieja como alias.
 
 ---
 
