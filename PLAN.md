@@ -88,6 +88,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ~~[BUG-RS21](#-bug-rs21)~~ | ~~dos observadores en serie con antorcha al final: al **poner** un bloque delante hay **1 parpadeo**, al **quitar** hay **2**. Los correctos son **2 en ambos casos** (Minecraft)~~ | ✅ resuelto 2026-08-10 | el corte por `apagones.has(...)` **descartaba** flancos legítimos durante el pulso del observador. Ahora se **encolan** en `pendientesObs` y se re-disparan al terminar el pulso. Efecto secundario buscado: dos observadores enfrentados oscilan a 100 ms (reloj cara a cara de Minecraft). La marca temporal `apagones.set('obs:'+k, 1)` **antes** de notificar corta la recursión síncrona sin descartar el flanco |
 | [BUG-RS22](#-bug-rs22) | el **observador mirando una placa de presión pisada** emite **1 pulso cada ~1 s** aunque la placa no cambie de estado (el flanco de subida sí es correcto) | ✅ resuelto 2026-08-10 | la sospecha era buena y se quedó corta: la placa SÍ parpadeaba (`pulso` vencía y el despachador la re-encendía), y además `encender()` avisaba a los observadores aunque no cambiara el bloque. Capacidad nueva `alSeguirPisando` + sin cambio de bloque no hay flanco. `test_placa_observador.js` |
 | [BUG-RS23](#-bug-rs23) | una pieza **exportada de otra instancia e importada aquí** deja de ser circuito: llega como `asset:assets/piston-pegajoso-on.vox.json` y la tabla solo conocía `hab:piston-pegajoso-on` | ✅ resuelto 2026-08-10 | las piezas se identifican por NOMBRE y se registran en los dos espacios de nombres; el espacio se arrastra a las parejas (cabeza, hoja alta, variante -on). `test_piezas_importadas.js` |
+| [BUG-FLUID3](#-bug-fluid3) | un **fluido exportado de otra instancia** (`hab:agua`) se importa aquí como `asset:assets/agua.vox.json` y **no se ve bien**; pasa igual con la lava | 🔴 abierto 2026-08-10 | mismo síntoma que [BUG-RS23](#-bug-rs23) pero en el sistema de fluidos ([REQ-FLUID1](#-req-fluid1)): sin investigar |
 | [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
 | ~~[REQ-PERF1](#-req-perf1)~~ | ~~**profiler con callstack automático** que se activa cuando los fps caen por debajo de un umbral, con niveles de verbosidad, para identificar el cuello real~~ | ✅ resuelto 2026-08-10 | `game.perfAssert = 120` (fps mínimo), `game.perfVerbosity = 1..3`. `mcTick` mide su duración; si el frame cae bajo el assert, vuelca al `console.log` las funciones llamadas + calls + ms + max. Se desarma tras un dump; `game.perfDump()` re-arma. Con `perfAssert = 0` (defecto) las envolturas se retiran → coste 0 |
 | ~~[REQ-PERF2](#-req-perf2)~~ | ~~**modo de renderizado "fast" (unlit)** desde F12 — sin luces ni sombras, para depurar el motor bajando todo el coste de renderizado~~ | ✅ resuelto 2026-08-10 | `game.renderMode = 'fast'`/`'normal'`. `fast` combina `sunShade=1` (sin sombra) + `interiorDark=1` (sin skylight) + short-circuit en `mcComputeBlockLight` (sin luz de bloque). Al cambiar re-malla el mundo para reflejar el shading. Restaura los valores al volver a `normal` |
@@ -3118,6 +3119,29 @@ lo importado no le quite el sitio a lo de siempre. Sin regresión en `test_redst
 **Límite conocido:** el puente es por **nombre de fichero**. `piston-pegajoso-on` se reconoce venga de
 donde venga, pero si al importar se le cambia el nombre al fichero, deja de ser esa pieza — como
 pasaría en la galería.
+
+---
+
+### 🔴 BUG-FLUID3 · Un fluido importado de otra instancia no se ve bien — 🔴 abierto 2026-08-10
+
+**Reporte del dueño, literal:**
+
+> «mas problemas con exportar e importar, desde otra instancia e exportado el asset "hab:agua" (asi se
+> ve en la galeria) que es un fluido, y al importarlo aqui lo ha importado como
+> "asset:assets/agua.vox.json" por lo que no se ve correctamente, esto pasa con otros fluidos como la
+> lava»
+
+**Sin investigar.** Es el mismo síntoma que [BUG-RS23](#-bug-rs23) —el espacio de nombres cambia al
+cruzar de instancia— pero en otro sistema: el de fluidos ([REQ-FLUID1](#-req-fluid1)), que tiene sus
+propias tablas (`game.fluidos`, `agua.json`, `lava.json`) y su propio render. El arreglo de BUG-RS23
+es solo del motor de redstone, así que **no** alcanza a esto.
+
+En el repo se ve la importación: `assets/agua.vox.json` es nuevo y `assets/lava.vox.json` ha cambiado
+de arriba abajo.
+
+**Por dónde empezar cuando toque:** ver si las tablas de fluidos van por clave `hab:` escrita a mano
+(como iba `CIRCUITOS`) y, si es así, si vale la misma solución —identificar por nombre pelado y dar
+de alta en los dos espacios— o si además hay algo del **dibujo/alpha** que se pierde al empotrar.
 
 ---
 
