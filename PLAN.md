@@ -95,8 +95,8 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ~~[REQ-PERF1](#-req-perf1)~~ | ~~**profiler con callstack automático** que se activa cuando los fps caen por debajo de un umbral, con niveles de verbosidad, para identificar el cuello real~~ | ✅ resuelto 2026-08-10 | `game.perfAssert = 120` (fps mínimo), `game.perfVerbosity = 1..3`. `mcTick` mide su duración; si el frame cae bajo el assert, vuelca al `console.log` las funciones llamadas + calls + ms + max. Se desarma tras un dump; `game.perfDump()` re-arma. Con `perfAssert = 0` (defecto) las envolturas se retiran → coste 0 |
 | ~~[REQ-PERF2](#-req-perf2)~~ | ~~**modo de renderizado "fast" (unlit)** desde F12 — sin luces ni sombras, para depurar el motor bajando todo el coste de renderizado~~ | ✅ resuelto 2026-08-10 | `game.renderMode = 'fast'`/`'normal'`. `fast` combina `sunShade=1` (sin sombra) + `interiorDark=1` (sin skylight) + short-circuit en `mcComputeBlockLight` (sin luz de bloque). Al cambiar re-malla el mundo para reflejar el shading. Restaura los valores al volver a `normal` |
 | [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
-| [REQ-TEST1](#-req-test1) | 79 `test_*.js` sueltos en la raíz y **ningún runner**: no hay forma de correr la suite ni de saber cuáles necesitan servidor | 🟡 abierto 2026-08-07 | fila **acertada** de la auditoría del dueño. 66 abren Chromium contra `:8500`, 12 son Node puro, y el fichero no lo dice. **Sin investigar a fondo** |
-| [REQ-DOC1](#-req-doc1) | `CLAUDE.md` son 239 KB con **12 encabezados `##`**: lo que está documentado no se encuentra | 🟡 abierto 2026-08-07 | la auditoría lo leyó como «falta REDSTONE.md»; el diagnóstico era falso (hay 420 líneas en `CLAUDE.md:2420`), el síntoma no. **Sin investigar a fondo** |
+| ~~[REQ-TEST1](#-req-test1)~~ | ~~79 `test_*.js` sueltos en la raíz y **ningún runner**: no hay forma de correr la suite ni de saber cuáles necesitan servidor~~ | ❌ archivado 2026-08-10 | archivado a petición del dueño. Fila **duplicada**: el mismo id ya figura ✅ resuelto más abajo, y lo que pedía está hecho — `correr_tests.js` con `--list`/`--node`/`--pw`/`--area=`, y los **96** tests etiquetados |
+| ~~[REQ-DOC1](#-req-doc1)~~ | ~~`CLAUDE.md` son 239 KB con **12 encabezados `##`**: lo que está documentado no se encuentra~~ | ❌ archivado 2026-08-10 | archivado a petición del dueño. Fila **duplicada**: el mismo id ya figura ✅ resuelto más abajo (Mapa de Navegación en la cabecera de `CLAUDE.md`) |
 | [REQ-DOC2](#-req-doc2) | falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas) | 🟡 abierto 2026-08-07 | la crítica mejor puesta de la auditoría; no es partir el fichero, es documentar qué vive en `state`, `mc` y `game`. **Sin investigar a fondo** |
 | ~~[BUG-STR1](#-bug-str1)~~ | ~~`hab:cubo-trans` acaba como **estructura fina** y no como **bloque** de rejilla~~ | ✅ cerrado 2026-08-07 | no era la válvula ni «el cubo es hueco»: era el **alpha**. Un macizo translúcido ya entra en `mc.grid` con geometría real y pasada de BLEND; `mcRecFina` es ahora la fuente única de esa regla |
 | [REQ-MNT2](#-req-mnt2) | marcar desde el **editor de agentes** qué pieza es **montable**, sin `game.esqueletos.montable(…)` a mano | ✅ cerrado 2026-08-07 | Casilla «te lleva montado» por pieza (también en la raíz); la marca vive en el **documento** y la aplica el snippet al plantar. La API queda como válvula por instancia |
@@ -2428,7 +2428,13 @@ entran.
 
 ---
 
-### 🟡 REQ-TEST1 · Un runner para la suite, y que cada test diga qué necesita — 🟡 abierto 2026-08-07
+### ❌ REQ-TEST1 · Un runner para la suite, y que cada test diga qué necesita — ❌ archivado 2026-08-10
+
+> **Archivado 2026-08-10 a petición del dueño.** Estaba **duplicado**: este mismo id ya figuraba
+> resuelto el 2026-08-08 en el índice. Y lo que pedía está hecho — `correr_tests.js` (`--list`,
+> `--node`, `--pw`, `--area=…`) y los **96** `test_*.js` etiquetados con `@area` y `@necesita`.
+> Queda un cabo suelto que **no** justifica mantenerlo abierto: el runner lee `@area:` con dos puntos
+> y hay 1 test escrito con `@area=`, que por eso cae en «general».
 
 **Redactado sin investigar** (regla del dueño). Sale de una auditoría externa del repo, cuya fila
 «Batería de Pruebas — ⚠️ Descentralizado» es **la única que resultó exacta al comprobarla**.
@@ -2464,7 +2470,11 @@ justo el mecanismo más frágil del repo.
 
 ---
 
-### 🟡 REQ-DOC1 · `CLAUDE.md` está documentado pero no es navegable — 🟡 abierto 2026-08-07
+### ❌ REQ-DOC1 · `CLAUDE.md` está documentado pero no es navegable — ❌ archivado 2026-08-10
+
+> **Archivado 2026-08-10 a petición del dueño.** Estaba **duplicado**: este mismo id ya figuraba
+> resuelto el 2026-08-08 en el índice, con el Mapa de Navegación (TOC) en la cabecera de `CLAUDE.md`.
+> Lo que sigue es el análisis de entonces, que se queda como registro.
 
 **Redactado sin investigar.** La auditoría externa marcó «Redstone — ⚠️ Parcial — Disperso en tests;
 falta REDSTONE.md». **El diagnóstico es falso** y conviene dejarlo escrito para no repetirlo:
