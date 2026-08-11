@@ -78,26 +78,57 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| [BUG-RS10](#-bug-rs10) | el pistón **no empuja estructuras** (sí bloques, sí jugador, sí agentes) | 🟡 abierto 2026-08-07 | **el caso de la captura ya no ocurre** (era [BUG-STR1](#-bug-str1)): el pistón empuja `mc.grid` y no mira `mc.structures`, y eso está escrito como límite conocido de la v1. Preguntar al dueño si aún le molesta antes de tocar nada |
+| [REQ-GAL3](#-req-gal3) | poder **cambiar el espacio de nombres de una pieza desde la galería** (mover `asset:` ↔ `hab:`) | 🔴 abierto 2026-08-10 | idea del dueño al hilo de BUG-FLUID3. No es el arreglo de los importados (el motor ya no depende del espacio), sino la herramienta para **colocar** una pieza donde la quieres. Redactado, sin investigar |
+| [REQ-FLUID4](#-req-fluid4) | **«ilusión de agua»**: un lago se ve como cubos transparentes con caras internas, no como una masa continua | 🟡 en curso 2026-08-11 | **fases 1-2 (culling en el camino fino) y 3 (vista subacuática) hechas** — `test_caras_fluido.js` + `test_vista_subacuatica.js`. Queda la **fase 4 (reflejos)**, aplazada por el dueño ⇒ [REQ-FLUID5](#-req-fluid5) |
+| [REQ-FLUID5](#-req-fluid5) | **reflejos de cielo y nubes en la superficie del agua** — la fase 4 de REQ-FLUID4, sacada a ticket propio | 🔴 abierto 2026-08-11 | lo aplazó el dueño («más adelante») al acotar REQ-FLUID4. **Redactado, sin investigar.** Es un cambio de shader, no de mallado: el culling de 1-2 ya deja **una sola lámina** donde pintarlo |
+| [BUG-SNP3](#-bug-snp3) | **`game.bloques.quitar()` está roto**: lanza `ReferenceError: g is not defined` siempre, por ~12 líneas de física pegadas por error en medio de la función | 🔴 abierto 2026-08-10 | encontrado de paso en REQ-SHADOW2, **no es mío**: está así en HEAD y tumba `test_bloques_comportamiento.js` y `test_luz_traspasa.js` |
+| [BUG-SNP4](#-bug-snp4) | los cambios hechos en el **editor de código del Mundo se revierten** al volver al mapa y reabrirlo | 🔴 abierto 2026-08-11 | **Redactado, sin investigar.** Sospecha (sin comprobar): el snippet tiene **dos copias vivas** y al reabrir el editor se relee la que se cargó al abrir el Mundo, no la editada. Ojo: el dueño dice **Ctrl+C**, `CLAUDE.md` documenta **Alt+C** |
+| [BUG-FLUID5](#-bug-fluid5) | `test_nadar.js` (4 fallos) y `test_hundirse.js` (4 fallos) **miden el fondo del pozo, no el fluido**: son guardianes viejos frente a las constantes **retuneadas** por el dueño | 🔴 abierto 2026-08-11 | **Investigado, sin decidir.** No es una regresión: A/B revirtiendo REQ-FLUID9 sobre `app.js` da el **mismo resultado exacto**. Los dos se escribieron para `gravedad 1/16, empuje 8` y hoy el motor lleva `WATER {0.5, 0.22, 3}` / `LAVA {1, 0.11, 2}` ⇒ con **8× la gravedad de dentro** sus tramos de 120/240 frames cruzan enteros un pozo de 9 y leen `vy = 0`. **Falta que el dueño diga qué manda**: los tests codifican sus decisiones de REQ-FLUID6/7 y las constantes también son suyas. `CLAUDE.md` §🏊 cita las cifras viejas |
+| [REQ-PICK4](#-req-pick4) | la tecla **`P`** del Mundo (la rotación de herramienta) necesita una entrada más: un **«block picker»** — clic en un bloque del mapa y ese material pasa a la ranura que esté elegida en el cajón | 🔴 abierto 2026-08-11 | **Redactado, sin investigar.** Es el *pick block* de Minecraft llevado a la barra rápida del Mundo. El dueño lo llamó primero «color picker» y se corrigió en el acto: no coge un color, coge la **clave del material**. No es [REQ-PICK1](#-req-pick1) ni [REQ-PICK3](#-req-pick3), que son el selector del **editor** |
+| [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
+| [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
+| [REQ-DOC2](#-req-doc2) | falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas) | 🟡 abierto 2026-08-07 | la crítica mejor puesta de la auditoría; no es partir el fichero, es documentar qué vive en `state`, `mc` y `game`. **Sin investigar a fondo** |
+| [REQ-MAP1](#-req-map1) | Alt+M = pantalla de mapas conmutable sin perder el mundo abierto | medio | — |
+
+---
+
+## 🗄️ Tickets CERRADOS — archivo
+
+Movidos aquí para no engordar el índice de arriba (regla: se quitan de la tabla de ABIERTOS al
+cerrar). **El detalle de cada uno sigue en su sección**, enlazado por su ancla `(#id)`; esto es
+solo el índice histórico. Reabrir uno = devolver su fila a la tabla de arriba.
+
+La columna «pinta» es una **impresión al redactar, no una estimación medida** — varias se escribieron
+sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo que el dueño cerró el
+2026-08-06 al revisar la cola; el detalle y sus consecuencias están en cada ticket.
+
+| ticket | qué es | pinta | decisiones |
+|---|---|---|---|
+| ~~[BUG-RS25](#-bug-rs25)~~ | ~~la **placa de presión no se desactiva al bajarse** de ella: se queda pegada encendida~~ | ✅ resuelto 2026-08-11 | el latido no se pega: para en seco al bajarse (medido de 4 maneras y en 16 ciclos). Lo roto era el **arranque**: el estado de la placa ES la clave de la rejilla, pero lo que la suelta es un `setTimeout` que **no se guarda con el mundo** — un mundo guardado con la placa pisada volvía pegado para siempre (así estaba `/map/default`). `repasarMundo()` ya hacía esto con el observador guardado encendido; ahora suelta también toda entrada `manual`+`pulso` (cubre el **botón**). Con alguien encima el latido la re-enciende en el mismo frame, así que no reabre BUG-RS22. `tests/test_placa_pegada.js` |
 | ~~[PERF-MC3](#-perf-mc3)~~ | ~~abrir un mundo VACÍO cuesta 2,2 s; el 81 % es bajar la paleta EN SERIE~~ | ❌ cerrado 2026-08-07 | lo hecho se queda (383 → 63 ms en local, el cartel ya no miente); las propuestas 3 y 4 **no se hacen**: en el enlace del dueño el cuello es la RED, no el motor |
 | ~~[BUG-SNP1](#-bug-snp1)~~ | ~~«no existe el material X» miente, llena la consola y PIERDE la definición~~ | ✅ resuelto 2026-08-06 | lo que no está **todavía** espera en silencio y entra solo al colocarlo; lo que está **mal escrito** sigue avisando |
 | ~~[REQ-PICK1](#-req-pick1)~~ | ~~el selector de bloque/textura: ancho, nombres, fuente, menú contextual y filtros~~ | ✅ resuelto 2026-08-08 | ventana a `min(1200px,96vw)`, rejilla `minmax(110px,1fr)`, buscador por texto, filtros por categoría (Bloques, Texturas, Estructuras, Redstone), menú contextual (`ℹ️ Ver ficha`, `✏️ Editar material`), fuente `--font-game` a 9px en 2 líneas con `title` completo |
 | ~~[BUG-RS9](#-bug-rs9)~~ | ~~el pistón **no empuja al jugador**: te subes encima de la cabeza extendida~~ | ✅ cerrado 2026-08-07 | era `mcUnstick`, que solo busca salida hacia arriba |
-| [BUG-RS10](#-bug-rs10) | el pistón **no empuja estructuras** (sí bloques, sí jugador, sí agentes) | 🟡 abierto 2026-08-07 | **el caso de la captura ya no ocurre** (era [BUG-STR1](#-bug-str1)): el pistón empuja `mc.grid` y no mira `mc.structures`, y eso está escrito como límite conocido de la v1. Preguntar al dueño si aún le molesta antes de tocar nada |
 | ~~[BUG-RS19](#-bug-rs19)~~ | ~~el **observador** se coloca como **bloque** sin girar pero como **estructura** al rotarlo con `R`; y al activarlo, la variante encendida **pierde el `@n`** y apunta a otra dirección~~ | ✅ resuelto 2026-08-10 | **dos arreglos**: (1) `mcRecFina` en `app.js` — una línea: la única pieza de redstone con `pielCubre=true` y `blockLike=false` (observador, 4092 vox) ya entra por ruta fina; (2) `dispararObservador` en `redstone/redstone.js` — quitar el fallback `mc.name2id[quieroOn] \|\| mc.name2id[par.on]` que caía a la clave sin girar cuando `observador-on@n` aún no estaba en la paleta |
 | ~~[BUG-RS20](#-bug-rs20)~~ | ~~dos **observadores en fila** no se propagan: el de atrás no detecta que el de delante cambió de estado~~ | ✅ resuelto 2026-08-10 | confirmada la sospecha: `dispararObservador` escribe con `yoEscribiendo=true` y el envoltorio de `mcSetBlock` se salta `encolarVecinos`. Se extrae el bucle a `notificarObservadoresVecinos(x,y,z)` y se llama explícitamente tras el `mcSetBlock` protegido (encendido **y** apagado). Cascada A→B→A cortada por `apagones.has(...)` |
 | ~~[BUG-RS21](#-bug-rs21)~~ | ~~dos observadores en serie con antorcha al final: al **poner** un bloque delante hay **1 parpadeo**, al **quitar** hay **2**. Los correctos son **2 en ambos casos** (Minecraft)~~ | ✅ resuelto 2026-08-10 | el corte por `apagones.has(...)` **descartaba** flancos legítimos durante el pulso del observador. Ahora se **encolan** en `pendientesObs` y se re-disparan al terminar el pulso. Efecto secundario buscado: dos observadores enfrentados oscilan a 100 ms (reloj cara a cara de Minecraft). La marca temporal `apagones.set('obs:'+k, 1)` **antes** de notificar corta la recursión síncrona sin descartar el flanco |
 | [BUG-RS22](#-bug-rs22) | el **observador mirando una placa de presión pisada** emite **1 pulso cada ~1 s** aunque la placa no cambie de estado (el flanco de subida sí es correcto) | ✅ resuelto 2026-08-10 | la sospecha era buena y se quedó corta: la placa SÍ parpadeaba (`pulso` vencía y el despachador la re-encendía), y además `encender()` avisaba a los observadores aunque no cambiara el bloque. Capacidad nueva `alSeguirPisando` + sin cambio de bloque no hay flanco. `test_placa_observador.js` |
 | [BUG-RS23](#-bug-rs23) | una pieza **exportada de otra instancia e importada aquí** deja de ser circuito: llega como `asset:assets/piston-pegajoso-on.vox.json` y la tabla solo conocía `hab:piston-pegajoso-on` | ✅ resuelto 2026-08-10 | las piezas se identifican por NOMBRE y se registran en los dos espacios de nombres; el espacio se arrastra a las parejas (cabeza, hoja alta, variante -on). `test_piezas_importadas.js` |
 | [BUG-FLUID3](#-bug-fluid3) | un **fluido exportado de otra instancia** (`hab:agua`) se importa aquí como `asset:assets/agua.vox.json` y **no se ve bien**; pasa igual con la lava | ✅ resuelto 2026-08-10 | no era el motor de fluidos: era que `setFluid` y `mcMatKey` tenían `hab:agua`/`hab:lava` escritos a mano, así que los niveles copiaban la paleta de un material inexistente → **roca**. `mcNombreMat` + `mcClaveDeNombre` en `app.js`. `test_fluido_importado.js` |
-| [REQ-GAL3](#-req-gal3) | poder **cambiar el espacio de nombres de una pieza desde la galería** (mover `asset:` ↔ `hab:`) | 🔴 abierto 2026-08-10 | idea del dueño al hilo de BUG-FLUID3. No es el arreglo de los importados (el motor ya no depende del espacio), sino la herramienta para **colocar** una pieza donde la quieres. Redactado, sin investigar |
-| [REQ-SHADOW2](#-req-shadow2) | materiales **sin sombra**: que `white-wool` (y el que se elija) no **reciba** ni **proyecte** sombra, para nubes semirrealistas | 🔴 abierto 2026-08-10 | configurable desde el **autorun**, no cableado al material. Redactado, sin investigar |
-| [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
+| [REQ-SHADOW2](#-req-shadow2) | materiales **sin sombra**: que `white-wool` (y el que se elija) no **reciba** ni **proyecte** sombra, para nubes semirrealistas | ✅ resuelto 2026-08-10 | `define(clave,{recibeSombra:false,proyectaSombra:false})` desde el autorun; banderas sumadas al `aShade`. `test_sin_sombra.js` |
+| [BUG-SH2](#-bug-sh2) | las nubes con `proyectaSombra:false` **siguen dejando pegote** de sombra debajo | ✅ resuelto 2026-08-11 | era la otra sombra: la SIEMBRA de skylight cortaba la columna en todo lo que no fuera aire. `mcTablaCielo()` la abre solo para `proyectaSombra:false`; `luz:'pasa'` sigue sin abrirla. Cierra la mitad que le faltaba a [REQ-SHADOW2](#-req-shadow2) |
+| ~~[REQ-FLUID6](#-req-fluid6)~~ | ~~**hundirse despacio**: dentro de un líquido la gravedad y la velocidad terminal se reducen~~ | ✅ cerrado 2026-08-11 | cifras tomadas como **RELATIVAS**: fuera no cambia ni un float, dentro gravedad **×1/16** + rozamiento exponencial (la terminal la da el rozamiento, no un tope). **Una sola `mcCaidaPaso` y tres puntos de llamada**, así los agentes caen por donde cae el jugador. Lava más espesa con una sola perilla. `test_hundirse.js` |
+| ~~[REQ-FLUID7](#-req-fluid7)~~ | ~~**nadar hacia arriba**: dentro, MANTENER salto empuja de forma continua en vez de dar un impulso y caer~~ | ✅ cerrado 2026-08-11 | `mc.keys` ya era **estado**, no flanco: el trabajo estaba en la física. Sexto argumento `nadando` en la misma `mcCaidaPaso`; el tope de subida lo da **el rozamiento que ya existía**, sin techo a mano. Mandan los **pies**, y con suelo debajo gana el salto de siempre. `test_nadar.js` |
+| ~~[REQ-FLUID8](#-req-fluid8)~~ | ~~**fuentes infinitas**: una celda rodeada de fuentes por los lados y con suelo sólido debajo se vuelve fuente ella también~~ | ✅ cerrado 2026-08-11 | umbral **≥2** (con 1 se inunda el plano entero); «sólido» **estricto**, otra fuente debajo no vale; vale para **cualquier** fluido; las derivadas son fuentes de pleno derecho y romper la original no las degrada. 25 líneas dentro de `processCell`, que **ya iba por cola de eventos**: cuatro sondeos, cero barridos. Válvula `mc.sinFuentesInfinitas`. `test_fuentes_infinitas.js` |
+| ~~[REQ-FLUID9](#-req-fluid9)~~ | ~~dentro de un fluido, **`W` te lleva donde MIRAS** y **Shift izquierdo hunde** más rápido~~ | ✅ cerrado 2026-08-11 | **séptimo argumento `mira`** en la misma `mcCaidaPaso`: `W`/`S` reparten su empuje entre avanzar (×`cos` del cabeceo) y hundirse/emerger (×`sen`), y Shift es `mira -= 1`. **Un solo presupuesto acotado a ±1** compartido con la tecla de nadar ⇒ salto+Shift se cancelan y mirar arriba saltando no empuja el doble. El rumbo se **acota, no se normaliza** (a plomo, todo lo que aporta `W` va a descenso). Rama propia **antes** del reparto por `mc.onGround`, porque el **air-strafe** que gobernaba el agua no reescribe la velocidad (BUG-ESC1 por el otro lado). Bajar sale más rápido que subir sin cifras nuevas: `−(empuje+1)·g` contra `(empuje−1)·g`. `test_nadar_avance.js` (14 ok). ⚠️ `k['shift']` son las **dos** teclas Shift. Fuera del scope, sin pedir: factor de marcha e inercia al soltar |
+| [BUG-FLUID4](#-bug-fluid4) | **caras traslúcidas marcadas** bajo un fluido en los bloques que **no llenan el lateral de su celda** | ✅ resuelto 2026-08-11 | la sospecha era correcta: `mcTapaCara` dice `false` sobre **toda** celda fina (la regla de las hojas «fancy»), así que una flor metida en el lago no tapaba ninguna cara y el fluido emitía **las 5** que la rodean — láminas sueltas marcando el hueco, que es lo de las capturas (`data/tickets/BUG-FLUID4/`). La pregunta dentro de `tapadasFluido` es otra: no «¿tapa la cara del vecino?» sino **«¿ocupa la celda?»** (sin waterlogging, una pieza fina ha REEMPLAZADO al líquido). `tapaAlFluido`, local al culling de REQ-FLUID4; `mcTapaCara` **sin tocar**. Medido +5 → **0** caras extra en agua y lava, igual que la roca; el aire (`nId 0`) sigue emitiendo. §5 de `test_caras_fluido.js` |
+| [BUG-RAY2](#-bug-ray2) | el aim **choca con la celda entera** de un cable o una alfombra en el suelo: apuntando al muro de detrás se borra el cable, o el bloque nuevo sale encima de él | ✅ resuelto 2026-08-11 | es **[BUG-RAY1](#-bug-ray1) en la otra mitad del mundo**: desde que el clic derecho mete en `mc.grid` lo que cabe en su celda, el rayo preguntaba `mcSolid` (celda 16³) por una pieza de 1 voxel de alto. `mcRejillaSolidAt` + `mcRejillaRayHit` (sub-DDA fino acotado a la celda, como el de estructuras) en `mcRaycast` y `mcBreak`. Sin materiales finos, byte-idéntico. `test_rayo_apuntado.js` |
+| [BUG-RS24](#-bug-rs24) | **no se puede hacer clic (botón central) sobre una pieza de redstone que está dentro de un fluido**: el rayo se para en el agua | ✅ resuelto 2026-08-11 | el rayo del snippet (`miraFina`, en `redstone/redstone-piezas.js`) es una **re-implementación** del de `app.js` a la que nunca le llegó la guarda `!mcIsCellReplaceable`; desde REQ-FLUID4 un fluido es fino-en-la-rejilla con el bitset **LLENO** (4096/4096), así que «¿cruzo un voxel fino lleno?» dice que sí en la primera celda de líquido. `VERSION` a `piezas-1.5`. `test_clic_bajo_fluido.js` |
 | ~~[REQ-PERF1](#-req-perf1)~~ | ~~**profiler con callstack automático** que se activa cuando los fps caen por debajo de un umbral, con niveles de verbosidad, para identificar el cuello real~~ | ✅ resuelto 2026-08-10 | `game.perfAssert = 120` (fps mínimo), `game.perfVerbosity = 1..3`. `mcTick` mide su duración; si el frame cae bajo el assert, vuelca al `console.log` las funciones llamadas + calls + ms + max. Se desarma tras un dump; `game.perfDump()` re-arma. Con `perfAssert = 0` (defecto) las envolturas se retiran → coste 0 |
 | ~~[REQ-PERF2](#-req-perf2)~~ | ~~**modo de renderizado "fast" (unlit)** desde F12 — sin luces ni sombras, para depurar el motor bajando todo el coste de renderizado~~ | ✅ resuelto 2026-08-10 | `game.renderMode = 'fast'`/`'normal'`. `fast` combina `sunShade=1` (sin sombra) + `interiorDark=1` (sin skylight) + short-circuit en `mcComputeBlockLight` (sin luz de bloque). Al cambiar re-malla el mundo para reflejar el shading. Restaura los valores al volver a `normal` |
-| [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
 | ~~[REQ-TEST1](#-req-test1)~~ | ~~79 `test_*.js` sueltos en la raíz y **ningún runner**: no hay forma de correr la suite ni de saber cuáles necesitan servidor~~ | ❌ archivado 2026-08-10 | archivado a petición del dueño. Fila **duplicada**: el mismo id ya figura ✅ resuelto más abajo, y lo que pedía está hecho — `correr_tests.js` con `--list`/`--node`/`--pw`/`--area=`, y los **96** tests etiquetados |
 | ~~[REQ-DOC1](#-req-doc1)~~ | ~~`CLAUDE.md` son 239 KB con **12 encabezados `##`**: lo que está documentado no se encuentra~~ | ❌ archivado 2026-08-10 | archivado a petición del dueño. Fila **duplicada**: el mismo id ya figura ✅ resuelto más abajo (Mapa de Navegación en la cabecera de `CLAUDE.md`) |
-| [REQ-DOC2](#-req-doc2) | falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas) | 🟡 abierto 2026-08-07 | la crítica mejor puesta de la auditoría; no es partir el fichero, es documentar qué vive en `state`, `mc` y `game`. **Sin investigar a fondo** |
 | ~~[BUG-STR1](#-bug-str1)~~ | ~~`hab:cubo-trans` acaba como **estructura fina** y no como **bloque** de rejilla~~ | ✅ cerrado 2026-08-07 | no era la válvula ni «el cubo es hueco»: era el **alpha**. Un macizo translúcido ya entra en `mc.grid` con geometría real y pasada de BLEND; `mcRecFina` es ahora la fuente única de esa regla |
 | [REQ-MNT2](#-req-mnt2) | marcar desde el **editor de agentes** qué pieza es **montable**, sin `game.esqueletos.montable(…)` a mano | ✅ cerrado 2026-08-07 | Casilla «te lleva montado» por pieza (también en la raíz); la marca vive en el **documento** y la aplica el snippet al plantar. La API queda como válvula por instancia |
 | ~~[BUG-AG1](#-bug-ag1)~~ | ~~los **agentes articulados** no los empuja el pistón ni pueden pisar placas~~ | ✅ cerrado 2026-08-07 | eran **tres** fallos; BUG-AG2 hacía falta pero no bastaba |
@@ -144,7 +175,6 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ~~[BUG-RS7](#-bug-rs7)~~ | ~~el pistón no se puede poner **apuntando hacia arriba**: se coloca de lado~~ | ✅ resuelto 2026-08-06 | el circuito lo acostaba al soltarlo; ahora el frente sale de `mcOriPerm` y puede ser `±Y` |
 | ~~[BUG-RS8](#-bug-rs8)~~ | ~~accionar la palanca la **mueve de celda** y le cambia el giro~~ | ✅ resuelto 2026-08-06 | **el mismo fallo que BUG-RS7**: redstone recortaba la postura a 4 bits y hay 24 |
 | ~~[BUG-RS6](#-bug-rs6)~~ | ~~agrandar la puerta a 16×16×24 la convierte en **estructura** y deja de ser redstone~~ | ✅ resuelto 2026-08-06 | la puerta son **dos celdas de rejilla** que se mueven en la misma pasada; muere el apaño de `conduce` |
-| [REQ-MAP1](#-req-map1) | Alt+M = pantalla de mapas conmutable sin perder el mundo abierto | medio | — |
 | ~~[REQ-NAV1](#-req-nav1)~~ | ~~la barra superior se reduce a `[Galería] [🌍 Mundo] [⋯]`~~ | ✅ resuelto 2026-08-07 | de 15 botones a 3; la cabecera baja a **una fila de 70,6 px** a 390 px; la Galería lo enseña **todo, sin clasificar**; `test_barra_tres_botones.js` **22 ok** |
 | ~~[REQ-XR1](#-req-xr1)~~ | ~~rayos-X tapa lo que marca: inservible para capturas~~ | ✅ resuelto 2026-08-06 | solo aristas: del 92,2 % de pantalla tapada al 4,9 % |
 | ~~[REQ-XR2](#-req-xr2)~~ | ~~rayos-X: una línea más en la etiqueta con el **power** del bloque~~ | ✅ resuelto 2026-08-06 | `⚡ recibe → saca` en las piezas y `⚡ n débil` en los bloques que hacen de puente; el 0 no se pinta |
@@ -158,10 +188,6 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ~~[BUG-ESC1](#-bug-esc1)~~ | ~~al montar en una escalera se conserva el movimiento lateral: te mueve solo y te tira~~ | ✅ | colgado mandaba la rama de aire de `app.js` (sin rozamiento ni reescritura desde teclas); agarrado se manda por la de tierra |
 | ~~[BUG-ROT1](#-bug-rot1)~~ | ~~`R` y `Shift+R` no alcanzan las 24 orientaciones: hay colocaciones imposibles~~ | ✅ resuelto 2026-08-06 | eran 16 (faltaba el tercer cuarto de vuelta); `MC_ORI` se **deriva**, y sale agrupada de 4 en 4 ⇒ `ori = cara*4 + giro` es el gesto que pidió el dueño |
 | ~~[PERF-MC2](#-perf-mc2)~~ | ~~sub-chunk culling de estructuras~~ | ❌ cerrado 2026-08-07 | **sin hacer, por decisión del dueño**: nadie ha vuelto a reportar fps bajos por estructuras desde que se midió que el cuello era otro |
-
-La columna «pinta» es una **impresión al redactar, no una estimación medida** — varias se escribieron
-sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo que el dueño cerró el
-2026-08-06 al revisar la cola; el detalle y sus consecuencias están en cada ticket.
 
 ---
 
@@ -3086,6 +3112,77 @@ tras limpiar—, y pasa igual con el motor de antes y con el de ahora.
 
 ---
 
+### ✅ BUG-RS25 · La placa de presión no se desactiva al bajarse de ella — ✅ resuelto 2026-08-11
+
+**Reporte del dueño, literal:**
+
+> la placa de presion de redstone no funciona correctamente, cuando el usuario ya se ha bajado de
+> ella deberia desactivarse pero no se desactiva.
+
+**Montaje:** una `hab:placa` en el suelo alimentando algo visible (lámpara o pistón). Te subes
+—enciende, eso funciona— y te bajas: se queda **pegada encendida**, en vez de soltarse.
+
+**Sin investigar** (regla de tickets: se escriben, no se investigan). Lo que sí conviene dejar
+apuntado, porque es la trampa de este ticket concreto:
+
+- **Es el reverso exacto de [BUG-RS22](#-bug-rs22)**, resuelto ayer. Allí el problema era el
+  contrario —la placa se soltaba sola estando tú encima y el observador pulsaba cada ~1 s— y el
+  arreglo fue sostenerla: `alSeguirPisando` late cada 250 ms mientras sigas en la celda y re-arma un
+  `pulso` de 1,2 s. **Bajarse no tiene flanco propio**: `alPisar` es solo de entrada. Lo único que
+  suelta la placa es que **deje de llegar el latido** y el `pulso` venza por su cuenta.
+- Por eso la primera pregunta no es «¿por qué no se apaga?» sino **¿sigue llegando el latido después
+  de bajarte?** (celda de pies mal calculada, la entidad contada como dentro de la celda de al lado,
+  o el `pulso` re-armándose desde otro sitio). La segunda es si el `pulso` vence pero **algo lo
+  vuelve a encender** — que fue justo la mitad no evidente de BUG-RS22.
+- **El arreglo no puede reabrir BUG-RS22.** Las dos mitades son la misma frontera: si se acorta o se
+  elimina el sostén, vuelve el parpadeo y el observador vuelve a pulsar cada ~1 s. `test_placa_observador.js`
+  guarda ese lado; hará falta un caso nuevo para el lado de soltar, y los dos tienen que pasar juntos.
+- Ojo también al `pulso` de 1,2 s como **latencia esperada**: parte de «no se desactiva» podría ser
+  «tarda más de un segundo en desactivarse». Merece medirlo antes de tocar nada — la diferencia
+  cambia por completo qué está roto.
+
+Material: `hab:placa` / `hab:placa-on`, declarados en los dos espacios de nombres (ver BUG-RS22).
+El descubridor de siempre es `game.bloques.info()` y el estado de la celda, `game.redstone.info(x,y,z)`.
+
+**Resuelto 2026-08-11 — y la sospecha de arriba era la equivocada.**
+
+El latido **no** se queda pegado: para en seco al bajarse. Medido de cuatro maneras distintas (andando,
+saltando, quedándose encima y desde el borde de la celda, `performance/sonda_placa_rs25.js`) y en el
+mundo del dueño con su puerta (`sonda_placa_rs25_mundo.js`): la placa suelta siempre, y en 16 ciclos
+con estancias de 40 ms a 2 s no hay ni uno que la deje pisada. En caliente el mecanismo está sano.
+
+**Lo que sí estaba roto es la otra mitad, y saltó al mirar `/map/default`: ese mundo CARGABA con la
+placa en `hab:placa-on`.** El estado de una pieza con pareja **es la clave que hay en la rejilla** —eso
+es lo que hace que una palanca sobreviva a recargar el mundo sin persistir nada—, pero a una placa no
+la suelta su clave: la suelta un `setTimeout` de `apagones`, que es **memoria de la sesión y no se
+guarda con el mundo**. Guardar el mundo con la placa pisada (autoguardado mientras estás encima, que
+es lo normal) deja en disco una celda `-on` que al volver no tiene temporizador que la suelte ni nadie
+que se vaya a bajar de ella: **pegada para siempre**, alimentando su puerta o su lámpara con nadie
+encima. Por eso «me he bajado y no se desactiva»: no era esa bajada, era una anterior.
+
+El arreglo tiene **precedente literal en el mismo sitio**: `repasarMundo()` (el repaso de arranque,
+`redstone.js`) ya devolvía a `off` el **observador** guardado encendido, por esta misma razón y con
+este mismo comentario. Se le añade la otra entrada momentánea: toda celda `manual` + `pulso` que
+cargue en `-on` se suelta al arrancar, porque **con nadie encima una entrada de pulso está apagada por
+definición**; y si de verdad hay alguien, su latido (`alSeguirPisando`) la re-enciende en el mismo
+frame — que es justo el caso B del guardián, y es lo que impide reabrir BUG-RS22. Cubre también el
+**botón**, que tenía la misma enfermedad sin que nadie la hubiera visto. `VERSION` del motor a `r1.3`.
+
+De propina, un fallo latente que el precedente sí tenía: esas celdas se escriben **a pelo en
+`mc.grid`**, sin pasar por `mcSetBlock`, así que la malla no se enteraba. Ahora se juntan en
+`retocadas` y se remallan al final del repaso — sin esto el mundo seguía **enseñando** la placa pisada
+aunque el circuito ya estuviera suelto.
+
+⚠️ **No se reescribe el mundo del dueño**: el arreglo suelta la placa al cargar, no toca
+`data/mundo.json`. Si ese mundo se vuelve a guardar, se guardará ya con la placa suelta.
+
+Guardián: **`tests/test_placa_pegada.js`** (A: carga pisada → se suelta y su cable se apaga · B: con
+alguien encima sigue pisada · C: el ciclo de siempre no cambia). Sin regresión en
+`test_placa_observador.js`, `test_agente_pisa_placa.js` ni `test_redstone_arranque.js` (los 3 fallos
+de éste son **previos**: se reproducen igual con el motor de antes, y son de assets, no de señal).
+
+---
+
 ### 🟡 BUG-RS23 · Una pieza importada de otra instancia deja de ser circuito — ✅ resuelto 2026-08-10
 
 **Reporte del dueño, literal:**
@@ -3210,7 +3307,935 @@ reescribir el mundo, o dejar la vieja como alias.
 
 ---
 
-### 🔴 REQ-SHADOW2 · Materiales sin sombra (nubes) — 🔴 abierto 2026-08-10
+### 🔴 REQ-FLUID4 · «Ilusión de agua»: que un lago parezca una masa continua, no cubos transparentes — 🔴 abierto 2026-08-10
+
+**Petición del dueño:** que el agua se vea como en Minecraft —una masa continua y cristalina— en vez
+de una cuadrícula de cubos transparentes con las **aristas y caras internas** a la vista. Aporta un
+análisis de **otra IA** con tres pilares:
+
+1. **Culling de caras internas** — una cara de agua que colinda con **otra agua** no se emite; solo
+   queda la «cáscara» (superficie + bordes contra aire o sólido). Es lo que mata el entramado de
+   líneas internas.
+2. **Altura de la capa superior** — un bloque fuente expuesto al aire **no llena el cubo**: se
+   renderiza a ~87,5 % de alto, lo que además evita Z-fighting con lo que flote encima.
+3. **Mezcla α y tintado** — el agua se pinta en una **pasada final**, después de los opacos y
+   **ordenada de atrás hacia delante** (`SRC_ALPHA, 1-SRC_ALPHA`); y la textura es en **escala de
+   grises**, tintada por bioma (turquesa en picos helados, verde/marrón en pantano).
+
+**Alcance aclarado por el dueño (2026-08-10), en cuatro mensajes:** los fluidos **ya existen y
+funcionan**, no se toca la simulación. Lo que falta es el **aspecto**: «desde fuera o desde dentro
+tiene que parecer agua cristalina», incluida la **vista subacuática**. **Fuera de alcance de
+momento:** reflejar el cielo y las nubes — «más adelante». Y permiso explícito para los datos que
+haga falta: «si necesitas hacer un bloque sólido de agua de 16×16×16 con alpha, hazlo».
+
+### Causa raíz (investigada, 2026-08-10)
+
+**No es que falte culling en el mallado del cubo: es que el agua no pasa por ahí.**
+
+`assets/agua.vox.json` son **2784 voxels** de un solo color `#3377ff1a` (alpha 26/255 ≈ 10 %). Con
+`translucido=true` y `nvox < 4096`, `blockLike` sale **false** (`app.js:6673`), así que el agua entra
+por el **camino fino de la rejilla** (`mc.finoRejilla`), no por el del bloque. Y eso es correcto y
+deliberado —lo explica `mcRecFina` (`app.js:6710-6713`)—: **el atlas del terreno se hornea sin
+alpha** (`buildTexFaces` fija `d[o+3]=255`) y el shader del terreno **recorta**, no mezcla, así que un
+translúcido proyectado al cubo saldría **macizo**. Para eso existe la pasada `finoAVbo` con BLEND.
+
+⚠️ **Ahí está el fallo:** el camino del cubo **sí** culla contra el vecino (`mcTapaCara`,
+`app.js:7952-7967`, con altura de fluido incluida), pero el camino **fino no culla nada entre
+celdas**: `copia()` (`app.js:7999`) vuelca **todas** las caras de la cáscara de cada celda. Dos celdas
+de agua contiguas dibujan **dos paredes translúcidas pegadas** en su frontera y, con alpha 0,10 cada
+una, eso es exactamente la cuadrícula de aristas que se ve. `mcTapaCara` además devuelve **false** a
+propósito para toda celda fina (`app.js:6053-6058`) — la regla de las hojas «fancy», correcta para
+hojas y ruinosa para un fluido contra sí mismo.
+
+O sea: **el pilar 1 del análisis es el problema real, pero vive en el camino fino**, no en el del cubo.
+
+### Plan por fases (no todo de golpe)
+
+1. ✅ **Culling agua-agua en el camino fino — HECHO (2026-08-11).** Ver abajo.
+2. ✅ **Bloque de agua 16³ con alpha — HECHO por el dueño (2026-08-11).** `assets/agua.vox.json` y
+   `assets/lava.vox.json` son ya 16×16×16 = 4096 voxels de un color con alpha.
+3. ✅ **Vista subacuática — HECHA (2026-08-11).** Ver abajo.
+4. **Reflejos de cielo y nubes** — aplazado por el dueño ⇒ sale de aquí y vive en
+   **[REQ-FLUID5](#-req-fluid5)** (2026-08-11). Este ticket queda **cerrado en lo suyo**.
+
+⚠️ Del análisis original de la otra IA, lo que **sigue sin comprobar** (y no hace falta para 1-3):
+
+- **Contrastar el punto 2 con fuente.** El «~87,5 %» y el «nivel 8/8» del análisis **no cuadran entre
+  sí**: en Minecraft la fuente es el nivel **0**, y 8/8 sería lo contrario de lleno. El número puede
+  ser bueno y la etiqueta mala, pero hay que verificarlo, no copiarlo.
+- El **tintado por bioma** es un rasgo aparte y más gordo (no tenemos biomas): probablemente sea
+  ticket propio, o un tinte por material. Preguntar al dueño si lo quiere dentro de éste.
+### ✅ Fases 1-2 · Que parezca agua **desde fuera** — hechas (2026-08-11)
+
+Petición del dueño tras probar la fase 3: «vale, tiene mejor pinta, ahora quiero que parezca agua
+también desde fuera».
+
+**Lo que se emite ahora.** El camino fino ya sabe **a dónde mira cada cara**: `mcStructGeom` guarda,
+en arrays paralelos a los `…SC` de luz, un byte por cara (`colFD`/`alphaFD`/`texFD`) con el índice de
+`MC_FACES`… **o 6 si el quad no está en la piel de la pieza**. Esa distinción no es adorno: un quad
+que mira a +Y puede estar en el interior del modelo (el techo de una cueva dentro de la pieza), y a
+ése no lo tapa ningún vecino. Con eso, el bucle fino de `mcMeshChunk` calcula una máscara de 6 bits
+por celda y `copia()` se salta las caras marcadas. **Una charca de 9×9×3 pasa de 1458 caras a 81** —
+justo la lámina de arriba.
+
+Las tres reglas, que son las mismas que el camino de cubo llevaba desde siempre:
+
+- vecino **opaco** que tapa la cara entera (`mcTapaCara`), y solo con el bloque lleno;
+- **arriba/abajo** contra el mismo fluido: siempre (`mcGetFluidHeight` ya devuelve 1.0 cuando hay
+  fluido encima, así que los dos planos coinciden exactos);
+- **de lado** contra el mismo fluido: solo si el vecino **llega tan alto** como uno mismo; si no,
+  asoma una franja y hay que dibujarla.
+
+⚠️ **Se compara TIPO de fluido, nunca id.** `hab:agua` y `hab:agua-1..7` son ids distintos de la
+**misma** masa de agua, y agua contra lava son tipos distintos y sí se ven. Para eso está
+`mcTablaFluido()` — tabla densa `id → 'WATER'|'LAVA'|''` sacada de `game.fluidos.getProps()`, con la
+caché invalidada por el tamaño de la paleta **y por la identidad de `game.fluidos`**: la instala un
+snippet y puede llegar **después** del primer mallado, así que sin esa segunda condición el «aquí no
+hay fluidos» se quedaba cacheado para siempre.
+
+⚠️ **La regresión que destapó todo esto (y que era la mitad del problema visible):** los niveles de
+fluido se apendan a la paleta en `setFluid`, **después** de que `mcBuildPalette` hornee
+`mc.finoRejilla`. Ese `mc.finoRejilla[id] = …` escribía **pasado el final de un `Uint8Array`**, y JS
+lo tira sin decir nada. Resultado: `agua-3` perdía «me dibujo con mi geometría fina» y volvía al
+camino de cubo… que proyecta desde el **atlas del terreno, horneado sin alpha** ⇒ un cubo azul
+**opaco** en medio de un lago translúcido. Ahora los cuatro arrays (`finoRejilla`, `finoExtra`,
+`recorte`, `atraviesaDoc`) **crecen**, como ya hacía `mcAltaVariante`.
+
+**Y el alpha del agua.** Con las caras internas fuera, un lago es **una sola lámina**, no dieciocho
+apiladas; con `#3377ff1a` (α = 0,10) el agua se volvía casi invisible. `assets/agua.vox.json` pasa a
+**`#3377ff66`** (α = 0,40): cristalina —se ve el fondo y lo que hay dentro— pero se lee como agua.
+Es un valor de asset: se cambia en el editor sin tocar el motor. Lava se queda como estaba (α = 0,74).
+
+Válvula: **`mc.sinCullingFluido = true`** devuelve el lago-rejilla de antes (y está metida en la firma
+de la caché de chunks, o sea que re-malla de verdad).
+
+**Verificado** — `node test_caras_fluido.js`, TODO OK: mide la **malla** (caras del VBO translúcido
+del chunk), no una variable; la expectativa del caso agua-contra-lava se **deriva de la rejilla de
+verdad** en vez de escribirse a mano, porque si no se estaría midiendo al simulador de fluidos. Sin
+regresión en `test_vista_subacuatica.js`, `test_fluido_importado.js`, `test_atlas_estructuras.js`,
+`test_luz_al_estampar.js`, `test_caras_pegadas.js` ni `test_caras_mundo.js`. Comparativa en
+`data/tickets/REQ-FLUID4/` (`4-fuera-sin-culling.png` / `5-fuera-con-culling.png` y `6-`/`7-` para
+lava). Fallos previos que **no** son de esto y siguen igual que en HEAD: `test_cubo_translucido.js`
+§6 (2), `test_flor_en_rejilla.js` (3), `test_luz_en_rejilla.js` (3).
+
+### ✅ Fase 3 · Vista subacuática — hecha (2026-08-11)
+
+Empezada la primera por petición del dueño. **`app.js` no reconoce ningún material por su nombre:**
+pregunta a `game.fluidos.getProps()`, que es quien ya distingue agua de lava y entiende los niveles
+(`hab:agua-3`). Por eso agua y lava salen del **mismo mecanismo** y solo cambian color y distancia,
+como pidió («es como el agua pero cambia el color nada más»).
+
+- `mcFluidoOjo()` mira la celda del **ojo**, no la de los pies (`mc.pos[1] + MC_EYE*mc.scale`, la
+  misma altura que `mcViewMatrix`). Andar por un charco no tiñe; agacharse dentro, sí. Hay caso de
+  test para eso.
+- `mcActualizaVista()` corre **una vez por fotograma**, al principio de `mcRender()` y **antes del
+  clear** — el color de fondo es la mitad del efecto, porque lo que queda más allá de la niebla es
+  fondo, no cielo.
+- Las dos palancas ya existían (`uSky`, `uFogNear`/`uFogFar`) pero **`MC_SKY` se leía suelto en 9
+  sitios** y la niebla se fijaba a mano en 6. Ahora todos pasan por `mcCieloEf` / `mcFogNear()` /
+  `mcFogFar()`. El **séptimo** sitio de niebla (el del overlay) se deja fuera a propósito: allí está
+  desactivada y bajo el agua tampoco debe volver.
+
+⚠️ **Las dos lecciones de esta fase, cada una de una ronda fallida:**
+
+1. La niebla submarina va en **bloques absolutos**, NO en fracción del `far` de proyección como la de
+   fuera. Con fracciones y `renderDist` alto la niebla acababa a ~50 bloques y no teñía nada: el
+   efecto se quedaba en «he cambiado el color del fondo».
+2. **Tinte y alcance son cosas distintas y hay que separarlas.** Arreglar (1) cerrando la niebla a 11
+   bloques sí parecía agua, pero **borraba las paredes** — dicho por el dueño: «no se ven las paredes
+   o bloques que no son agua cuando está buceando, deberían verse», y «quiero por lo menos un far
+   100». Con una sola palanca hay que elegir entre las dos, y las dos hacen falta. La salida es un
+   **suelo de niebla** (`uFogMin`, uniforme nuevo en los cuatro shaders con niebla): un tinte
+   constante que se aplica igual a un bloque pegado a la cara que a uno lejano. Así `far` puede ser
+   100 y el agua notarse igual. Fuera del agua vale **0**, o sea `f = 0 + 1·f`: idéntico al de antes,
+   ni un float de diferencia. El overlay lo fija a 0 a mano, para que bucear no le eche un velo azul
+   a la interfaz.
+
+Comparativa en `data/tickets/REQ-FLUID4/` (`1-fuera.png` / `2-agua.png` / `3-lava.png`).
+
+Valores estéticos ⇒ **tunables por consola**, no UI: `game.vistaAgua({far:60})`,
+`game.vistaAgua({tinte:0.5})` (más azul **sin** perder alcance), `game.vistaAgua({sky:[0,0.4,0.6]})`,
+`game.vistaLava({far:1})`, `game.vistaAgua('reset')`. Para probar sin nadar:
+`mc.vistaFluido = 'WATER' | 'LAVA' | null` (y `undefined` para devolvérselo al motor).
+Defectos: agua `far:100, tinte:0.30`; lava `far:6, tinte:0.80` — en lava se ve poco a propósito.
+
+**Verificado** — `node test_vista_subacuatica.js`, 35 comprobaciones, TODO OK. Mide la **pantalla**
+con `readPixels`, no variables. §6 corre en **`/map/voxelforge`** a propósito: `/map/test` no tiene
+agua en la paleta, así que la detección automática —lo que puede romperse sin que nadie se entere—
+se quedaba sin probar. Sin regresión en `test_sin_sombra.js` (fuera del agua los valores son los de
+siempre, así que el render no cambia ni un float).
+
+**Pendiente de este ticket:** fases 1 y 2 (el culling agua-agua y el bloque 16³), que son las que
+quitan la cuadrícula vista **desde fuera**. El agua y la lava ya son 16³ de 4096 voxels.
+
+- Materiales de agua que hay hoy, por si el arreglo debe cubrirlos a todos: `hab:agua`,
+  `hab:agua-profunda`, `hab:like-water`, `asset:assets/agua.vox.json` y `assets/lava.vox.json` (256
+  voxels, `#ff5500bd`). Antecedente **BUG-FLUID3**: allí el síntoma parecía del motor de fluidos y
+  era de resolución de claves.
+
+---
+
+### 🔴 REQ-FLUID5 · Reflejos de cielo y nubes en la superficie del agua — 🔴 abierto 2026-08-11
+
+**De dónde sale.** Era la **fase 4 de [REQ-FLUID4](#-req-fluid4)**. Al acotar aquel ticket el dueño la
+dejó fuera con un «más adelante», y al cerrar las fases 1-3 pidió sacarla a ticket propio. Aquí está.
+
+**Qué se pide.** Que la lámina de agua **refleje el cielo y las nubes**, que es lo que separa «un
+cristal azul tumbado» de «agua». Hoy la superficie es plana y opaca al mundo de arriba: se ve el
+color del asset y nada más.
+
+**Por qué ahora tiene sentido y antes no.** Las fases 1-2 dejaron el lago como **una sola lámina** de
+caras (una charca de 9×9×3 pasó de 1458 caras a 81). Un reflejo pintado sobre dieciocho planos
+apilados se habría sumado dieciocho veces; sobre uno solo, se pinta una vez. **Esto es un cambio de
+shader, no de mallado** — el trabajo de geometría ya está hecho.
+
+**Lo que se sabe del terreno** (sin volver a investigar, todo de lo aprendido en REQ-FLUID4):
+
+- La superficie del agua sale por la pasada **`finoAVbo`** del chunk (BLEND, `stride 9`), no por el
+  atlas del terreno — que se hornea **sin alpha** y recorta en vez de mezclar.
+- Cada cara translúcida ya lleva su **dirección** (`alphaFD`, byte por quad, `0..5` = índice de
+  `MC_FACES`, `6` = no está en la piel). O sea: **el shader ya puede saber cuáles son las caras de
+  arriba**, que son las únicas que reflejan. Eso no había que inventarlo, se hizo en la fase 1.
+- El color del cielo ya está centralizado en `mcCieloEf()` desde la fase 3, y `uSky` es uniforme.
+- Las nubes son geometría del mundo (`white-wool` con `recibeSombra:false` / `proyectaSombra:false`,
+  [REQ-SHADOW2](#-req-shadow2)), **no** una textura de cielo. Eso condiciona el enfoque: un reflejo
+  «de nubes» de verdad implicaría verlas, y verlas implica una pasada extra.
+
+**Enfoques posibles, sin decidir** (por coste creciente; hay que medir antes de elegir):
+
+1. **Fresnel + color de cielo.** Mezclar hacia `uSky` según el ángulo de visión: rasante refleja,
+   picado transparenta. Barato, sin pasada extra, y es el 80 % de la sensación. **No refleja nubes**,
+   solo el color del cielo.
+2. **Lo anterior + normales onduladas** (ruido animado). Rompe el espejo plano, que es lo que delata
+   una superficie falsa. Sigue sin pasada extra.
+3. **Reflexión planar de verdad**: segunda pasada del mundo con la cámara espejada por el plano del
+   agua, a un FBO. Es lo único que refleja nubes y terreno **de verdad**, y es también lo que dobla
+   los draw calls. ⚠️ Con **PERF-RS1** (el mundo ya se estrangula por draw calls) esto no se decide
+   sin medir. Y el agua no está siempre a la misma altura: un plano único no vale para dos lagos a
+   cotas distintas.
+
+**⚠️ Lo que NO se ha verificado** (esto es un ticket redactado, no una investigación):
+
+- Si el shader translúcido tiene hoy a mano la **normal** y la **dirección a cámara** que un Fresnel
+  necesita, o hay que subirlas.
+- Cómo interactúa un reflejo con **`uFogMin`** (el suelo de tinte de la fase 3): visto desde dentro
+  del agua, la cara de arriba es la que se mira al bucear, y ahí un reflejo puede quedar mal.
+- Si la **lava** entra en este ticket. Refleja distinto (es emisiva, casi opaca) y puede que lo suyo
+  sea brillo, no reflejo. **Preguntar al dueño.**
+- Si hay ya alguna palanca de reflejo en el motor. Se asume que no.
+
+**Herencia de REQ-FLUID4 que aplica aquí igual:** la válvula por consola (`game.vistaAgua(...)` es el
+precedente — valores estéticos van a **tunables de F12, no a UI**), y el guardián debe medir la
+**pantalla** (`readPixels`) o la **malla**, nunca una variable.
+
+---
+
+### ⚠️ Nota común a REQ-FLUID6 y REQ-FLUID7 · las cifras son RELATIVAS
+
+El dueño aporta números de **Minecraft**, en **bloques/tick**. Nuestro motor **no funciona en ticks**
+(la física del jugador va en bloques por segundo) y, sobre todo, **la instrucción es explícita**:
+
+> «las velocidades tenerlas en cuenta como **relativas**, usar **fuera** del líquido las que están
+> ahora mismo»
+
+O sea: **fuera del agua no cambia ni un float** — se queda tal cual está hoy. Lo que se implementa es
+la **proporción** entre dentro y fuera, sacada de las cifras que él da:
+
+| magnitud | fuera (MC) | dentro (MC) | **razón a implementar** |
+|---|---|---|---|
+| aceleración de gravedad | 0,08 b/tick² | 0,005 b/tick² | **×1/16** (0,0625) |
+| velocidad terminal | ≈3,92 b/tick | — (no la da) | ver REQ-FLUID6 |
+| subir manteniendo salto | — (es impulso) | ≈0,04 | **8× la gravedad de dentro**, o **½ la de fuera** |
+
+Ese último renglón es el que hace que se pueda nadar: con la tecla pulsada, dentro del agua el neto
+es **+0,035 hacia arriba** = **7× la gravedad de dentro**, subiendo. Al soltarla, vuelve a hundirse a
+1/16 de gravedad. Anclar así los valores es lo que hace que la sensación se conserve aunque nuestros
+números de fuera no sean los de Minecraft.
+
+⚠️ **Dos incoherencias de unidades en el enunciado**, que hay que resolver antes de codificar y que no
+invento yo — están en el texto tal cual llegó: el impulso de salto viene en **m/s** (`0,42 m/s`)
+cuando el resto va en bloques/tick, y el empuje de dentro viene en **bloques/tick** cuando una
+**aceleración** debería ser bloques/**tick²**. En Minecraft ambos son 0,42 y 0,04 en unidades de tick;
+lo tomo así, pero queda anotado.
+
+---
+
+### ✅ REQ-FLUID6 · Dentro de un líquido se hunde uno **despacio**: gravedad y velocidad terminal reducidas — ✅ cerrado 2026-08-11
+
+**Petición del dueño:**
+
+> «1) Aceleración por gravedad y velocidad terminal · Fuera: aceleración gravitatoria hacia abajo de
+> 0,08 bloques/tick² (velocidad terminal ≈3,92 bloques/tick). Dentro: la gravedad efectiva se reduce
+> a 0,005 bloques/tick², provocando un hundimiento lento y controlado.»
+
+**Lo que hay que hacer, en una frase:** mientras el cuerpo esté dentro de un fluido, la gravedad que
+se le aplica es **1/16** de la de fuera, y la velocidad de caída se satura mucho antes. Fuera, todo
+igual que hoy (ver la nota común de arriba).
+
+**Lo que se sabe del terreno** (de REQ-FLUID4, no de una investigación nueva):
+
+- **Quién decide si estás dentro** ya existe y no hay que inventarlo: `game.fluidos.getProps(...)`,
+  que es lo que usa `mcFluidoOjo()` de la fase 3. `app.js` **no reconoce materiales por su nombre**,
+  se lo pregunta al simulador — y así entiende gratis los niveles (`hab:agua-3`) y la lava.
+- ⚠️ Pero la fase 3 mira **el OJO** a propósito (andar por un charco no debe teñir la pantalla). La
+  **física** casi seguro quiere otra celda —los pies, o el centro del cuerpo—, o no se hunde uno
+  hasta tener la cabeza dentro. **Son dos preguntas distintas al mismo `getProps`**, no la misma.
+
+**⚠️ Lo que NO se ha verificado** (ticket redactado, no investigado):
+
+- **Si el jugador ya tiene algún trato especial dentro del agua hoy** (freno, nado, algo). Se asume
+  que no, pero es lo primero que hay que mirar al abrirlo: si lo hay, este ticket lo sustituye, no lo
+  suma.
+- **La velocidad terminal.** El dueño da la de fuera (≈3,92) pero **no la de dentro**. En Minecraft
+  sale del rozamiento, no de una constante, así que hay que decidir si la modelamos con un **factor
+  de arrastre** (más fiel y más barato: un `v *= k` por paso) o con un tope duro. Como el dueño pide
+  proporciones, el arrastre encaja mejor.
+- Qué pasa en la **frontera**: entrar en el agua a toda velocidad ¿frena de golpe o decelera? Si es
+  de golpe, se nota como un muro.
+- **Si esto aplica a los agentes** o solo al jugador. Hay antecedente: **BUG-FLUID2** ya tocó la
+  gravedad de los agentes. **Preguntar al dueño.**
+- Si **lava** usa las mismas proporciones que el agua o es más espesa (en Minecraft lo es). Lo mismo
+  que ya se preguntó en REQ-FLUID5: el ticket cubre «líquido», y agua/lava pueden diferir por
+  parámetro sin duplicar código, porque `getProps` ya devuelve el **tipo**.
+
+**Cómo se verificará** (herencia de REQ-FLUID4, que aplica igual): el guardián mide la **caída real**
+—posiciones del jugador a lo largo de N pasos de física—, no la variable de la constante. Y el caso
+que de verdad protege es **fuera del agua no cambia nada**.
+
+Valores estéticos ⇒ **tunables de consola F12**, no UI, con el precedente exacto de
+`game.vistaAgua({...})`.
+
+**Resuelto 2026-08-11.** Lo que se decidió al implementarlo:
+
+- **Rozamiento, no tope duro.** El dueño no dio la terminal de dentro, así que sale sola:
+  `v = (v − g_dentro·dt)·e^(−dt/τ)`, con `τ` = «arrastre». Entrar en el agua a 10 bloques/s frena en
+  ~0,2 s en vez de chocar contra un techo invisible, y la terminal (~0,30 bloques/s en agua) es una
+  **consecuencia**, no un número escrito a mano.
+- **Una sola `mcCaidaPaso(vy, dt, x, y, z)` y tres puntos de llamada** — el jugador en `mcUpdate` y
+  los **dos** integradores de agentes del snippet (`asentar` y `movPaso`), que llaman a través de un
+  puente con respaldo. Es lo que hace cierto el «los agentes se comportan como los jugadores en todos
+  los casos» **mañana** y no solo hoy: copiar la fórmula habría sido condenarlas a divergir al primer
+  retoque. Mismo patrón que `mc.sunExtra` / `mcXrayExtra`.
+- **La lava más espesa es UNA perilla**: más rozamiento, misma proporción de gravedad. Así subir el
+  espesor no cambia además lo rápido que se empieza a hundir. Sale ~0,15 bloques/s, la mitad del agua.
+- **Se sondea el PUNTO, no la celda** (`mcGetFluidHeight`), para que unos pies apoyados en el aire que
+  deja un fluido a medio nivel no se hundan. Es la diferencia deliberada con `mcFluidoOjo` de
+  REQ-FLUID4 fase 3, que sí mira la celda del ojo.
+- Válvula `mc.sinFisicaFluido` + `game.fisicaAgua({...})` / `game.fisicaLava({...})`.
+
+`test_hundirse.js` (20 ok). Dos expectativas del test estuvieron mal antes de estarlo el motor, y las
+dos por lo mismo: **el motor integra en pasos discretos y yo comparaba contra el límite continuo**
+(½gt² frente a la suma `g·dt²·n(n+1)/2`, y la vida media del rozamiento medida un frame antes de que
+muerda). Anotado aquí porque volvió a morder en REQ-FLUID7.
+
+---
+
+### ✅ REQ-FLUID7 · Dentro se **nada** manteniendo el salto, no se salta — ✅ cerrado 2026-08-11
+
+**Petición del dueño:**
+
+> «2) Mecánica de ascenso (salto vs. flotabilidad) · Fuera: presionar la tecla de salto aplica un
+> impulso instantáneo hacia arriba (v_y ≈ 0,42) seguido de una parábola. Dentro: **mantener** la tecla
+> de salto aplica una aceleración ascendente constante (≈0,04), generando un empuje continuo tipo
+> flotación.»
+
+**Lo que hay que hacer, en una frase:** dentro del líquido la tecla de salto deja de ser un **evento**
+y pasa a ser un **estado**. Fuera, sigue siendo el impulso de hoy, intacto.
+
+**Por qué es ticket aparte de [REQ-FLUID6](#-req-fluid6) y no el mismo:** aquél cambia una
+**constante** (la gravedad se multiplica por 1/16). Éste cambia el **gesto de entrada**: pasar de
+«al pulsar, sumo velocidad una vez» a «mientras esté pulsada, sumo aceleración cada paso» toca el
+manejo del teclado, no la caída. Se pueden probar por separado, y sin el 6 el 7 no se nota (con la
+gravedad de fuera, un empuje de ½ de gravedad no sube: frena).
+
+**Depende de REQ-FLUID6** y conviene hacerlo después: la cifra de empuje está anclada a la gravedad
+**de dentro** (8×), así que hasta que ésa no exista, no hay a qué anclarla.
+
+**⚠️ Lo que NO se ha verificado:**
+
+- **Si el motor sabe hoy que la tecla de salto sigue pulsada**, o solo ve el flanco de pulsación. Es
+  **la** pregunta de este ticket: si solo hay evento, hay que llevar el estado de la tecla hasta el
+  paso de física, y ahí es donde vive el trabajo real.
+- Qué pasa **al asomar la cabeza**: si estás medio dentro medio fuera, ¿flotas o saltas? La respuesta
+  natural es «manda la celda de los pies» y es la que hace que se pueda **salir** del agua a la
+  orilla; si manda el ojo, uno se queda pegado al borde. **Es un caso de test, no un detalle.**
+- Si hay **tope de velocidad de subida**. Sin él, mantener pulsado en un lago hondo te dispara.
+- Si el agua **corriente** empuja (en Minecraft sí). **Fuera de alcance salvo que el dueño diga**;
+  sería otro ticket, y es el que justificaría de verdad el simulador de niveles.
+- Si los **agentes** nadan. Misma pregunta que en REQ-FLUID6.
+
+**Cómo se verificará:** un guardián que mantenga la tecla N pasos y compruebe que la altura **sube de
+forma sostenida** (no una parábola), que al soltarla **baja despacio** (eso es REQ-FLUID6 en marcha),
+y que **fuera del agua el salto de siempre da exactamente la misma parábola que hoy**.
+
+**Resuelto 2026-08-11.** Respuesta a cada duda que dejó abierta el ticket:
+
+- **¿El motor ve la tecla mantenida o solo el flanco?** Mantenida: `mc.keys` es un mapa de **estado**
+  (`k[' ']` sigue a `true` mientras esté pulsada) y lo que la convertía en evento era la guarda
+  `mc.onGround`, no la entrada. O sea que no hubo que tocar el manejo de teclado: **todo el trabajo
+  estaba en la física**, que era la mitad optimista de la estimación.
+- **¿Tope de subida?** Sí, y **gratis**: el mismo rozamiento de REQ-FLUID6 lo da. La aceleración pasa
+  de `−g_dentro` a `+(empuje−1)·g_dentro` y el arrastre la satura en ~2,04 bloques/s en agua. Cero
+  techos escritos a mano, y como el empuje está anclado a la gravedad de dentro (no a un absoluto),
+  retocar una perilla no descoloca la otra.
+- **¿Manda el ojo o los pies?** **Los pies** (`mc.pos[1]`), como se sospechaba: es lo que deja salir a
+  la orilla. Subes hasta que los pies asoman, ahí vuelve a mandar la gravedad de fuera, y al llegar al
+  borde se aterriza y se salta con el salto normal.
+- **¿Y el charco de un bloque?** Con **suelo debajo gana el salto de siempre** (`mc.onGround` sigue
+  teniendo prioridad). Sin esto, vadear un charco se habría sentido como andar por pegamento — es un
+  caso que el ticket no preveía y que salió de mirar qué hace Minecraft de verdad: allí nadar es
+  «en agua **y sin suelo**», no «en agua».
+- **Implementación:** un sexto argumento opcional `nadando` en la **misma** `mcCaidaPaso`, no una
+  función nueva. Así los agentes heredan la capacidad por el mismo puente que REQ-FLUID6 y sin
+  argumento se comporta exactamente como antes del ticket.
+- Perilla `empuje` en `game.fisicaAgua({empuje:12})` / `game.fisicaLava(...)`. `empuje:1` = flotar
+  quieto; `0` = no se nada.
+
+`test_nadar.js` (19 ok). **Tres expectativas mías fallaron antes que el motor**, todas por la misma
+raíz que en REQ-FLUID6: la terminal real de un integrador discreto **no es `a·τ`** sino
+`a·dt·k/(1−k)` con `k = e^(−dt/τ)` — un 3,7 % de diferencia a 60 fps, más que cualquier tolerancia
+honrada. Las tolerancias del test se derivan ahora de la **cola calculada** `|v₀−v*|·kⁿ` en vez de ser
+un porcentaje a ojo. La consola sigue anunciando `a·τ` a propósito: es la caracterización que **no
+depende de dt**.
+
+**Agua corriente que empuja: sigue fuera de alcance** y sin abrir, como se dijo.
+
+---
+
+### ✅ REQ-FLUID8 · **Fuentes infinitas**: una celda rodeada de fuentes se vuelve fuente — ✅ cerrado 2026-08-11
+
+**Lo que pide el dueño, literal:**
+
+> *«creacion de "fuentes de fluido infinito" (o más bien bloques de fluido que se ponen solos cuando se
+> están añadiendo fuentes de fluido). Si un bloque está tocando por los lados (norte, sur, este u oeste)
+> fuentes de fluido, y por debajo tiene un bloque sólido, entonces se convierte también en una fuente de
+> fluido.»*
+
+Con su ejemplo, un hoyo de 2×2×1 en el que se colocan dos fuentes en diagonal:
+
+```
+   antes            después
+ [FUENTE][aire]   [FUENTE][FUENTE]
+ [aire][FUENTE]   [FUENTE][FUENTE]
+```
+
+Los dos huecos se vuelven fuente **por tocar dos fuentes cada uno**. El resultado práctico es el cubo
+infinito: puedes vaciar una casilla y el hoyo se rellena solo para siempre.
+
+#### ⚠️ Pregunta bloqueante: ¿dos fuentes adyacentes, o basta con una?
+
+El enunciado dice «tocando por los lados **fuentes**» (plural) y el ejemplo tiene **exactamente dos**
+por celda. Pero la regla escrita también se puede leer como «≥1», y **la diferencia es enorme**:
+
+- **≥2** (lo que da el ejemplo): el 2×2 funciona, y una fuente suelta en mitad de un llano **no** se
+  propaga. Es la regla que hace falta para que el charco no se coma el mundo.
+- **≥1**: cualquier fuente sobre suelo sólido convertiría a su vecina, y ésta a la suya — **el plano
+  entero se vuelve fuente** hasta topar con una pared. Eso no es una fuente infinita, es una inundación.
+
+**Se implementará ≥2 salvo que el dueño diga lo contrario**, porque es lo único compatible con su propio
+ejemplo. Preguntar antes de escribir código.
+
+#### Otras dudas a resolver antes de implementar (ninguna investigada)
+
+- **¿«sólido» incluye otra fuente debajo?** Un estanque de dos de hondo tiene fluido bajo la capa de
+  arriba, no roca. Si se exige sólido estricto, la regla solo funciona en la capa que toca el fondo, y
+  el 2×2 del ejemplo (profundidad 1) es justo el caso que sí funciona. Hay que decidir si es a propósito.
+- **¿Vale para la LAVA?** El enunciado dice «fluido» en general. Conviene que sea una **bandera por
+  tipo** (como `gravedad`/`arrastre`/`empuje` de REQ-FLUID6/7) y no una regla cableada, aunque el
+  defecto acabe siendo solo agua.
+- **¿Es reversible?** Si rompo una de las fuentes originales, ¿las derivadas vuelven a ser corriente?
+  Si **no** lo son, es precisamente lo que hace útil el cubo infinito. Si lo son, no sirve para nada.
+- **¿Actúa sobre el aire o sobre el agua que ya lo llenó?** El dueño describe `[aire] → [FUENTE]`, pero
+  el simulador va a llenar ese aire con corriente (`nivel 1`) en el tick anterior, así que lo más
+  probable es que la regla **ascienda una celda de corriente a nivel 0** un tick después. El resultado
+  visible es el mismo; conviene decidirlo explícitamente y no que salga por accidente.
+
+#### Dónde cae (lo único que sí se ha mirado, 2 minutos)
+
+El simulador de fluidos **está en `app.js`**, no en un snippet: `fluidLevels` (un `Map` `'x,y,z' → 0..7`),
+`getProps`, `setFluid(x,y,z,type,level)`, `processCell(x,y,z)`, `queueTick` y `notifyNeighbors`. Dos
+consecuencias buenas:
+
+1. **«Fuente» ya se representa**: es `fluidLevel === 0` (la clave de material se construye como
+   `base + '-' + level` y el `-0` no se escribe). Convertir en fuente es `setFluid(x, y, z, tipo, 0)`.
+   No hay que inventar un concepto nuevo ni tocar el formato en disco.
+2. **El bucle ya es dirigido por eventos** (cola de ticks + aviso a vecinos), que es exactamente lo que
+   el dueño describe con «cuando se están añadiendo fuentes». La regla entra dentro de `processCell`
+   como cuatro sondeos horizontales sobre celdas que **ya** se están procesando: **no hace falta ningún
+   barrido del mundo**, y ése es el criterio de coste del ticket.
+
+Es motor, así que `app.js` es el sitio (la regla de «no se toca `app.js` para los agentes» no aplica).
+
+#### Riesgos anotados
+
+- **Cascada.** La conversión avisa a los vecinos, que pueden convertirse, que avisan… En una piscina
+  grande y llana con dos fuentes puestas a mano, esto puede convertir **toda** la lámina en fuentes.
+  Puede que sea lo deseable, pero cada conversión cambia la clave del bloque y **remalla**: hay que
+  medir el coste sobre un estanque de verdad, no sobre el 2×2 del ejemplo.
+- **Interacción con el culling de REQ-FLUID4:** las caras se decidieron con la regla del vecino del
+  mismo fluido; pasar de `agua-1` a `agua` cambia el id pero no el **tipo**, y el culling se hizo por
+  tipo justo para esto. Comprobarlo, no darlo por hecho.
+- No toca nada de REQ-FLUID6/7: la física de hundirse y nadar mira el **tipo**, no el nivel.
+
+**Cómo se verificará:** un guardián que monte el hoyo 2×2×1 del enunciado en `/map/test`, coloque las
+dos fuentes en diagonal y compruebe que las otras dos celdas acaban a **nivel 0**; que **una sola**
+fuente sobre un llano no convierte a nadie; que al vaciar una celda el hoyo se rellena y vuelve a ser
+fuente (el cubo infinito); y que un estanque normal **sin** dos fuentes adyacentes se comporta como hoy.
+
+#### Resuelto 2026-08-11
+
+**Respuestas del dueño a las cuatro dudas** (y lo que implican):
+
+| duda | respuesta | consecuencia |
+|---|---|---|
+| ¿1 o 2 fuentes adyacentes? | **≥2** (no lo contradijo y es lo único compatible con su ejemplo) | una fuente suelta no convierte a nadie: no hay inundación |
+| ¿«sólido» admite otra fuente debajo? | **no, sólido es sólido** | la regla **solo prende en la capa que toca el fondo**; un estanque de dos de hondo no vuelve infinita la capa de arriba |
+| ¿vale para la lava? | **para cualquier fluido** | sin bandera por tipo: una regla, todos los líquidos |
+| ¿es reversible? | **romper la original no afecta a las demás** | las derivadas son fuentes de pleno derecho ⇒ el cubo infinito funciona |
+
+**Implementación: 25 líneas dentro de `processCell`**, entre el paso 1 (¿me quedo sin alimentación?) y
+el paso 2 (¿caigo?). Lo importante es lo que **no** hizo falta:
+
+- **Ni un concepto nuevo.** «Fuente» ya era `fluidLevel === 0`, así que convertir es `setFluid(x,y,z,tipo,0)`.
+  Nada que añadir al formato en disco ni a la paleta.
+- **Ni un barrido del mundo.** La regla vive dentro de la cola de ticks que ya existía: cuatro sondeos
+  horizontales sobre una celda **que ya se estaba procesando**. `notifyNeighbors` propaga la conversión
+  por el hoyo, y no hay bucle infinito porque ascender exige `level > 0` y una fuente ya no vuelve a entrar.
+- **Ni deshacer nada** para el punto 3: al no degradar nunca una fuente, la respuesta del dueño sale sola.
+- «Sólido» reutiliza el mismo `!isReplaceable` con el que ya se decidía el flujo horizontal, para que
+  «lo que sostiene un charco» signifique una sola cosa en toda la función. Eso ya excluye aire y fluidos.
+
+Válvula `mc.sinFuentesInfinitas`. Guardián `test_fuentes_infinitas.js` (8 ok): monta una bandeja de roca
+partida en **cuatro compartimentos estancos**, uno por caso — en la primera versión dos casos compartían
+bandeja, el agua de uno se coló en el otro y la lava ni llegó a asentarse; **un charco que se filtra de
+un caso a otro convierte un verde en una casualidad**. Los tres casos que de verdad protege son los NO:
+una fuente sola no asciende a nadie (el guardián del umbral), con fuente debajo no prende, y la válvula
+lo apaga.
+
+---
+
+### ✅ REQ-FLUID9 · Dentro de un fluido, `W` te lleva **donde miras** y Shift te **hunde** — ✅ cerrado 2026-08-11
+
+**Petición del dueño (literal):** «cuando se esta dentro de un fluido, la tecla W (avanzar) tiene que
+hacer que se avance en la direccion donde apunta la mirada, y para descender mas rapidamente se puede
+utilizar la tecla shift izquieda crealo e implementalo».
+
+Es la **lectura (c)** de las tres que planteaba el borrador de este ticket (*`W` no me lleva a donde
+miro*), más una capacidad nueva que no estaba en él (**Shift hunde**). Las otras dos lecturas —el factor
+de marcha del agua y la inercia horizontal al soltar— **NO entran aquí**: no se han pedido, y meterlas
+de gorra sería fusionar capacidades. Sueltas las teclas y se conserva la inercia de hoy.
+
+**Lo que hace, en una frase:** con los pies en un líquido y **sin suelo debajo**, `W`/`S` reparten su
+empuje entre **avanzar** (×`cos` del cabeceo) y **sumergirse/emerger** (×`sen`), así que mirar al fondo
+con `W` te hunde y mirar al cielo te saca; y **Shift** añade un empuje hacia abajo.
+
+#### Las tres piezas
+
+**1. Un séptimo argumento en `mcCaidaPaso`, no una función nueva.** Subir, bajar y dejarse caer son el
+**mismo** empuje del cuerpo con distinto signo, así que la vista y Shift entran por donde ya entraba la
+tecla de nadar:
+
+```js
+mcCaidaPaso(vy, dt, x, y, z, nadando, mira)
+const m = Math.max(-1, Math.min(1, (mira||0) + (nadando?1:0)));
+const a = g*(m*(f.empuje||0) - 1);   // m=0 ⇒ −g · m=1 ⇒ (empuje−1)·g · m=−1 ⇒ −(empuje+1)·g
+```
+
+⚠️ **`mira` y la tecla de nadar comparten UN solo presupuesto de empuje, acotado a ±1.** Es lo que hace
+que salto+Shift a la vez den exactamente «ni una cosa ni la otra» y que mirar arriba **con** el salto
+pulsado no empuje el doble. Y `m=0` devuelve `−g` byte a byte: fuera de un líquido `mcCaidaPaso` sale
+por su `return` temprano y **no cambia ni un float**, que era la condición del dueño en REQ-FLUID6.
+
+Bajar sale **más rápido que subir** sin ninguna cifra nueva, porque la gravedad ayuda en un sentido y
+estorba en el otro: `−(empuje+1)·g` contra `(empuje−1)·g`. Con el agua de hoy, ~9,7 bloques/s hundiéndose
+con Shift frente a 4,84 subiendo y 2,42 dejándose caer.
+
+**2. Una rama propia en el mando horizontal, y va DIRECTA.** Nadar es «en líquido **y sin suelo**», o sea
+que hasta hoy el cuerpo dentro del agua lo gobernaba el **air-strafe** — y el air-strafe **por definición
+no reescribe la velocidad**, así que girar la vista no podía redirigirte. Es la trampa de BUG-ESC1 vista
+por el otro lado. La rama nueva va **antes** del reparto por `mc.onGround` y escribe `mc.vel[0]/[2]`
+directo, como el camino de tierra.
+
+⚠️ **El rumbo se ACOTA, no se normaliza** (`if(hl>1)`). Normalizar devolvería la marcha entera con el
+cuerpo apuntando al fondo; acotando, mirar a plomo convierte **todo** lo que aporta `W` en descenso, que
+es justo lo que se pidió. Y el rewrite va bajo `if(ml>0)`: sin tecla de rumbo no se toca la velocidad
+horizontal, o sea que la inercia de hoy se queda como está (es el otro ticket).
+
+**3. Shift es `mira -= 1`**, y se acota junto con el resto. Ojo: `mc.keys` guarda `e.key.toLowerCase()`,
+así que **`k['shift']` son las DOS teclas Shift**, no solo la izquierda. Distinguirlas pediría
+`e.code === 'ShiftLeft'` y no se ha hecho: el dueño la nombró para describir el gesto, no para excluir la
+derecha. Efecto colateral bienvenido: `sp` ya media la marcha con Shift, así que hundirse va además con
+el rumbo horizontal a media velocidad.
+
+#### Lo que NO cambia
+
+- **Fuera del líquido, nada.** §1 del guardián: `W` mirando a plomo hacia abajo y Shift en el aire dan
+  la caída de siempre **frame a frame**.
+- **Con suelo debajo, tampoco**: mandan los pies y `mc.onGround` gana, así que vadear un charco se anda
+  igual que siempre (§6).
+- **`mc.sinFisicaFluido`** sigue devolviendo la física de antes de los tres tickets, ahora también con
+  la vista y con Shift (§7).
+- Ni perilla nueva ni constante suelta: todo sale de `MC_FISICA_FLUIDO` y de las perillas persistidas
+  que ya existían.
+
+**Cómo se verificó:** `node test_nadar_avance.js` (**14 ok**), con su propio pozo **estanco** de 11×18×11
+en `/map/test` —más ancho que el de `test_nadar.js` a propósito: a ~5 bloques/s el jugador cruza un
+interior de 5 en un suspiro y lo que se mediría es la pared, no el rumbo— y el `mcUpdate` **de verdad**
+frame a frame. Cubre: fuera no cambia nada · `W` al horizonte avanza y deja la vertical **bit a bit**
+igual que sin teclas · `W` a plomo hunde y casi no desplaza (el guardián del acotado) · `W` arriba sube
+**sostenido** · Shift hunde más que dejarse caer · salto+Shift se cancelan · el charco se vadea · la
+válvula. Los números salen de `game.fisicaAgua()` **leído del motor**, no escritos a mano.
+
+⚠️ Y la trampa de siempre, que volvió a morder (la sexta): la terminal discreta es `a·dt·k/(1−k)`… pero
+**a los 40 frames todavía no se ha llegado a ella** — son 3,03·τ, o sea el **95,2 %**. La primera versión
+del test comparaba contra la asíntota con tolerancia del 2 % y fallaba con el motor teniendo razón. Se
+compara contra el término n-ésimo exacto, `vT·(1−kⁿ)`.
+
+⚠️ **Hallazgo aparte, y NO es de este ticket:** `test_nadar.js` (4 fallos) y `test_hundirse.js` (4
+fallos) **ya fallaban antes de tocar nada** — comprobado con una A/B, revirtiendo las tres costuras de
+REQ-FLUID9 sobre `app.js` y volviendo a correrlos: **mismo resultado exacto**. La causa es que los dos
+se escribieron para el `gravedad: 1/16, empuje: 8` original y el dueño **retuneó** las constantes a
+`WATER {0.5, 0.22, 3}` / `LAVA {1, 0.11, 2}`: con **8× la gravedad de dentro**, sus tramos de 120 y 240
+frames cruzan enteros un pozo de 9 de hondo, así que lo que miden es el **fondo o la superficie**, no el
+fluido (de ahí los `vy = 0`). Y sus dos comparaciones agua↔lava contradicen la tunería: hoy la lava se
+hunde **igual** que el agua (2,42) y se nada en ella **más despacio** (2,42 contra 4,84). Son tests
+viejos frente a números nuevos, no una regresión. Ver **[BUG-FLUID5](#-bug-fluid5)**.
+
+---
+
+### 🔴 BUG-FLUID5 · Los guardianes de REQ-FLUID6/7 miden el fondo del pozo, no el fluido — 🔴 abierto 2026-08-11
+
+**Investigado, sin decidir.** Salió al cerrar [REQ-FLUID9](#-req-fluid9), y lo primero que había que
+descartar era haberlo roto yo: **no**. Se revirtieron las tres costuras de REQ-FLUID9 sobre `app.js` y
+se volvieron a correr los dos ficheros ⇒ **mismo resultado exacto**, los mismos 4 fallos cada uno. Hoy:
+
+| test | resultado |
+|---|---|
+| `node test_nadar.js` | 15 ok / **4 fallos** |
+| `node test_hundirse.js` | 16 ok / **4 fallos** |
+
+**La causa es que las constantes cambiaron de dueño y los tests no se enteraron.** Los dos se
+escribieron contra el `MC_FISICA_FLUIDO` original de REQ-FLUID6 (`gravedad: 1/16`, `empuje: 8`, la
+misma gravedad para agua y lava) y el motor lleva hoy los valores que **retuneó el dueño**:
+
+```js
+WATER: { gravedad: 0.5, arrastre: 0.22, empuje: 3 }
+LAVA:  { gravedad: 1,   arrastre: 0.11, empuje: 2 }
+```
+
+De ahí salen los dos síntomas, y ninguno es un fallo del motor:
+
+1. **Los tramos se salen del agua.** Con **8×** la gravedad de dentro, los tramos de 120 y 240 frames
+   que antes se quedaban a media columna cruzan **enteros** un pozo de 9 de hondo: lo que miden es el
+   fondo o la superficie, no el fluido. Se ve en los `vy = 0` de las lecturas.
+2. **Las comparaciones agua↔lava dicen ahora lo contrario.** Con la gravedad ya distinta por tipo, la
+   lava se hunde **igual** que el agua (2,42 las dos) y se nada en ella **más despacio** (2,42 contra
+   4,84). Los tests exigen la relación de cuando la única perilla que separaba los dos líquidos era el
+   `arrastre`.
+
+**Lo que falta es una decisión del dueño, no código**, y por eso el ticket se queda abierto en vez de
+«arreglarse»: los tests codifican **sus** decisiones de REQ-FLUID6/7 (cómo se siente hundirse, en qué
+se diferencia la lava) y las constantes de hoy también son **suyas**. Reescribir los guardianes para que
+pasen con los números nuevos es borrar la única copia escrita del criterio anterior; y volver los
+números al original es deshacerle el tuneo. Las dos preguntas concretas:
+
+- **¿Los pozos se hacen más hondos o los tramos más cortos?** Es lo que arregla el síntoma 1 sin tocar
+  ninguna cifra de física — el fallo ahí es del **banco de pruebas**, no del criterio.
+- **¿La lava tiene que seguir distinguiéndose del agua, y en qué?** Hoy se hunde igual y se nada peor.
+  Si eso es lo buscado, los dos tramos de comparación se reescriben; si no, es la tunería la que falla.
+
+⚠️ **Y hay una tercera copia de los números viejos: `CLAUDE.md`.** Su § «🏊 Física dentro de un líquido»
+sigue citando `gravedad: 1/16` y `empuje: 8` para los dos fluidos. Esa parte **sí** se corrige sin
+preguntar a nadie —la documentación tiene que decir lo que hay en el código— y va con este ticket.
+
+**No se tocan mientras tanto.** Un guardián en rojo por un criterio que caducó es ruido, pero un
+guardián borrado o relajado a la callada es peor: la próxima vez que alguien toque `mcCaidaPaso` no
+habrá nada que le diga que se ha cargado el tacto del agua. Quedan en rojo **y anotados aquí**.
+
+---
+
+### 🔴 BUG-SNP3 · `game.bloques.quitar()` lanza `ReferenceError: g is not defined` — 🔴 abierto 2026-08-10
+
+**Encontrado de paso implementando REQ-SHADOW2, y no es de ese cambio:** está así **en HEAD**
+(`git show HEAD:data/snippets/mundo-autoarranque.json`), y el `quitar()` de REQ-SHADOW2 se escribió
+envuelto en `try/catch` para poder seguir precisamente por esto.
+
+En medio de `game.bloques.quitar()`, en `data/snippets/mundo-autoarranque.json`, hay **~12 líneas de
+física del jugador pegadas por error** (líneas 1136-1147): el remate de la colisión horizontal y el
+bloque de aviso `[CAYENDO]`. Ahí dentro **no existe ninguna** de las variables que usa —`g`, `xPrev`,
+`s`, `a`, `_yEntry`, `zPrev`, `rig`, `cx`, `cz`, `footY`, `suelo`—, así que **cualquier**
+`game.bloques.quitar('lo-que-sea')` sobre un material que sí tenía comportamiento revienta en la
+primera línea:
+
+```js
+    delete tabla[clave];
+    olvidarSeguido(clave);
+    reconstruirCache();
+    // Colision horizontal: usar la Y de ENTRADA (antes de gravedad/escalon)   ← NADA DE ESTO PINTA AQUÍ
+    if (g.x !== xPrev && chocaTerreno(s, a, g.x, _yEntry, zPrev)) { g.x = xPrev; }
+    …
+    return true;
+```
+
+**Lo que atenúa el daño y hay que mirar antes de tocar:** `delete tabla[clave]` +
+`reconstruirCache()` corren **antes** de la línea que peta, así que el estado queda **correcto** — el
+material sí se olvida. Lo que se pierde es el `return true` y todo lo que venga después de la
+llamada. Por eso el bug ha podido vivir escondido: quien llama y no mira la excepción ve el efecto
+que esperaba.
+
+**Lo que rompe hoy:** tumba `test_bloques_comportamiento.js` (peta en el caso de la línea 667, tras
+61 ok) y `test_luz_traspasa.js` (línea 48). Los dos fallan igual en HEAD que con REQ-SHADOW2 aplicado
+— se comprobó a propósito antes de dar el ticket por verde.
+
+**Arreglo esperado:** borrar las 12 líneas y devolver `quitar()` a `reconstruirCache(); return true;`
+⚠️ Hay que averiguar **de dónde salieron** antes de borrarlas: si se movieron desde el `mcUpdate` de
+la física en vez de copiarse, la física del jugador está a su vez incompleta y el arreglo son dos
+sitios, no uno. Como siempre en este snippet: parche idempotente por marca, nunca reescribirlo entero
+(tiene **dos copias vivas** y el dueño lo edita en vivo).
+
+---
+
+### 🔴 BUG-SNP4 · Los cambios en el editor de código del Mundo se revierten — 🔴 abierto 2026-08-11
+
+**Enunciado del dueño, literal:**
+
+> «cuando esto en el mapa y hago control+C si edito el codigo, vuelvo al mapa, vuelvo con control+C al
+> editor, los cambios que hice en el script se revierten y no deberia»
+
+**Área:** el editor de snippets del Mundo (el modal de código que se abre desde dentro de `/map/<n>`).
+
+⚠️ **Discrepancia de tecla, sin resolver:** el dueño dice **Ctrl+C**; `CLAUDE.md` documenta que el
+editor de snippets se abre con **Alt+C** («con teclado sobran, porque Esc cierra y Alt+C abre los
+snippets»), y `Ctrl+C` está además cogido en el editor de voxels por `copySelection`. Puede ser que
+el atajo real sea otro, que haya dos, o simplemente que el dueño lo llame así. Hay que mirarlo antes
+de tocar nada, porque de eso depende **qué código abre el modal** y por tanto dónde está el fallo.
+
+**Sospecha, NO verificada:** un snippet del Mundo tiene **dos copias vivas** (el `.json` en disco y lo
+que el Mundo cargó al arrancar), y es la trampa recurrente de esta zona. Si al reabrir el modal se
+relee la copia que se cargó al abrir el Mundo en vez de la editada, lo escrito «desaparece» sin que
+nadie haya borrado nada.
+
+**Lo que NO se ha comprobado** (esto es un ticket redactado, no investigado):
+
+- si lo que se pierde es solo lo **no guardado**, o también lo que se guardó desde el modal;
+- si recargar la pestaña muestra el texto nuevo o el viejo (o sea: si el `.json` de disco llegó a
+  cambiar);
+- si el modal relee el snippet en cada apertura o conserva un buffer;
+- cuál es el atajo real y si abre el mismo modal en los dos casos.
+
+**Cuidado al arreglarlo:** el snippet es autoría del dueño y lo edita en vivo. Nada de reescribirlo
+entero; los cambios de código van por parche idempotente por marca, como el resto de esta zona.
+
+---
+
+### ✅ BUG-FLUID4 · Caras traslúcidas marcadas bajo un fluido — ✅ resuelto 2026-08-11
+
+**Reporte del dueño, literal:**
+
+> «algunos bloques no se muestran bien bajo los fluidos cuando se construyen, parece que afecta
+> bloques que no ocupan todo el lateral de las caras, el fallo se ve en las caras, deberian de ser
+> transparentes como hace el fluido con otros bloques de fluido pero se marcan las caras de forma
+> traslucida»
+
+**Capturas:** `data/tickets/BUG-FLUID4/01.png` (primera persona dentro de una sala teñida de rojo,
+una pieza fina en cruz sobre el suelo y **dos cuadros verticales traslúcidos rosados** de pie a cada
+lado) y `data/tickets/BUG-FLUID4/02.png` (el mismo cuadro de cerca). Contexto en `contexto.md`.
+
+**Zona (sin comprobar que sea la culpable):** el culling de caras de fluido de **REQ-FLUID4** —
+`tapadasFluido`, `colFD`/`alphaFD`/`texFD`, `mcTapaCara` y `mc.recorte`. Guardián actual:
+`test_caras_fluido.js`.
+
+**Causa, ya reproducida y medida.** La sospecha era la buena. `mcTapaCara` devuelve `false` sobre
+**toda** celda fina («no es un cubo, no puede tapar la cara del vecino» — la regla de las hojas
+«fancy», que existe para que por los agujeros de una copa no se vea el vacío), así que la cara del
+fluido que da a una pieza que no llena su celda no entraba en **ninguna** de las tres reglas de
+`tapadasFluido` y se emitía. Y como las caras fluido↔fluido de alrededor **sí** se cullean, la
+superviviente queda **aislada**: una lámina translúcida suelta marcando el hueco, que es exactamente
+lo que se ve en las capturas.
+
+**Medido** en una charca estanca **con tapa** (así toda celda está llena, `fH = 1`) de 5×5×3, contando
+las caras del lote alpha del chunk, con la celda del medio cambiada:
+
+| centro | agua | lava |
+|---|---|---|
+| fluido (charca entera) | 0 | 0 |
+| `roca` (vecino macizo) | 5 | 5 |
+| `flor-roja` (vecino **fino**) | **10** | **10** |
+
+Las **5 de más** son las cuatro laterales más la de encima. Los 5 del caso `roca` son el baseline
+correcto y no un resto del fallo: `mcGetFluidHeight` solo devuelve 1.0 cuando hay fluido **del mismo
+tipo justo encima**, así que la celda bajo la piedra tiene `fH < 1` y emite su cara de arriba, y sus
+cuatro vecinas laterales (llenas) fallan la regla 3 contra ella. Con la válvula `mc.sinCullingFluido`
+el mismo sitio da **444**, o sea que el mecanismo es el culling y no otra cosa (era el último punto
+abierto de la lista de comprobaciones). Pasa **igual con agua y con lava**; no depende de construir:
+depende de que haya una pieza fina metida en el líquido.
+
+**Arreglo:** una pregunta **propia de los fluidos** junto a `tapadasFluido`, `tapaAlFluido(x,y,z)`, y
+el cambio es sustituirla por `mcTapaCara` **en la primera rama y solo ahí**. `mcTapaCara` no se toca:
+su contrato general tiene que seguir diciendo `false` sobre una celda fina o se desharía la regla de
+las hojas, y además `mcSolid`/`mcFineBoxHit`/`mcAimBoxHit` los extrae *verbatim por texto*
+`test_rayo_apuntado.js`. La pregunta nueva no es «¿tapa la cara?» sino «**¿ocupa la celda?**»: no
+tenemos *waterlogging* —un material por celda—, así que una pieza fina que no es fluido ha
+**reemplazado** al líquido ahí y la cara que da a ella no se ve. Aproximación honesta y no exacta: si
+la pieza es más estrecha que la celda, por los lados asomaría un pelo de líquido que ya no se dibuja;
+a cambio desaparecen las láminas sueltas, que es lo que se reportó.
+
+⚠️ **El hueco de AIRE tiene que seguir emitiendo**, y sale gratis: el aire es `nId === 0`, y la rama
+nueva exige `nId` con geometría fina. Lo fija §1, donde la superficie de la charca sigue dando sus
+81 caras contra el cielo.
+
+**Resultado:** el delta pasa de **+5 a 0** en agua y en lava, con el baseline de `roca` intacto en 5 y
+la válvula intacta en 444.
+
+**Guardián:** `node test_caras_fluido.js` **§5** (la tabla de arriba, en las dos direcciones y con el
+anti-falso-verde de que la charca llena da 0 pero el hueco ocupado sigue dando 5 — si el arreglo
+cullease de más, todo daría 0 y el test pasaría sin mirar nada). §4 sigue exigiendo que un material
+sin fluido dé una malla **byte a byte idéntica**.
+
+---
+
+### ✅ BUG-RAY2 · El aim choca con la celda entera de un cable o una alfombra — ✅ resuelto 2026-08-11
+
+**Reporte del dueño, literal:**
+
+> «cuando quiero borrar (o colocar) un objeto y delante tengo, por ejemplo, un cable de redstone en el
+> suelo (puede ser tambien una alfombra, es decir bloques que no ocupan los 16x16x16), aunque no este
+> apuntando los voxels del cable sino al objeto que se ve detras, es como si el aim colisionase con el
+> rigidbody del bloque del cable, entonces me borra el cable (o coloca algo encima del cable) y no
+> quiero eso; pasa con cables o cualquier bloque que no sea solido, no atraviesa las partes solidas
+> para apuntar lo que hay detras.»
+
+**Es [BUG-RAY1](#-bug-ray1) otra vez, en la OTRA mitad del mundo.** Aquél arregló el rayo contra las
+estructuras finas (`mcStructCellSolid` respondía por la caja de la celda entera ⇒ `mcStructRayHit`,
+sub-DDA a 1/16 acotado a la celda). La rejilla se quedó sin arreglar porque entonces no le hacía
+falta: en `mc.grid` solo había bloques macizos. Desde `mcCabeEnRejilla`/`mcPonEnRejilla`, **el clic
+derecho mete en `mc.grid` todo lo que cabe en una celda** —cable, alfombra, flor, antorcha—, así que
+un cable de **1 voxel de alto** pasó a ser terreno… y `mcRaycast` seguía preguntando `mcSolid(x,y,z)`,
+que es «¿hay algo en esta celda de 16³?». El rayo se paraba en el cubo entero del cable: apuntando al
+muro de detrás se borraba el cable, y el bloque nuevo salía **encima** de él (la normal era la de la
+celda). Es la misma trampa de «un material vive en dos sitios», ahora al revés que en BUG-RAY1.
+
+**El arreglo, mismo patrón que BUG-RAY1:**
+
+- **`mcRejillaSolidAt(fx,fy,fz)`** — hermana de `mcAimSolidAt` para la rejilla. Una celda que llena su
+  cubo responde por la celda (coste de siempre); una celda fina (`mc._geoFina`) se sondea con **la
+  misma indexación que `mcTerrenoChoca`**, leyendo `bitsAim` como el resto del apuntado.
+- **`mcRejillaRayHit(x,y,z, o,d, t0)`** — sub-DDA a 1/16 **acotado a esa celda** (`3·T+3` pasos), que
+  solo cuenta impacto si el rayo cruza un voxel fino lleno. Devuelve `-1` si sale de la celda.
+- Dos únicos puntos de llamada: **`mcRaycast`** (se prueban terreno y estructura y gana el impacto más
+  cercano) y **`mcBreak`** (el borrado necesitaba su propio arreglo). Colocar sale gratis: `mcPlace`
+  consume el `cell + normal` de `mcRaycast`.
+- **Sin materiales finos, `mc._geoFina` es `null` y el camino es byte-idéntico** al de siempre: la
+  rama fina ni se toca. `mcSolid`, `mcFineBoxHit`, `mcFineSolidAt`, `mcAimBoxHit`, `mcAimSolidAt`,
+  `mcStructColl`, `mcStructAt`, `mcStructRayHit` y `mcStructCellSolid` **no se han tocado** — son las
+  que envuelve `mundo-autoarranque` y las que extrae *verbatim* `test_rayo_apuntado.js`.
+
+**Guardián: `node test_rayo_apuntado.js` (19 ok).** Los 7 casos nuevos plantan un cable de 1 voxel de
+alto **en `mc.grid`** (`mc._geoFina`, `fdim=[T,1,T]`) delante de una pared y comprueban que el rayo la
+alcanza. Que no es un verde vacío se probó por A/B: revirtiendo los dos puntos de llamada de
+`mcRaycast` en una copia, el test cae a **17 ok, 2 fallos** con exactamente el síntoma del dueño (el
+rayo para en la celda del cable, `x=9`, y el bloque nuevo iría a `x=8`, o sea **encima del cable**).
+Los otros 5 casos siguen verdes en las dos direcciones — incluidos dos anti-falso-verde: apuntando
+**al** cable el rayo **sí** para en él, y un mundo sin geometría fina (`sinEscalera`) se comporta como
+antes. Vecinos comprobados sin cambios: `test_clic_derecho_rejilla.js`, `test_rayos_x.js`.
+
+---
+
+### ✅ BUG-RS24 · No se puede clicar una pieza de redstone que está dentro de un fluido — ✅ resuelto 2026-08-11
+
+**Reporte del dueño, literal:**
+
+> «posible bug, no puedo hacer clic (boton de enmedio raton) sobre un componente redstone si esta
+> dentro de un fluido y deberia»
+
+**Confirmado midiendo, no deduciendo.** Con una palanca en `/map/test` y el ojo a tres bloques, en
+seco el rayo del snippet da `[20,30,20]` (la palanca) y la conmuta; inundando **una sola celda** entre
+el ojo y ella, el rayo se para en el agua (`[17,30,20]`, clave `asset:assets/agua.vox.json-2`) y
+`conmutar` no cambia nada — mientras `mcRaycast(6,true)`, el rayo **del motor**, sigue devolviendo
+`[20,30,20]`. O sea que los dos rayos no estaban de acuerdo, y ése era el ticket.
+
+**La causa es la duplicación, no el fluido.** El botón central **no se ata en `app.js`** (su
+`mousedown` sale por `if(e.button!==0 && e.button!==2) return;`): lo ata el snippet, y con él viene
+`miraFina`, que es una **re-implementación** del rayo del motor en `redstone/redstone-piezas.js`. El
+motor pregunta en tres sitios —`mcRaycast`, `mcBreak` y `mcPlace`— «¿esta celda es **reemplazable**?»
+antes de pararse en ella; a la copia del snippet esa guarda nunca le llegó. Mientras un fluido fue
+otra cosa daba igual; desde **REQ-FLUID4** un fluido es un macizo 16³ **fino en la rejilla** con el
+bitset `bits` **LLENO (4096/4096)**, así que el test «¿cruza el rayo un voxel fino lleno?» dice que sí
+en la **primera** celda de líquido y ahí se acaba el rayo. Es la misma familia que
+[BUG-RAY1](#-bug-ray1) y [BUG-RAY2](#-bug-ray2): *un bucle copiado se desincroniza del original en
+cuanto cambia el original*.
+
+**El arreglo son cuatro líneas en `miraFina`** (`redstone/redstone-piezas.js`, `VERSION` a
+`'piezas-1.5'`): la misma pregunta que ya se hace el motor, con la misma función.
+
+```js
+if (typeof mcIsCellReplaceable === 'function' && mcIsCellReplaceable(cx, cy, cz)) continue;
+```
+
+- Va **antes** de la manga ancha de `esManual` y del sondeo del bitset, o sea que una pieza sumergida
+  se sigue apuntando por su celda entera como en seco.
+- El `typeof` no es adorno: el snippet corre en un `new Function` y tiene que seguir siendo ejecutable
+  contra un motor viejo que no exponga el ayudante.
+- **Salta por REEMPLAZABLE, no por «fino»**, que es lo que impide que el arreglo se lleve por delante
+  el apuntado del cable: un cable es fino igual que el agua y recorre el mismo camino: lo único que
+  los separa es esa pregunta. Es lo que fija el tramo D del guardián.
+- **El clic DERECHO arrastraba la misma ceguera** y se arregla con esto mismo: `mcUseRight` y el
+  `mousedown` del botón central llaman los dos a `conmutarApuntada()` → `miraFina`. Degradaba distinto
+  —al no reconocer la pieza, el clic derecho caía al original y **construía** un bloque en vez de
+  conmutar—, así que en el agua era peor que no hacer nada.
+- **Ni una línea de `app.js`.** El motor ya respondía bien; el que preguntaba mal era el snippet.
+
+**Guardián: `node test_clic_bajo_fluido.js` (17 ok).** Monta su propia cubeta estanca en `/map/test` e
+inyecta `redstone/redstone.js` y `redstone/redstone-piezas.js` **desde los fuentes**, para que falle
+cuando se rompa el código y no cuando alguien olvide re-publicar. **A** es el control en seco; **B**
+comprueba de paso las premisas del diagnóstico (la celda es agua, es reemplazable, su bitset fino está
+**lleno**) y que la pieza y el motor dan ya la misma respuesta; **C** es la palanca del todo sumergida.
+**D** es el anti-falso-verde y va sobre la **misma celda**: con un cable el rayo tiene que **pararse**
+ahí (y se afirma que ese cable es fino y que su bitset **no** está lleno, o sea que recorre el mismo
+camino), y con agua en esa misma celda tiene que **atravesarla** y llegar a la palanca.
+
+⚠️ Dos formas de medir que costaron un falso rojo cada una, las dos por la misma confusión: **el ojo
+se planta en el SUELO de su celda**, no en su centro (`mc.pos[1] = Y − MC_EYE·escala` deja el ojo
+exactamente en `y = Y`). Así que un cable tumbado en el suelo de esa celda **sí** está en la trayectoria
+de un rayo horizontal, y un `pitch` de −0,62 da antes en el suelo de roca de la cubeta que en nada de lo
+que se quería medir. En los dos casos el motor tenía razón y el test estaba mal escrito.
+
+---
+
+### 🔴 REQ-PICK4 · «Block picker» en la rotación de la tecla `P` del Mundo — 🔴 abierto 2026-08-11
+
+**Petición del dueño, literal:**
+
+> «la tecla "p" en el mundo de seleccion de herramienta tendria que tener una nueva en la rotacion que
+> sea "color picker" de forma que se pueda hacer clic en un bloque del mapa y que reemplace el que
+> esta seleccionado en ese momento en el cajon»
+
+Y su corrección inmediata, que es la que manda:
+
+> «seria mas block picker en este caso»
+
+**Redactado, sin investigar.** Lo que se pide es el *pick block* de Minecraft, llevado a la rotación de
+herramienta de la tecla `P`: apuntar a un bloque del mapa, hacer clic, y que **la ranura elegida del
+cajón pase a tener ese material**. Lo que se coge no es un color sino la **clave** del material, que es
+justo la corrección del dueño y por eso el ticket se llama así.
+
+**No es un duplicado.** [REQ-PICK1](#-req-pick1) y [REQ-PICK3](#-req-pick3) son el **selector de
+bloque/textura del editor** (la ventana con buscador y filtros), y el cuentagotas de la paleta también
+es del editor. Esto vive en el **Mundo** y su destino es la barra rápida.
+
+**Lo que habrá que mirar cuando toque** (nada de esto está comprobado):
+
+- qué entradas tiene hoy la rotación de la tecla `P` en el Mundo y dónde se define;
+- de dónde sale la clave: **un material vive en uno de dos sitios** (`mc.grid` y `mc.structures`), así
+  que el picker tiene que responder por los dos, como ya hacen el rayo de apuntar y rayos-X;
+- qué hacer con el **giro horneado en la clave** (`clave@n`): si el picker se trae la postura tal cual
+  o la clave base;
+- y qué pasa cuando el material apuntado **no está** en el cajón: si sustituye la ranura activa —que
+  es lo que pide el dueño— o busca antes si ya está en otra.
+
+---
+
+### ✅ REQ-SHADOW2 · Materiales sin sombra (nubes) — ✅ resuelto 2026-08-10
 
 **Petición del dueño, literal:**
 
@@ -3218,21 +4243,110 @@ reescribir el mundo, o dejar la vieja como alias.
 > tengan "receive shadows" ni "cast shadows" para poder hacer unas nubes semirealistas con esos
 > materiales. que sea algo configurable nivel de autorun por si quiero elegir otro material»
 
-**Sin investigar.** Dos banderas por MATERIAL, no por celda: **no proyecta** (nada se oscurece por
-tenerlo encima) y **no recibe** (se pinta a luz plena, venga lo que venga de arriba). El caso de uso
-manda: una nube de `white-wool` flotando no puede dejar un pegote de sombra en el suelo ni salir ella
-gris por su propia panza.
+**La duda que traía el ticket, resuelta sin preguntar.** Quedaba abierto si «receive shadows» era el
+*skylight* (oclusión horneada, la que oscurece bajo techo) o la sombra proyectada del sol (mapa de
+sombra en GPU). No hacía falta elegir: **las dos banderas se exponen por separado** y
+`recibeSombra:false` apaga **ambas** sombras, que es lo que pide una nube. Lo que sí resultó no ser
+opcional es el arrastre:
 
-**Nota importante para quien lo coja:** en el Mundo hay **DOS sombras distintas** y «receive shadows»
-es ambiguo entre ellas — el *skylight* (oclusión ambiental horneada, lo que oscurece bajo techo) y la
-sombra proyectada del sol, que es un **mapa de sombra en GPU** (`mcRenderShadow`). Lo primero que hay
-que cerrar con el dueño es si quiere las dos apagadas o solo la del sol; para «nubes semirrealistas»
-suena a **las dos**.
+⚠️ **`proyectaSombra:false` por sí sola NO quita el pegote del suelo.** Solo saca la pieza del mapa
+del sol; un bloque macizo **sigue tapando la luz del cielo** y la sombra de skylight sigue ahí. Por
+eso `proyectaSombra:false` arrastra `luz:'pasa'` salvo que se diga `luz` a mano. Sin esto el caso de
+uso no funciona, y no se veía desde el enunciado.
 
-**Forma esperada:** lo pide para el **autorun**, o sea la misma vía que el resto de comportamientos —
-`game.bloques.define('hab:white-wool', { ... })` en `mundo-autoarranque`, con `app.js` exponiendo la
-capacidad (un array por id, patrón `mc.atraviesa`/`mc.sunExtra`) y el snippet decidiendo a qué
-material se le aplica. **No** cablear `white-wool` en el motor: él quiere poder elegir otro.
+⚠️⚠️ **Ese arrastre resultó ser MEDIA solución, y la otra media es [BUG-SH2](#-bug-sh2)** (2026-08-11):
+`luz:'pasa'` gobierna la **difusión**, no la **siembra**, así que la columna de cielo seguía cortándose
+en la nube y el pegote seguía ahí. Hoy lo abre el motor: `proyectaSombra:false` ⇒ el cielo atraviesa
+la columna, y `luz:'pasa'` sigue sin abrirla (un dosel de hojas tiene que seguir sombreando).
+
+**Cómo quedó.** Dos banderas por MATERIAL, configurables desde el autorun; **ningún material cableado
+en el motor** — `white-wool` ni siquiera existe en esta instancia, así que se verificó sobre
+`asset:assets/leaves.vox.json`:
+
+```js
+game.bloques.define('hab:white-wool', { recibeSombra:false, proyectaSombra:false });
+```
+
+- **`app.js`** expone la capacidad y solo la consulta, patrón `mc.atraviesa`/`mc.traspasaLuz`: dos
+  tablas, `mc.sinSombra` por **id de bloque** (terreno de `mc.grid`) y `mc.sinSombraKey` por
+  **clave** (estructuras finas de `mc.structures`), las dos `null` por defecto ⇒ coste cero.
+- **Sin atributo nuevo en ningún vértice:** las banderas viajan sumadas al `aShade` que ya existe en
+  los tres formatos (`aShade = sombreado + 2·bits`; 1 = no recibe, 2 = no proyecta), decodificadas
+  por `MC_SHADE_LIB`. Es seguro porque **`MC_FACES` va de 0,40 a 1,12 y nunca llega a 2**.
+- Los cuatro fragment shaders envuelven el término del sol con **`mix()`, no con `if`**: `sunFactor`
+  usa derivadas y no pueden ir en control de flujo divergente.
+- En el paso del sol, el bit 2 manda el vértice fuera del volumen de recorte (`MC_SUN_VS`), y una
+  instancia fina entera se salta por `st.sinProyectar` — más barato que filtrar por CPU.
+- **El snippet** (`parche_snp_sin_sombra.py`, idempotente por marca) llena las dos tablas y fuerza
+  `mcMeshAll()` + `mcRestampAll()` + **`mcShadowDirty()`** cuando la lista cambia.
+
+**La trampa que costó encontrar.** Las banderas se **hornean en el sombreado**, así que cambiarlas
+invalida las mallas cacheadas **aunque no se mueva un solo voxel**. Va en la **firma del chunk**
+(recorrer la paleta, cientos, al lado del barrido del chunk, miles, no se nota); y el mapa del sol,
+que solo se refresca cuando cambia la geometría, hay que ensuciarlo a mano porque aquí la geometría
+es idéntica.
+
+**Verificación** — `node test_sin_sombra.js` (nuevo, 7 secciones, TODO OK). Mide las tres capas por
+separado en vez de fiarse: `getBufferSubData` del VBO real (sombreado máximo 1,120 → 5,120 con el bit
+2 → 7,120 con los dos), `readPixels` del FBO del mapa del sol (24,0 → 15,0 → 24,0) y brillo de
+pantalla. Un asset sin marcar da un VBO **byte-idéntico**. ⚠️ Al elegir el id de prueba hay que
+filtrarlo por `mcTablaFina()`: la primera versión del test cogió una pieza fina, cuyo sombreado no
+está en `ch.vbo`, y midió el búfer equivocado. `test_caras_pegadas.js` en verde (15 ok, 0 fallos) y
+el resto del área igual que en HEAD. Docs en `CLAUDE.md` § «Materiales que no reciben ni proyectan
+sombra».
+
+---
+
+### 🐛 BUG-SH2
+
+**Estado:** ✅ resuelto 2026-08-11 · guardián `node test_sin_sombra.js`
+
+**Petición del dueño, literal:**
+
+> «aunque no deberian proyectar sombras las nubes, algo de sombra sí que proyectan»
+
+Con el autoarranque declarando `'asset:assets/white_whool.vox.json': { recibeSombra:false,
+proyectaSombra:false }`, las nubes seguían dejando un **pegote oscuro** en el suelo de debajo.
+
+**La causa: hay TRES sitios de donde sale una sombra, y [REQ-SHADOW2](#-req-shadow2) solo arregló dos.**
+
+| sombra | dónde vive | ¿la cubría REQ-SHADOW2? |
+|---|---|---|
+| mapa del sol (silueta proyectada) | GPU, `mcRenderShadow` + fragment shader | **sí** (bit 2 ⇒ el vértice sale del volumen de recorte) |
+| skylight, **difusión** | `mcTablaLuz()`, leída por `mcComputeLight`/`mcRelightBox` | **sí**, pero de rebote (`proyectaSombra:false` arrastraba `luz:'pasa'`, y eso lo hace el snippet) |
+| skylight, **siembra** | los dos bucles de columna vertical | **no** — y era éste |
+
+Los dos bucles que siembran el cielo (uno en `mcComputeLight`, el global, y otro en `mcRelightBox`, el
+incremental) llevaban desde siempre `if(g[i]!==0) break;`: **cualquier** bloque que no fuera aire
+cortaba la columna en seco, dijera lo que dijera la tabla de difusión. O sea que la nube, que es un
+16³ macizo, paraba el cielo aunque hubiera declarado que no proyecta nada — y `luz:'pasa'` no podía
+arreglarlo porque **gobierna otra pregunta**.
+
+**El arreglo: `mcTablaCielo()`, hermana de `mcTablaLuz()` pero para la SIEMBRA.** `Uint8Array` por id
+de bloque, con el aire siempre a 1 y, encima, los ids que traigan el bit 2 de `mc.sinSombra` (o sea
+`proyectaSombra:false`). Los dos bucles pasan a `if(!CIELO[g[i]]) break;`. Con `mc.sinSombra` en `null`
+—lo normal— la tabla es la de siempre y no cambia ni una celda.
+
+⚠️ **`luz:'pasa'` sigue SIN abrir la columna, y eso es la mitad del ticket.** Son dos preguntas
+distintas y mezclarlas rompe el bosque: un dosel de hojas es de recorte, así que la luz se difunde por
+él, pero **tiene que seguir dando sombra a lo que cubre**. Lo único que abre la columna es decir
+literalmente «yo no proyecto sombra». Semántica confirmada por el dueño:
+
+> «`proyectaSombra:false` ⇒ el cielo atraviesa la columna; `luz:'pasa'` en piezas secas la sigue cortando.»
+
+**Detalles que no se ven en el diff:**
+
+- **Los dos bucles quedan con los MISMOS predicados**, sin excepciones — es lo que compara celda a
+  celda `test_luz_incremental_navegador.js`, y en cuanto difieran en un `if` el mundo editado deja de
+  coincidir con el recién cargado.
+- **La tabla se construye por llamada**, igual que `mcTablaLuz()`: `mc.sinSombra` lo escribe el snippet
+  y una tabla cacheada se quedaría vieja sin que nadie la invalidara.
+- **No hace falta invalidación extra**: `mcMeshAll()` llama a `mcComputeLight()` como primera
+  instrucción, y el snippet ya llama a `mcMeshAll()` cuando cambia la lista de `sinSombra`.
+- **`mcRelightBox` sigue siendo exacto**: su caja cubre la **columna entera** en Y, así que abrir o
+  cerrar una columna se recalcula del todo.
+- **Las estructuras finas no necesitan nada**: dejan la celda como aire y nunca cortaron el cielo.
+- Un id por encima del final de la tabla lee `undefined` (falsy) ⇒ corta: se queda corto, no revienta.
 
 ---
 
@@ -3733,7 +4847,7 @@ game.perfDump();
 - Si con `fast` los fps NO caen → el cuello era la iluminación GPU.
 - Si con `fast` siguen cayendo → el cuello está en CPU (motor de redstone, lógica de agentes, etc.).
 
-**Verificado** con `sonda_render_mode.js`: cambio de `normal → fast → normal`, valores restaurados,
+**Verificado** con `performance/sonda_render_mode.js`: cambio de `normal → fast → normal`, valores restaurados,
 modo inválido rechazado con warning.
 
 ```
@@ -3830,7 +4944,7 @@ de un poco más de sobrecoste (unos microsegundos por envoltura por llamada).
 
 **Verificado**:
 - `node --check app.js` OK.
-- `node sonda_req_perf1.js` (nuevo): activa `perfAssert = 60` en Chromium bajo SwiftShader (~15 fps),
+- `node performance/sonda_req_perf1.js` (nuevo): activa `perfAssert = 60` en Chromium bajo SwiftShader (~15 fps),
   el profiler dispara automáticamente y vuelca la tabla al `console.log`. Con `perfAssert = 0` el
   volcado no se produce. La API responde a asignación (`= N`) y devuelve valores correctos por
   getter. Snapshot capturado (SwiftShader):
@@ -5291,6 +6405,14 @@ está actualizado en `redstone/redstone-ejemplos.js` pero **no re-montado** — 
 ---
 
 ## Bitácora
+- 2026-08-11 · 🎯 [REQ-PICK4](#-req-pick4) · Abierto: un **«block picker» en la rotación de la tecla `P`** del Mundo — clic en un bloque del mapa y ese material pasa a la ranura elegida del cajón, o sea el *pick block* de Minecraft. **Redactado, sin investigar**, que es la regla del dueño para «nuevo ticket». Lo único que hubo que decidir es el **nombre**: lo pidió como «color picker» y se corrigió él mismo en el acto («seria mas block picker en este caso»), y la corrección es la buena — lo que se coge es la **clave del material**, no un color. Anotado en el ticket que **no** es duplicado de [REQ-PICK1](#-req-pick1) ni de [REQ-PICK3](#-req-pick3) (aquéllos son el selector del **editor**; éste es del **Mundo**) y las cuatro preguntas que habrá que resolver al implementarlo: qué rota hoy la tecla `P`, que la clave puede venir de `mc.grid` **o** de `mc.structures`, qué hacer con el giro horneado en la clave (`clave@n`), y si sustituye la ranura activa o busca antes si el material ya está en el cajón.
+- 2026-08-11 · 🎯 **El aim ya no choca con la celda entera de un cable ni de una alfombra ([BUG-RAY2](#-bug-ray2), cerrado)** (dueño: «aunque no este apuntando los voxels del cable sino al objeto que se ve detras, es como si el aim colisionase con el rigidbody del bloque del cable»). El ticket **no existía**: se redactó y se arregló en la misma pasada, por petición expresa («revisar si este ticket existe, sino crearlo y corregirlo, es prioritario»). Lo que hizo el trabajo fue **reconocerlo como [BUG-RAY1](#-bug-ray1) en la otra mitad del mundo** en vez de investigarlo de cero: aquél ya había arreglado exactamente esto para las estructuras finas (la celda respondía por su caja de 16³ ⇒ sub-DDA a 1/16 acotado a la celda), y la rejilla se quedó fuera porque entonces en `mc.grid` solo había macizos. Desde `mcCabeEnRejilla`, un cable de **1 voxel de alto** es **terreno**, y `mcRaycast` seguía preguntando `mcSolid`, que responde por la celda entera. Así que el arreglo es el mismo patrón, no uno nuevo: `mcRejillaSolidAt` (sondeo fino con **la misma indexación que `mcTerrenoChoca`**, leyendo `bitsAim`) + `mcRejillaRayHit` (sub-DDA acotado, `3·T+3` pasos), cableados en **dos sitios y solo dos** — `mcRaycast` y `mcBreak`; colocar salió gratis porque `mcPlace` consume el `cell + normal` del rayo. **Ninguna de las nueve funciones que envuelve `mundo-autoarranque` o que extrae *verbatim* el test se ha tocado**, y sin materiales finos (`mc._geoFina` a `null`) el camino es byte-idéntico. `test_rayo_apuntado.js` pasa de 12 a **19 ok**, y que los 7 casos nuevos no sean un verde vacío se probó por **A/B**: revirtiendo los dos puntos de llamada de `mcRaycast` en una copia, el test cae a 17 ok / 2 fallos reproduciendo el síntoma exacto del reporte (el rayo para en la celda del cable y el bloque nuevo iría **encima** de él). Vecinos sin regresión: `test_clic_derecho_rejilla.js` (incluido su §0, «el mundo del dueño queda como estaba») y `test_rayos_x.js`. ⚠️ `test_flor_en_rejilla.js` falla **3**, pero falla **igual con el `app.js` de antes**: son de mallado/proyección (`mc.finoExtra`), previos y ajenos a esto.
+- 2026-08-11 · ♾️ **Fuentes infinitas: el hoyo de 2×2 se cierra solo ([REQ-FLUID8](#-req-fluid8), cerrado)** (dueño: «si un bloque está tocando por los lados fuentes de fluido, y por debajo tiene un bloque sólido, entonces se convierte también en una fuente»). Una celda de corriente que toca **dos o más** fuentes por los lados y tiene roca debajo asciende a fuente. Lo que hizo el trabajo fue **preguntar antes de teclear**: el enunciado se podía leer como «≥1», y con ≥1 cada fuente convierte a su vecina y ésa a la suya hasta volver fuente el llano entero — no es una fuente infinita, es una inundación. Las otras tres respuestas del dueño (sólido es sólido y no vale otra fuente; vale para cualquier fluido; romper la original no degrada a las demás) cerraron el diseño antes de escribir nada. Y el ticket salió **barato porque el motor ya estaba preparado**: «fuente» ya era `fluidLevel === 0` —así que convertir es `setFluid(...,0)` y no hay concepto nuevo ni cambio de formato— y el simulador ya iba por **cola de eventos**, así que la regla son cuatro sondeos dentro de `processCell` sobre una celda que ya se estaba procesando, sin barrer el mundo. 25 líneas en `app.js` + válvula `mc.sinFuentesInfinitas`. `test_fuentes_infinitas.js` (8 ok), con la bandeja partida en **cuatro compartimentos estancos**: en la primera versión el agua de un caso se coló en el de al lado y la lava ni se asentó — un charco que se filtra de un caso a otro convierte un verde en una casualidad. Sin regresión en `test_caras_fluido.js` ni `test_vista_subacuatica.js`. ⚠️ `test_fluido_importado.js` falla **2** (paleta compartida entre `agua.vox.json` y su nivel `-1`), pero falla **igual con el `app.js` de HEAD**: es previo y no de aquí — ojo, porque ese fichero es el guardián de [BUG-FLUID3](#-bug-fluid3), que está dado por resuelto.
+- 2026-08-11 · ♾️ [REQ-FLUID8](#-req-fluid8) · Abierto: **fuentes de fluido infinitas**. Una celda que toca fuentes por los lados y tiene un bloque sólido debajo se convierte ella misma en fuente; el ejemplo del dueño es el hoyo de 2×2×1 con dos fuentes en diagonal que se cierra solo. **Redactado sin investigar**, salvo dos minutos para localizar dónde cae: el simulador de fluidos vive **en `app.js`** (`fluidLevels`, `getProps`, `setFluid`, `processCell`, `queueTick`), «fuente» **ya existe** como `fluidLevel === 0`, y el bucle **ya es dirigido por eventos**, así que la regla son cuatro sondeos dentro de `processCell` y no un barrido del mundo. ⚠️ Queda **una pregunta bloqueante**: el enunciado dice «tocando fuentes» en plural y el ejemplo tiene exactamente **dos** por celda, pero la frase también se lee como «≥1» — y con ≥1 una fuente suelta convierte a su vecina, y ésta a la suya, hasta **inundar el plano entero**. Se implementará **≥2** salvo que el dueño diga otra cosa, por ser lo único compatible con su propio ejemplo. Anotadas además tres decisiones que el enunciado no fija: si «sólido debajo» admite otra fuente (o la regla solo vale en la capa del fondo), si vale para la lava (mejor bandera por tipo, como las perillas de REQ-FLUID6/7), y si es reversible al romper una de las fuentes originales — que es justo lo que decide si el cubo infinito sirve para algo.
+- 2026-08-11 · 🏊 **Nadar: hundirse despacio y subir manteniendo la tecla ([REQ-FLUID6](#-req-fluid6) + [REQ-FLUID7](#-req-fluid7), cerrados)** (dueño: «los agentes tienen que comportarse a nivel de físicas como los jugadores en todos los casos. la lava puede ser un poco más espesa»). Dentro de un líquido la gravedad baja a **×1/16** y aparece un **rozamiento vertical**; mantener la tecla de salto invierte el signo de esa aceleración. Tres cosas que gobernaron el resultado y no estaban en los tickets. **(1) Una sola función de caída, tres puntos de llamada.** Los agentes articulados tienen sus **propios** integradores en el snippet —dos, `asentar` y `movPaso`—, así que la petición del dueño se podía cumplir copiando la fórmula tres veces… y quedaría rota al primer retoque. En vez de eso `app.js` **ofrece** `mcCaidaPaso` y quien tenga cuerpo la llama, igual que `mc.sunExtra`. Es lo que hace que «como los jugadores» siga siendo verdad mañana. **(2) El tope de subida no hubo que inventarlo**: es el mismo rozamiento que frena la caída, así que salió gratis y sin techos escritos a mano — y el empuje se ancló a la gravedad de dentro, no a un número absoluto, para que las perillas no se descoloquen entre sí. **(3) Mandan los pies, salvo que haya suelo debajo.** Lo primero deja salir a la orilla; lo segundo, que no estaba en el ticket, evita que vadear un charco de un bloque se convierta en andar por pegamento: en Minecraft nadar es «en agua **y sin suelo**», no «en agua». Y una lección que costó cinco tests en rojo: **el motor integra en pasos discretos**, así que la terminal real no es `a·τ` sino `a·dt·k/(1−k)` (un 3,7 % a 60 fps) y la caída no es `½gt²` sino la suma discreta. Las cinco veces el motor tenía razón y la equivocada era mi expectativa; ahora las tolerancias se derivan de la cola calculada `|v₀−v*|·kⁿ` en lugar de ser un porcentaje a ojo. `test_hundirse.js` (20 ok) + `test_nadar.js` (19 ok), los dos con un §1 que exige que **fuera del agua no cambie ni un float**, que era la condición del dueño.
+- 2026-08-11 · 🏊 [REQ-FLUID6](#-req-fluid6) y [REQ-FLUID7](#-req-fluid7) · Abiertos: la **física dentro de un líquido**. El dueño manda dos mecánicas con cifras de Minecraft —gravedad 0,08 → 0,005 bloques/tick² dentro (velocidad terminal ≈3,92 fuera), y el salto que fuera es un impulso de 0,42 y dentro pasa a ser una aceleración sostenida de 0,04 mientras se mantiene la tecla—. **Son dos tickets porque son dos cosas distintas**: el 6 cambia una **constante** (la gravedad se multiplica por 1/16), el 7 cambia el **gesto de entrada** (la tecla de salto deja de ser un evento y pasa a ser un estado), y sin el 6 el 7 ni se nota, porque contra la gravedad de fuera un empuje de media gravedad no sube, frena. ⚠️ La instrucción que gobierna los dos: **las velocidades son RELATIVAS y fuera del líquido no se toca nada** — nuestro motor no va en ticks sino en bloques/segundo, así que lo que se implementa es la **razón** (×1/16 la gravedad; el empuje de subida = 8× la gravedad de dentro = ½ la de fuera, que deja un neto de +7× hacia arriba con la tecla pulsada). Tabla de razones escrita en el ticket para no re-derivarla. Anotadas dos incoherencias de unidades del enunciado (el impulso llega en m/s entre cifras en bloques/tick; el empuje llega en bloques/tick cuando una aceleración es bloques/tick²). Y una trampa que ya conocemos de la fase 3: **quién decide que estás «dentro»** — allí se mira el **OJO** a propósito (andar por un charco no debe teñir la pantalla), pero la física querrá los **pies**, y de eso depende que se pueda salir a la orilla. **Redactados, sin investigar**, a petición del dueño. Sin verificar y anotado como tal: si el jugador ya tiene hoy algún trato dentro del agua, si el motor sabe que una tecla **sigue** pulsada o solo ve el flanco, cuál es la velocidad terminal de dentro (el dueño no la da; probablemente arrastre y no tope duro), y si esto alcanza a los **agentes** (antecedente BUG-FLUID2) y si la **lava** es más espesa — las dos últimas, a preguntar.
+- 2026-08-11 · 🪞 [REQ-FLUID5](#-req-fluid5) · Abierto: **reflejos de cielo y nubes en la superficie del agua**. Era la fase 4 de REQ-FLUID4; el dueño la aplazó al acotar aquel ticket («más adelante») y ahora pide sacarla a ticket propio. **Redactado, sin investigar** — a petición suya, nada de código todavía. Lo que sí se anota, por venir de lo aprendido en las fases 1-3 y no de una investigación nueva: es un cambio de **shader**, no de mallado (el culling ya dejó **una sola lámina** donde pintar, en vez de dieciocho planos apilados); la cara de arriba **ya se puede identificar** en el shader gracias a `alphaFD`, el byte de dirección que se añadió en la fase 1; y las nubes son **geometría de verdad** (`white-wool` de REQ-SHADOW2), no una textura de cielo, lo que separa el enfoque barato del caro. Tres enfoques anotados sin decidir: Fresnel hacia `uSky` (sin pasada extra, no refleja nubes), + normales onduladas, o **reflexión planar** a un FBO —que es lo único que refleja nubes de verdad y también lo que **dobla los draw calls**, así que con PERF-RS1 encima no se elige sin medir, y además un plano único no vale para dos lagos a cotas distintas—. Sin verificar, y dicho en el ticket: si el shader translúcido tiene ya a mano la normal y la dirección a cámara, cómo se lleva un reflejo con el `uFogMin` de la fase 3 al mirar la superficie **desde debajo**, y si la lava entra aquí (es emisiva: puede que lo suyo sea brillo y no reflejo) — eso último **a preguntar al dueño**.
+- 2026-08-11 · 💧 **Que parezca agua también desde fuera: culling de caras internas en el camino fino (REQ-FLUID4, fases 1-2)** (dueño: «vale, tiene mejor pinta, ahora quiero que parezca agua también desde fuera», y antes «no deben de verse las caras de los cubos, tiene que parecer agua o lava líquida»). Un fluido es un 16³ macizo **translúcido**, así que por BUG-STR1 va siempre por el **camino fino** (`finoAVbo`) — y ese camino **no tenía culling ninguno**: cada celda de un lago copiaba su geometría entera, las seis caras, y desde fuera se veía exactamente lo que era, cubos apilados con las costuras marcadas. Una charca de 9×9×3 emitía **1458 caras**; ahora **81** (18×). El mallador de cubos lleva su regla desde siempre, pero aquí no se podía reusar: la geometría fina se copia como bloque opaco de vértices y no sabía **hacia dónde mira** cada quad. Se añade eso, `colFD`/`alphaFD`/`texFD`, un byte por quad: **0..5 = está en la piel de la pieza y mira hacia ahí**, **6 = no está en la piel**. El 6 no es relleno — un quad interior (el techo de una cueva dentro del propio dibujo) no lo tapa ningún vecino y hay que poder decir «a éste no lo mires»; y el envés de una cara con `caras` hereda la dirección de su anverso, porque viven en el mismo plano. Con eso, tres reglas: vecino **opaco** (`mcTapaCara`, la misma pregunta del camino de cubo, y **solo con la celda llena** — un fluido que no llega arriba no alcanza el plano que el vecino tapa), mismo fluido **en vertical** (dos celdas apiladas comparten el plano exacto: `mcGetFluidHeight` ya devuelve 1.0 cuando hay fluido encima), y mismo fluido **en horizontal** solo si **llega tan alto**. ⚠️ La identidad de un fluido es su **TIPO y no su id**: `hab:agua-1`…`hab:agua-7` son ids distintos de la misma agua, así que comparando ids no se habría cullado ni un lago con corriente — `mcTablaFluido()` lo pregunta a `game.fluidos.getProps` y su caché se invalida por **dos** cosas, el tamaño de la paleta **y la identidad de `game.fluidos`**, porque si no el `null` de antes de que el snippet instale la API se queda cacheado para siempre y el culling no se enciende jamás. **Y debajo había un bug latente que era la mitad visible del problema**: `setFluid` apenda el id del nivel a la paleta y escribía sus flags en `mc.finoRejilla[id]`, `finoExtra`, `recorte` y `atraviesaDoc` — `Uint8Array` dimensionados **cuando los horneó `mcBuildPalette`** — o sea **fuera del array**, y JS lo tira sin decir nada: el nivel perdía «me dibujo con mi geometría fina», volvía al camino de cubo y salía un **cubo azul opaco** (el atlas de terreno se hornea con `d[o+3]=255`) en medio de un lago translúcido. Ahora crecen, como ya hacía `mcAltaVariante`. Válvula `mc.sinCullingFluido`, **sumada a la firma del chunk** en los dos sitios donde se calcula: cambia la malla, y sin eso el caché LRU de PERF-RS1 devolvía el VBO de antes — la A/B daba el mismo número las dos veces y costó un rato darse cuenta de que el instrumento mentía, no el código. El alpha del agua es del **asset** (`assets/agua.vox.json`, `#3377ff1a → #3377ff66`, porque una lámina de una celda era invisible; la lava se queda en `#ff5500bd`) y se retoca en el editor. Guardián nuevo `test_caras_fluido.js`: las 1458→81 y el ida y vuelta de la válvula, que los niveles siguen por el camino fino, que agua y lava cullean igual —con la cuenta **derivada de la rejilla real** usando los propios ayudantes del motor, no un número escrito a mano, que mediría el simulador de fluidos y no el culling— y que una pieza sin fluido (`flor-roja`) da una malla **byte a byte idéntica**. Sin regresión en `test_vista_subacuatica`, `test_fluido_importado`, `test_atlas_estructuras` (13), `test_luz_al_estampar` (9), `test_caras_pegadas` (15) y `test_caras_mundo`. ⚠️ `test_cubo_translucido` (2), `test_flor_en_rejilla` (3) y `test_luz_en_rejilla` (3) fallan **igual que en HEAD**: vienen de antes y no de aquí. Capturas del A/B en `data/tickets/REQ-FLUID4/4-…` a `7-…`. Queda la **fase 4 (reflejos)**, aplazada por el dueño ⇒ ticket aparte.
 - 2026-08-06 · 🔌 **El Mundo hacía cola detrás de miniaturas que nadie veía (PERF-MC3, segunda vuelta)** (dueño: «mira ver si estás midiendo las cosas bien», y luego «no puede ser que el mapa empty tarde si no tiene ni un voxel»). Tras arreglar el serie→paralelo, en su máquina la paleta seguía costando **10032 ms de 11287**, y **9905 se los comía el PRIMER bloque** (`hierba`) mientras los otros catorce salían a 4-18 ms. **Mi diagnóstico anterior era falso, y el culpable era mi propio instrumento**: la línea `RED ·` sacaba el veredicto de los KB/s y acusó al **ancho de banda** de una fase cuyas descargas habían terminado en **1265 ms**. Un caudal bajo solo dice que los documentos son pequeños para lo que tarda un viaje, no que la red sea el cuello. Segundo error encadenado: el dueño **no está en el móvil**, está en un portátil potente con buena red, así que la hipótesis de CPU (rasterizar las miniaturas de las galerías) tampoco se sostenía — la medí estrangulando la CPU ×8 por CDP y todo escalaba **uniforme**, nunca aparecía un bloque comiéndose el 99 %. La causa real estaba en el **orden de arranque**, en las tres últimas líneas del fichero: en `/map/<nombre>` se llamaba a `loadServerAssets()` + `refreshHabitantesList()` **antes** de `openWorld()`, así que el editor entero arrancaba primero aunque el Mundo lo tape entero, y sus galerías bajan **un documento por miniatura** (43 habitantes, 6,3 MB) **por el mismo host**, del que el navegador solo abre **~6 sockets**. La paleta no estaba descargando: estaba **esperando turno**. Arreglo: se parte el índice de assets en sus dos trabajos —`mcIndexAssets` (los nombres cortos que usan los snippets, hace falta ANTES) y llenar las galerías (solo lo mira el editor, va DESPUÉS)— compartiendo la promesa de `assets/index.json` para no pedirlo dos veces; y de propina **se cierra una carrera que ya existía**: `openWorld()` salía sin esperar a `loadServerAssets()`, así que el autoarranque podía encontrarse el registro de alias a medias. Medido en local: peticiones **ajenas compitiendo por el cable 3 → 0** y el pico de simultáneas de la paleta **5 → 8**. Confirmado por el dueño en su máquina: «ya carga rápido». **Y el instrumento se arregló para que no vuelva a mentir**: `RED ·` ya no calcula KB/s, sino que **solapa** la ventana de red con la duración real de la fase (comparar los dos relojes de largo daba 233 %, porque parte de esos documentos los pide la galería antes de que la fase empiece); el `ms` de cada bloque se reparte en **`doc` / `caras` / `geom`** —esperar el documento, rasterizar las 6 caras, hornear geometría fina: un bloque de 9905 ms es un problema distinto según cuál de las tres sea—; y se añade **`esperando TURNO de socket`** (`requestStart − fetchStart`) junto a cuántas **peticiones ajenas** competían en esa misma ventana, que es exactamente la cifra que distingue «la red va lenta» de «la red no era para ti» y que no aparecía en ninguna otra parte. Sin regresiones: `test_paleta_paralela` (12), `test_informe` (34), `test_galeria_assets` (7), `test_galeria_namespace` (8), `test_mapas` (18), `test_materiales_en_espera`, `test_setvoxel_autocarga` (21), `test_stamp_scripting`, `test_redstone_arranque`.
 - 2026-08-06 · ⏳ **Un mundo vacío tardaba 2,2 s porque los 15 materiales bajaban de uno en uno (PERF-MC3)** (dueño: «cargo `/map/empty`, que no tiene ni un voxel, y se tira en "Preparando bloques (0/15)…" un buen rato, cosa que no tiene sentido; quiero saber qué pasa»). Lo primero fue **medirlo con su propio informe**, no suponer: de 2178 ms, **1775 eran la paleta** y dentro de ella los 15 documentos salían **estrictamente consecutivos** (`roca` 868 ms, luego `hierba` 162, luego `tierra` 149…). El bucle de `mcBuildPaletteImpl` esperaba la `fetch` de cada bloque antes de pedir el siguiente. El arreglo es de seis líneas y **no toca el bucle**: `mcPrecargarDocs` suelta las peticiones en tandas con tope 8 y **no se espera a que acaben**, así que el bucle sigue yendo en serie —tiene que ir, rasteriza sobre un canvas compartido y escribe `mc.palette[id]` en orden— pero cuando le toca el bloque 5 su documento ya está bajando. Lo que lo hace posible es que **`getRoomData` cachea la PROMESA y no el resultado**: pedir un documento dos veces no lo baja dos veces, así que precalentar es literalmente pedirlos antes. Medido en local con caché fría, tres vueltas cada uno: **383 ms de media → 63 ms**, ≈6×. Y de paso **desmiente la sospecha del propio ticket**: si una parte gorda hubiera sido CPU (`JSON.parse` + rasterizar 6 caras), esos 383 ms no se caerían a 63 con latencia ≈ 0 — era espera en serie casi entera. El segundo síntoma era el cartel: `onProgress` se llamaba **después** de terminar cada bloque y con el nombre del bloque **ya hecho**, así que los 868 ms de `roca` transcurrían enteros diciendo «(0/15)» — justo mientras más se trabajaba, el número no se movía, y eso es lo que se lee como un cuelgue. Ahora avisa dos veces por bloque y la de «empezando» dice el que se está bajando; la de después es la única que trae el `ms` y por tanto la única que entra en el informe. Las **descargas que nadie pidió** que apuntaba el ticket resultaron ser dos cosas distintas al medirlas con la pila de llamadas: `/api/habitantes` ×3 son **tres inicializadores del editor** disparando a la vez (`refreshHabitantesList`, `loadRooms`, `refreshTexturas`), que ahora **comparten la petición en vuelo** —no el resultado, que daría listas rancias tras guardar o borrar—; y los dos assets de fuera de la paleta los pide `renderTexStrip`, la tira de texturas **del editor**, que se pinta detrás mientras el Mundo carga: no sobran, son de otra pantalla, y lo único que hacían era ocupar dos de las ~6 conexiones del navegador. Verificado con `test_paleta_paralela.js` **nuevo** (12 ok, estable en tres vueltas), que mide la **forma y no el reloj**: pico de peticiones en vuelo ≥ 4 (en serie sería 1 por definición), paleta completa **y en el mismo orden** (el id de bloque es la posición en `mc.blockKey` y los mundos guardados llevan ids dentro), primer cartel `(0/8) hierba ⬇`, y `/api/habitantes` una sola vez. Deliberadamente **no** compara reloj de pared contra suma de las partes: en localhost lo que domina es la cola de conexiones del navegador, no el código, así que aprobaría y suspendería sola. Sin regresiones en `test_informe` (34), `test_materiales_en_espera`, `test_atlas_estructuras` (13), `test_galeria_assets` (7), `test_bloques_comportamiento` (384) y `test_navegador` (15). ⚠️ **En el host remoto del dueño no está medido**: allí eran 1774 ms de idas y vueltas, así que debería ganarse más que en local, pero es previsión y no dato. Las propuestas 3 y 4 del ticket (paleta perezosa, caras ya rasterizadas por el servidor) quedan **abiertas a propósito**: ahora la paleta son ~60 ms en local y conviene volver a medir en remoto antes de decidir si sigue siendo el cuello.
 - 2026-08-06 · 🚪 **La puerta alta son DOS celdas, no una estructura (BUG-RS6)** (dueño: «al modificar la puerta usada en redstone de 16x16x16 a un tamaño 16x16x24 por que era demasiado baja, ahora se plancha como estructura y no como bloque, y deja de funcionar como elemento de redstone», y luego «si se puede hacer en varias celdas parecería mejor ya que las estructuras son lentas, eso sí, tendrían que moverse al unísono si es una puerta que se abre»). El circuito nunca estuvo roto: lo que se rompió fue **dónde vive la pieza**. `mcCabeEnRejilla` exige `w/h/d ≤ 1` celda para entrar en `mc.grid`, y 24 de alto son dos — así que el clic derecho pasó a estamparla como **estructura suelta**, y una estructura no tiene celda, ni vecinos, ni señal. Medido de frente antes de tocar nada: `hab:puerta` daba `finoRejilla=false` mientras `hab:puerta-abierta` (todavía 16³) daba `true`. La salida que puso el dueño —celdas de rejilla, no estructuras— trae su propia condición: **al unísono**, porque media puerta abierta es peor que una puerta lenta. Dos decisiones sostienen el arreglo. La primera: **el dibujo se parte, no se rehace**. `redstone/partir_puerta.py` corta la puerta que él tenía **hoy** en la galería (776 voxels, con su listón claro y el tirador recolocado a media altura) en `puerta` (z 0..15) y `puerta-alta` (z 16..23), y **deriva la hoja abierta girando la cerrada 90° sobre la jamba** en vez de dibujarla aparte — que es exactamente el fallo que ya había ocurrido: él subió la cerrada a 24 y `puerta-abierta.json` se quedó en 16 y con otro grosor. La segunda: **una manda sobre la otra**, el patrón del pistón. `hab:puerta` y `hab:puerta-abierta` van con **dos `define()` y `alRecibirSeñal`**, sin `encendida`, y el callback escribe las dos celdas y remalla **una sola vez**; la mitad de arriba no es pieza de redstone (no tiene señal, no conduce, no hace cola). Lo que compra no usar `encendida` se ve en el caso feo: como todo va con `precargar:false`, si a la hoja de arriba le falta el material en la paleta **no se mueve ninguna de las dos** y se reintenta entero — con `encendida` el motor habría abierto la de abajo él mismo antes de avisar. De regalo muere el apaño de `conduce`: se va el `perdida: 1` obligatorio (con 0 las dos hojas se sostenían la una a la otra y la puerta **no se cerraba jamás**), el tick de diferencia entre hojas y el abrir-solo-media al final del alcance; una puerta de Minecraft tampoco conduce. **Sin tocar `app.js`.** Verificado con `test_redstone_puerta.js` **nuevo**, que no pregunta «¿se abrió?» sino **«¿en qué pasada se abrió cada hoja?»**: tickea de una en una y las dos cambian en la **misma** (1 y 1) en los cuatro giros, al abrir y al cerrar. Más: las cuatro piezas caben en la rejilla, media puerta sola funciona y no escribe encima, un bloque ajeno arriba queda intacto, y el cable del otro lado se queda apagado. Sin regresión en `test_redstone_piston`, `test_redstone_giro`, `test_redstone_bloques` y `test_redstone_arranque`. Lo que **no** se hizo, y es la causa raíz de que esto se rompiera en silencio: avisar en el editor al agrandar un asset que **es** pieza de redstone.
@@ -5502,3 +6624,18 @@ Pantalla nueva aparte del editor: 1ª persona, WASD + ratón, terreno plano, con
 
 - 2026-08-08 · [REQ-DOC1](#-req-doc1) · Navegabilidad de CLAUDE.md — ✅ resuelto 2026-08-08. Se ha incorporado una Tabla de Contenidos / Mapa de Navegacion en la cabecera de CLAUDE.md y la seccion dedicada a la bateria de pruebas y runner CLI.
 - 2026-08-08 · 👁️ [REQ-AG13](#-req-ag13) · Visualizacion 3D de Conos de Vision y Mirada de Agentes — ✅ resuelto 2026-08-08. Se implemento mcPushVisionCones() en app.js para renderizar los conos 3D de deteccion del cuerpo (seguir.vision en ambar/dorado) y limites de mirada de cabeza (mirar.limites en cian). Activable con game.verConos = true, game.conosVision = true o durante la vista de Rayos-X (X). Verificado con test_req_ag13_conos_vision.js (4/4 ok).
+
+- 2026-08-10 · ☁️ [REQ-SHADOW2](#-req-shadow2) · Materiales sin sombra (nubes) — ✅ resuelto 2026-08-10. Dos banderas por material desde el autorun, `game.bloques.define(clave, { recibeSombra:false, proyectaSombra:false })`, sin cablear ningun material en el motor. `app.js` expone `mc.sinSombra` (por id, terreno) y `mc.sinSombraKey` (por clave, estructuras finas) y solo las consulta; el snippet decide. Las dos banderas viajan **sumadas al `aShade`** que ya existia (`sombreado + 2·bits`), asi que no hay atributo nuevo en ningun formato de vertice. Lo que no se veia desde el enunciado: en el Mundo hay **dos** sombras y `proyectaSombra:false` sola no basta (el bloque sigue tapando el skylight), por eso arrastra `luz:'pasa'`; y cambiar las banderas invalida las mallas cacheadas sin mover un voxel, asi que entra en la firma del chunk + `mcShadowDirty()`. Verificado con `test_sin_sombra.js` (7 secciones, TODO OK) y `test_caras_pegadas.js` (15 ok, 0 fallos).
+
+- 2026-08-10 · 🐞 [BUG-SNP3](#-bug-snp3) · Abierto: `game.bloques.quitar()` lanza `ReferenceError: g is not defined` en cualquier material con comportamiento. ~12 lineas de fisica del jugador pegadas por error dentro de la funcion (`mundo-autoarranque.json` 1136-1147, el remate de la colision horizontal + el aviso `[CAYENDO]`). **Ya estaba en HEAD**, no lo trae REQ-SHADOW2: tumba `test_bloques_comportamiento.js` y `test_luz_traspasa.js` igual en las dos versiones. Atenuante: el `delete` + `reconstruirCache()` corren antes de petar, asi que el estado queda bien y solo se pierde el `return`.
+
+- 2026-08-10 · 💧 [REQ-FLUID4](#-req-fluid4) · Abierto: «ilusion de agua» — un lago se ve como una cuadricula de cubos transparentes con caras y aristas internas, no como una masa continua. El dueño aporta el analisis de otra IA con tres pilares: culling de las caras agua-agua, capa superior a ~87,5 % de alto, y pasada alpha final ordenada de atras hacia delante + tintado por bioma sobre textura en escala de grises. **Redactado, sin investigar.** Antes de tocar: contrastar el «~87,5 % / nivel 8/8» con fuente (no cuadra entre si), comprobar si el culling ya lo hacemos en el camino translucido (podria dejar el ticket en los puntos 2 y 3), y decidir aparte lo del bioma (no tenemos biomas).
+
+- 2026-08-11 · 🐞 [BUG-FLUID4](#-bug-fluid4) · Abierto: bajo un fluido, los bloques que no ocupan todo el lateral de su celda marcan las caras de forma traslucida en vez de verse transparentes. **Redactado, sin investigar.** Capturas en `data/tickets/BUG-FLUID4/`. Sospecha sin comprobar: `mcTapaCara` devuelve `false` sobre una celda fina, asi que la cara del fluido contra esa pieza no la culla ninguna de las tres reglas de REQ-FLUID4. Sin verificar: que fluido y que material salen en las capturas, si pasa con agua o solo con lava, si depende de que la celda este llena, si es solo al construir o tambien al cargar, y si `mc.sinCullingFluido = true` lo hace desaparecer.
+- 2026-08-11 · 🐞 [BUG-SNP4](#-bug-snp4) · Abierto: los cambios hechos en el editor de codigo del Mundo se revierten al volver al mapa y reabrir el editor. **Redactado, sin investigar.** Sospecha sin comprobar: el snippet tiene **dos copias vivas** y al reabrir el modal se relee la que se cargo al abrir el Mundo, no la editada. Sin verificar: si se pierde solo lo no guardado o tambien lo guardado, y si el `.json` de disco llega a cambiar. Ojo con la tecla: el dueño dice **Ctrl+C**, `CLAUDE.md` documenta **Alt+C** (y `Ctrl+C` esta cogido por `copySelection` en el editor de voxels).
+
+- 2026-08-11 · 💧 [REQ-FLUID4](#-req-fluid4) · **Fase 3 (vista subacuatica) resuelta.** Al meter el ojo en un fluido la escena se tiñe y la niebla se acerca; agua y lava por el MISMO mecanismo, cambiando solo color y distancia. `mcFluidoOjo()` pregunta a `game.fluidos.getProps()` (ningun material cableado por nombre) y mira la celda del OJO, no la de los pies. `MC_SKY` se leia suelto en 9 sitios y la niebla a mano en 6: todos pasan ya por `mcCieloEf`/`mcFogNear`/`mcFogFar`. **Leccion:** la niebla submarina va en BLOQUES ABSOLUTOS, no en fraccion del far de proyeccion — la primera version usaba fracciones y el efecto se quedaba en «he cambiado el color del fondo». Tunables: `game.vistaAgua({far:6})`, `game.vistaLava(...)`, `mc.vistaFluido` para probar sin nadar. Verificado con `node test_vista_subacuatica.js` (30 ok, TODO OK) y sin regresion en `test_sin_sombra.js`. Capturas en `data/tickets/REQ-FLUID4/`.
+
+- 2026-08-11 · 💧 [REQ-FLUID4](#-req-fluid4) · **2ª ronda de la fase 3, tras probarlo el dueño:** «quiero por lo menos un far 100, ver las cosas de lejos en el agua, y no se ven las paredes o bloques que no son agua cuando esta buceando, deberian verse». Las dos quejas eran el mismo fallo: con la niebla a 11 bloques, todo lo que hay detras ES niebla. Subir el far sin mas devolvia el problema contrario (no se tiñe nada), asi que se separan las dos palancas: **`uFogMin`**, uniforme nuevo en los cuatro shaders con niebla, es un SUELO de tinte constante que no depende de la distancia. Ahora `far:100` (se ven las paredes) + `tinte:0.30` (parece agua). Fuera del agua vale 0 ⇒ `f = 0 + 1·f`, identico al render de antes. Lava: `far:6, tinte:0.80`. Nuevo tunable `game.vistaAgua({tinte:…})`. Verificado con `node test_vista_subacuatica.js` (35 ok, TODO OK) y sin regresion en `test_sin_sombra.js`.
+
+- 2026-08-11 · 🐞 [BUG-FLUID4](#-bug-fluid4) · **Resuelto, y la sospecha del dia anterior era la buena.** `mcTapaCara` devuelve `false` sobre TODA celda fina —es la regla de las hojas «fancy», esta ahi para que por los agujeros de una copa no se vea el vacio—, asi que ninguna de las tres reglas de `tapadasFluido` cullaba la cara del fluido contra una flor o una escalera metida en el lago: el liquido emitia las 5 caras que la rodean, y como sus vecinas fluido↔fluido SI se cullan, la superviviente se queda **suelta** — la lamina traslucida marcando el hueco que fotografio el dueño. Medido con el A/B: `flor-roja` daba **10** caras donde `roca` da 5; agua y lava igual. El arreglo es que dentro del culling de fluido la pregunta es otra: no «¿tapa la cara del vecino?» sino **«¿ocupa la celda?»**. Sin waterlogging (un material por celda), una pieza fina que no es fluido ha REEMPLAZADO al liquido y la cara que da a ella no se ve. `tapaAlFluido` es local a `tapadasFluido` y solo entra en su primera rama; **`mcTapaCara` no se toca** (su contrato general tiene que seguir diciendo `false`, y `test_rayo_apuntado.js` extrae verbatim a sus vecinas). El hueco de AIRE sigue emitiendo, porque `nId` es 0 y no llega a la rama. Verificado: 10 → 5 en las dos, la valvula `mc.sinCullingFluido` sigue devolviendo el lago-rejilla (444), `flor-roja` sigue en el lote opaco, y el mundo del dueño quedo como estaba. `node test_caras_fluido.js` §5, con anti-falso-verde (si el arreglo cullease de mas todo daria 0 y el test pasaria sin mirar nada).
