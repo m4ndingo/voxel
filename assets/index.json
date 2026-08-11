@@ -261,7 +261,8 @@
     },
     "file": "assets/lava.vox.json",
     "description": "",
-    "alias": "lava"
+    "alias": "lava",
+    "categoria": "fluido"
   },
   {
     "id": "tejado",
@@ -713,67 +714,6 @@
     "alias": "sign"
   },
   {
-    "id": "escalera",
-    "name": "Escalera",
-    "role": "Bloque básico 16³",
-    "icon": "🧱",
-    "type": "textura",
-    "group": "Bloques de construcción",
-    "size": {
-      "x": 16,
-      "y": 1,
-      "z": 16
-    },
-    "file": "assets/escalera.vox.json",
-    "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir."
-  },
-  {
-    "id": "zz-pieza-test",
-    "name": "ZZ Pieza De Prueba",
-    "role": "Pieza de agente · de pruebas",
-    "icon": "🧪",
-    "type": "textura",
-    "group": "Bloques de construcción",
-    "size": {
-      "x": 16,
-      "y": 16,
-      "z": 16
-    },
-    "file": "assets/zz-pieza-test.vox.json"
-  },
-  {
-    "id": "piston",
-    "name": "Pistón",
-    "role": "Bloque · pistón normal (piston)",
-    "icon": "🟤",
-    "type": "textura",
-    "group": "Bloques de construcción",
-    "size": {
-      "x": 16,
-      "y": 16,
-      "z": 16
-    },
-    "file": "assets/piston.vox.json",
-    "description": "Pistón — empuja una fila de hasta 12 bloques al recibir señal de redstone.",
-    "categoria": "redstone"
-  },
-  {
-    "id": "piston_pegajoso",
-    "name": "Pistón pegajoso",
-    "role": "Bloque · pistón pegajoso (sticky piston)",
-    "icon": "🟢",
-    "type": "textura",
-    "group": "Bloques de construcción",
-    "size": {
-      "x": 16,
-      "y": 16,
-      "z": 16
-    },
-    "file": "assets/piston_pegajoso.vox.json",
-    "description": "Pistón pegajoso — empuja bloques al extenderse y los arrastra al retraerse.",
-    "categoria": "redstone"
-  },
-  {
     "id": "observador",
     "name": "Observador",
     "role": "Bloque · detector de actualizaciones activo (observer-on)",
@@ -804,5 +744,186 @@
     "file": "assets/observador-on.vox.json",
     "description": "Observador activo — emite 15 por la cara trasera.",
     "categoria": "redstone"
+  },
+  {
+    "id": "piston-pegajoso",
+    "name": "piston-pegajoso",
+    "role": "Bloque · piston-pegajoso",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/piston-pegajoso.vox.json",
+    "categoria": "redstone"
+  },
+  {
+    "id": "piston-pegajoso-on",
+    "name": "piston-pegajoso-on",
+    "role": "Bloque · piston-pegajoso-on",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/piston-pegajoso-on.vox.json",
+    "categoria": "redstone"
+  },
+  {
+    "id": "piston-pegajoso-cabeza",
+    "name": "piston-pegajoso-cabeza",
+    "role": "Bloque · piston-pegajoso-cabeza",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/piston-pegajoso-cabeza.vox.json",
+    "categoria": "redstone"
+  },
+  {
+    "id": "hierba-l-tetris",
+    "name": "Hierba L (tetris)",
+    "role": "Textura · césped sobre tierra",
+    "icon": "🌿",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hierba-l-tetris.vox.json",
+    "description": "Textura Hierba — objeto 16³ usado como pincel."
+  },
+  {
+    "id": "agua",
+    "name": "agua",
+    "role": "Bloque · agua",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/agua.vox.json",
+    "categoria": "fluido"
+  },
+  {
+    "id": "alfombra",
+    "name": "alfombra",
+    "role": "Bloque · alfombra",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 1
+    },
+    "file": "assets/alfombra.vox.json",
+    "categoria": "fluido",
+    "alias": "lava"
+  },
+  {
+    "id": "cabeza-de-oso",
+    "name": "Cabeza de Oso",
+    "role": "Pieza de agente · cabeza (15³, gira sobre el centro de su caja)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 15,
+      "y": 15,
+      "z": 15
+    },
+    "file": "assets/cabeza-de-oso.vox.json",
+    "description": "Cabeza de oso estilo voxel para el formato voxelforge-1."
+  },
+  {
+    "id": "torso-de-oso",
+    "name": "Torso de Oso",
+    "role": "Pieza de agente · raíz del esqueleto",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 12,
+      "y": 8,
+      "z": 14
+    },
+    "file": "assets/torso-de-oso.vox.json",
+    "description": "Torso de oso en formato voxelforge-1 coordinado con la cabeza de oso."
+  },
+  {
+    "id": "brazo-de-oso",
+    "name": "Brazo de Oso",
+    "role": "Pieza de agente · brazo (pivote 1 = hombro +X, 2 = hombro -X)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 5,
+      "y": 5,
+      "z": 14
+    },
+    "file": "assets/brazo-de-oso.vox.json",
+    "description": "Brazo de oso en formato voxelforge-1 coordinado con el oso."
+  },
+  {
+    "id": "pierna-de-oso",
+    "name": "Pierna de Oso",
+    "role": "Pieza de agente · pierna (pivote 1 = cadera +X, 2 = cadera -X)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 5,
+      "y": 5,
+      "z": 12
+    },
+    "file": "assets/pierna-de-oso.vox.json",
+    "description": "Pierna de oso en formato voxelforge-1 coordinada con el conjunto del oso."
+  },
+  {
+    "id": "hormig-n-amarillo-i",
+    "name": "Hormigón Amarillo I",
+    "role": "Bloque · hormigón amarillo (yellow concrete)",
+    "icon": "🟡",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hormig-n-amarillo-i.vox.json",
+    "description": "Hormigón Amarillo — bloque de construcción 16³ (textura lisa y mate)."
+  },
+  {
+    "id": "hormig-n-amarillo-dot",
+    "name": "Hormigón Amarillo Dot",
+    "role": "Bloque · hormigón amarillo (yellow concrete)",
+    "icon": "🟡",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hormig-n-amarillo-dot.vox.json",
+    "description": "Hormigón Amarillo — bloque de construcción 16³ (textura lisa y mate)."
   }
 ]
