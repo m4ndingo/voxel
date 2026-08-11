@@ -5867,7 +5867,229 @@ $('#play-modal').addEventListener('click',e=>{ if(e.target.id==='play-modal') cl
  * de voxels → 60fps holgados incluso con cientos de miles de bloques. F1 monta la pantalla, el
  * contexto GL, el bucle por rAF y el medidor de FPS; el terreno, meshing y física llegan en F2-F5. */
 const MC_SKY=[0.549,0.776,1.0];   // color cielo (calca .mc-modal en CSS)
-const MC_CHUNK=16;                // lado del chunk en x/z (la columna vertical y entera va en un chunk)
+// ── REQ-FLUID4 · vista subacuática ────────────────────────────────────────────────────────────────
+// Meter la cabeza en el agua tiene que TEÑIR la escena y ACERCAR la niebla. Lo segundo es lo que la
+// hace parecer líquido: sin niebla corta se ve un mundo normal con un filtro azul encima, que es
+// justo lo que NO queremos. Las dos palancas ya existían (uSky + uFogNear/uFogFar); lo que faltaba es
+// que alguien las moviera, porque MC_SKY se leía suelto en nueve sitios del render.
+// Agua y lava salen del MISMO mecanismo y solo se diferencian en el color y en cuánto cierran la
+// niebla (la lava no deja ver nada), que es lo que pidió el dueño: «es como el agua pero cambia el
+// color nada más».
+// ⚠️ near/far van en BLOQUES, en absoluto — NO en fracción del far de dibujado, como la niebla de
+// fuera. Bajo el agua no ves más lejos por subir la distancia de render: la visibilidad la pone el
+// agua, no la tarjeta. La primera versión usaba fracciones y el efecto se quedaba en «he cambiado el
+// color del fondo», porque con renderDist alto la niebla acababa a 50 bloques y no teñía nada.
+// Se multiplican por mc.scale para que aguanten al cambiar el tamaño del jugador.
+// Son valores ESTÉTICOS: se tocan en vivo con game.vistaAgua/game.vistaLava (ver más abajo).
+const MC_VISTA_FLUIDO = {
+// `tinte` es un SUELO de niebla: se aplica igual a un bloque pegado a la cara que a uno lejano, así
+// que el agua se nota siempre sin cerrar la visibilidad. Es lo que permite las dos cosas a la vez:
+// «ver las cosas de lejos» (far grande) y que parezca agua. Sin él hay que elegir una — niebla corta
+// (parece agua pero las paredes desaparecen) o niebla larga (se ve todo pero solo has cambiado el
+// color del fondo). Las dos versiones anteriores de esta fase se estrellaron justo ahí.
+// `near` NEGATIVO es legal y es lo que pidió el dueño: la rampa de niebla arranca *antes* del ojo, así
+// que hasta lo pegado a la cara entra ya con algo de niebla en vez de salir limpio. Con `tinte` bajo
+// (0,1) el efecto es «hay agua delante» sin cerrar la visibilidad — las dos cosas a la vez.
+  WATER: { sky:[0.10,0.34,0.60], near:-30, far:100, tinte:0.10 },
+  LAVA:  { sky:[0.45,0.10,0.02], near:-80, far:100, tinte:0.10 },   // en lava la rampa arranca aún antes
+};
+// Color de fondo/niebla EFECTIVO de este fotograma. Es lo único que cambia al sumergirse, y por eso
+// los uniformes uSky lo leen a él y no a MC_SKY.
+let mcCieloEf = MC_SKY.slice();
+let mcNieblaEf = null;   // null = la niebla de siempre; si no, [near, far] en bloques
+let mcTinteEf = 0;       // suelo de niebla: 0 = ninguno (fuera del agua no cambia nada)
+// ¿En qué fluido está el OJO? El ojo, no los pies: agachado en un charco se ve agua aunque los pies
+// sigan en el mismo sitio, y de pie en un bloque de agua no se ve. Es la misma altura de ojo que usa
+// mcViewMatrix, así que lo que se tiñe y lo que se ve coinciden siempre.
+function mcFluidoOjo(){
+  if(!mc.grid || !mc.dim || !mc.pos) return null;
+  const x=Math.floor(mc.pos[0]), y=Math.floor(mc.pos[1]+MC_EYE*mc.scale), z=Math.floor(mc.pos[2]);
+  if(!mcInside(x,y,z)) return null;
+  const id=mc.grid[mcIdx(x,y,z)];
+  if(!id) return null;
+  // Vía game.fluidos: es quien sabe de niveles (hab:agua-3) y quien ya distingue agua de lava. Aquí no
+  // se reconoce ningún material por su nombre.
+  const api=(typeof game!=='undefined') && game.fluidos;
+  if(!api || typeof api.getProps!=='function') return null;
+  const p=api.getProps(id,x,y,z);
+  return (p && p.isFluid && MC_VISTA_FLUIDO[p.fluidType]) ? p.fluidType : null;
+}
+
+// ── REQ-FLUID6 · la física DENTRO de un líquido ────────────────────────────────────────────────
+// Las cifras del dueño son de Minecraft y vienen en bloques/TICK; aquí se usan como RAZONES, porque
+// la instrucción fue «usar fuera del líquido las que están ahora mismo»: fuera no cambia ni un float.
+//   · `gravedad` = factor sobre la de fuera.
+//   · `arrastre` = constante de tiempo del rozamiento vertical, en SEGUNDOS. Ésta NO se convierte de
+//     nada: un segundo es un segundo en los dos motores. Fuera del agua no existe (hoy no hay
+//     velocidad terminal, y así se queda).
+// La velocidad terminal no se escribe: SALE de las dos, v = MC_GRAVEDAD · gravedad · arrastre. Un
+// tope duro daría el mismo número y un muro al llegar a él; el rozamiento se acerca solo.
+const MC_GRAVEDAD = 22;   // bloques/s², la de fuera del agua — la de toda la vida
+// REQ-FLUID7 · `empuje` = cuántas veces la gravedad de DENTRO empuja hacia arriba mientras se mantiene
+// la tecla, así que el neto subiendo es (empuje − 1) veces esa misma gravedad. Está anclado a la de
+// dentro y no a un número absoluto: si mañana se retoca `gravedad`, nadar sigue sintiéndose igual de
+// vivo respecto a hundirse.
+// ⚠️ Los cuatro números de abajo los pidió el dueño (2026-08-11) y NO se derivan de las cifras de
+// Minecraft: hundirse pasó de ~0,30 a 2,42 bloques/s en los dos líquidos. Lo que los separa ya no es
+// cuánto se hunde uno sino el TACTO y el nadar — la lava lleva el doble de gravedad con la mitad de
+// arrastre (misma terminal, pero la alcanza en la mitad de tiempo: más seca, menos flotante) y su
+// empuje neto es ×1 frente al ×2 del agua, o sea que de la lava cuesta el doble salir.
+const MC_FISICA_FLUIDO = {
+  WATER: { gravedad: 0.5, arrastre: 0.22, empuje: 3 },   // ⇒ baja a ~2,42 bloques/s · sube a ~4,84
+  LAVA:  { gravedad: 1,   arrastre: 0.11, empuje: 2 },   // ⇒ baja a ~2,42 igual · sube a ~2,42 (justo lo que pesa)
+};
+// ¿Hay líquido en ESTE punto? El punto, no la celda: un fluido a medio nivel deja aire encima, y unos
+// pies apoyados ahí no están dentro de nada. Es la diferencia con mcFluidoOjo, que sí mira la celda
+// entera — allí basta, porque lo que se decide es si teñir la pantalla.
+function mcFluidoEnPunto(x, y, z){
+  const cx=Math.floor(x), cy=Math.floor(y), cz=Math.floor(z);
+  if(!mc.grid || !mc.dim || !mcInside(cx,cy,cz)) return null;
+  const id=mc.grid[mcIdx(cx,cy,cz)];
+  if(!id) return null;
+  const api=(typeof game!=='undefined') && game.fluidos;
+  if(!api || typeof api.getProps!=='function') return null;
+  const p=api.getProps(id,cx,cy,cz);
+  if(!p || !p.isFluid || !MC_FISICA_FLUIDO[p.fluidType]) return null;
+  return (y - cy <= mcGetFluidHeight(cx,cy,cz)) ? p.fluidType : null;   // por debajo de la superficie de SU celda
+}
+// Los parámetros que gobiernan a un cuerpo con los pies en (x,y,z), o null si está al aire.
+function mcFisicaFluido(x, y, z){
+  if(mc.sinFisicaFluido) return null;   // válvula: devuelve la caída de antes de este ticket
+  const t = mcFluidoEnPunto(x, y, z);
+  return t ? MC_FISICA_FLUIDO[t] : null;
+}
+// LA caída, y la única. Devuelve la vy del paso siguiente para un cuerpo con los pies en (x,y,z).
+// Fuera del líquido es, literalmente, lo de siempre: vy − MC_GRAVEDAD·dt.
+//
+// Es `function` global y no un `const` a propósito, igual que mcStuckExtra o mcXrayExtra: los agentes
+// viven en el snippet 'mundo-autoarranque' (que corre en `new Function`) y tienen sus PROPIOS
+// integradores. El dueño pidió que se comporten como el jugador «en todos los casos», y la única
+// forma de que eso siga siendo verdad dentro de seis meses es que no haya dos fórmulas — app.js pone
+// el paso y quien tenga un cuerpo lo llama. Los agentes no le importan a app.js; la caída sí.
+//
+// El arrastre se aplica también SUBIENDO, y no es un descuido: es lo que hace que entrar en el agua
+// a toda velocidad frene en unas décimas en vez de chocar contra un muro invisible.
+//
+// REQ-FLUID7 · `nadando` (opcional) = la tecla de subir SIGUE pulsada. Fuera del líquido no pinta nada:
+// ahí subir es un impulso de un solo frame y lo da quien llama, no esta función. Dentro invierte el
+// signo de la aceleración —de −1 a +(empuje−1) veces la gravedad de dentro— y el mismo arrastre que
+// frena la caída da, gratis, un tope de subida: no hace falta un techo escrito a mano, que es lo que
+// el ticket dejaba en duda. Sin el argumento se comporta exactamente como antes de REQ-FLUID7.
+// REQ-FLUID9 · `mira` (opcional, −1..1) = la parte VERTICAL de lo que se está pidiendo con el rumbo:
+// +1 = arriba del todo, −1 = abajo del todo, 0 = ni una cosa ni otra. Lo calcula quien llama (el
+// jugador, del cabeceo de la vista y de la tecla de hundirse) porque esta función no sabe hacia dónde
+// mira un cuerpo. Se SUMA a `nadando` y se acota, así que el empuje sigue siendo uno: mirar arriba y
+// además mantener el salto no empuja el doble. Con `mira` a 0 la cuenta es byte a byte la de antes.
+function mcCaidaPaso(vy, dt, x, y, z, nadando, mira){
+  const f = mcFisicaFluido(x, y, z);
+  if(!f) return vy - MC_GRAVEDAD*dt;
+  const g = MC_GRAVEDAD*f.gravedad;
+  const m = Math.max(-1, Math.min(1, (mira||0) + (nadando?1:0)));
+  const a = g*(m*(f.empuje||0) - 1);   // m=0 ⇒ −g · m=1 ⇒ (empuje−1)·g · m=−1 ⇒ −(empuje+1)·g
+  return (vy + a*dt) * Math.exp(-dt/f.arrastre);
+}
+// Una vez por fotograma, antes de dibujar nada. Deja mcCieloEf/mcNieblaEf listos para todo el frame.
+function mcActualizaVista(){
+  const f = (mc.vistaFluido===undefined) ? mcFluidoOjo() : mc.vistaFluido;   // válvula para tests y F12
+  const v = f && MC_VISTA_FLUIDO[f];
+  mc.fluidoOjo = f || null;
+  if(!v){ mcCieloEf[0]=MC_SKY[0]; mcCieloEf[1]=MC_SKY[1]; mcCieloEf[2]=MC_SKY[2];
+          mcNieblaEf=null; mcTinteEf=0; return; }
+  const k = mc.scale || 1;
+  mcCieloEf[0]=v.sky[0]; mcCieloEf[1]=v.sky[1]; mcCieloEf[2]=v.sky[2];
+  mcNieblaEf=[v.near*k, v.far*k];
+  mcTinteEf=v.tinte||0;
+}
+function mcFogMin(){ return mcTinteEf; }
+// Los seis sitios que fijaban la niebla a mano (pj.far*0.55 … *0.98) pasan por aquí. El séptimo, el
+// del overlay, NO: allí la niebla está desactivada a propósito y bajo el agua tampoco debe volver.
+// Fuera del agua sigue siendo proporcional al far; dentro, absoluta (ya viene en unidades de mundo).
+function mcFogNear(far){ return mcNieblaEf ? mcNieblaEf[0] : far*0.55; }
+function mcFogFar (far){ return mcNieblaEf ? mcNieblaEf[1] : far*0.98; }
+
+// ── REQ-FLUID4 · afinar la vista subacuática en vivo ──────────────────────────────────────────────
+// El color y la distancia de visión bajo el agua son estéticos y discutibles, así que van por consola
+// y no por la UI. Se ven en el acto (la vista se recalcula cada fotograma) y persisten en la sesión.
+//   game.vistaAgua()                       → mira los valores de ahora
+//   game.vistaAgua({ far:60 })             → se ve menos lejos: agua más turbia
+//   game.vistaAgua({ tinte:0.5 })          → MÁS azul sin perder alcance (0 = nada, 1 = opaco)
+//   game.vistaAgua({ sky:[0,0.4,0.6] })    → otro tono
+//   game.vistaLava({ far:1 })              → lo mismo para la lava
+//   game.vistaAgua('reset')                → vuelve al defecto
+// Para PROBAR sin nadar: mc.vistaFluido='WATER' | 'LAVA' | null, y undefined para volver a que lo
+// decida el motor.
+function _mcTunableFluido(tipo, defecto){
+  return function(cfg){
+    const v = MC_VISTA_FLUIDO[tipo];
+    if(cfg === 'reset'){ v.sky = defecto.sky.slice(); v.near = defecto.near; v.far = defecto.far;
+                         v.tinte = defecto.tinte; }
+    else if(cfg && typeof cfg === 'object'){
+      if(Array.isArray(cfg.sky) && cfg.sky.length === 3) v.sky = cfg.sky.map(Number);
+      if(typeof cfg.near === 'number') v.near = cfg.near;
+      if(typeof cfg.far === 'number') v.far = cfg.far;
+      if(typeof cfg.tinte === 'number') v.tinte = Math.max(0, Math.min(1, cfg.tinte));
+    }
+    console.log('[' + tipo.toLowerCase() + '] sky=[' + v.sky.join(', ') + '] near=' + v.near +
+                ' far=' + v.far + ' bloques · tinte=' + v.tinte);
+    return { sky: v.sky.slice(), near: v.near, far: v.far, tinte: v.tinte };
+  };
+}
+game.vistaAgua = _mcTunableFluido('WATER', { sky: MC_VISTA_FLUIDO.WATER.sky.slice(),
+  near: MC_VISTA_FLUIDO.WATER.near, far: MC_VISTA_FLUIDO.WATER.far, tinte: MC_VISTA_FLUIDO.WATER.tinte });
+game.vistaLava = _mcTunableFluido('LAVA', { sky: MC_VISTA_FLUIDO.LAVA.sky.slice(),
+  near: MC_VISTA_FLUIDO.LAVA.near, far: MC_VISTA_FLUIDO.LAVA.far, tinte: MC_VISTA_FLUIDO.LAVA.tinte });
+// ── REQ-FLUID6 · afinar el hundimiento en vivo ────────────────────────────────────────────────────
+//   game.fisicaAgua()                      → los valores de ahora, con la velocidad terminal que sale
+//   game.fisicaAgua({ gravedad:0.03 })     → se hunde arrancando más despacio (fracción de la de fuera)
+//   game.fisicaAgua({ arrastre:0.5 })      → menos espeso: tarda más en frenar y termina más rápido
+//   game.fisicaLava({ arrastre:0.05 })     → lava más espesa aún
+//   game.fisicaAgua({ empuje:12 })         → REQ-FLUID7: se nada hacia arriba con más brío
+//   game.fisicaAgua({ empuje:1 })          → el empuje justo compensa la gravedad: se queda flotando
+//   game.fisicaAgua('reset')               → vuelve al defecto
+// Y mc.sinFisicaFluido = true devuelve la caída de antes de este ticket, para comparar.
+// Lo que se afine PERSISTE (localStorage, `vf_fis_<tipo>`), como game.nearClip o game.parkour: el
+// dueño juega desde el móvil y una perilla que se olvida al recargar hay que volver a teclearla en
+// cada partida. 'reset' borra la preferencia, no solo el valor en memoria.
+const MC_FIS_LS = { WATER: 'vf_fis_agua', LAVA: 'vf_fis_lava' };
+function _mcFisicaGuardar(tipo){
+  const v = MC_FISICA_FLUIDO[tipo];
+  try{ localStorage.setItem(MC_FIS_LS[tipo], JSON.stringify({ gravedad: v.gravedad, arrastre: v.arrastre, empuje: v.empuje })); }catch(e){}
+}
+function _mcFisicaCargar(tipo){
+  const v = MC_FISICA_FLUIDO[tipo];
+  try{
+    const s = localStorage.getItem(MC_FIS_LS[tipo]); if(!s) return;
+    const g = JSON.parse(s); if(!g || typeof g !== 'object') return;
+    if(typeof g.gravedad === 'number' && g.gravedad > 0) v.gravedad = g.gravedad;
+    if(typeof g.arrastre === 'number' && g.arrastre > 0) v.arrastre = g.arrastre;
+    if(typeof g.empuje   === 'number' && g.empuje  >= 0) v.empuje   = g.empuje;
+  }catch(e){}
+}
+function _mcTunableFisica(tipo, defecto){
+  _mcFisicaCargar(tipo);   // el defecto ya está copiado en `defecto`, así que 'reset' sigue volviendo al del motor
+  return function(cfg){
+    const v = MC_FISICA_FLUIDO[tipo];
+    if(cfg === 'reset'){ v.gravedad = defecto.gravedad; v.arrastre = defecto.arrastre; v.empuje = defecto.empuje;
+                         try{ localStorage.removeItem(MC_FIS_LS[tipo]); }catch(e){} }
+    else if(cfg && typeof cfg === 'object'){
+      if(typeof cfg.gravedad === 'number' && cfg.gravedad > 0) v.gravedad = cfg.gravedad;
+      if(typeof cfg.arrastre === 'number' && cfg.arrastre > 0) v.arrastre = cfg.arrastre;
+      // empuje < 1 es legítimo (se hunde aun nadando) y 0 es «no se nada», así que aquí no se exige > 0.
+      if(typeof cfg.empuje === 'number' && cfg.empuje >= 0) v.empuje = cfg.empuje;
+      _mcFisicaGuardar(tipo);
+    }
+    const term = MC_GRAVEDAD * v.gravedad * v.arrastre;
+    const sube = MC_GRAVEDAD * v.gravedad * ((v.empuje||0) - 1) * v.arrastre;
+    console.log('[' + tipo.toLowerCase() + '] gravedad=×' + v.gravedad + ' (' +
+                (MC_GRAVEDAD*v.gravedad).toFixed(2) + ' bloques/s² de ' + MC_GRAVEDAD + ') · arrastre=' +
+                v.arrastre + ' s ⇒ cae a ' + term.toFixed(2) + ' bloques/s · empuje=×' + v.empuje +
+                ' ⇒ nada a ' + sube.toFixed(2) + ' bloques/s');
+    return { gravedad: v.gravedad, arrastre: v.arrastre, empuje: v.empuje, terminal: term, terminalSubida: sube };
+  };
+}
+game.fisicaAgua = _mcTunableFisica('WATER', { gravedad: MC_FISICA_FLUIDO.WATER.gravedad, arrastre: MC_FISICA_FLUIDO.WATER.arrastre, empuje: MC_FISICA_FLUIDO.WATER.empuje });
+game.fisicaLava = _mcTunableFisica('LAVA',  { gravedad: MC_FISICA_FLUIDO.LAVA.gravedad,  arrastre: MC_FISICA_FLUIDO.LAVA.arrastre,  empuje: MC_FISICA_FLUIDO.LAVA.empuje });
+const MC_CHUNK=16;              // lado del chunk en x/z (la columna vertical y entera va en un chunk)
 const MC_MAXLIGHT=15;             // nivel máximo de luz del cielo (t7 skylight): se pierde 1 por bloque al difundirse por el aire
 const MC_TILE=16;                 // px por cara en el atlas (las texturas son 16³)
 const MC_ATLAS_STEP=16;           // el atlas de estructuras crece de 16 en 16 filas: si se ajustase al recuento, cada
@@ -6000,6 +6222,18 @@ const mc={
                                   // del gancho de arriba y mcSolidWalk consulta los dos. Para que vuelva a
                                   // chocar se le quita el flag al .vox.json: game.bloques.quitar() solo
                                   // deshace lo que puso el snippet.
+  sinSombra:null,                 // REQ-SHADOW2 · Uint8Array por id de bloque (TERRENO), dos banderas sumadas:
+                                  //   1 = NO RECIBE  → nada lo oscurece: ni el skylight (mc.light) ni la sombra del sol
+                                  //   2 = NO PROYECTA → su geometría no entra en el mapa de sombra (mcRenderShadow)
+                                  // Las escribe el snippet (game.bloques.define(clave,{recibeSombra:false,
+                                  // proyectaSombra:false})) y app.js solo las consulta, igual que mc.atraviesa. Es
+                                  // para nubes: una nube de lana no puede dejar un pegote de sombra en el suelo ni
+                                  // salir gris por su propia panza. null = coste cero.
+                                  // ⚠️ NO PROYECTA es solo el mapa del SOL. Un bloque macizo sigue TAPANDO la luz del
+                                  // cielo, que es la OTRA sombra: para que una nube no oscurezca lo de abajo hace
+                                  // falta además luz:'pasa' (mc.traspasaLuz). El snippet lo encadena.
+  sinSombraKey:null,              // lo mismo para las ESTRUCTURAS finas, que no tienen id de bloque: { clave → bits }.
+                                  // Se consulta una vez por instancia al mallarla (mcBuildStructMesh), no por cara.
   finoRejilla:null,               // Uint8Array por id de bloque, 1 = este material NO llena su celda (una flor, una
                                   // mata, una llama): proyectarlo sobre las 6 caras del cubo es infiel por
                                   // definición, así que el mallador emite su GEOMETRÍA REAL dentro de la malla del
@@ -6061,6 +6295,26 @@ function mcTablaFina(){
     if(g && (g.colCount || g.alphaCount)) T[id]=g; else mcCalientaFina(key);
   }
   return (mc._geoFina=T);
+}
+// REQ-FLUID4 · id de bloque → tipo de fluido ('WATER'|'LAVA') o ''. Existe porque la identidad de un fluido
+// NO es su id: hab:agua y hab:agua-1 … hab:agua-7 son ids DISTINTOS de la misma masa de agua, así que las
+// caras internas de un lago hay que decidirlas comparando TIPOS. null = en este mundo no hay ningún fluido,
+// y entonces el mallado no paga nada. Caché densa como mcTablaFina, rehecha cuando cambia la paleta… o
+// cuando cambia el propio game.fluidos: lo instala un snippet y puede llegar DESPUÉS del primer mallado,
+// con la paleta ya del mismo tamaño (sin esa segunda condición el null se quedaría cacheado para siempre).
+let mcFluidoTabla=null, mcFluidoTablaN=-1, mcFluidoTablaApi=null;
+function mcTablaFluido(){
+  const n = mc.blockKey ? mc.blockKey.length : 0;
+  const api = ((typeof game!=='undefined') && game.fluidos) || null;
+  if(mcFluidoTablaN===n && mcFluidoTablaApi===api) return mcFluidoTabla;
+  mcFluidoTablaN=n; mcFluidoTablaApi=api;
+  if(!api || typeof api.getProps!=='function') return (mcFluidoTabla=null);
+  const T=new Array(n).fill(''); let hay=false;
+  for(let id=1; id<n; id++){
+    let p=null; try{ p=api.getProps(id,0,0,0); }catch(e){}
+    if(p && p.isFluid && p.fluidType && p.fluidType!=='NONE'){ T[id]=p.fluidType; hay=true; }
+  }
+  return (mcFluidoTabla = hay ? T : null);
 }
 // Hornea (async) la geometría fina de un material y re-malla cuando llega. Es la red de seguridad del camino
 // normal, que la calienta mcBuildPalette antes del primer mallado: mcMeshChunk es SÍNCRONO y mcStructGeom no,
@@ -6208,11 +6462,21 @@ function mcSetBlock(x,y,z,id){
           mc.palette[id] = mc.palette[baseId];
           // Compartir la geometría fina del fluido base
           if (mc.finoGeom && mc.finoGeom[baseKey] && !mc.finoGeom[matKey]) mc.finoGeom[matKey] = mc.finoGeom[baseKey];
-          // Copiar flags de renderizado (fino, recorte, atravesable)
-          if (mc.finoRejilla) mc.finoRejilla[id] = mc.finoRejilla[baseId];
-          if (mc.finoExtra) mc.finoExtra[id] = mc.finoExtra[baseId];
-          if (mc.recorte) mc.recorte[id] = mc.recorte[baseId];
-          if (mc.atraviesaDoc) mc.atraviesaDoc[id] = mc.atraviesaDoc[baseId];
+          // Copiar flags de renderizado (fino, recorte, atravesable). Son Uint8Array del tamaño que tenía
+          // la paleta cuando los horneó mcBuildPalette, y este id ACABA de apendarse: escribir en [id] a
+          // secas se sale del array y JS lo tira sin decir nada. Así el nivel perdía «me dibujo con mi
+          // geometría fina» y el agua-3 volvía al camino de cubo → un cubo azul OPACO (el atlas de terreno
+          // se hornea sin alpha) en medio de un lago translúcido. Hay que CRECER el array, como mcAltaVariante.
+          var conId = function (a, v) {
+            if (!a) return a;
+            if (a.length > id) { a[id] = v; return a; }
+            var n = new Uint8Array(id + 1); n.set(a); n[id] = v; return n;
+          };
+          mc.finoRejilla  = conId(mc.finoRejilla,  mc.finoRejilla  ? (mc.finoRejilla[baseId]  | 0) : 0);
+          mc.finoExtra    = conId(mc.finoExtra,    mc.finoExtra    ? (mc.finoExtra[baseId]    | 0) : 0);
+          mc.recorte      = conId(mc.recorte,      mc.recorte      ? (mc.recorte[baseId]      | 0) : 0);
+          mc.atraviesaDoc = conId(mc.atraviesaDoc, mc.atraviesaDoc ? (mc.atraviesaDoc[baseId] | 0) : 0);
+          if (typeof mcTablaFina === 'function') mcTablaFina();   // la tabla que leen el mallado y mcTapaCara
         } else {
           mc.palette[id] = mc.palette[1] || [];
         }
@@ -6282,6 +6546,41 @@ function mcSetBlock(x,y,z,id){
         if (typeof mcMarcaBuild === 'function') mcMarcaBuild(x, z);
         notifyNeighbors(x, y, z);
         return true;
+      }
+
+      // 1b. REQ-FLUID8 · FUENTES INFINITAS. Una celda de corriente que toca DOS o más fuentes por los
+      // lados y tiene un bloque SÓLIDO debajo asciende a fuente ella misma. Es lo que cierra el hoyo de
+      // 2×2 del dueño y lo que hace que un pozo así no se agote nunca.
+      //
+      // Van DOS y no una a propósito: con una, cada fuente convertiría a su vecina, y ésa a la suya,
+      // hasta volver fuente el llano entero — eso no es una fuente infinita, es una inundación.
+      //
+      // «Sólido» es sólido de verdad (dueño): otra fuente debajo NO vale, así que la regla solo prende
+      // en la capa que toca el fondo. Se usa el mismo `!isReplaceable` que ya decide el flujo horizontal
+      // más abajo, para que «lo que sostiene un charco» signifique una sola cosa en toda la función.
+      //
+      // Es barato porque va dentro de la cola de ticks que ya existe: cuatro sondeos en una celda que
+      // ya se estaba procesando, cero barridos del mundo.
+      if (!mc.sinFuentesInfinitas && y - 1 >= 0) {
+        var abajoProps = getProps(idEn(x, y - 1, z), x, y - 1, z);
+        if (!abajoProps.isReplaceable) {
+          var HORIZ8 = [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1]];
+          var fuentes = 0;
+          for (var i8 = 0; i8 < HORIZ8.length; i8++) {
+            var fx = x + HORIZ8[i8][0], fz = z + HORIZ8[i8][2];
+            if (!dentro(fx, y, fz)) continue;
+            var fProps = getProps(idEn(fx, y, fz), fx, y, fz);
+            if (fProps.isFluid && fProps.fluidType === type && fProps.fluidLevel === 0) fuentes++;
+          }
+          if (fuentes >= 2) {
+            setFluid(x, y, z, type, 0);
+            // Avisar a los vecinos es lo que propaga la conversión por el hoyo: la celda de al lado
+            // puede que ahora sí tenga sus dos fuentes. No hay bucle infinito porque ascender exige
+            // `level > 0` y una fuente ya no vuelve a entrar aquí.
+            notifyNeighbors(x, y, z);
+            return true;
+          }
+        }
       }
     }
 
@@ -6548,7 +6847,7 @@ function mcInitGL(){
   mc.gl2 = (typeof WebGL2RenderingContext!=='undefined') && (gl instanceof WebGL2RenderingContext);
   mc.deriv = mc.gl2 || !!gl.getExtension('OES_standard_derivatives');
   if(!mc.deriv) console.warn('[mundo] sin OES_standard_derivatives → sin sombra de sol');
-  gl.clearColor(MC_SKY[0],MC_SKY[1],MC_SKY[2],1);
+  gl.clearColor(mcCieloEf[0],mcCieloEf[1],mcCieloEf[2],1);
   gl.enable(gl.DEPTH_TEST);
   cv.addEventListener('webglcontextlost',e=>{ e.preventDefault(); }, false);   // MVP: mínimo (F3 re-mesha al volver)
   return gl;
@@ -6994,6 +7293,11 @@ async function mcStructGeom(srcKey, rot){
   // arrays paralelos a col/alpha/tex (mismo orden de push). mcBuildStructMesh los usa para hornear shade*=lightLut[lv]
   // según la luz del entorno (skylight + luz de bloque), igual que el terreno muestrea la celda de aire vecina.
   const colSC=[], alphaSC=[], texSC=[];
+  // REQ-FLUID4 · Dirección de cada CARA emitida, en arrays paralelos a colSC/alphaSC/texSC (1 byte por cara):
+  // 0..5 = índice de MC_FACES si el quad está en la PIEL de la pieza por ese lado, y 6 = «nunca se tapa».
+  // La distinción importa: un quad mirando a +Y puede estar en el interior de la pieza (el techo de una
+  // cueva dentro del modelo), y ése no lo tapa ningún vecino. Solo lo consume el culling de fluidos.
+  const colFD=[], alphaFD=[], texFD=[];
   const TRI=[0,1,2,0,2,3], TRI_ATRAS=[3,2,0,2,1,0];   // el mismo par de triángulos con el bobinado al revés
   const valAt=new Map(); for(const r of raw) valAt.set(r[0]+','+r[1]+','+r[2], r[3]);
   const hayCaras=maskAt.size>0;   // un doc sin `caras` no paga ni una consulta en el bucle de mallado
@@ -7029,19 +7333,22 @@ async function mcStructGeom(srcKey, rot){
     // Celda-muestra por CARA (v1): la celda de BLOQUE del lado aire de la esquina mínima. base es la esquina fina
     // mínima; sumar d (±1 en la normal, 0 en el plano) cruza a la celda de aire vecina, luego floor a bloque.
     const sx=Math.floor((base[0]+d[0])/MC_TILE), sy=Math.floor((base[1]+d[1])/MC_TILE), sz=Math.floor((base[2]+d[2])/MC_TILE);
+    // ¿está el quad en la piel de la pieza por su lado? (REQ-FLUID4). El envés hereda la misma dirección
+    // que su anverso a propósito: vive en el mismo plano, así que si un vecino tapa la cara, tapa las dos.
+    const nAx=M.nAx, fd = ((d[nAx]>0 ? base[nAx]+size[nAx]>=dim[nAx] : base[nAx]<=0) ? f : 6);
     if(m.t===1){
       const r=mc.structUV[m.key][F.tex], repU=size[M.tuAx], repV=size[M.tvAx];
       const tileC=[[0,0],[repU,0],[repU,repV],[0,repV]];   // corners q0..q3 ↔ (u0v0,u1v0,u1v1,u0v1) en espacio de repetición
       for(const k of ORD){ const c=q[k];
         tex.push((base[0]+(c[0]?size[0]:0))*S+ox, (base[1]+(c[1]?size[1]:0))*S+oy, (base[2]+(c[2]?size[2]:0))*S+oz,
                  tileC[k][0], tileC[k][1], r.u0, r.v0, r.u1, r.v1, F.s); }
-      texSC.push(sx,sy,sz);
+      texSC.push(sx,sy,sz); texFD.push(fd);
     } else {
       const c3=m.col, isA=(m.a>=0.996), arr=(isA ? col : alpha);   // opaco al VBO normal; translúcido al VBO de la pasada con blend
       for(const k of ORD){ const c=q[k];
         arr.push((base[0]+(c[0]?size[0]:0))*S+ox, (base[1]+(c[1]?size[1]:0))*S+oy, (base[2]+(c[2]?size[2]:0))*S+oz,
                  c3[0],c3[1],c3[2], F.s, m.emit, m.a); }
-      (isA?colSC:alphaSC).push(sx,sy,sz);
+      (isA?colSC:alphaSC).push(sx,sy,sz); (isA?colFD:alphaFD).push(fd);
     }
   }
   // Por cada cara: en cada capa se construye la máscara (celdas sólidas, expuestas, con su material) y se
@@ -7119,6 +7426,7 @@ async function mcStructGeom(srcKey, rot){
                alphaLocal:new Float32Array(alpha), alphaCount:alpha.length/9,  // translúcido: mismo layout, pasada con blend
                texLocal:new Float32Array(tex), texCount:tex.length/10,
                colSC:new Int16Array(colSC), alphaSC:new Int16Array(alphaSC), texSC:new Int16Array(texSC),  // celda-muestra de luz por CARA (3 int/cara)
+               colFD:new Uint8Array(colFD), alphaFD:new Uint8Array(alphaFD), texFD:new Uint8Array(texFD), // dirección de la cara, 0..5 si está en la piel y 6 si no (REQ-FLUID4)
                emitCells:emitArr,                                              // celdas-de-bloque locales con ≥1 voxel emisivo (Parte B)
                emitDir:emitDirArr,                                             // dirección del haz por celda emisiva (normal neta de caras expuestas)
                ext:{x:mx*S, y:my*S, z:mz*S}, bits, bitsAim, fdim:[mx,my,mz] };
@@ -7153,17 +7461,24 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc){
   };
   // Desplaza un array por vértice (stride s, pos en 0..2) a coords de mundo, hornea shade (offset shOff) por CARA
   // (6 vértices) con faceFactor, y lo sube como VBO STATIC_DRAW. Caras emisivas: el shader ignora vShade → no-op.
+  // REQ-SHADOW2 · una instancia es de UN material, así que sus banderas se miran una vez, aquí, y no por cara.
+  // Las estructuras finas no tienen id de bloque: van por clave (mc.sinSombraKey). mcClaveBase quita el giro,
+  // que en una estructura vive en `rot` y no en la clave, pero cuesta nada y cubre a quien la escriba con giro.
+  const ss = mc.sinSombraKey ? ((mc.sinSombraKey[srcKey] ?? mc.sinSombraKey[mcClaveBase(srcKey)]) | 0) : 0;
   const upload=(src,count,s,sc,shOff)=>{ if(!count) return null; const world=new Float32Array(src.length);
     for(let i=0;i<count;i++){ const b=i*s; world[b]=src[b]*E+ox; world[b+1]=src[b+1]*E+oy; world[b+2]=src[b+2]*E+oz;
       for(let j=3;j<s;j++) world[b+j]=src[b+j]; }
-    if(doLight && sc){ const faces=count/6; for(let fi=0;fi<faces;fi++){ const f=faceFactor(sc,fi);
+    if(doLight && sc && !(ss&1)){ const faces=count/6; for(let fi=0;fi<faces;fi++){ const f=faceFactor(sc,fi);
       if(f!==1){ for(let v=0;v<6;v++){ const o=(fi*6+v)*s+shOff; world[o]*=f; } } } }
+    if(ss) for(let i=0;i<count;i++) world[i*s+shOff]+=2*ss;      // banderas sumadas al sombreado (MC_SHADE_LIB)
     const vbo=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vbo); gl.bufferData(gl.ARRAY_BUFFER, world, gl.STATIC_DRAW); return vbo; };
   const colCount=geom.colCount,   colVbo  =upload(geom.colLocal,   colCount,   9, geom.colSC,   6);   // opaco: pos(3)+rgb(3)+shade(6)+emit+alpha
   const alphaCount=geom.alphaCount, alphaVbo=upload(geom.alphaLocal, alphaCount, 9, geom.alphaSC, 6);   // translúcido: mismo layout
   const texCount=geom.texCount,   texVbo  =upload(geom.texLocal,   texCount,  10, geom.texSC,   9);   // stride 10: pos(3)+aTile(2)+aRect(4)+aShade(9)
   const aabb=[ox,oy,oz, ox+geom.ext.x*E, oy+geom.ext.y*E, oz+geom.ext.z*E];
-  return {key:srcKey, ox,oy,oz, rot, esc:E, colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitCells:geom.emitCells, emitDir:geom.emitDir};
+  // sinProyectar viaja en la instancia (siempre, también en false: se aplica con Object.assign al re-mallar y
+  // tiene que poder volver a proyectar). mcRenderShadow se salta la pieza entera en vez de recortar sus vértices.
+  return {key:srcKey, ox,oy,oz, rot, esc:E, colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitCells:geom.emitCells, emitDir:geom.emitDir, sinProyectar:!!(ss&2)};
 }
 // Atlas de TEXTURAS de estructuras (gemelo de mcBuildPalette/mcUploadAtlas): compone las 6 caras de cada
 // CLAVE `tex:` distinta usada por las estructuras vivas (6 cols × Nclaves filas, NEAREST, medio téxel de
@@ -7437,6 +7752,16 @@ float sunFactor(vec3 w){
   return p.y < top-0.05 ? uSunShade : 1.0;
 #endif
 }`;
+// REQ-SHADOW2 · Las dos banderas de sombra viajan SUMADAS encima de aShade, sin atributo nuevo: el sombreado propio
+// de la cara vale como mucho 1.12 (MC_FACES) y nunca llega a 2, así que la parte entera/2 queda libre para dos bits.
+//   aShade = sombreado + 2·bits   con   bits: 1 = no recibe sombra, 2 = no proyecta sombra
+// Los tres formatos de vértice del Mundo (terreno pos+uv+shade, estructura pos+color+shade+emit+alpha, y la
+// texturizada pos+tile+rect+shade) tienen su float de sombreado, así que el mismo truco vale para los tres y el
+// mapa de sombra puede leerlo con un solo atributo extra. Se descodifica en el VERTEX shader: al fragmento le
+// llegan ya separados (vShade limpio y vSol 0/1), que además evita cualquier duda de precisión en el varying.
+const MC_SHADE_LIB=`
+float mcShade(float s){ return s-2.0*floor(s*0.5); }                       // el sombreado sin las banderas
+float mcRecibeSol(float s){ return step(mod(floor(s*0.5),2.0),0.5); }      // 1 = sí recibe, 0 = a luz plena`;
 // Los shaders se escriben UNA vez en ESSL 1.00 y se traducen aquí, porque dFdx/dFdy no están en los dos sitios:
 //   · WebGL1 → hay que pedir `OES_standard_derivatives` y la directiva debe ser la PRIMERA línea del fuente.
 //   · WebGL2 → la extensión NO existe para shaders ESSL 1.00 (ANGLE contesta literalmente "extension is not
@@ -7460,24 +7785,27 @@ function mcFS(cuerpo){ return mcGLSL(cuerpo,false); }
 const MC_VS=`
 attribute vec3 aPos; attribute vec2 aUV; attribute float aShade;
 uniform mat4 uProj; uniform mat4 uView;
-varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld;
-void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vUV=aUV; vShade=aShade; vDist=length(vp.xyz); vWorld=aPos; }`;
+varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
+${MC_SHADE_LIB}
+void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vUV=aUV; vShade=mcShade(aShade); vSol=mcRecibeSol(aShade); vDist=length(vp.xyz); vWorld=aPos; }`;
 const MC_FS=`
 precision mediump float;
-varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld;
-uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar;
+varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
+uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar; uniform float uFogMin;
 ${MC_SUN_LIB}
 void main(){ vec4 t=texture2D(uTex,vUV); if(t.a<0.5) discard;
-  vec3 col=t.rgb*vShade*sunFactor(vWorld); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
+  vec3 col=t.rgb*vShade*mix(1.0,sunFactor(vWorld),vSol); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
+  f=uFogMin+(1.0-uFogMin)*f;   // REQ-FLUID4 · suelo de tinte (0 fuera del agua = sin efecto)
   gl_FragColor=vec4(mix(col,uSky,f),1.0); }`;
 // Gemelo SIN `discard`: cuando el atlas del terreno es 100% opaco (mc.atlasHasAlpha=false), este shader deja al
 // hardware rechazar por early-z los fragmentos ocultos antes de correr → menos overdraw (la otra mitad del fill-rate).
 const MC_FS_OPAQUE=`
 precision mediump float;
-varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld;
-uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar;
+varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
+uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar; uniform float uFogMin;
 ${MC_SUN_LIB}
-void main(){ vec3 col=texture2D(uTex,vUV).rgb*vShade*sunFactor(vWorld); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
+void main(){ vec3 col=texture2D(uTex,vUV).rgb*vShade*mix(1.0,sunFactor(vWorld),vSol); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
+  f=uFogMin+(1.0-uFogMin)*f;   // REQ-FLUID4 · suelo de tinte (0 fuera del agua = sin efecto)
   gl_FragColor=vec4(mix(col,uSky,f),1.0); }`;
 // Fija EXACTAMENTE los arrays de atributos activos: deshabilita 0..N y habilita solo los de `list`. Necesario
 // porque en WebGL un atributo habilitado SIN buffer (p.ej. tras liberar su VBO al re-mallar, o un pase que
@@ -7516,7 +7844,7 @@ function mcLocOf(p){ const gl=mc.gl; return {
   aPos:gl.getAttribLocation(p,'aPos'), aUV:gl.getAttribLocation(p,'aUV'), aShade:gl.getAttribLocation(p,'aShade'),
   uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'),
   uTex:gl.getUniformLocation(p,'uTex'), uSky:gl.getUniformLocation(p,'uSky'),
-  uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
+  uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
   uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
   uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
@@ -7530,22 +7858,23 @@ function mcBuildProgram(){
 const MC_STRUCT_VS=`
 attribute vec3 aPos; attribute vec3 aColor; attribute float aShade; attribute float aEmit; attribute float aAlpha;
 uniform mat4 uProj; uniform mat4 uView; uniform mat4 uModel;
-varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld;
-void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz; vec4 vp=uView*vec4(w,1.0); gl_Position=uProj*vp; vColor=aColor; vShade=aShade; vDist=length(vp.xyz); vEmit=aEmit; vAlpha=aAlpha; vWorld=w; }`;
+varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld; varying float vSol;
+${MC_SHADE_LIB}
+void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz; vec4 vp=uView*vec4(w,1.0); gl_Position=uProj*vp; vColor=aColor; vShade=mcShade(aShade); vSol=mcRecibeSol(aShade); vDist=length(vp.xyz); vEmit=aEmit; vAlpha=aAlpha; vWorld=w; }`;
 const MC_STRUCT_FS=`
 precision mediump float;
-varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld;
-uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar;
+varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld; varying float vSol;
+uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar; uniform float uFogMin;
 ${MC_SUN_LIB}
-void main(){ vec3 lit=mix(vColor*vShade*sunFactor(vWorld), vColor, vEmit);       // emisivo (vEmit=1) = a pleno brillo, sin sombra
-  float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0)*(1.0-vEmit);        // ni niebla: el emisivo brilla a través
+void main(){ vec3 lit=mix(vColor*vShade*mix(1.0,sunFactor(vWorld),vSol), vColor, vEmit);   // emisivo (vEmit=1) = a pleno brillo, sin sombra
+  float f=(uFogMin+(1.0-uFogMin)*clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0))*(1.0-vEmit);        // ni niebla: el emisivo brilla a través
   gl_FragColor=vec4(mix(lit,uSky,f), vAlpha); }`;
 function mcBuildStructProgram(){
   const gl=mc.gl, p=glProgram(gl,mcVS(MC_STRUCT_VS),mcFS(MC_STRUCT_FS)); mc.structProg=p;
   mc.structLoc={ aPos:gl.getAttribLocation(p,'aPos'), aColor:gl.getAttribLocation(p,'aColor'), aShade:gl.getAttribLocation(p,'aShade'),
     aEmit:gl.getAttribLocation(p,'aEmit'), aAlpha:gl.getAttribLocation(p,'aAlpha'),
     uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'), uModel:gl.getUniformLocation(p,'uModel'),
-    uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
+    uSky:gl.getUniformLocation(p,'uSky'), uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
     uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
@@ -7558,21 +7887,23 @@ function mcBuildStructProgram(){
 const MC_STEX_VS=`
 attribute vec3 aPos; attribute vec2 aTile; attribute vec4 aRect; attribute float aShade;
 uniform mat4 uProj; uniform mat4 uView; uniform mat4 uModel;
-varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld;
-void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz; vec4 vp=uView*vec4(w,1.0); gl_Position=uProj*vp; vTile=aTile; vRect=aRect; vShade=aShade; vDist=length(vp.xyz); vWorld=w; }`;
+varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
+${MC_SHADE_LIB}
+void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz; vec4 vp=uView*vec4(w,1.0); gl_Position=uProj*vp; vTile=aTile; vRect=aRect; vShade=mcShade(aShade); vSol=mcRecibeSol(aShade); vDist=length(vp.xyz); vWorld=w; }`;
 const MC_STEX_FS=`
 precision highp float;
-varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld;
-uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar;
+varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
+uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar; uniform float uFogMin;
 ${MC_SUN_LIB}
 void main(){ vec2 uv=vRect.xy+(vRect.zw-vRect.xy)*fract(vTile); vec4 t=texture2D(uTex,uv); if(t.a<0.5) discard;
-  vec3 col=t.rgb*vShade*sunFactor(vWorld); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
+  vec3 col=t.rgb*vShade*mix(1.0,sunFactor(vWorld),vSol); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
+  f=uFogMin+(1.0-uFogMin)*f;   // REQ-FLUID4 · suelo de tinte (0 fuera del agua = sin efecto)
   gl_FragColor=vec4(mix(col,uSky,f),1.0); }`;
 function mcBuildStructTexProgram(){
   const gl=mc.gl, p=glProgram(gl,mcVS(MC_STEX_VS),mcFS(MC_STEX_FS)); mc.stexProg=p;
   mc.stexLoc={ aPos:gl.getAttribLocation(p,'aPos'), aTile:gl.getAttribLocation(p,'aTile'), aRect:gl.getAttribLocation(p,'aRect'), aShade:gl.getAttribLocation(p,'aShade'),
     uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'), uModel:gl.getUniformLocation(p,'uModel'), uTex:gl.getUniformLocation(p,'uTex'),
-    uSky:gl.getUniformLocation(p,'uSky'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
+    uSky:gl.getUniformLocation(p,'uSky'), uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
     uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
@@ -7600,9 +7931,13 @@ function mcBuildNoteTextProgram(){
 // basta con cambiar el stride. NDC: x,z → la caja del mundo; z de clip = 1-2h, o sea que lo MÁS ALTO queda lo más
 // cerca del sol y gana el test de profundidad. Con eso, el color del téxel = altura de la superficie más alta.
 const MC_SUN_VS=`
-attribute vec3 aPos; uniform vec3 uSunOrg; uniform vec3 uSunDim; uniform mat4 uModel; varying float vH;
+attribute vec3 aPos; attribute float aShade; uniform vec3 uSunOrg; uniform vec3 uSunDim; uniform mat4 uModel; varying float vH;
 void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz;
   vH=(w.y-uSunOrg.y)/uSunDim.y;
+  // REQ-SHADOW2 · aShade trae la bandera «no proyecta» (bit 2 ⇒ ≥4.0, ver MC_SHADE_LIB): se manda el vértice fuera
+  // del volumen de clip y el triángulo entero desaparece del mapa. Los tres vértices comparten material, así que
+  // nunca queda uno a medias. Sin la bandera (aShade constante 0) esto no se cumple jamás y no cuesta nada.
+  if(aShade>=4.0){ gl_Position=vec4(0.0,0.0,2.0,1.0); return; }
   gl_Position=vec4((w.x-uSunOrg.x)/uSunDim.x*2.0-1.0, (w.z-uSunOrg.z)/uSunDim.z*2.0-1.0, 1.0-2.0*vH, 1.0); }`;
 // 8 bits de altura serían 0.16 bloques de resolución (bandas visibles en el borde de la sombra), así que va
 // empaquetada en 16 sobre R y G con el truco de siempre: G lleva el resto y R se corrige para que sume exacto.
@@ -7611,7 +7946,7 @@ precision highp float; varying float vH;
 void main(){ vec2 e=fract(vec2(vH, vH*255.0)); e.x-=e.y/255.0; gl_FragColor=vec4(e,0.0,1.0); }`;
 function mcBuildSunProgram(){
   const gl=mc.gl, p=glProgram(gl,mcVS(MC_SUN_VS),mcFS(MC_SUN_FS)); mc.sunProg=p;
-  mc.sunLoc={ aPos:gl.getAttribLocation(p,'aPos'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
+  mc.sunLoc={ aPos:gl.getAttribLocation(p,'aPos'), aShade:gl.getAttribLocation(p,'aShade'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
     uModel:gl.getUniformLocation(p,'uModel') };
 }
@@ -7721,14 +8056,23 @@ function mcRenderShadow(){
   mcAttribs([SL.aPos]);
   mcSunFrustum(SL);
   const IDENT=mat4.ident();
-  const draw=(vbo,count,stride,model)=>{ if(!vbo || !count) return;
+  // shOff = dónde está el float de sombreado dentro del vértice, que es donde viaja la bandera «no proyecta»
+  // (REQ-SHADOW2). Es OPCIONAL a propósito: sin él el atributo se queda en la constante 0 y todo proyecta, que
+  // es lo que hacía antes y lo que le sigue valiendo a quien dibuje por mc.sunExtra con la firma de cuatro.
+  const draw=(vbo,count,stride,model,shOff)=>{ if(!vbo || !count) return;
     gl.uniformMatrix4fv(SL.uModel,false,model||IDENT);
     gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
-    gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,stride,0); gl.drawArrays(gl.TRIANGLES,0,count); };
-  for(const ch of mc.chunks.values()){ if(ch.count && ch.vbo) draw(ch.vbo, ch.count, 6*4);
-    if(ch.finoCount && ch.finoVbo) draw(ch.finoVbo, ch.finoCount, 9*4); }   // las celdas finas dan su sombra de verdad, no la del cubo
-  for(const a of mc.agents.values()) if(a.count && a.vbo) draw(a.vbo, a.count, 6*4);
+    gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,stride,0);
+    if(SL.aShade>=0){
+      if(shOff===undefined||shOff===null){ gl.disableVertexAttribArray(SL.aShade); gl.vertexAttrib1f(SL.aShade,0); }
+      else { gl.enableVertexAttribArray(SL.aShade); gl.vertexAttribPointer(SL.aShade,1,gl.FLOAT,false,stride,shOff); }
+    }
+    gl.drawArrays(gl.TRIANGLES,0,count); };
+  for(const ch of mc.chunks.values()){ if(ch.count && ch.vbo) draw(ch.vbo, ch.count, 6*4, null, 5*4);
+    if(ch.finoCount && ch.finoVbo) draw(ch.finoVbo, ch.finoCount, 9*4, null, 6*4); }   // las celdas finas dan su sombra de verdad, no la del cubo
+  for(const a of mc.agents.values()) if(a.count && a.vbo) draw(a.vbo, a.count, 6*4);   // un agente no es un material: siempre proyecta
   for(const st of mc.structures){
+    if(st.sinProyectar) continue;                                   // pieza entera fuera del mapa: más barato que recortarla vértice a vértice
     if(st.colCount && st.colVbo) draw(st.colVbo, st.colCount, 9*4, st.model);
     if(st.texCount && st.texVbo) draw(st.texVbo, st.texCount, 10*4, st.model);
   }
@@ -7736,7 +8080,7 @@ function mcRenderShadow(){
   // están en ninguna de las listas de arriba). app.js no sabe qué es: solo le presta el dibujante de la pasada.
   if(mc.sunExtra) try{ mc.sunExtra(draw); }catch(e){ console.error('[mundo] sunExtra:', e); }
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  gl.clearColor(MC_SKY[0],MC_SKY[1],MC_SKY[2],1);
+  gl.clearColor(mcCieloEf[0],mcCieloEf[1],mcCieloEf[2],1);
   S.dirty=false;
   return S;
 }
@@ -7813,7 +8157,12 @@ function mcMeshChunk(cx,cz){
   const chEarly = mc.chunks.get(chunkKeyEarly);
   let _sigCalc = 0, _sigListo = false;
   if(chEarly){
-    let sig = (mc.palette.length|0) * 1000003 + (mc.gridGen|0);
+    let sig = (mc.palette.length|0) * 1000003 + (mc.gridGen|0)
+              + (mc.sinCullingFluido ? 7919 : 0);   // REQ-FLUID4: la válvula cambia la malla, así que invalida la caché
+    // REQ-SHADOW2 · las banderas de sombra se hornean en el shade, así que cambiarlas invalida las mallas
+    // cacheadas aunque no se haya movido un solo voxel. Va en la semilla, no por celda: recorrer la paleta
+    // (unos cientos) al lado del barrido del chunk (miles) no se nota, y ahorra que el snippet tenga que avisar.
+    const SS0=mc.sinSombra; if(SS0){ for(let i=0;i<SS0.length;i++) if(SS0[i]) sig=((sig*13 + i*7 + SS0[i])|0); }
     const g0=mc.grid, L0=mc.light, BL0=_CACHE_STRICT ? mc.blockLight : null;
     const NX=dim.x, sxyEarly=NX*dim.y;
     for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
@@ -7890,6 +8239,7 @@ function mcMeshChunk(cx,cz){
     lightLut=new Float32Array(MC_MAXLIGHT+1);
     for(let lv=0;lv<=MC_MAXLIGHT;lv++) lightLut[lv]=Math.pow(dark,(MC_MAXLIGHT-lv)/MC_MAXLIGHT);
   }
+  const SS=mc.sinSombra;     // REQ-SHADOW2 · id → banderas de sombra (1 no recibe, 2 no proyecta). null = coste cero
   const GEO=mcTablaFina();   // id → geometría real (o null): las celdas que no son cubos, ver más abajo
   const finas=[];            // …y dónde están: [x,y,z,id, x,y,z,id, …] (plano, sin objetos por celda)
   for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
@@ -7918,8 +8268,12 @@ function mcMeshChunk(cx,cz){
       }
 
       const r=rects[F.tex], C=F.corners;
+      const ss=SS?(SS[id]|0):0;   // REQ-SHADOW2
       let s=F.s;
-      if(lightLut){ let lv=MC_MAXLIGHT; if(mcInside(ax,ay,az)){ const li=mcIdx(ax,ay,az); lv=Math.max(L[li], BL?BL[li]:0); } s*=lightLut[lv]; }   // fuera de la rejilla = cielo abierto; max(skylight, luz de bloque)
+      // «No recibe» se salta el skylight aquí mismo, que es la sombra HORNEADA; la del sol es por fragmento y va
+      // en la bandera. El sombreado propio de la cara (F.s) se respeta: eso es el relieve del cubo, no una sombra.
+      if(lightLut && !(ss&1)){ let lv=MC_MAXLIGHT; if(mcInside(ax,ay,az)){ const li=mcIdx(ax,ay,az); lv=Math.max(L[li], BL?BL[li]:0); } s*=lightLut[lv]; }   // fuera de la rejilla = cielo abierto; max(skylight, luz de bloque)
+      s+=2*ss;                   // las dos banderas viajan sumadas al sombreado (MC_SHADE_LIB)
       const uv=[[r.u0,r.v0],[r.u1,r.v0],[r.u1,r.v1],[r.u0,r.v1]];
       for(const k of [0,1,2,0,2,3]){
         const c=C[k];
@@ -7940,23 +8294,65 @@ function mcMeshChunk(cx,cz){
     // Traslada un flujo fino (stride 9) a la celda de mundo y hornea la luz del entorno por CARA con su
     // celda-muestra: exactamente la misma cuenta que mcBuildStructMesh, pero acumulando en un array común
     // en vez de subir una VBO por instancia.
-    const copia=(src,count,sc,out,ox,oy,oz,fH)=>{
+    // ss = banderas de sombra del material de la celda (REQ-SHADOW2, 0 = las de siempre): con «no recibe» no se
+    // muestrea la luz del entorno y el sombreado sale entero, y las dos banderas se suman al float de sombreado.
+    // tap = máscara de 6 bits de caras que NO se emiten (REQ-FLUID4). Con tap=0 —todo lo que no es fluido—
+    // el bucle es el de siempre.
+    const copia=(src,count,sc,fd,out,ox,oy,oz,fH,ss,tap)=>{
       const scaleH = (typeof fH === 'number' && fH > 0) ? fH : 1.0;
       for(let f=0, nf=count/6; f<nf; f++){
+        if(tap && fd && (tap & (1<<fd[f]))) continue;   // cara interna de la masa de fluido: no se dibuja
         let k=1;
-        if(lightLut && sc){
+        if(lightLut && sc && !(ss&1)){
           const wx=ox+sc[f*3], wy=oy+sc[f*3+1], wz=oz+sc[f*3+2];
           if(mcInside(wx,wy,wz)){ const li=mcIdx(wx,wy,wz); k=lightLut[Math.max(L[li], BL?BL[li]:0)]; }   // fuera de rejilla = cielo (k=1)
         }
         for(let v=0;v<6;v++){ const b=(f*6+v)*9;
-          out.push(src[b]+ox, oy + src[b+1] * scaleH, src[b+2]+oz, src[b+3], src[b+4], src[b+5], src[b+6]*k, src[b+7], src[b+8]); }
+          out.push(src[b]+ox, oy + src[b+1] * scaleH, src[b+2]+oz, src[b+3], src[b+4], src[b+5], src[b+6]*k+2*ss, src[b+7], src[b+8]); }
       }
     };
+    // REQ-FLUID4 · Fase 1: las caras INTERNAS de una masa de fluido no se emiten. Sin esto un lago es una
+    // rejilla de cubos translúcidos —cada cara interior se mezcla sobre la anterior, y el borde de cada
+    // cubo se marca— en vez de una lámina de agua. El camino de cubo (mc.grid) ya hacía este culling; el
+    // camino FINO no, y agua y lava van siempre por el fino porque son translúcidas.
+    const FT = mc.sinCullingFluido ? null : mcTablaFluido();   // válvula (tests y F12): vuelve al lago-rejilla
+    // BUG-FLUID4: mcTapaCara dice `false` sobre TODA celda fina (la regla de las hojas «fancy»), así que
+    // una flor o una escalera metida en el lago no tapaba ninguna cara y el fluido emitía las 5 caras que
+    // la rodean —láminas translúcidas sueltas marcando el hueco, que es lo que se ve en las capturas—.
+    // Aquí la pregunta es otra: no «¿tapa la cara del vecino?» sino «¿OCUPA esta celda?». No tenemos
+    // waterlogging (un material por celda), así que una pieza fina que no es fluido ha REEMPLAZADO al
+    // líquido y la cara que da a ella no se ve. El hueco de AIRE sigue emitiendo: nId es 0 y no entra aquí.
+    const tapaAlFluido=(ax,ay,az)=>{
+      if(mcTapaCara(ax,ay,az)) return true;                  // vecino macizo: lo de siempre
+      if(!GEO || !mcInside(ax,ay,az)) return false;
+      const nId = mc.grid[mcIdx(ax,ay,az)];
+      return !!(nId && GEO[nId] && !(FT[nId]||''));           // pieza fina que NO es fluido: ocupa la celda
+    };
+    const tapadasFluido=(x,y,z,id,fH)=>{
+      const tipo = FT ? (FT[id]||'') : '';
+      if(!tipo) return 0;                                    // no es fluido: cero coste y cero cambio
+      let bits=0;
+      for(let f=0;f<6;f++){
+        const d=MC_FACES[f].dir, ax=x+d[0], ay=y+d[1], az=z+d[2];
+        // Vecino opaco que tapa la cara entera: la misma regla que el camino de cubo. Solo con el bloque
+        // lleno; si el fluido no llega arriba del todo, sus caras no llegan al plano que el vecino tapa.
+        if(fH>=0.999 ? tapaAlFluido(ax,ay,az) : (f===1 && y>0 && tapaAlFluido(ax,ay,az))){ bits|=1<<f; continue; }
+        const nId = mcInside(ax,ay,az) ? mc.grid[mcIdx(ax,ay,az)] : 0;
+        if(!nId || (FT[nId]||'') !== tipo) continue;          // TIPO, no id: hab:agua-3 es la misma agua
+        // Vertical: dos celdas del mismo fluido apiladas comparten el plano exacto (mcGetFluidHeight ya
+        // devuelve 1.0 cuando tiene fluido encima), así que la cara de en medio sobra siempre.
+        if(f<2){ bits|=1<<f; continue; }
+        if(mcGetFluidHeight(ax,ay,az) >= fH-1e-6) bits|=1<<f; // lateral: solo si el vecino llega tan alto
+      }
+      return bits;
+    };
     for(let i=0;i<finas.length;i+=4){
-      const x=finas[i], y=finas[i+1], z=finas[i+2], g=GEO[finas[i+3]];
+      const x=finas[i], y=finas[i+1], z=finas[i+2], id=finas[i+3], g=GEO[id];
       const fH = mcGetFluidHeight(x, y, z);
-      copia(g.colLocal,   g.colCount,   g.colSC,   fcol,   x,y,z, fH);
-      copia(g.alphaLocal, g.alphaCount, g.alphaSC, falpha, x,y,z, fH);
+      const ss = SS?(SS[id]|0):0;
+      const tap = tapadasFluido(x,y,z,id,fH);
+      copia(g.colLocal,   g.colCount,   g.colSC,   g.colFD,   fcol,   x,y,z, fH, ss, tap);
+      copia(g.alphaLocal, g.alphaCount, g.alphaSC, g.alphaFD, falpha, x,y,z, fH, ss, tap);
     }
   }
   const key=cx+','+cz; let ch=mc.chunks.get(key);
@@ -7978,7 +8374,8 @@ function mcMeshChunk(cx,cz){
   // PERF-RS1: si el chunk se acaba de crear (no existía chEarly), _sigListo=false y hay que
   // guardar la firma ahora. Si existía y la firma ya se calculó arriba, ya está guardada.
   if(!_sigListo){
-    let sig = (mc.palette.length|0) * 1000003 + (mc.gridGen|0);
+    let sig = (mc.palette.length|0) * 1000003 + (mc.gridGen|0)
+              + (mc.sinCullingFluido ? 7919 : 0);   // REQ-FLUID4: la válvula cambia la malla, así que invalida la caché
     const strict = (typeof game === 'undefined') || game.cacheStrict !== false;
     const g0=mc.grid, L0=mc.light, BL0=strict ? mc.blockLight : null, NX=dim.x, sxyE2=NX*dim.y;
     for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
@@ -8021,17 +8418,34 @@ function mcTablaLuz(){
   P[0]=1;   // el aire pasa SIEMPRE, diga lo que diga nadie
   return P;
 }
+// Tabla de «¿la columna de CIELO sigue bajando por aquí?», indexada por id de bloque. Es OTRA pregunta que
+// `mcTablaLuz`: aquélla gobierna la DIFUSIÓN (por dónde se propaga la luz una vez sembrada) y ésta la SIEMBRA
+// (hasta dónde llega el cielo por la vertical). Por eso `luz:'pasa'` NO abre la columna y sigue sin abrirla: un
+// dosel de hojas tiene que dar sombra a lo que cubre, o un bosque dejaría de sombrear.
+// La única excepción es `proyectaSombra:false` (bit 2 de `mc.sinSombra`, REQ-SHADOW2), y es la mitad que le
+// faltaba a ese ticket: el material dice literalmente «yo no proyecto sombra», y el pegote oscuro que dejaba
+// debajo era ESTE, el del skylight, no el del mapa del sol. Una nube que no proyecta nada tiene que dejar pasar
+// el cielo entero. Con `mc.sinSombra` en null (lo normal) es la tabla de siempre: solo el aire.
+// Un id por encima del final lee `undefined` = falsy = corta: se queda corto, no revienta.
+function mcTablaCielo(){
+  const s=mc.sinSombra;
+  const n=Math.max(256, (mc.blockKey?mc.blockKey.length:0)+1, s?s.length:0);
+  const C=new Uint8Array(n);
+  C[0]=1;   // el aire, siempre
+  if(s) for(let id=1, m=Math.min(s.length,n); id<m; id++) if(s[id]&2) C[id]=1;
+  return C;
+}
 function mcComputeLight(){
   const dim=mc.dim, g=mc.grid, NX=dim.x, NY=dim.y, NZ=dim.z, sxy=NX*NY, N=NX*NY*NZ;
   const L=(mc.light&&mc.light.length===N)?mc.light:(mc.light=new Uint8Array(N));
   if(mc.interiorDark>=1) return;   // desactivado: mcMeshChunk no muestrea la luz, no hace falta calcularla
   L.fill(0);
-  const PASA=mcTablaLuz();
+  const PASA=mcTablaLuz(), CIELO=mcTablaCielo();
   const buckets=[]; for(let i=0;i<=MC_MAXLIGHT;i++) buckets.push([]);
   const top=buckets[MC_MAXLIGHT];
   const seed=i=>{ if(PASA[g[i]] && L[i]!==MC_MAXLIGHT){ L[i]=MC_MAXLIGHT; top.push(i); } };
-  for(let z=0;z<NZ;z++) for(let x=0;x<NX;x++)   // siembra: cada columna, de arriba abajo, mientras sea aire = cielo
-    for(let y=NY-1;y>=0;y--){ const i=x+y*NX+z*sxy; if(g[i]!==0) break; seed(i); }
+  for(let z=0;z<NZ;z++) for(let x=0;x<NX;x++)   // siembra: cada columna, de arriba abajo, mientras el cielo la atraviese
+    for(let y=NY-1;y>=0;y--){ const i=x+y*NX+z*sxy; if(!CIELO[g[i]]) break; seed(i); }
   // El "vacío" fuera del mundo también es cielo (se dibuja azul): deja entrar luz por las 4 CARAS LATERALES, para
   // que una ventana/hueco abierto al borde ilumine el interior (antes la luz solo entraba por arriba).
   for(let y=0;y<NY;y++){
@@ -8087,10 +8501,10 @@ function mcRelightBox(bx,bz,bx1,bz1){
   // MISMA tabla y MISMOS predicados que mcComputeLight, sin excepciones: en cuanto las dos difieran en un
   // solo `if`, el mundo editado deja de coincidir con el recién cargado. Es justo lo que compara celda a
   // celda `test_luz_incremental_navegador.js`.
-  const PASA=mcTablaLuz();
+  const PASA=mcTablaLuz(), CIELO=mcTablaCielo();
   const sembrar=(i,lv)=>{ if(PASA[g[i]] && L[i]<lv){ L[i]=lv; buckets[lv].push(i); } };
   for(let z=z0;z<=z1;z++) for(let x=x0;x<=x1;x++)     // cielo por arriba, columna a columna (igual que el global)
-    for(let y=NY-1;y>=0;y--){ const i=x+y*NX+z*sxy; if(g[i]!==0) break; sembrar(i,MC_MAXLIGHT); }
+    for(let y=NY-1;y>=0;y--){ const i=x+y*NX+z*sxy; if(!CIELO[g[i]]) break; sembrar(i,MC_MAXLIGHT); }
   for(let y=0;y<NY;y++){                              // las 4 caras del MUNDO, solo si la caja llega hasta ellas
     if(x0===0)    for(let z=z0;z<=z1;z++) sembrar(y*NX+z*sxy, MC_MAXLIGHT);
     if(x1===NX-1) for(let z=z0;z<=z1;z++) sembrar((NX-1)+y*NX+z*sxy, MC_MAXLIGHT);
@@ -8798,8 +9212,27 @@ function mcUpdate(dt){
   const ml=Math.hypot(mx,mz);
   const cabalgando = (typeof game !== 'undefined' && game.esqueletos && typeof game.esqueletos.esCabalgando === 'function') ? game.esqueletos.esCabalgando() : false;
   const reposicionando = cabalgando && (k['shift'] || k['Shift']);
+  // REQ-FLUID9 · nadando (pies en líquido y SIN suelo) el cuerpo va DONDE MIRAS: lo que W/S aportan se
+  // reparte entre avanzar (×cos del cabeceo) y sumergirse/emerger (×sen), así que mirar al fondo con W te
+  // hunde y mirar arriba te saca. Mismo criterio de «dentro» que REQ-FLUID6/7: mandan los PIES y con suelo
+  // debajo gana lo de fuera, o sea que vadear un charco se anda igual que siempre.
+  const enFluido = !!mcFisicaFluido(mc.pos[0], mc.pos[1], mc.pos[2]) && !mc.onGround;
+  let mira = 0;
   if(cabalgando && !reposicionando){
     mx=0; mz=0; mc.vel[0]=0; mc.vel[2]=0;
+  } else if(enFluido){
+    // Se manda DIRECTO y no por air-strafe: lo que se pide es que girar la vista te REDIRIJA, y el
+    // air-strafe por definición no reescribe la velocidad. Es la trampa de BUG-ESC1 vista del otro lado —
+    // nadar es «sin suelo», así que hasta hoy el cuerpo dentro del agua lo gobernaba el control de aire.
+    let f=0, st=0;
+    if(k['w']) f+=1; if(k['s']) f-=1; if(k['d']) st+=1; if(k['a']) st-=1;
+    const cp=Math.cos(mc.pitch);
+    let hx=fwd[0]*f*cp + right[0]*st, hz=fwd[2]*f*cp + right[2]*st;
+    const hl=Math.hypot(hx,hz);
+    if(hl>1){ hx/=hl; hz/=hl; }   // se ACOTA, no se normaliza: mirando a plomo, W no empuja nada en horizontal
+    if(ml>0){ mc.vel[0]=hx*sp; mc.vel[2]=hz*sp; }   // sin rumbo se conserva la inercia de antes (la marcha en agua es otro ticket)
+    mira = f*Math.sin(mc.pitch);   // + = arriba (mc.pitch es positivo mirando al cielo)
+    if(k['shift']) mira -= 1;      // …y Shift hunde. Se acota luego en mcCaidaPaso junto al salto
   } else if(mc.onGround || !mc.airControl){
     // Suelo (o air-control off): la velocidad horizontal se fija DIRECTA desde la dirección de vista → marcha responsiva
     // e instantánea (y frena en seco al soltar). Comportamiento clásico.
@@ -8820,7 +9253,13 @@ function mcUpdate(dt){
     if(f)  airAxis(fwd[0]*f,   fwd[2]*f);     // adelante/atrás relativo a la vista
     if(st) airAxis(right[0]*st, right[2]*st);  // lateral (strafe) relativo a la vista
   }   // en aire sin input: la velocidad horizontal se conserva intacta (inercia del salto)
-  mc.vel[1]-=22*dt;                                  // gravedad
+  // REQ-FLUID7 · con los pies en un líquido y SIN suelo debajo, mantener la tecla nada hacia arriba en
+  // vez de no hacer nada. Se mira `mc.pos[1]`, o sea los PIES: es lo que deja salir a la orilla (subes
+  // hasta que los pies asoman y a partir de ahí mandan la gravedad y el salto de siempre) y lo que evita
+  // que andar por un charco te convierta en nadador. Con suelo debajo gana el salto de toda la vida, así
+  // que un charco de un bloque se sigue saltando igual que antes; fuera del agua `nadando` no hace nada.
+  const nadando = !!k[' '] && !mc.onGround;
+  mc.vel[1]=mcCaidaPaso(mc.vel[1], dt, mc.pos[0], mc.pos[1], mc.pos[2], nadando, mira);   // gravedad (REQ-FLUID6: dentro de un líquido, 1/16 y con rozamiento; REQ-FLUID9: la vista y Shift)
   if(k[' '] && mc.onGround){ mc.vel[1]=8.0*Math.sqrt(mc.scale); mc.onGround=false; }   // salto: altura ∝ scale (√ porque h=v²/2g) → el doble de grande salta el doble de bloques, igual que la marcha escala con el tamaño
   const p=mc.pos;
   // Horizontal eje a eje CON auto-escalón (∝ tamaño): un bloque de altura 1 es un escalón enano para un
@@ -8883,6 +9322,11 @@ function mcChunkVisible(ch, pv){
 function mcRender(){
   const gl=mc.gl; if(!gl) return;
   mcResize();
+  // REQ-FLUID4 · lo primero del frame: si el ojo está sumergido, el fondo y la niebla son otros. Va
+  // ANTES del clear porque el color de fondo es la mitad del efecto (lo que se ve más allá de la
+  // niebla es fondo, no cielo).
+  mcActualizaVista();
+  gl.clearColor(mcCieloEf[0],mcCieloEf[1],mcCieloEf[2],1);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   if(!mc.prog || !mc.atlasTex) return;
   // Pasada 1 · el mundo visto desde el sol (solo si la geometría cambió). Deja el mapa en la unidad 1 para que lo
@@ -8899,8 +9343,8 @@ function mcRender(){
   mcAttribs([L.aPos,L.aUV,L.aShade]);   // limpia cualquier atributo suelto (p.ej. aTile/aRect de estructuras) que haría fallar el draw
   gl.uniformMatrix4fv(L.uProj,false,pj.m);
   gl.uniformMatrix4fv(L.uView,false,view);
-  gl.uniform3f(L.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
-  gl.uniform1f(L.uFogNear, pj.far*0.55); gl.uniform1f(L.uFogFar, pj.far*0.98);
+  gl.uniform3f(L.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
+  gl.uniform1f(L.uFogMin, mcFogMin()); gl.uniform1f(L.uFogNear, mcFogNear(pj.far)); gl.uniform1f(L.uFogFar, mcFogFar(pj.far));
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.atlasTex); gl.uniform1i(L.uTex,0);
   mcSunUniforms(L, SM);
   const stride=6*4, cxp=Math.floor(mc.pos[0]/MC_CHUNK), czp=Math.floor(mc.pos[2]/MC_CHUNK);
@@ -8949,8 +9393,8 @@ function mcRender(){
       const SL=mc.structLoc, sstr=9*4;
       gl.useProgram(mc.structProg);
       gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
-      gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
-      gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
+      gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
+      gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
       mcSunUniforms(SL, SM);
       mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);
       for(const s of mc.structures){
@@ -8980,8 +9424,8 @@ function mcRender(){
       const stride2=10*4, SL=mc.stexLoc;   // alpha-test en el FS (el atlas de estructuras tiene huecos)
       gl.useProgram(mc.stexProg);
       gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
-      gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
-      gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
+      gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
+      gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.structAtlasTex); gl.uniform1i(SL.uTex,0);
       mcSunUniforms(SL, SM);
       mcAttribs([SL.aPos,SL.aTile,SL.aRect,SL.aShade]);
@@ -9005,8 +9449,8 @@ function mcRender(){
         const SL=mc.structLoc, sstr=9*4;
         gl.useProgram(mc.structProg);
         gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
-        gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
-        gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
+        gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
+        gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
         mcSunUniforms(SL, SM);
         mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);
         // El sesgo (puesto arriba, para las tres pasadas) también hace falta aquí: sin él la cara de cristal
@@ -9052,8 +9496,8 @@ function mcDrawPreview(pj, view){
     const SL=mc.structLoc, sstr=9*4;
     gl.useProgram(mc.structProg);
     gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
-    gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
-    gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
+    gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
+    gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
     mcSunUniforms(SL, null);                                                    // el fantasma es una ayuda, no proyecta ni recibe sombra
     gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);                              // el fantasma nunca gira; sin esto hereda la matriz de la ultima instancia girada
     mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);                // el blend del fantasma usa CONSTANT_ALPHA → ignora vAlpha (el vidrio se ve al alpha del fantasma)
@@ -9064,8 +9508,8 @@ function mcDrawPreview(pj, view){
     const SL=mc.stexLoc, stride2=10*4;
     gl.useProgram(mc.stexProg);
     gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
-    gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
-    gl.uniform1f(SL.uFogNear, pj.far*0.55); gl.uniform1f(SL.uFogFar, pj.far*0.98);
+    gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
+    gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.structAtlasTex); gl.uniform1i(SL.uTex,0);
     mcSunUniforms(SL, null);
     gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
@@ -9298,8 +9742,8 @@ function mcDrawOverlays(pj, view){
   gl.useProgram(mc.structProg);
   gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
   gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
-  gl.uniform3f(SL.uSky,MC_SKY[0],MC_SKY[1],MC_SKY[2]);
-  gl.uniform1f(SL.uFogNear, pj.far*8); gl.uniform1f(SL.uFogFar, pj.far*10);   // sin niebla sobre el overlay
+  gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
+  gl.uniform1f(SL.uFogMin, 0); gl.uniform1f(SL.uFogNear, pj.far*8); gl.uniform1f(SL.uFogFar, pj.far*10);   // sin niebla ni tinte sobre el overlay
   if(SL.aEmit >= 0) gl.vertexAttrib1f(SL.aEmit, 1.0);
   mcAttribs([SL.aPos, SL.aColor, SL.aShade]);   // deja habilitados SOLO estos 3; ningún atributo huérfano con VBO nulo
   // Rayos-X: relleno translúcido (alpha constante vía blendColor) y SIN test de profundidad (atraviesa muros).
@@ -9543,11 +9987,16 @@ function mcRaycast(maxd, hitStruct){   // desde el ojo, dirección de mirada; de
   const golpe=(t,fina)=>({ cell:[x,y,z], normal:[nx,ny,nz], dist:t, fina:fina,
                            point:[o[0]+d[0]*t, o[1]+d[1]*t, o[2]+d[2]*t] });
   for(let i=0;i<cap;i++){
-    if(mcSolid(x,y,z) && !(typeof mcIsCellReplaceable === 'function' && mcIsCellReplaceable(x,y,z))) return golpe(tEnter, false);
+    // Rejilla: lo mismo que abajo con las estructuras, porque desde mcPonEnRejilla un cable o una alfombra
+    // son TERRENO (BUG-RAY2). Una celda que llena su cubo devuelve tEnter, o sea el mcSolid pelado de antes.
+    let tg=-1;
+    if(mcSolid(x,y,z) && !(typeof mcIsCellReplaceable === 'function' && mcIsCellReplaceable(x,y,z))) tg=mcRejillaRayHit(x,y,z, o,d, tEnter);
     // Estructuras: NO basta con que la estructura toque la celda — hay que atravesar un voxel fino LLENO.
     // Una escalera es casi toda aire dentro de su celda; dar por sólida la celda entera hacía que el rayo
     // se parase en su caja y el bloque nuevo saliera flotando delante, en vez de pegarse a la pared del fondo.
-    if(hitStruct){ const tf=mcStructRayHit(x,y,z, o,d, tEnter); if(tf>=0) return golpe(tf, true); }
+    // En una misma celda pueden convivir las dos: gana la MÁS CERCANA, y a igualdad la rejilla (lo de siempre).
+    if(hitStruct){ const tf=mcStructRayHit(x,y,z, o,d, tEnter); if(tf>=0 && (tg<0 || tf<tg)) return golpe(tf, true); }
+    if(tg>=0) return golpe(tg, false);
     if(tX<tY && tX<tZ){ if(tX>MAXD) break; x+=sX; tEnter=tX; tX+=dX; nx=-sX; ny=0; nz=0; }
     else if(tY<tZ){    if(tY>MAXD) break; y+=sY; tEnter=tY; tY+=dY; nx=0; ny=-sY; nz=0; }
     else {             if(tZ>MAXD) break; z+=sZ; tEnter=tZ; tZ+=dZ; nx=0; ny=0; nz=-sZ; }
@@ -9639,6 +10088,55 @@ function mcStructCellSolid(x,y,z){
   if(!mc.structures.length || y<0) return false;
   const T=MC_TILE;
   return mcAimBoxHit(x*T, y*T, z*T, x*T+T-1, y*T+T-1, z*T+T-1);
+}
+
+// ── Y lo mismo para la REJILLA (BUG-RAY2) ────────────────────────────────────────────────────────
+// Desde que el clic derecho mete en mc.grid todo lo que cabe en su celda, un cable o una alfombra son
+// TERRENO, no estructura. El rayo seguía preguntando por la celda entera (mcSolid), así que se paraba en
+// el cubo de 16³ de un cable de 1 voxel de alto: apuntando al muro de detrás se borraba el cable, o el
+// bloque nuevo salía encima de él. Es la misma trampa que ya arregló BUG-RAY1 en el lado de las
+// estructuras, y se arregla igual: preguntando por la FORMA REAL de la celda.
+//
+// ¿Hay materia en el voxel fino de mundo (fx,fy,fz) de la rejilla? Hermana de mcAimSolidAt. Una celda que
+// llena su cubo responde por la celda (coste de siempre); una celda fina (mc._geoFina) se sondea con la
+// misma indexación que mcTerrenoChoca, leyendo `bitsAim` como el resto del apuntado.
+function mcRejillaSolidAt(fx,fy,fz){
+  const T=MC_TILE, x=Math.floor(fx/T), y=Math.floor(fy/T), z=Math.floor(fz/T);
+  if(y<0 || !mcSolid(x,y,z)) return false;
+  const GEO=mc._geoFina; if(!GEO) return true;                    // sin materiales finos: la celda es el cubo
+  const g=GEO[mc.grid[mcIdx(x,y,z)]]; if(!g || !g.bits) return true;
+  const bits=g.bitsAim||g.bits, dm=g.fdim;                        // ocupación real, no la de colisión
+  const lx=fx-x*T, ly=fy-y*T, lz=fz-z*T;
+  if(lx<0||ly<0||lz<0||lx>=dm[0]||ly>=dm[1]||lz>=dm[2]) return false;   // la geometría va ceñida al dibujo
+  return !!bits[(ly*dm[2]+lz)*dm[0]+lx];
+}
+
+// ¿A qué distancia cruza el rayo materia de la rejilla dentro de la celda (x,y,z)? Devuelve -1 si la
+// atraviesa sin tocar nada. Gemela de mcStructRayHit, con una diferencia que importa: si la celda NO es
+// fina devuelve `t0` sin sondear nada, así que un mundo sin materiales finos se comporta exactamente como
+// antes (el rayo se para al entrar en la celda, igual que hacía el mcSolid pelado).
+function mcRejillaRayHit(x,y,z, o,d, t0){
+  const GEO=mc._geoFina; if(!GEO) return t0;
+  const g=GEO[mc.grid[mcIdx(x,y,z)]]; if(!g || !g.bits) return t0;   // cubo macizo: para donde paraba
+  const T=MC_TILE, inf=1e9;
+  const px=o[0]+d[0]*t0, py=o[1]+d[1]*t0, pz=o[2]+d[2]*t0;   // punto de entrada a la celda
+  const cl=(v,lo)=>v<lo?lo:(v>lo+T-1?lo+T-1:v);              // el borde exacto puede caer en la celda vecina
+  let fx=cl(Math.floor(px*T), x*T), fy=cl(Math.floor(py*T), y*T), fz=cl(Math.floor(pz*T), z*T);
+  const sX=d[0]>0?1:-1, sY=d[1]>0?1:-1, sZ=d[2]>0?1:-1;
+  const aX=Math.abs(d[0]), aY=Math.abs(d[1]), aZ=Math.abs(d[2]);
+  const dX=aX>0?1/(aX*T):inf, dY=aY>0?1/(aY*T):inf, dZ=aZ>0?1/(aZ*T):inf;   // t por voxel fino
+  let tX=aX>0?((d[0]>0?(fx+1)/T-px:px-fx/T)/aX):inf;
+  let tY=aY>0?((d[1]>0?(fy+1)/T-py:py-fy/T)/aY):inf;
+  let tZ=aZ>0?((d[2]>0?(fz+1)/T-pz:pz-fz/T)/aZ):inf;
+  let t=0;
+  for(let i=0;i<3*T+3;i++){
+    if(fx<x*T||fx>=x*T+T||fy<y*T||fy>=y*T+T||fz<z*T||fz>=z*T+T) return -1;   // salió de la celda
+    if(mcRejillaSolidAt(fx,fy,fz)) return t0+t;
+    if(tX<tY && tX<tZ){ fx+=sX; t=tX; tX+=dX; }
+    else if(tY<tZ){     fy+=sY; t=tY; tY+=dY; }
+    else {              fz+=sZ; t=tZ; tZ+=dZ; }
+  }
+  return -1;
 }
 // Re-malla TODAS las estructuras vivas (al cambiar game.structTextures): invalida la geometría fina cacheada
 // (el modo de textura cambió), recompone el atlas y reconstruye las VBO de cada instancia. La colisión fina
@@ -9758,7 +10256,9 @@ function mcBreak(){
       if(s){ mcPushHist({t:'s-', sp:{key:s.key,ox:s.ox,oy:s.oy,oz:s.oz,rot:s.rot|0}}); mcRemoveStruct(s); return; }
     }
     const bx=Math.floor(px), by=Math.floor(py), bz=Math.floor(pz);
-    if(by>=0 && mcSolid(bx,by,bz) && !mcIsCellReplaceable(bx,by,bz)){ const before=mc.grid[mcIdx(bx,by,bz)]; mcSetBlock(bx,by,bz,0); mcPushHist({t:'b',x:bx,y:by,z:bz,before,after:0}); mcRemeshAround(bx,bz); mcScheduleSave(); return; }
+    // Misma regla fina que el rayo de apuntar (BUG-RAY2): una celda que no llena su cubo —un cable en el
+    // suelo, una alfombra— solo se rompe si el rayo cruza SU geometría, no toda su celda.
+    if(mcRejillaSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T)) && !mcIsCellReplaceable(bx,by,bz)){ const before=mc.grid[mcIdx(bx,by,bz)]; mcSetBlock(bx,by,bz,0); mcPushHist({t:'b',x:bx,y:by,z:bz,before,after:0}); mcRemeshAround(bx,bz); mcScheduleSave(); return; }
   }
 }
 // Cuarto de vuelta (0..3) para que el FRENTE de la sala mire al jugador: se toma de hacia dónde mira (yaw),
