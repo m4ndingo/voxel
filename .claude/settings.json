@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./data/worlds/**)",
+      "Read(./data/mundo.vox)",
+      "Read(./data/fotos/**)",
+      "Read(./releases/**)",
+      "Read(./node_modules/**)",
+      "Read(./assets/taberna.vox.json)",
+      "Read(./assets/mazmorra.vox.json)",
+      "Read(./assets/herreria.vox.json)"
+    ]
+  }
+}
