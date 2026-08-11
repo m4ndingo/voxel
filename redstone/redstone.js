@@ -67,7 +67,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'r1.2';
+  var VERSION = 'r1.3';         // r1.3: el repaso de arranque suelta las entradas de pulso pegadas (BUG-RS25)
   var MAX_POR_DRENADO = 4096;   // tope por pasada: un circuito enorme se reparte entre frames, no cuelga
   var MAX_CAMBIOS_POR_CELDA = 8;// una celda que cambia más veces que esto en una pasada está oscilando
 
@@ -975,7 +975,10 @@
       for (var i = 1; i < ids.length; i++) if (ids[i]) { hay = true; break; }
       if (!hay) return 0;
 
-      var g = mc.grid, NX = mc.dim.x, NY = mc.dim.y, NZ = mc.dim.z, n = 0;
+      // Las celdas que este repaso DESATASCA (observador y placa/botón guardados encendidos). Se
+      // escriben en la rejilla a pelo, sin pasar por mcSetBlock, así que la malla no se entera sola:
+      // hay que remallarlas al final o el mundo enseña la placa pisada con nadie encima.
+      var g = mc.grid, NX = mc.dim.x, NY = mc.dim.y, NZ = mc.dim.z, n = 0, retocadas = [];
       for (var z = 0; z < NZ; z++) for (var y = 0; y < NY; y++) {
         var fila = y * NX + z * NX * NY;
         for (var x = 0; x < NX; x++) {
@@ -989,12 +992,29 @@
           if (esObservador(cfg) && claveBase(mc.blockKey[id] || '').indexOf('-on') > 0) {
             var par = parejaObservador(cfg._clave);
             var idOff = mc.name2id[conOri(par.off, x, y, z)];
-            if (idOff && idOff !== id) { g[fila + x] = idOff; }
+            if (idOff && idOff !== id) { g[fila + x] = idOff; retocadas.push([x, y, z]); }
+          }
+          // La misma enfermedad, y por la misma razón, en las entradas de PULSO (placa, botón).
+          // El estado de una pieza con pareja ES la clave de la rejilla (ver encendidaEn), y eso es
+          // justo lo que hace que una palanca sobreviva a recargar el mundo sin persistir nada. Pero
+          // a una placa no la suelta su clave: la suelta un setTimeout de `apagones`, que es memoria
+          // de ESTA sesión y no se guarda con el mundo. Un mundo guardado con la placa pisada vuelve
+          // con la celda en `-on`, sin temporizador que la suelte y sin nadie que se vaya a bajar de
+          // ella: pegada para siempre, alimentando su puerta con nadie encima (BUG-RS25).
+          // Con nadie encima, una entrada de pulso está apagada POR DEFINICIÓN; y si de verdad hay
+          // alguien, su latido (`alSeguirPisando`, redstone-piezas) la re-enciende en el mismo frame.
+          // `conOri` por lo mismo que arriba: la placa puede estar puesta con vuelco y caer a la
+          // clave sin girar la pondría de pie.
+          if (cfg.manual && cfg.pulso && cfg.encendida && claveBase(mc.blockKey[id] || '') === claveBase(cfg.encendida)) {
+            var idSuelta = mc.name2id[conOri(cfg.apagada, x, y, z)];
+            if (idSuelta && idSuelta !== id) { g[fila + x] = idSuelta; retocadas.push([x, y, z]); }
           }
           cola.set(cl(x, y, z), [x, y, z]); n++;
         }
       }
-      if (n) { forzar = true; pedirDrenado(); console.log('[redstone] repaso: ' + n + ' celda(s) de circuito'); }
+      if (retocadas.length) remallar(retocadas);
+      if (n) { forzar = true; pedirDrenado(); console.log('[redstone] repaso: ' + n + ' celda(s) de circuito'
+        + (retocadas.length ? ' · ' + retocadas.length + ' desatascada(s)' : '')); }
       return n;
     },
 
