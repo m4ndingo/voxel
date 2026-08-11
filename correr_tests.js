@@ -43,7 +43,7 @@ Opciones:
 }
 
 // 1. Escanear ficheros test_*.js en la raíz
-const dir = __dirname;
+const dir = __dirname+"/tests";
 const files = fs.readdirSync(dir)
   .filter(f => f.startsWith('test_') && f.endsWith('.js'))
   .sort();

@@ -86,13 +86,20 @@ test('los uniformes que se buscan existen en el fuente', () => {
   assert(/gl\.uniform1f\(L\.uSunProbe,\s*mc\.sunProbe\)/.test(SRC), 'mcSunUniforms no sube mc.sunProbe');
 });
 
-test('el programa del sol solo usa aPos (sirve para los tres formatos de vertice)', () => {
+test('el programa del sol usa aPos y aShade (sirve para los tres formatos de vertice)', () => {
+  // aPos vale para los tres formatos porque va siempre el primero. aShade tambien esta en los tres, pero a
+  // distinto desplazamiento, asi que cada dibujo lo declara (REQ-SHADOW2): es donde viaja «no proyecta».
   const vsSrc = glsl('MC_SUN_VS');
   const attrs = (vsSrc.match(/attribute\s+\w+\s+(\w+)/g) || []).map(a => a.match(/(\w+)$/)[1]);
-  assert(attrs.length === 1 && attrs[0] === 'aPos', 'el VS del sol usa ' + attrs.join(',') + ' y solo deberia usar aPos');
+  assert(attrs.length === 2 && attrs.includes('aPos') && attrs.includes('aShade'),
+    'el VS del sol usa ' + attrs.join(',') + ' y solo deberia usar aPos y aShade');
   // los tres strides con los que se dibuja en la pasada del sol
   const pasada = SRC.slice(SRC.indexOf('function mcRenderShadow'), SRC.indexOf('function mcSunUniforms'));
   for (const st of ['6*4', '9*4', '10*4']) assert(pasada.includes(st), 'la pasada del sol no dibuja con stride ' + st);
+  // Sin bandera el atributo tiene que quedarse en la constante 0, o quien dibuje por mc.sunExtra con la firma
+  // vieja de cuatro argumentos leeria basura del vertice y desapareceria del mapa a ratos.
+  assert(/vertexAttrib1f\(SL\.aShade,\s*0\)/.test(pasada), 'la pasada del sol no deja aShade en 0 sin desplazamiento');
+  assert(/aShade>=4\.0/.test(vsSrc), 'el VS del sol no descarta el vertice con la bandera «no proyecta»');
 });
 
 test('el mapa se muestrea con NEAREST (la altura va empaquetada, interpolarla la inventa)', () => {

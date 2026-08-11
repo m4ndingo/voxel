@@ -67,6 +67,9 @@ function montar(opciones = {}) {
     // El apuntado va por sus propias sondas (leen bitsAim, no bits); el mcStructColl de juguete de arriba
     // solo trae `bits`, que es justo el caso «g fabricado por un tercero» que el `||` tiene que aguantar.
     extraer('mcAimBoxHit') + extraer('mcAimSolidAt') +
+    // La rejilla tiene sus propias sondas desde BUG-RAY2 (un cable o una alfombra son TERRENO, no
+    // estructura). Sin mc._geoFina las dos salen por la puerta rapida y el rayo es el de siempre.
+    extraer('mcRejillaSolidAt') + extraer('mcRejillaRayHit') +
     extraer('mcRaycast') + extraer('mcStructRayHit') + extraer('mcStructCellSolid'), sandbox);
   return sandbox;
 }
@@ -140,6 +143,52 @@ console.log('\nSin nada al alcance no hay impacto');
   w.mc.yaw = Math.PI / 2;                                    // mirando a -X, hacia el vacio
   const hit = w.mcRaycast(4, true);
   t('devuelve null', hit === null, 'hit=' + JSON.stringify(hit));
+}
+
+// ── 6. BUG-RAY2: un cable en el SUELO es rejilla, y no puede tapar lo que hay detras ───────────────
+// Desde mcPonEnRejilla, lo que cabe en una celda (un cable, una alfombra, una flor) se escribe en
+// mc.grid: mcSolid da true para la celda ENTERA aunque el dibujo sea un voxel de alto. El dueno lo
+// reporto asi: apuntando al muro del fondo se le borraba el cable, o el bloque nuevo caia encima de el.
+// Es el mismo fallo que BUG-RAY1 arreglo en las estructuras, en la otra mitad del mundo.
+console.log('\nUn cable de rejilla en el suelo no tapa la pared de detras (BUG-RAY2)');
+{
+  const ID_CABLE = 2;
+  function montarCable() {
+    const w = montar({ sinEscalera: true });
+    // El cable ocupa el voxel fino de ABAJO de su celda, los 16x16 en planta: fdim va cenido al dibujo.
+    const fdim = [T, 1, T];
+    const bits = new Uint8Array(fdim[0] * fdim[1] * fdim[2]).fill(1);
+    const geo = []; geo[ID_CABLE] = { fdim, bits, bitsAim: bits };
+    w.mc._geoFina = geo;
+    w.mc.grid[w.mcIdx(9, 9, 8)] = ID_CABLE;       // en la celda de delante, a la altura del ojo
+    return w;
+  }
+  const w = montarCable();
+  // El ojo mira en horizontal a y=9.6 => voxel fino y local 9, muy por encima del cable (local 0).
+  const hit = w.mcRaycast(8, true);
+  t('el rayo atraviesa la celda del cable y llega a la pared', hit && hit.cell[0] === 10,
+    hit ? 'celda x=' + hit.cell[0] : 'sin impacto');
+  t('el bloque nuevo iria pegado a la pared (x=9), no encima del cable',
+    hit && hit.cell[0] + hit.normal[0] === 9, hit ? 'x=' + (hit.cell[0] + hit.normal[0]) : 'sin impacto');
+  // La trampa del codigo viejo, fijada igual que en el caso 1: la CELDA si es solida.
+  t('la celda del cable si es solida (es lo que miraba el codigo viejo)', w.mcSolid(9, 9, 8) === true);
+  t('pero no hay materia a la altura del ojo', w.mcRejillaSolidAt(9 * T + 8, 9 * T + 9, 8 * T + 8) === false);
+  t('y si la hay a la altura del cable', w.mcRejillaSolidAt(9 * T + 8, 9 * T + 0, 8 * T + 8) === true);
+
+  // Anti-falso-verde: apuntando AL cable el rayo si se para en su celda, o no se podria ni romper.
+  const w2 = montarCable();
+  w2.mc.pos[1] = 9 + 0.02 - MC_EYE_DE(w2);       // ojo dentro del voxel fino de abajo de la celda y=9
+  const hit2 = w2.mcRaycast(8, true);
+  t('apuntando al cable el rayo si se para en su celda', hit2 && hit2.cell[0] === 9,
+    hit2 ? 'celda x=' + hit2.cell[0] : 'sin impacto');
+
+  // Y sin materiales finos (mc._geoFina ausente) el rayo tiene que ser BYTE a BYTE el de antes:
+  // la celda entera para el rayo, como hacia el mcSolid pelado.
+  const w3 = montar({ sinEscalera: true });
+  w3.mc.grid[w3.mcIdx(9, 9, 8)] = ID_ROCA;
+  const hit3 = w3.mcRaycast(8, true);
+  t('sin mc._geoFina la celda entera sigue parando el rayo', hit3 && hit3.cell[0] === 9,
+    hit3 ? 'celda x=' + hit3.cell[0] : 'sin impacto');
 }
 
 console.log('\n' + ok + ' ok, ' + fallos + ' fallos');
