@@ -725,7 +725,7 @@
   }
 
   // ── 3. el gesto ────────────────────────────────────────────────────────────────────────────
-  var VERSION = 'piezas-1.4';
+  var VERSION = 'piezas-1.5';
   var ALCANCE = 6;
 
   // ⚠️ Apuntar a una palanca NO se puede dejar en manos de game.aim(). El rayo del motor trabaja en
@@ -747,6 +747,11 @@
       if (!mcInside(cx, cy, cz)) return null;
       var id = mc.grid[mcIdx(cx, cy, cz)];
       if (!id) continue;
+      // El agua y la lava NO paran el rayo. Desde REQ-FLUID4 un fluido es un macizo 16³ que se dibuja
+      // con su geometría fina, o sea que su `bits` está LLENO de arriba abajo: sin esta guarda, la
+      // primera celda de líquido que cruza el rayo se lleva el impacto y una pieza sumergida deja de
+      // poder conmutarse. Es la misma pregunta que ya se hacen mcRaycast, mcBreak y mcPlace en app.js.
+      if (typeof mcIsCellReplaceable === 'function' && mcIsCellReplaceable(cx, cy, cz)) continue;
       // Manga ancha para las ENTRADAS: a una palanca, un botón o una placa les vale la celda entera.
       // Es la distinción de Minecraft entre el «hitbox» y la malla, y aquí no es un capricho: la
       // varilla de la palanca es de 1/16 y encima SE MUEVE al girarla (se inclina al otro lado), así
