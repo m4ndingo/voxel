@@ -13,9 +13,12 @@ está esperando decisión del dueño.
 | `sonda_perf_rs1.js` | mide el coste de un circuito de redstone oscilando |
 | `sonda_cache_lru.js` | mide el caché LRU de `mcMeshChunk` con un observador |
 | `sonda_render_mode.js` | comprueba el ida y vuelta de `game.renderMode` |
+| `sonda_perf3_colocar.js` | **BUG-PERF3** · reparto del coste de **colocar un bloque** en 4 chunks distintos |
+| `sonda_perf3_finos.js` | **BUG-PERF3** · cuánta geometría fina produce un chunk y qué tarda en mallarse |
+| `sonda_perf3_verifica.js` | **BUG-PERF3** · huella de la geometría fina, para A/B contra un `app.js` anterior |
 
-⚠️ **Las sondas no son tests.** `correr_tests.js` solo recoge `test_*.js` **de la raíz**, así que
-moverlas aquí no toca la suite. Se lanzan a mano (`node performance/sonda_req_perf1.js`) y necesitan
+⚠️ **Las sondas no son tests.** `correr_tests.js` recoge `test_*.js` de **`tests/`**, así que
+tenerlas aquí (y con nombre `sonda_*`) las deja fuera de la suite por partida doble. Se lanzan a mano (`node performance/sonda_req_perf1.js`) y necesitan
 el servidor en `:8500` y `playwright` (que está en `/root/voxel/node_modules`, así que **hay que
 ejecutarlas desde el repo**, no desde `/tmp`).
 

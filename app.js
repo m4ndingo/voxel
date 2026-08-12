@@ -8289,7 +8289,18 @@ function mcMeshChunk(cx,cz){
   // POR VÉRTICE, mc.structProg) no depende del atlas del terreno: geometrías distintas se concatenan en un
   // buffer. Ahí está todo el asunto — una pieza suelta cuesta 1 draw call (200 flores = 200, ~400 ms medidos)
   // y esto cuesta 0: van dentro del buffer del chunk, que ya se dibujaba. Mismo dibujo, mismo precio.
-  const fcol=[], falpha=[];
+  // BUG-PERF3 · los dos flujos finos son Float32Array PREDIMENSIONADOS, no arrays normales.
+  // Antes se acumulaba con `out.push(9 valores)` por vértice y al final `new Float32Array(arr)`.
+  // En un chunk cargado de piezas finas eso son ~594 000 vértices ⇒ 5,3 M de floats empujados de
+  // nueve en nueve más una copia final de 5,3 M: 150 ms de re-mallado, y se paga ENTERO cada vez
+  // que se coloca un bloque en ese chunk (colocar cambia la topología, así que no hay atajo que
+  // valga). El tamaño se sabe antes de empezar —cada cara son 6 vértices × 9 floats, o sea
+  // `count*9` por flujo—, así que se reserva exacto y se escribe por índice. Es cota superior, no
+  // medida: el culling de fluido (`tap`) puede saltarse caras, y por eso se sube `subarray(0,n)`.
+  let capC=0, capA=0;
+  for(let i=0;i<finas.length;i+=4){ const g=GEO[finas[i+3]]; if(!g) continue; capC+=g.colCount*9; capA+=g.alphaCount*9; }
+  const fcol={buf: capC?new Float32Array(capC):null, n:0};
+  const falpha={buf: capA?new Float32Array(capA):null, n:0};
   if(finas.length){
     // Traslada un flujo fino (stride 9) a la celda de mundo y hornea la luz del entorno por CARA con su
     // celda-muestra: exactamente la misma cuenta que mcBuildStructMesh, pero acumulando en un array común
@@ -8307,8 +8318,12 @@ function mcMeshChunk(cx,cz){
           const wx=ox+sc[f*3], wy=oy+sc[f*3+1], wz=oz+sc[f*3+2];
           if(mcInside(wx,wy,wz)){ const li=mcIdx(wx,wy,wz); k=lightLut[Math.max(L[li], BL?BL[li]:0)]; }   // fuera de rejilla = cielo (k=1)
         }
+        const B=out.buf; let p=out.n;
         for(let v=0;v<6;v++){ const b=(f*6+v)*9;
-          out.push(src[b]+ox, oy + src[b+1] * scaleH, src[b+2]+oz, src[b+3], src[b+4], src[b+5], src[b+6]*k+2*ss, src[b+7], src[b+8]); }
+          B[p]=src[b]+ox; B[p+1]=oy + src[b+1] * scaleH; B[p+2]=src[b+2]+oz;
+          B[p+3]=src[b+3]; B[p+4]=src[b+4]; B[p+5]=src[b+5];
+          B[p+6]=src[b+6]*k+2*ss; B[p+7]=src[b+7]; B[p+8]=src[b+8]; p+=9; }
+        out.n=p;
       }
     };
     // REQ-FLUID4 · Fase 1: las caras INTERNAS de una masa de fluido no se emiten. Sin esto un lago es una
@@ -8362,12 +8377,13 @@ function mcMeshChunk(cx,cz){
   ch.count=verts.length/6; ch.aabb=[x0,0,z0, x1,dim.y,z1];
   // Los dos flujos finos del chunk: opaco (pasada de color por vértice) y translúcido (pasada con blend).
   // Sin celdas finas no se crea ni un buffer, y si dejan de haberlas se libera: un mundo sin flores no paga nada.
-  const sube=(vboProp,cntProp,arr)=>{
-    const n=arr.length/9;
+  const sube=(vboProp,cntProp,flujo)=>{
+    const n=flujo.n/9;
     if(!n){ if(ch[vboProp]) gl.deleteBuffer(ch[vboProp]); ch[vboProp]=null; ch[cntProp]=0; return; }
     if(!ch[vboProp]) ch[vboProp]=gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, ch[vboProp]);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW);
+    // `subarray` es una vista, no una copia: la reserva es cota superior y aquí se sube lo escrito.
+    gl.bufferData(gl.ARRAY_BUFFER, flujo.n===flujo.buf.length?flujo.buf:flujo.buf.subarray(0,flujo.n), gl.STATIC_DRAW);
     ch[cntProp]=n;
   };
   sube('finoVbo','finoCount', fcol); sube('finoAVbo','finoACount', falpha);

@@ -16,8 +16,8 @@ Para localizar una función usa **`SYMBOLS.md`** (mapa `función → app.js:lín
 lectura reemplaza docenas de sondeos). Regenéralo si cambia:
 `grep -nE '^[[:space:]]*(async )?function ' app.js`. Guardián: `node tests/test_symbols_sync.js`.
 
-- **Poner/colocar un bloque:** `app.js:setVoxel(239)` · `mcSetVoxel(11740)` · `mcSetBlock(6354)` ·
-  `mcCabeEnRejilla(6981)` · `mcPlace(10266)` · `mcResolveMat(11601)`/`mcMatKey(11579)`.
+- **Poner/colocar un bloque:** `app.js:setVoxel(239)` · `mcSetVoxel(11756)` · `mcSetBlock(6354)` ·
+  `mcCabeEnRejilla(6981)` · `mcPlace(10282)` · `mcResolveMat(11617)`/`mcMatKey(11595)`.
 - **Nombre corto de un asset:** léelo de **`assets/index.json`** (22 KB, cubre los 70), **NUNCA** de un
   `*.vox.json` (taberna = 283 k tokens, más que una ventana entera; están vetados en
   `.claude/settings.json`).

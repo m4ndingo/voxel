@@ -89,6 +89,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
 | [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
 | [REQ-DOC2](#-req-doc2) | falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas) | 🟡 abierto 2026-08-07 | la crítica mejor puesta de la auditoría; no es partir el fichero, es documentar qué vive en `state`, `mc` y `game`. **Sin investigar a fondo** |
+| [BUG-PERF3](#-bug-perf3) | en un mapa complejo, **colocar un bloque hunde los fps — y depende de DÓNDE se coloque** | 🟨 medido y mejorado ×2,9 (2026-08-12) | **medido**: el 97 % era `mcMeshChunk`, que emitía 594 k vértices finos con `push` de 9 en 9. Ahora reserva el `Float32Array` exacto y escribe por índice: 162 → 57 ms por gesto, geometría byte a byte idéntica. Quedan ×5,3 contra terreno liso ⇒ falta la **medida del dueño** y decidir si se va al mesh incremental. El protocolo ya estaba escrito (`performance/PROTOCOLO_TEST_DUENO.md`) **citando este id, pero el ticket nunca se abrió**. No es [PERF-RS1](#-perf-rs1): allí el trabajo lo dispara el motor de redstone oscilando (`rs.procesarRemallar`), aquí lo dispara **una edición manual** por el camino de `app.js` (`mcSetBlock` → `mcRemeshAround`), así que el *budget* propuesto en `PROPUESTA_PERF-RS1_pasada9.md` **no lo cubre** |
 | [REQ-MAP1](#-req-map1) | Alt+M = pantalla de mapas conmutable sin perder el mundo abierto | medio | — |
 
 ---
@@ -4373,6 +4374,114 @@ literalmente «yo no proyecto sombra». Semántica confirmada por el dueño:
   cerrar una columna se recalcula del todo.
 - **Las estructuras finas no necesitan nada**: dejan la celda como aire y nunca cortaron el cielo.
 - Un id por encima del final de la tabla lee `undefined` (falsy) ⇒ corta: se queda corto, no revienta.
+
+---
+
+### 🟨 BUG-PERF3 · Colocar un bloque hunde los fps, y depende de DÓNDE se coloque — 🟨 medido y mejorado ×2,9 (2026-08-12), pendiente de la medida del dueño
+
+**Reportado** 2026-08-12 por el dueño:
+
+> «en un mapa complejo colocar un bloque, dependiendo de dónde se haga, genera una caída importante
+> de fps.»
+
+**El ticket llega con los deberes medio hechos y con una trampa.** En `performance/` ya estaba
+escrito `PROTOCOLO_TEST_DUENO.md`, un guion paso a paso para medir esto **en la GPU del dueño**, y
+dice en su línea 4 `Ticket: BUG-PERF3 en PLAN.md`. Ese ticket **no existía**: el protocolo se escribió
+apuntando a un id que nadie llegó a dar de alta. Esta sección lo abre.
+
+**Qué NO es.** Es fácil archivarlo como duplicado de [PERF-RS1](#-perf-rs1) porque el síntoma
+(«caen los fps», «`mcMeshChunk` cuesta 20-124 ms») es el mismo, pero **el disparador es otro**:
+
+| | [PERF-RS1](#-perf-rs1) | BUG-PERF3 (esto) |
+|---|---|---|
+| quién genera el trabajo | el motor de redstone oscilando solo | **el dueño colocando un bloque** |
+| por dónde entra | `rs.procesarRemallar` (`redstone/redstone.js`) | `mcSetBlock` → `mcRemeshAround` (`app.js`) |
+| lo arregla el *budget* de `PROPUESTA_PERF-RS1_pasada9.md` | sí, ahí es donde se instala | **no**: ese presupuesto vive en el snippet de redstone y una edición manual no pasa por él |
+
+**La hipótesis, y por qué el «depende de dónde» es la pista buena.** Colocar un bloque **cambia la
+topología** (aire↔sólido), y ese es justo el caso que `mcRemeshAround` (`app.js:8705`) no puede
+saltarse: cuando `mc.gridGen` cambia hace las tres cosas caras —`mcRelightBox`, `mcMeshChunk` de cada
+chunk tocado y `mcRebakeStructsNear`—, mientras que un observador pulsando no toca `gridGen` y se las
+salta todas. De ahí que el coste dependa del **sitio**: en terreno liso el chunk es barato, y en un
+chunk con estructuras finas dentro (pistones, observadores, cables, flores, agua) el mismo gesto
+re-malla geometría cara y además re-hornea las estructuras del vecindario.
+
+Está sin confirmar cuál de las tres domina, y son arreglos distintos:
+
+- si manda **`mcMeshChunk`** → presupuesto/troceado del mallado, o caché por firma que hoy va al
+  25-33 % de aciertos (`PROPUESTA_PERF-RS1_pasada9.md` §3);
+- si manda **`mcRebakeStructsNear`** → acotar mejor qué estructuras se re-hornean de verdad;
+- si manda **`mcRelightBox`** → el BFS de luz sobre la caja.
+
+**Lo que falta para pasar de hipótesis a causa.** Dos caminos, y no se estorban:
+
+1. **La medida del dueño** — `performance/PROTOCOLO_TEST_DUENO.md`, que pide exactamente lo que hace
+   falta: dos volcados del **mismo** mundo y el **mismo** bloque, en un sitio malo y en uno bueno.
+   Un volcado suelto no distingue «este bloque es caro» de «este sitio es caro». El paso 4
+   (`game.renderMode='fast'`) reparte la culpa entre CPU y GPU en una línea. Los ayudantes que pide
+   están verificados en `app.js` (`perfDump`, `perfAssert`, `perfContinuo`, `perfVerbosity`,
+   `cacheStats`, `chunksActivos`, `chunkCacheSlots`, `shadowSize`, `renderMode`).
+2. **Una sonda headless** en `performance/` que coloque el mismo bloque en un chunk liso y en uno
+   cargado de estructuras y cronometre el desglose. Bajo SwiftShader los números absolutos no valen,
+   pero **la razón malo/bueno y el reparto entre las tres funciones sí**, y eso es lo que decide qué
+   se arregla.
+
+---
+
+#### Medido 2026-08-12 (camino 2, sonda headless) — y la hipótesis se quedó corta
+
+`performance/sonda_perf3_colocar.js` coloca y quita el mismo bloque 24 veces en cuatro chunks que
+solo se diferencian en lo que ya tenían dentro. **De las tres candidatas manda una sola, y por
+goleada**: `mcMeshChunk` se lleva el **97 %**; `mcRebakeStructsNear` y `mcRelightBox` son ruido
+(0,04 y 2,2 ms). Así que acotar el re-horneado o el BFS de luz **no habría movido la aguja**.
+
+| chunk sembrado con | ms/gesto | de eso, meshChunk | razón contra «liso» |
+|---|---|---|---|
+| liso (terreno pelado) | 13,1 | 6,2 | — |
+| flores (finas en rejilla) | 56,4 | 50,3 | ×4,3 |
+| observadores + cables | **161,9** | **156,5** | **×12,3** |
+
+Ese ×12,3 **es** el «depende de dónde» del enunciado.
+
+**La causa, medida y no supuesta** (`performance/sonda_perf3_finos.js`): el chunk denso produce
+**594 000 vértices finos**, y el emisor de geometría fina los acumulaba con
+`out.push(9 valores)` **por vértice** sobre un array normal —5,3 millones de floats empujados de
+nueve en nueve— para acabar copiándolo entero con `new Float32Array(arr)`. El chunk liso produce
+**0** vértices finos y cuesta 3 ms. No es que el bloque sea caro: es que **colocar cambia la
+topología**, y eso obliga a re-mallar el chunk entero pagando esos 594 000 vértices otra vez.
+
+**Arreglo** (`app.js`, `mcMeshChunk`): el tamaño se conoce antes de emitir —cada cara son 6 vértices
+× 9 floats, o sea `count*9` por flujo—, así que se reserva el `Float32Array` exacto de antemano y se
+escribe **por índice**. Se acabaron el `push` variádico y la copia final. A la GPU se sube
+`subarray(0,n)` porque la reserva es cota superior (el culling de caras por fluido puede saltarse
+alguna).
+
+| | antes | después |
+|---|---|---|
+| `mcMeshChunk` de un chunk denso, aislado | 147-224 ms | **39-45 ms** |
+| colocar un bloque en el chunk de redstone | 161,9 ms/gesto | **56,7 ms/gesto** |
+| razón contra «liso» | ×12,3 | **×5,3** |
+
+**La geometría no cambia ni un vértice**, y eso está comprobado y no razonado:
+`performance/sonda_perf3_verifica.js` saca una huella (longitud + hash + suma) de lo que se sube a
+la GPU, y sale **idéntica** con el `app.js` de antes y el de después
+(`5055534:b7e09a90:63151533.409` y `4320:7cf665d0:54809.776`).
+
+**Sin regresiones**: las áreas `render` (14) y `caras` (7) dan **exactamente el mismo resultado**
+antes y después del cambio (A/B con `git stash`), incluidos los que ya estaban en rojo. `--node`
+sigue en 13/13 tras regenerar `SYMBOLS.md`, que se desincronizó porque el cambio mueve líneas de
+`app.js` — lo canta `test_symbols_sync.js`, que hizo su trabajo.
+
+**Lo que queda, y por qué no se cierra:**
+
+- Siguen siendo **×5,3 frente al terreno liso** y ~50 ms de tirón: mejor, pero un chunk cargado
+  todavía se nota. El techo de este camino ya se tocó; lo siguiente es no re-mallar el chunk entero
+  por un bloque (**mesh incremental por celda**, §5.1 de `PROPUESTA_PERF-RS1_pasada9.md`), que es un
+  refactor grande y **no se hace sin que el dueño lo apruebe**.
+- **Falta la medida del dueño** (`performance/PROTOCOLO_TEST_DUENO.md`). Todo lo de arriba es
+  SwiftShader: valen las razones y el reparto, **no los milisegundos**. En particular el paso 4
+  (`renderMode='fast'`) es el que diría si en su GPU además hay un componente de fill-rate que aquí
+  no se ve.
 
 ---
 
