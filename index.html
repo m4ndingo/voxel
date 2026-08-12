@@ -7,13 +7,18 @@
   <title>VoxelForge · Editor de assets RPG</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
-<body>
+<!-- REQ-EDIT1 · La tapa viene puesta desde el HTML, no desde JS: si la pusiera app.js ya sería tarde para
+     el primer píxel. La quita `mcDestapaApp()` en cuanto se sabe si nos quedamos en el editor o si
+     'editor-autoarranque' se va a otro sitio. Red de seguridad de 5 s dentro de app.js. -->
+<body class="app-tapada">
   <!-- ===================== Cabecera ===================== -->
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark">◧</span>
       <div class="brand-txt">
-        <strong>VOXELFORGE</strong>
+        <!-- REQ-INTRO2 · con un mundo ya cargado en memoria, la marca es el camino de vuelta a la
+             intro, sin recargar la página. Sin mundo no hace nada ni se ve pulsable. -->
+        <strong id="marca-inicio">VOXELFORGE</strong>
         <small>Editor de assets voxel · RPG</small>
       </div>
     </div>
@@ -68,12 +73,17 @@
             <option value="textura">Textura (pincel)</option>
           </select>
         </label>
+        <!-- Las opciones las pone `GAL_CATEGORIAS` desde app.js (REQ-TOOL1): una sola lista, o se
+             desparejarían al primer añadido. Lo de aquí es solo el hueco. -->
         <label class="field">
           <span>Categoría</span>
-          <select id="meta-categoria">
-            <option value="">General</option>
-            <option value="redstone">Redstone ⚡</option>
-          </select>
+          <select id="meta-categoria"></select>
+        </label>
+        <!-- Solo se enseña si la categoría es «herramienta»: es lo que ata este dibujo a una de las
+             herramientas del Mundo, y lo que evita escribir su clave a mano en el motor. -->
+        <label class="field" id="meta-herramienta-campo" hidden>
+          <span>Es la herramienta</span>
+          <select id="meta-herramienta"></select>
         </label>
         <p class="role" id="meta-role" hidden></p>
         <label class="meta-sw" title="En el Mundo se ve, da sombra, se apunta y se rompe igual que cualquier otra pieza, pero el jugador la cruza sin frenarse: es lo que hace que una mata de hierba se pise en vez de ser un muro. No tiene que ver con «Caras» — un tallo de seis caras también puede atravesarse, y una vidriera con caras quitadas sigue chocando.">
@@ -272,7 +282,7 @@
       </div>
     </div>
     <div class="mc-picker-bar" style="background:rgba(0,0,0,0.3); border-bottom:1px solid rgba(255,255,255,0.1)">
-      <input type="search" id="hab-picker-search" class="mc-picker-search" placeholder="🔍 Buscar por nombre o tipo..." autocomplete="off">
+      <input type="search" id="hab-picker-search" class="mc-picker-search" placeholder="🔍 Buscar por nombre o tipo (3 letras mín.)..." autocomplete="off">
       <div class="mc-picker-filters" id="hab-picker-filters">
         <button class="mc-pick-filter active" data-cat="all">Todos</button>
         <button class="mc-pick-filter" data-cat="general">General</button>
@@ -509,13 +519,17 @@
       <div class="mc-loading-text" id="mc-loading-text">Cargando mundo…</div>
     </div>
     <div class="mc-crosshair" id="mc-crosshair" aria-hidden="true">+</div>
+    <!-- REQ-OSD2 · pantalla OSD: una capa que se pone ENCIMA del juego (menús tipo JUGAR/CONSTRUIR).
+         ⚠️ No confundir con game.showOSDbuttons (REQ-OSD1), que son los dos botones de la esquina.
+         Nace vacía y oculta; la puebla game.osd.abrir(nombre), con HTML o con un mapa en un iframe. -->
+    <div class="mc-osd" id="mc-osd" hidden></div>
     <!-- Controles táctiles (móvil): sin teclado no se puede andar por el Mundo. Los enseña/esconde
          mcTouchShow(); el contenedor no intercepta nada, así que el resto del canvas sigue siendo
          la zona de MIRAR arrastrando. -->
     <div class="mc-touch" id="mc-touch" hidden>
       <div class="mc-stick" id="mc-stick"><div class="mc-stick-knob" id="mc-stick-knob"></div></div>
       <button class="mc-tbtn" id="mc-tjump" type="button" title="Saltar">⤒</button>
-      <button class="mc-tbtn foto" id="mc-tfoto" type="button" title="Sacar foto (tecla F)">📷</button>
+      <button class="mc-tbtn foto" id="mc-tfoto" type="button" title="Sacar foto (Alt+F)">📷</button>
     </div>
     <!-- Botón de desatasco (BUG-AG7). Sale SOLO cuando estás atascado de verdad, porque con
          game.autoUnstick apagado el juego ya no te saca solo y en el móvil no hay tecla U. -->
@@ -532,7 +546,7 @@
       <div class="mapa-picker-head"><span id="mc-picker-title">Bloque o textura</span>
         <button class="btn sm ghost" id="mc-picker-close" title="Cerrar">✕</button></div>
       <div class="mc-picker-bar">
-        <input type="search" id="mc-picker-search" class="mc-picker-search" placeholder="🔍 Buscar por nombre o clave..." autocomplete="off">
+        <input type="search" id="mc-picker-search" class="mc-picker-search" placeholder="🔍 Buscar por nombre o clave (3 letras mín.)..." autocomplete="off">
         <div class="mc-picker-filters" id="mc-picker-filters">
           <button class="mc-pick-filter active" data-cat="all">Todos</button>
           <button class="mc-pick-filter" data-cat="general">General</button>

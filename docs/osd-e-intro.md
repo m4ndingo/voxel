@@ -1,0 +1,511 @@
+# Vuelo, pantallas OSD y la intro por URL
+
+<!-- Detalle de VoxelForge. NO se carga en cada turno: lo carga el agente a demanda
+     desde el índice de ../CLAUDE.md. -->
+
+Lo que cubre este documento es una sola cadena de cinco tickets (REQ-FLY1, REQ-OSD2, REQ-OSD3,
+REQ-OSD4, REQ-INTRO1), pedida por el dueño así:
+
+> quiero hacer algo nuevo que modifique la experiencia de entrar al mundo y es que parezca ya el
+> producto terminado. en el producto terminado espero que al arrancar aparezca una camara volando por
+> un terreno ya renderizado […] el goal es que se pueda pasar la url a un usuario donde poder empezar
+> a ver el producto con el menu/osd y modo vuelo
+
+El enunciado literal y las cuatro decisiones que lo cerraron están en
+[`data/tickets/REQ-INTRO1/contexto.md`](../data/tickets/REQ-INTRO1/contexto.md).
+
+---
+
+## 🛫 Modo vuelo (`F`) — REQ-FLY1
+
+**`F` = volar. La foto pasó a `Alt+F`** (y el botón táctil `#mc-tfoto` sigue siendo la foto).
+
+Es «como estar dentro de un fluido pero sin caída»: la dirección sale de la vista (mirar hacia abajo y
+avanzar te hunde), pero la vertical no la toca la gravedad.
+
+```js
+game.volar()          // conmuta            game.volar          // lee (true/false)
+game.volar(true)      // enciende           game.volarVel = 6   // celdas/s, escala con mc.scale
+game.fantasma(true)   // atraviesa el terreno — SOLO surte efecto volando
+```
+
+Reglas que cuestan caro romper:
+
+- **El estado vive en `mc`** (`mc.volar`, `mc.volarVel`, `mc.fantasma`), no en un closure: el snippet
+  del Mundo se reejecuta en vivo y no puede dejar al jugador congelado a media altura.
+- La rama de vuelo va **dentro de `mcUpdate`, antes de la de fluido**, y **no pasa por `mcCaidaPaso`**:
+  volando la vertical es `(Espacio?1:0) − (Shift?1:0)` por `volarVel·√scale`, y **cero exacto** si no se
+  pulsa nada. Cero, no «casi cero»: `test_vuelo.js` compara la `y` byte a byte durante 60 frames.
+- **Las colisiones se mantienen**: volar no atraviesa paredes. Para eso está `game.fantasma`, y solo
+  funciona volando — un noclip a pie por accidente sería otra cosa.
+- Mientras se vuela `mc.onGround` es `false`, para que no se disparen parkour ni deslizamiento.
+- `Alt+F` se detecta por **`e.code==='KeyF'`**, no por `e.key`: con Alt pulsado muchos teclados
+  entregan un carácter compuesto y la rama nunca se cumpliría (mismo motivo que el `Alt+C` que ya
+  había en `app.js`).
+- Al **apagar** el vuelo se deja `mc.vel[1]=0` y la gravedad recupera el mando sola.
+
+Guardián: `tests/test_vuelo.js` (`@area: fisica`).
+
+---
+
+## 🖥️ La capa OSD y `game.osd` — REQ-OSD2
+
+⚠️ **`game.osd` no es `game.showOSDbuttons`.** Lo segundo son los dos botones de la esquina (REQ-OSD1);
+lo de aquí es una **pantalla** que se pone encima del juego entero.
+
+`<div id="mc-osd" hidden>` dentro de `#mc-modal`, `inset:0`, **z-index 25** (encima del canvas y de
+`#mc-loading` z-20, debajo de `#mc-picker`/`#snip-modal` z-50/60).
+
+```js
+game.osd.define('menu', { html:'<div class="mc-osd-panel">…</div>' });   // pantalla de DOM
+game.osd.define('menu', { mapa:'menu1' });                              // pantalla que es OTRO MAPA
+game.osd.define('menu', { mapa:'menu1', pos:[64,20,64], yaw:-135, pitch:-20 });   // …y su encuadre
+game.osd.encuadre()      // ← el de ahora mismo, impreso como un define listo para pegar
+game.osd.abrir('menu');  game.osd.cerrar();  game.osd.conmutar('menu');
+game.osd.abierta         // nombre o null        game.osd.pantallas()
+game.osd.alPulsar('JUGAR', fn, {intro, cima});   // fn NO recibe nada; el 3.º declara qué usa de su snippet
+game.osd.pulsar('jugar');   game.osd.acciones();   game.osd.entorno('JUGAR')
+game.osd.dump()          // ← el descubridor: todo lo definido, tal cual está ahora
+```
+
+**`game.osd.dump()` es la puerta de entrada** (hermano de `game.bloques.info()`): quien no conoce el OSD
+no tiene que leerse `app.js` ni este documento para definir una pantalla — se lo cuenta el motor con lo
+que hay cargado en ese momento. Imprime en consola y **devuelve** el volcado
+(`{abierta, pantallas:[{nombre,tipo,cfg,abierta,botones:[{texto,marca,accion,hace,receta,origen,entorno,falta}],
+sinAccion}], acciones:[…], sinBoton}`).
+
+**Un botón son DOS piezas y lo que las une es el texto**, así que el volcado enseña las dos por cada
+botón: **`marca`**, el HTML exacto (para copiarlo tal cual), y **`hace`**, el **código fuente** de la
+acción registrada. La primera versión solo listaba los nombres y el dueño devolvió el ticket con la
+frase que lo resume: *«con esto no sé qué hace un botón… no sé crear un botón como los de esta
+pantalla»*. Un nombre no es una respuesta.
+
+```
+game.osd — 1 pantalla(s), 2 acción(es). Abierta: intro
+
+  • pantalla «intro»  [html]  ← ABIERTA
+      ── botón «JUGAR» ✓  lo registró el snippet «arranque-intro»
+         se escribe así:  <button class="mc-osd-btn">JUGAR</button>
+         al pulsarlo corre esto, y se pulsa sin ratón con  game.osd.pulsar('JUGAR')
+         cópialo ENTERO en la consola y corre tal cual:
+            const { intro, cima } = game.osd.entorno('JUGAR');   // lo que esta acción usa de su snippet
+            function jugar() {
+              intro.parar();
+              …
+            }
+            jugar();
+      El HTML entero de la pantalla (cópialo para hacer otra parecida):  …
+  ── Hacer un botón nuevo: son dos piezas, y lo que las une es el TEXTO ──  …recetario…
+```
+
+- Los botones **se leen igual que los lee `mcOsdAbrir`** (`[data-osd]` o el texto del `<button>`, en un
+  `<template>`, que no ejecuta scripts): un informe que no coincide con lo que se va a enganchar de
+  verdad sería peor que no tenerlo.
+- El código de la acción sale de `String(fn)`, sin sangría sobrante y **cortado a 18 líneas**: esto es
+  una respuesta, no un listado — para el resto está el snippet.
+- Lo que hay que mirar cuando «el OSD no responde» es **`✗ NADIE ha registrado su acción`** y
+  **`sinBoton`**: o el botón no tiene `alPulsar`, o el `alPulsar` lleva un texto que no coincide.
+- Una pantalla `{mapa:…}` devuelve `botones: null` **a propósito**: sus botones son bloques con nota y
+  viven en ese otro mapa; inventarlos sería mentir.
+- **El ejemplo se autorresuelve, y por eso la acción no tiene parámetros.** El volcado no imprime `hace`
+  pelado sino **`receta`**: la línea que resuelve los ayudantes, el código y la llamada, en ese orden, para
+  que el bloque se copie **entero** a F12 y corra. Pasar `(clave, entorno)` a la acción obligaba a explicar
+  dos parámetros que nadie pidió — *«no me puedes dar un ejemplo con una función de la cual no tengo sus
+  parámetros… deberían de autorresolverse»* (tercera devolución del ticket). Así que **una acción se escribe
+  con cero parámetros** y se la llama sin argumentos; el 3.er argumento de `alPulsar` **no cambia cómo corre
+  el botón**, solo **declara** qué usa de su snippet para que `entorno()` lo sirva y `dump()` sepa enseñarlo.
+  Sin él la acción funciona igual al pulsarla, pero copiada a la consola da `intro is not defined` — y el
+  volcado lo avisa en **`falta`**, con la línea de `alPulsar` ya escrita para arreglarlo. El guardián de esto
+  es `tests/test_osd_capa.js` §8: **evalúa la receta en el ámbito global** y comprueba que corre, y que el
+  código sin la línea de entorno sigue fallando.
+- **`origen`** dice **dónde** se registró la acción (`el snippet «arranque-intro»` o `la consola (F12)`): al
+  leer el volcado, lo siguiente que se quiere saber es dónde hay que ir a cambiarlo. Sale de
+  `mc._snippetActual`, que fija `mcCorreSnippet` mientras corre cada snippet.
+
+- **El texto del botón ES su identidad**, normalizado (trim + mayúsculas). Por eso una pantalla puede
+  pasar de `{html:…}` a `{mapa:…}` sin tocar ni una acción registrada: en los dos casos lo que llega es
+  «JUGAR».
+- **Al abrir** se suelta el puntero (`exitPointerLock`) y se vacía `mc.keys`. Con la cámara capturada
+  no hay cursor con el que pulsar nada, y las teclas pulsadas se quedarían pegadas.
+- Mientras hay pantalla abierta **`mcLockPointer` no recaptura** (guarda de una línea) y **`mcDoAction`
+  sale pronto**: si no, los clics del menú romperían bloques por detrás de la capa.
+- **`Esc` es de dos pasos**: con OSD abierto la primera pulsación cierra **el menú**, no el Mundo.
+- **Una sola pantalla a la vez**: abrir otra sustituye a la anterior (dos pantallas-mapa serían dos
+  contextos WebGL).
+
+Guardián: `tests/test_osd_capa.js` (`@area: render`). Su §1 es el que importa: **sin pantalla abierta el
+Mundo se comporta exactamente como antes del ticket**.
+
+---
+
+## 🪟 Una pantalla que es otro mapa (`<iframe>` + `postMessage`) — REQ-OSD3
+
+El dueño quiere **diseñar el menú dibujando un mapa** (`/map/menu1`) y activarlo desde otro mapa.
+`mc` es un **singleton** —una rejilla, un programa GL, un jugador—, así que dos escenas vivas serían
+reescribir `app.js`. La pantalla-mapa se monta **aislada en un iframe** y el motor no se toca.
+
+```
+game.osd.abrir('menu1')  →  <iframe src="/map/menu1?osd=1">  →  ese app.js arranca en ESCAPARATE
+```
+
+**`?osd=1` = modo escaparate** (`mcEsEscaparate` / `mcAplicaEscaparate`), y se marca **antes** de abrir
+el mundo porque `mcScheduleSave` y la hotbar se consultan durante la carga:
+
+- **no guarda nada** (`mcScheduleSave` sale en el primer `if`) — sin esto, la pantalla del menú se
+  machacaría a sí misma con el primer clic;
+- se esconde todo lo de jugar con la clase **`body.mc-escaparate`** (no con `hidden`: la hotbar se
+  re-muestra sola desde `mcUpdateHotbar` en cuanto el jugador se mueve, y un `hidden` puntual no aguanta);
+- **sin captura de puntero**: el cursor visible es lo que hace pulsable un botón;
+- **`mc.volar=true`**: sin gravedad, la cámara se queda donde la dejó el spawn del mapa.
+
+El **puente** (mismo origen, y aun así se comprueba `e.origin===location.origin`):
+
+| dirección | mensaje | quién lo trata |
+|---|---|---|
+| hijo → padre | `{vf:'osd-pulsar', texto:'JUGAR'}` | el padre llama a `game.osd.pulsar(texto)` |
+| padre → hijo | `{vf:'osd-cerrar'}` | el hijo cierra lo suyo |
+
+**La acción se ejecuta en el mundo de verdad, no en la pantalla**: la pantalla solo dice qué botón se
+ha pulsado. Y **al cerrar el iframe se destruye** (`src='about:blank'` + `remove()`): un segundo
+contexto WebGL no puede quedarse colgado.
+
+Guardián: `tests/test_osd_mapa.js`. Levanta **dos mundos** en SwiftShader: es lento a propósito.
+
+### Un OSD se pone ENCIMA, no borra lo que hay — REQ-OSD6
+
+Lo que veía el dueño al abrir una pantalla-mapa era la apertura del mundo de dentro **en directo**: «se
+ve como se pone todo azul, como empiezan a salir mensajes de cosas que cargan, y luego sale el mapa…
+mucho flash de información para algo que debería ser un simple menú». Tres costuras, tres arreglos:
+
+| lo que tapaba | dónde | cómo queda |
+|---|---|---|
+| el cielo del mundo de dentro | `mcClearFondo` | en escaparate el frame se limpia con **alpha 0**: donde no hay nada dibujado **se ve el juego de debajo** |
+| el fondo del documento | `body.mc-escaparate` (CSS) + `document.documentElement.style` | `#mc-modal` (que lleva el azul del cielo), `body` y `<html>` transparentes, y el resto del documento oculto — con el modal transparente, la cabecera del editor asomaría |
+| el cartel de carga y los toasts | `mcShowLoading` / `toast` | en escaparate **no salen**: un menú no habla, y ese cartel es azul a pantalla completa y va contando fases |
+
+Y la pantalla **no se enseña cargándose**: el iframe nace con la clase `cargando` (`opacity:0`) y una
+ruedecita **sin fondo** encima (el juego sigue viéndose). El hijo manda `{vf:'osd-listo'}` cuando el
+mundo está pintado *y* el autoarranque ha corrido —**dos** `requestAnimationFrame`, porque el primero es
+el que pinta— y ahí se descubre entera de una vez. Si nunca llega, un reloj de `MC_OSD_ESPERA_MS` (12 s)
+la descubre igual: un menú que no aparece nunca es peor que uno a medio hacer. Cerrar mata el reloj.
+
+⚠️ `mcClearFondo` tiene que llamarse en **los tres** sitios que limpian el fondo, incluido el que
+restaura el clear después de la pasada de sombra: uno que se olvide devuelve el azul un fotograma sí y
+otro no. Y la guarda de `toast` pregunta por **`mcEsEscaparate()` (la URL)**, no por `mc.escaparate`:
+`mc` es un `let` de más abajo y hay toasts antes de que exista — en la zona muerta ni `typeof mc` es
+seguro.
+
+### El encuadre de una pantalla-mapa — REQ-OSD7
+
+«Cuando se muestra un osd se debería de poder indicar las coordenadas (teleport) del jugador para poder
+encuadrar correctamente el menú… también la rotación de la cámara». Se declara en el propio `define`:
+
+```js
+game.osd.define('menu', {mapa:'menu1', pos:[64, 20, 64], yaw:-135, pitch:-20});
+game.osd.encuadre()   // ← el descubridor: vuela hasta que se vea bien y te imprime ESA línea ya escrita
+```
+
+- **`pos`** en coordenadas de mundo, como `game.tp`; **`yaw`/`pitch` en GRADOS**, como `game.yaw` y
+  `game.pitch`. Las mismas unidades que se leen en la consola, para copiar sin convertir nada.
+- Viaja **en la URL del iframe** (`&pos=…&yaw=…&pitch=…`) y no por `postMessage`: tiene que estar puesto
+  **antes del primer fotograma**, y un mensaje llega con el hijo ya pintado — eso se ve como un salto de
+  cámara. Lo aplica `mcEscaparateEncuadre` desde `mcAplicaEscaparate`.
+- Se escribe **directo en `mc`, no con `game.tp`**: `tp` desatasca (`mcUnstick`) y sube al aire libre más
+  cercano. Aquí las coordenadas son las de una **cámara**, no las de alguien que va a andar por ahí, y un
+  menú encuadrado desde dentro de una pared es legítimo.
+- Sin encuadre declarado **no se toca nada**: la cámara se queda donde diga el spawn del mapa, como antes.
+- ⚠️ **Y la pantalla se pone a `mc.scale = 1`**, pase lo que pase. `game.playerScale` **persiste en
+  `localStorage`** y el iframe comparte origen con el padre, así que se heredaba la escala del visitante;
+  como el ojo es `pos[1] + MC_EYE*mc.scale`, el **mismo `pos` de la URL encuadraba distinto en cada
+  navegador** y el menú salía descolocado sin que hubiera forma de cuadrarlo para todos. Un menú no es
+  alguien que va a andar por ahí: es una **cámara**. El `localStorage` no se toca — fuera del menú la
+  escala del visitante sigue valiendo.
+
+Guardián: `tests/test_osd_mapa.js` §5 (transparencia, revelado, silencio), §6 (encuadre) y §13 (escala).
+
+### Cambiar de pantalla NO recarga el fondo — REQ-OSD11
+
+Un menú de verdad son **varias pantallas sobre el mismo decorado** (MENÚ → AJUSTES → VOLAR: ON/OFF). Como
+`mcOsdAbrir` cerraba la anterior antes de abrir la siguiente, y cerrar **destruye el iframe** (R2: un
+contexto WebGL colgado no se recupera), cada salto levantaba `/map/voxelforge?osd=1` **de cero**: segundo
+contexto WebGL, descarga del mundo, mallado y luz. Segundos de espera y el velo de «cargando» reapareciendo
+para cambiar tres letras de un botón.
+
+Dos salidas, y **hacen falta las dos**:
+
+- **El fondo se hereda.** Si la pantalla que se abre declara **exactamente el mismo fondo** que la abierta
+  —mismo `mapa` **y** mismo encuadre, que es lo que resume `mcOsdFondoClave` y queda marcado en el
+  `dataset.osdFondo` del iframe—, se le deja el iframe vivo y solo se repinta el panel de botones. Un
+  encuadre distinto **sí** remonta: es otro decorado.
+  ⚠️ **El iframe no se mueve de sitio ni se re-inserta**: reparentar un `<iframe>` lo **recarga**, que es
+  justo lo que se está evitando. Se vacía la capa a mano dejándolo donde está.
+- **`game.osd.html(nuevoHtml)`** repinta el panel de la pantalla **abierta** sin tocar el fondo, y deja el
+  html en su definición (reabrirla enseña lo mismo). Es lo que quiere un botón con estado:
+
+```js
+game.osd.alPulsar('VOLAR: ON',  () => { game.volar(false); game.osd.html(panel('VOLAR: OFF')); });
+game.osd.alPulsar('VOLAR: OFF', () => { game.volar(true);  game.osd.html(panel('VOLAR: ON'));  });
+```
+
+Volver a hacer `define` + `abrir` **de la misma pantalla** para cambiarle el texto también sirve (el fondo
+se hereda igual), pero `html()` es la vía directa y no pasa por el revelado.
+
+Guardián: `tests/test_osd_mapa.js` §10 — la marca se pone en el `contentWindow` del hijo, porque una
+recarga la borra: es la única prueba de que el iframe no se ha vuelto a levantar.
+
+### Lo que cuesta una pantalla-mapa, medido — REQ-OSD11
+
+Sobre `/map/voxelforge` (un mundo 96×10×96 que en disco son **1,2 KB** de JSON), abrir la pantalla tarda
+**~1,5 s** en salir. No es el mapa: es **levantar una segunda copia entera de la app**. El desglose, del
+`performance` del hijo:
+
+| tramo | ms |
+|---|---|
+| HTML + `app.js` + `style.css` + `assets/index.json` | 0 → 140 |
+| arranque del motor hasta pedir el mundo | 140 → 350 |
+| `/api/mundo` + `/api/mundo/vox` | 350 → 645 |
+| assets de la paleta (13 `.vox.json`) | 645 → 800 |
+| **mallado + luz** (CPU, sin red) | 800 → 1115 |
+| fuente, habitantes, `mundo-autoarranque`, redstone… | 1115 → 2000 |
+
+De ahí salen las dos únicas palancas que hay:
+
+- **No volver a pagarlo**: heredar el iframe entre pantallas del mismo fondo (arriba). Es la grande, porque
+  convierte 1,5 s en 0 para el segundo, tercero y cuarto salto.
+- **`vivo:false`** en el `define` (→ `&postal=1` en la URL): el decorado no ejecuta `mundo-autoarranque`,
+  y con él se caen el motor de redstone, sus piezas y la lista de habitantes. **Medido: ~200 ms**, más toda
+  la CPU que ese mundo dejaba de gastar simulando por detrás de unos botones.
+  ⚠️ **No es gratis, y por eso no es el modo por defecto**: el autoarranque no solo anima, también **da de
+  alta materiales**. En `voxelforge` la lava y la lámpara se pintan de otro color sin él. Se enciende
+  mirando el decorado, no a ciegas.
+
+Lo que **no** arregla ninguna de las dos es el primer `abrir()`: ese 1,4 s es el precio del `<iframe>`, y
+el `<iframe>` está ahí porque `mc` es un singleton (R2).
+
+### La página no se enseña para taparla — REQ-EDIT1
+
+`<body class="app-tapada">` viene puesto **desde el HTML**, no desde JS: si lo pusiera `app.js` ya sería
+tarde para el primer píxel. Lo quita `mcDestapaApp()` en cuanto se sabe qué se va a enseñar. Resuelve dos
+flashazos que eran el mismo defecto por los dos lados:
+
+| entrando por… | qué se veía | quién destapa ahora |
+|---|---|---|
+| `/` con un `editor-autoarranque` que navega | el editor 2D/3D entero, 100-250 ms, antes de irse al Mundo | nadie: se navega tapado |
+| `/` sin snippet, o con `?noauto=1` | (nada malo) | el propio arranque, en cuanto sabe que no hay snippet |
+| `/` con un snippet que se queda | (nada malo) | al terminar el snippet |
+| `/map/<x>` directo | el editor de fondo mientras se pide `assets/index.json` | `openWorld`, en su primera línea |
+
+Detalles que cuestan caro:
+
+- **`visibility:hidden`, no `display:none`**: el layout se calcula igual, así que destapar no provoca
+  reflow ni salto, y el fondo del `body` se sigue pintando (lo que se ve es el color de siempre, no blanco).
+- **Cómo se sabe que el snippet se fue**: `beforeunload` llega **síncrono** al asignar `location.href`
+  (medido en Chromium), así que cuando el snippet vuelve ya está puesto `mc._navegando`. Si se fue, **no se
+  destapa** — destaparlo es exactamente el flash.
+- **El snippet se pide en paralelo** con las galerías, aunque siga corriendo al final: es para destapar
+  cuanto antes a quien no tiene ninguno, y no cobrarle la espera.
+- **Red de seguridad de 5 s** y `mcDestapaApp()` también en `closeWorld`: una página en negro para siempre
+  sería peor que el flash.
+
+Guardián: `tests/test_editor_tapa.js` (los cinco caminos, mirando la `visibility` efectiva y no la clase).
+
+⚠️ **Todo test de navegador que entre por `/` tiene que pedir `?noauto=1`.** Desde que existe el
+`editor-autoarranque`, `/` **es lo que el dueño diga que sea**: el suyo hace `location.href='/map/fps?intro=1'`,
+así que un test que abra `/` y busque la galería la busca en un mapa. No es hipotético — tumbó
+`test_galeria_assets.js` con un error ilegible (`dialog.accept: Cannot accept dialog which is already
+handled`: el `prompt` del renombrado nunca llegó porque la página se había ido, y el manejador quedó
+suelto para el `confirm` siguiente). Los **14 tests** que entran por la raíz llevan ya el `?noauto=1`
+con su comentario; el snippet es **dato del dueño**, no está en el repo, así que en un clon recién
+hecho esto no se reproduce.
+
+### Con un menú puesto, el HUD se aparta — REQ-OSD12
+
+Mientras hay una pantalla OSD abierta se esconden **hotbar, mira, mandos táctiles, CÓDIGO y ✕ CERRAR** —
+el mismo grupo que ya escondía la intro con `body.mc-intro`, y por la misma razón: el OSD suelta el puntero
+y `mcDoAction` sale pronto, así que la hotbar y la mira no hacen nada, y los botones de esquina compiten
+con los del propio menú. La clase es `body.mc-osd-puesto`, la pone `mcOsdAbrir` y la quita `mcOsdCerrar`.
+
+- **Por CSS y no con `hidden`**: `mcUpdateHotbar` la volvería a enseñar en el siguiente frame.
+- **`hud:true`** en el `define` lo deja puesto, para una pantalla que sea un panel sobre la partida viva.
+- ⚠️ **«✕ Cerrar» no se esconde en táctil** (`body.mc-osd-tactil`): allí no hay `Esc`, y esconderlo dejaría
+  al visitante encerrado en el menú si su pantalla no trae botón de salida. Es la misma excepción que hace
+  `updateOSDbuttons` desde REQ-OSD1.
+
+**CÓDIGO y ✕ CERRAR ya vienen ocultos de fábrica** — `let _showOSD=false`, y solo salen si
+`localStorage.vf_showOSD === '1'`. Si aparecen, es que en ese navegador se llamó alguna vez a
+`game.showOSDbuttons(true)` y quedó recordado: `game.showOSDbuttons(false)` lo deshace, también para siempre.
+
+Guardián: `tests/test_osd_mapa.js` §12.
+
+### El aviso de espera giraba mal — REQ-OSD11
+
+`.mc-osd-espera` se centra con `transform:translate(-50%,-50%)` y se animaba con el `mc-spin` de siempre,
+que dice `to{transform:rotate(360deg)}`. Una animación **pisa la propiedad entera**: el navegador
+interpolaba de `translate(-50%,-50%)` a `rotate(360deg)` como matrices, así que el punto **se deslizaba
+hacia abajo a la derecha y no giraba** (360° se descomponen en 0°). Medido antes del arreglo:
+`matrix(1,0,0,1,-11,-11)` → `matrix(1,0,0,1,-3,-3)`, rotación cero.
+
+Ahora tiene keyframes propios (`mc-spin-centro`) con **las dos funciones escritas en los dos fotogramas**,
+que es lo que hace que la interpolación sea función a función. Guardián: §11, que mira la matriz.
+
+**Y por eso se ven dos «cargas» seguidas al entrar**: son dos spinners distintos, no uno que parpadea — el
+overlay del Mundo anfitrión (`#mc-loading`, azul, centrado) y luego el de la pantalla (`.mc-osd-espera`,
+pequeño, sobre el juego). Medido en `/map/empty?intro=1`: el primero de 1039 a 1702 ms, el segundo de 1728
+a 3282 ms. Con 26 ms de nada entre medias.
+
+---
+
+## 🔘 Un botón es un bloque con una nota — REQ-OSD4
+
+No hay tipo «botón». Un botón es **un bloque que tiene una nota** (`mc.notes`), que ya planta un cartel
+3D legible encima. Se reutiliza entero lo que existía: `mcRaycast` + `mcNoteAnchor` (que va de la celda
+apuntada a la anotada, incluidos los bloques del cartel).
+
+- En escaparate el clic izquierdo **no rompe**: `mcDoAction` sale por arriba y hace
+  raycast → nota → acción. **Pulsar no es romper**: un menú cuyo botón se desintegra no es un menú.
+- **Sin puntero capturado no hay mira**, así que la dirección del rayo se **deriva del píxel donde se
+  hizo clic** (`mcYawPitchDePixel`) y se reusa `mcRaycast` VERBATIM dentro de un `try/finally`, en vez
+  de escribir un segundo DDA que se desincronizaría del primero.
+- Dentro de un iframe la acción se **manda al padre**; fuera, se ejecuta aquí mismo — así el dueño
+  puede probar el menú entrando a `/map/menu1` a pelo, que es como lo va a diseñar.
+- El cursor pasa a `pointer` sobre un bloque con nota: es la única señal de que aquello se pulsa.
+- `MC_OSD_ALCANCE = 96`: un botón de un menú puede estar lejos, no a distancia de brazo.
+
+Guardián: `tests/test_osd_boton.js` (`@area: general`).
+
+---
+
+## 🎬 La intro por URL (`?intro=1`) — REQ-INTRO1 / REQ-INTRO2
+
+**Solo se dispara con `?intro=1`.** `/map/fps` a secas entra como ha entrado siempre; la intro es una
+forma más de abrir un mapa, no un cambio en lo que ya funciona (misma decisión y mismo motivo que
+`?osd=1`).
+
+**La acepta CUALQUIER mapa, no solo `fps`** (REQ-INTRO2). `mcIntroArranque()` busca **dos** snippets, en
+este orden:
+
+1. **`arranque-<mapa>`** — la intro propia de ese mundo, si alguien se la ha escrito (`/map/fps` →
+   `data/snippets/arranque-fps.json`). Si existe, **gana**.
+2. **`arranque-intro`** — la intro **genérica**, que es la que hay hoy
+   (`data/snippets/arranque-intro.json`). Está escrita contra `mc.dim`, así que se orienta sola en un
+   mapa que no ha visto nunca: darle intro a un mundo nuevo **no cuesta escribir nada**.
+
+Si no aparece ninguno de los dos, el mundo entra normal y avisa por consola. Y como es un respaldo y no
+una copia, **arreglar la genérica arregla todos los mapas a la vez**: por eso hoy **no existe**
+`arranque-fps` — `/map/fps?intro=1` corre el mismo snippet que los demás. Escribir uno propio es para
+cuando un mapa quiera una intro **distinta**, no para repetir ésta.
+
+**La animación no vive en `app.js`.** `app.js` solo sabe *cuándo* llamarla.
+
+### ⏱️ Dónde se llama, y por qué ahí exactamente — **el mundo no se enseña a medias**
+
+Va **dentro de `openWorld`**, y **detrás de `await mcAutoarranque()` pero con el cartel de carga puesto**.
+Esa colocación es la respuesta a dos síntomas que reportó el dueño, que son el mismo problema visto por
+las dos caras:
+
+| dónde estaba la llamada | lo que veía el visitante en `/map/fps` |
+|---|---|
+| en la cadena del arranque, después de `openWorld` | el mundo cargado y él **~10 s de pie en el suelo**, y entonces empezaba a volar |
+| dentro de `openWorld` pero **antes** del autoarranque | el menú puesto y la **cámara congelada ~8 s** sin volar |
+
+La causa de los dos es la misma: `openWorld` deja el mundo pintado y jugable, y **lo siguiente que hace
+—`mundo-autoarranque`, 274 KB de snippet— bloquea el hilo** varios segundos en un mapa grande. Adelantar
+la intro no quita el bloqueo, solo cambia qué se ve durante él. Así que **no se enseña nada hasta que hay
+algo que enseñar**: `mcShowLoading('Preparando el mundo…')` antes del autoarranque, `mcHideLoading()`
+después, y el menú y el vuelo se descubren **a la vez**. Un cartel de carga que tarda es normal; un
+producto que arranca trabado, no.
+
+⚠️ El bloqueo **no lo introdujo la intro**: está en cualquier entrada al Mundo, solo que antes quedaba
+tapado por «el jugador de pie mirando el paisaje». Si algún día molesta, lo que hay que mirar es **qué
+hace `mundo-autoarranque` al entrar en un mapa grande** (dar de alta un material que el mundo no usa
+cuesta un `mcMeshAll`, y en `fps` eso son 512×512×40), no dónde se llama a la intro.
+
+Dos detalles más:
+
+- **El snippet de la intro se pide en paralelo con el mundo** (`mcIntroPrefetch()`, en el arranque): para
+  cuando `openWorld` lo necesita ya está en la mano, y no se suma un viaje de red al final.
+- **La llamada del arranque lleva pestillo** (`mcIntroArranque(true)` + `mc._introHecha`): `openWorld` se
+  vuelve a ejecutar al volver del editor, y sin él la intro se replantaría encima de alguien que ya le
+  dio a JUGAR. **A mano no hay pestillo**: `mcIntroArranque()` desde F12 relanza la intro, que es como se
+  prueba mientras se edita el snippet.
+
+Lo protege `test_intro.js §2`, y lo anota con un **`MutationObserver`** sobre el atributo `hidden` de
+`#mc-loading` / `#mc-osd`, no muestreando cada frame: durante el tramo que importa el hilo está
+bloqueado y un muestreo por `rAF` se lo saltaría entero.
+
+Lo que hace el snippet:
+
+1. `game.volar(true); game.fantasma(true);`
+2. Una **órbita** alrededor del centro del mapa en un `requestAnimationFrame`, con la altura
+   persiguiendo la copa del terreno por suavizado exponencial (sin eso, cada pico es un salto).
+   La mirada apunta al centro: `yaw = atan2(−dx, −dz)`, que es la **única** convención (la dirección de
+   vista es `[−sin(yaw)·cp, sin(pitch), −cos(yaw)·cp]`).
+3. `game.osd.define('intro', {html:…})` con **JUGAR** y **CONSTRUIR**, y `game.osd.abrir('intro')`.
+4. **`body.mc-intro`**: durante el sobrevuelo esto no es una partida todavía, es una postal, así que
+   fuera hotbar, mira y los botones «Código» y «Cerrar» de la esquina. Es la misma lista de selectores
+   que el escaparate (en `style.css`), pero la clase **la pone y la quita el snippet**, así que **JUGAR
+   lo devuelve todo** — y lo devuelve respetando `game.showOSDbuttons`, que es quien manda sobre los dos
+   botones de la esquina. Por clase y no por `hidden`: `mcUpdateHotbar` re-enseña la hotbar sola en
+   cuanto el jugador se mueve.
+
+Reglas que cuestan caro romper:
+
+- **El bucle vive en `mc._intro`** y **reejecutar el snippet para el anterior antes de montar el nuevo**.
+  Es la misma regla que el envoltorio de `mcUpdate`: el dueño edita el snippet en vivo, y dos bucles
+  moviendo la misma cámara se ven como un temblor del que nadie sabe el origen.
+- **JUGAR no recarga la página.** Era el encargo literal: el mapa que se está sobrevolando ya está
+  cargado. Para el bucle, apaga fantasma y vuelo, baja a la superficie de la columna de debajo
+  (`mcUnstick`) y cierra el menú.
+- **La captura del ratón va DENTRO del manejador del clic.** Es un gesto de usuario; pedirla tras un
+  `await` o un `rAF` la rechaza el navegador y el jugador aterriza sin poder mirar.
+- **CONSTRUIR va al editor 2D/3D** (decisión del dueño), no a un modo creativo dentro del mapa — y
+  **tampoco recarga** (ver abajo).
+- **Cualquier tecla de moverse corta la intro** y cae en JUGAR: quien ya sabe lo que quiere no espera.
+- El día que exista `/map/menu1` dibujado, es cambiar `{html:…}` por `{mapa:'menu1'}` — **ni una acción
+  cambia**, porque un botón se declara por su texto.
+
+### 🔁 Intro ⇄ editor, sin recargar — REQ-INTRO2
+
+**El editor y el Mundo son la misma página**: el Mundo es el overlay `#mc-modal` y el editor está
+debajo. Así que ir y volver **no puede costar una recarga**, que es volver a bajar mundo, atlas y
+galerías enteras. El circuito, ninguno de cuyos tramos navega:
+
+| paso | qué hace |
+|---|---|
+| **CONSTRUIR** | el snippet para la intro, apaga vuelo/fantasma, cierra el menú y llama a **`closeWorld()`**. (Antes era `location.href='/'`: eso recargaba la página entera.) |
+| **la marca «VOXELFORGE»** del editor | `mcVolverAIntro()` → `openWorld()` (**idempotente**: con `mc.grid` ya en memoria no baja nada) + `mcIntroArranque()` a mano. |
+
+- **`mcIntroArranque(auto)`**: con `auto` (la llamada del arranque) exige `?intro=1` y corre **una sola
+  vez** (`mc._introHecha`) — si no, volver del editor le replantaría la intro encima a quien ya está
+  jugando. **Sin `auto`** (consola, guardián, o el clic en la marca) relanza **siempre**, aunque la URL
+  no lleve `?intro=1`: quien la llama a mano ya ha dicho lo que quiere.
+- **La marca solo se ve pulsable si hay mundo en memoria** (`mcMarcaSync`, clase `.clicable`): en el
+  editor a secas es un rótulo y no debe prometer un camino que no existe.
+- **La URL no se toca** (nada de `history.replaceState`): `mcMapName()` la lee para saber en qué mundo
+  está, y cambiarla haría que el mundo se guardara en otro fichero.
+- Al volver se vuelve a ejecutar `mundo-autoarranque` (es reejecutable a propósito), y por eso la vuelta
+  también lleva su `mcShowLoading('Preparando el mundo…')` hasta que la intro está montada.
+
+Guardián: `tests/test_intro.js`. Corre sobre `/map/test?intro=1` porque `fps` es 512×512×40 (20 MB) y
+bajo SwiftShader no carga, pero **no simula nada**: `/map/test` no tiene snippet propio, así que lo que
+ejerce es el respaldo real servido por el servidor (§2), y §7 comprueba la ida y vuelta contando que
+**no vuelve a haber un GET de `/api/mundo`** y que un centinela puesto en `window` sobrevive. De
+`/map/fps` se verifica a mano.
+
+---
+
+## Verificación a mano
+
+```bash
+python3 server.py 8500
+node correr_tests.js --area=fisica       # REQ-FLY1
+node tests/test_osd_capa.js              # desde la RAÍZ, nunca desde tests/
+node tests/test_osd_mapa.js
+node tests/test_osd_boton.js
+node tests/test_intro.js
+```
+
+En el navegador: `/map/test` (`F` vuela, `Alt+F` saca foto y aparece en `/fotos`), luego
+`/map/fps?intro=1` (la cámara pasea, JUGAR aterriza sin recargar, CONSTRUIR abre el editor **sin
+recargar** y «VOXELFORGE» trae de vuelta a la intro, también sin recargar), cualquier **otro** mapa con
+`?intro=1` para ver el respaldo genérico, y `/map/fps` a secas para confirmar que **no cambió nada**.

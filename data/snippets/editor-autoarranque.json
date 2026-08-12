@@ -1,0 +1,6 @@
+{
+  "id": "editor-autoarranque",
+  "name": "editor autoarranque",
+  "code": "location.href = '/map/fps?intro=1';",
+  "savedAt": "2026-08-12T23:06:49"
+}

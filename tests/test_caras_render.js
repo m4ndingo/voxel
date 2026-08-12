@@ -28,7 +28,8 @@ const ok = (nom, cond, extra) => {
   const p = await b.newPage();
   const errores = [];
   p.on('pageerror', e => errores.push(String(e)));
-  await p.goto('http://localhost:8500/', { waitUntil: 'load', timeout: 60000 });
+  // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
+  await p.goto('http://localhost:8500/?noauto=1', { waitUntil: 'load', timeout: 60000 });
   await p.waitForFunction('typeof state !== "undefined" && typeof renderEdit3dScene === "function"', { timeout: 60000 });
 
   // Instrumento: cuenta cuantas caras se pintan de verdad en un frame, por cualquiera de las dos

@@ -85,7 +85,6 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | [BUG-SNP3](#-bug-snp3) | **`game.bloques.quitar()` está roto**: lanza `ReferenceError: g is not defined` siempre, por ~12 líneas de física pegadas por error en medio de la función | 🔴 abierto 2026-08-10 | encontrado de paso en REQ-SHADOW2, **no es mío**: está así en HEAD y tumba `test_bloques_comportamiento.js` y `test_luz_traspasa.js` |
 | [BUG-SNP4](#-bug-snp4) | los cambios hechos en el **editor de código del Mundo se revierten** al volver al mapa y reabrirlo | 🔴 abierto 2026-08-11 | **Redactado, sin investigar.** Sospecha (sin comprobar): el snippet tiene **dos copias vivas** y al reabrir el editor se relee la que se cargó al abrir el Mundo, no la editada. Ojo: el dueño dice **Ctrl+C**, `CLAUDE.md` documenta **Alt+C** |
 | [BUG-FLUID5](#-bug-fluid5) | `test_nadar.js` (4 fallos) y `test_hundirse.js` (4 fallos) **miden el fondo del pozo, no el fluido**: son guardianes viejos frente a las constantes **retuneadas** por el dueño | 🔴 abierto 2026-08-11 | **Investigado, sin decidir.** No es una regresión: A/B revirtiendo REQ-FLUID9 sobre `app.js` da el **mismo resultado exacto**. Los dos se escribieron para `gravedad 1/16, empuje 8` y hoy el motor lleva `WATER {0.5, 0.22, 3}` / `LAVA {1, 0.11, 2}` ⇒ con **8× la gravedad de dentro** sus tramos de 120/240 frames cruzan enteros un pozo de 9 y leen `vy = 0`. **Falta que el dueño diga qué manda**: los tests codifican sus decisiones de REQ-FLUID6/7 y las constantes también son suyas. `CLAUDE.md` §🏊 cita las cifras viejas |
-| [REQ-PICK4](#-req-pick4) | la tecla **`P`** del Mundo (la rotación de herramienta) necesita una entrada más: un **«block picker»** — clic en un bloque del mapa y ese material pasa a la ranura que esté elegida en el cajón | 🔴 abierto 2026-08-11 | **Redactado, sin investigar.** Es el *pick block* de Minecraft llevado a la barra rápida del Mundo. El dueño lo llamó primero «color picker» y se corrigió en el acto: no coge un color, coge la **clave del material**. No es [REQ-PICK1](#-req-pick1) ni [REQ-PICK3](#-req-pick3), que son el selector del **editor** |
 | [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
 | [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
 | [REQ-DOC2](#-req-doc2) | falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas) | 🟡 abierto 2026-08-07 | la crítica mejor puesta de la auditoría; no es partir el fichero, es documentar qué vive en `state`, `mc` y `game`. **Sin investigar a fondo** |
@@ -106,6 +105,18 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[REQ-FLY1](#-req-fly1)~~ | ~~**modo vuelo** con la tecla `F` (la foto pasa a `Alt+F`): moverse «como dentro de un fluido pero sin caída»~~ | ✅ resuelto 2026-08-12 | rama propia en `mcUpdate` antes de la de fluido: la vertical **no pasa por `mcCaidaPaso`** y es **cero exacto** sin teclas. Las colisiones se mantienen — atravesar es `game.fantasma`, y solo volando. `Alt+F` se detecta por `e.code`, no por `e.key` (con Alt el carácter llega compuesto). `tests/test_vuelo.js` |
+| ~~[REQ-OSD2](#-req-osd2)~~ | ~~una **capa OSD** encima del juego (`#mc-osd`) y su API `game.osd`, para poner pantallas de menú sobre cualquier mapa~~ | ✅ resuelto 2026-08-12 | `game.osd` (pantalla) ≠ `game.showOSDbuttons` ([REQ-OSD1](#-req-osd1), los botones de la esquina). Un botón se identifica **por su texto**, así que una pantalla pasa de `{html:…}` a `{mapa:…}` sin tocar ni una acción. `Esc` de dos pasos: cierra el menú, no el Mundo. `tests/test_osd_capa.js` |
+| ~~[REQ-OSD3](#-req-osd3)~~ | ~~que una **pantalla OSD sea otro mapa** (`/map/menu1` encima de `/map/test`)~~ | ✅ resuelto 2026-08-12 | `<iframe src="/map/<mapa>?osd=1">` (modo **escaparate**: no guarda, sin hotbar, sin captura de puntero) y **se destruye al cerrar** — es un segundo contexto WebGL. La acción se ejecuta **en el padre**; la pantalla solo dice qué botón se pulsó. `tests/test_osd_mapa.js` |
+| ~~[REQ-OSD4](#-req-osd4)~~ | ~~los **botones del menú son bloques con texto**: clic en el bloque ⇒ acción (cargar mapa, teleportar, cerrar)~~ | ✅ resuelto 2026-08-12 | la acción se declara **por el texto de la nota** (`mc.notes`): cero infra nueva. **Pulsar no rompe.** Sin mira, la dirección del rayo se deriva del píxel del clic y se reutiliza `mcRaycast` VERBATIM. `tests/test_osd_boton.js` |
+| ~~[REQ-INTRO1](#-req-intro1)~~ | ~~la **intro de `/map/fps`**: la cámara sobrevuela el mapa en tiempo real y el OSD ofrece **JUGAR** / **CONSTRUIR**~~ | ✅ resuelto 2026-08-12 | se dispara **solo con `?intro=1`** (`/map/fps` a secas no cambia). La animación vive en el snippet **`arranque-<mapa>`**, no en `app.js`, y su bucle (`mc._intro`) se desmonta antes de montar otro. JUGAR **no recarga** y captura el puntero dentro del propio manejador del clic. `tests/test_intro.js` |
+| ~~[REQ-INTRO2](#-req-intro2)~~ | ~~la intro en **cualquier mapa** (no solo `fps`) y volver a ella desde el editor pulsando **«VOXELFORGE»**, sin recargar~~ | ✅ resuelto 2026-08-12 | respaldo **`arranque-intro`** cuando no hay `arranque-<mapa>` (una sola intro que arreglar); CONSTRUIR pasa de `location.href='/'` a **`closeWorld()`** y la marca llama a **`mcVolverAIntro()`** — editor y Mundo son la misma página. `tests/test_intro.js` §7 |
+| ~~[REQ-OSD5](#-req-osd5)~~ | ~~**`game.osd.dump()`**: volcar las pantallas definidas con su configuración y las acciones registradas, para que quien no conoce el OSD pueda definir pantallas nuevas~~ | ✅ resuelto 2026-08-12 | imprime **y devuelve** el volcado, y de cada botón enseña su HTML exacto y una **receta que se copia entera a F12 y corre** (entorno resuelto + código + llamada); las acciones tienen **cero parámetros**. Devuelto 3 veces por el dueño hasta llegar a eso. `tests/test_osd_capa.js` §8, 26 ok |
+| ~~[REQ-OSD6](#-req-osd6)~~ | ~~abrir una pantalla-mapa es **un parpadeo de información**: todo azul, mensajes de carga, y luego el mapa. Un OSD tiene que ponerse **encima**, verse a través, y aparecer **ya cargado**~~ | ✅ resuelto 2026-08-12 | en escaparate el frame se limpia con **alpha 0** (`mcClearFondo`), `#mc-modal`/`body`/`<html>` transparentes, y **ni cartel de carga ni toasts**. El iframe nace invisible con una ruedecita sin fondo y se descubre **de una vez** cuando el hijo manda `{vf:'osd-listo'}` (reloj de 12 s por si no llega). `tests/test_osd_mapa.js` §5 |
+| ~~[REQ-OSD7](#-req-osd7)~~ | ~~poder indicar en una pantalla-mapa **las coordenadas y la rotación de la cámara**, para encuadrar el menú~~ | ✅ resuelto 2026-08-12 | se declara en el `define` (`pos:[x,y,z], yaw, pitch` — coords como `game.tp`, grados como `game.yaw`) y viaja **en la URL del iframe**, que es el único sitio que llega antes del primer fotograma. **`game.osd.encuadre()`** imprime el `define` ya escrito con la cámara de ahora mismo. `tests/test_osd_mapa.js` §6 |
+| ~~[REQ-TOOL1](#-req-tool1)~~ | ~~en el Mundo, **una ranura 10** detrás de la 9 que enseña la **herramienta activa** con su dibujo y sirve para cambiarla (**clic** o **alt+P** abren el picker filtrado a herramientas); `P` sigue rotando. Más: **una categoría por pieza** (herramienta, construcción, fluido, redstone…) **elegible desde el editor 2D/3D**~~ | ✅ resuelto 2026-08-12 | el dibujo declara qué herramienta es (`meta.categoria`+`meta.herramienta`), el motor lo deriva del catálogo: nada de claves `hab:` a mano. Ranura 10 con `P`; izquierdo rota, derecho abre el picker de siempre filtrado. De propina, los iconos de las 10 ranuras pasan a ser el dibujo en iso sobre transparente |
+| ~~[REQ-GAL4](#-req-gal4)~~ | ~~en **la galería 2D/3D y en el picker del mapa**: que el buscador exija **3 letras mínimo**, y **ordenación** — «recientes» por defecto, más «fecha creación», «nombre» y «tamaño»~~ | ✅ hecho 2026-08-12 | Los dos puntos, y los dos **compartidos por las dos galerías**, que es lo que el dueño quiere a la larga: `GAL_MIN_BUSCA`+`galConsulta()` (con menos de 3 letras **no filtra** y avisa) y `GAL_ORDENES`+`galCompara()`+`galMontaOrden()`. «Recientes»=`savedAt` (importado o modificado), «creación»=`createdAt` (que **no se pisa** al reguardar), «tamaño»=nº de voxels; el orden se recuerda en `localStorage`. `server.py` rellena las fechas y el recuento que faltaban en los 70 assets viejos (del mtime) y los persiste. Guardianes: `tests/test_gal4_buscador_min.js` y `tests/test_gal4_orden.js` |
+| ~~[REQ-PICK4](#-req-pick4)~~ | ~~la tecla **`P`** del Mundo necesita una entrada más: un **«block picker»** — clic en un bloque del mapa y ese material pasa a la ranura elegida del cajón~~ | ✅ cerrado 2026-08-12 | Implementado como **Cuentagotas**, cuarta entrada de `P`. `mcPickBlock()` recorre el rayo con la **misma marcha fina que el pico**, guarda la **clave base** (sin `@ori` ni nivel de fluido) y, si el material ya está en el cajón, **selecciona esa ranura** en vez de duplicarlo. `mcToolPasiva()` deja `select`/`pick` fuera de las tres rutas que colocaban. **Tras pillar, la mano pasa sola a Pintar** (ampliación del dueño del 2026-08-12) y el botón se suelta, o ese mismo clic seguiría pintando. Guardián: `tests/test_cuentagotas.js` |
 | ~~[BUG-RS25](#-bug-rs25)~~ | ~~la **placa de presión no se desactiva al bajarse** de ella: se queda pegada encendida~~ | ✅ resuelto 2026-08-11 | el latido no se pega: para en seco al bajarse (medido de 4 maneras y en 16 ciclos). Lo roto era el **arranque**: el estado de la placa ES la clave de la rejilla, pero lo que la suelta es un `setTimeout` que **no se guarda con el mundo** — un mundo guardado con la placa pisada volvía pegado para siempre (así estaba `/map/default`). `repasarMundo()` ya hacía esto con el observador guardado encendido; ahora suelta también toda entrada `manual`+`pulso` (cubre el **botón**). Con alguien encima el latido la re-enciende en el mismo frame, así que no reabre BUG-RS22. `tests/test_placa_pegada.js` |
 | ~~[PERF-MC3](#-perf-mc3)~~ | ~~abrir un mundo VACÍO cuesta 2,2 s; el 81 % es bajar la paleta EN SERIE~~ | ❌ cerrado 2026-08-07 | lo hecho se queda (383 → 63 ms en local, el cartel ya no miente); las propuestas 3 y 4 **no se hacen**: en el enlace del dueño el cuello es la RED, no el motor |
 | ~~[BUG-SNP1](#-bug-snp1)~~ | ~~«no existe el material X» miente, llena la consola y PIERDE la definición~~ | ✅ resuelto 2026-08-06 | lo que no está **todavía** espera en silencio y entra solo al colocarlo; lo que está **mal escrito** sigue avisando |
@@ -181,6 +192,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 | ~~[REQ-XR2](#-req-xr2)~~ | ~~rayos-X: una línea más en la etiqueta con el **power** del bloque~~ | ✅ resuelto 2026-08-06 | `⚡ recibe → saca` en las piezas y `⚡ n débil` en los bloques que hacen de puente; el 0 no se pinta |
 | ~~[BUG-RS2](#-bug-rs2)~~ | ~~los repetidores de redstone girados no funcionan~~ | ✅ resuelto 2026-08-06 | el giro estaba BIEN; lo que fallaba era que el repetidor emitía por 5 lados, y los 3 «rotos» miraban a otro lado |
 | ~~[REQ-CART2](#-req-cart2)~~ | ~~la ventana de editar nota (tecla `N`) es diminuta y su letra también~~ | ✅ resuelto 2026-08-06 | 720px y 18px de serie + `game.noteFont`/`game.noteWidth` por consola |
+| ~~[REQ-CART3](#-req-cart3)~~ | ~~los carteles de las notas, que ahora son botones de menú, apenas se configuran (escala, palo, sitio) y su rótulo se desvanece~~ | ✅ resuelto 2026-08-12 | `game.carteles` (escala/palo/desvío/giro) replantando por firma; `noteTextDist` 14 → **21** y **sin límite** en pantalla-menú; `test_carteles.js` **26 ok** |
 | ~~[REQ-RS4](#-req-rs4)~~ | ~~un bloque que recibe energía debe **energizarse** y alimentar lo que tenga pegado~~ | ✅ resuelto 2026-08-06 | r1.2: fuerte/débil, `aislante()`, `test_redstone_bloques.js` |
 | ~~[REQ-RS5](#-req-rs5)~~ | ~~el **bloque de redstone** (fuente permanente); un repetidor encima no se activaba~~ | ✅ resuelto 2026-08-06 | pieza nueva + `red_concrete` **estaba declarado fuente** en `DEFECTOS` (quitado). Repetidor encima = solo soporte, como en Minecraft |
 | ~~[BUG-GAL1](#-bug-gal1)~~ | ~~editar el cable de redstone creó una pieza **nueva** en vez de reemplazar la vieja~~ | ✅ resuelto 2026-08-06 | Guardar enrutaba por `meta.type`, no por la galería de la que salió la pieza |
@@ -1099,6 +1111,366 @@ antes sí o sí.
 - Todo lo anterior comprobado también en **viewport de 390 px**, donde `95vw` deja la ventana estrecha
   y el problema del corte es peor.
 
+### ✅ REQ-FLY1 · Modo vuelo con la tecla `F` (y la foto a `Alt+F`) — ✅ done (2026-08-12)
+**Resuelto**: `mc.volar` / `mc.volarVel` / `mc.fantasma` viven en `mc`, y el vuelo es una **rama propia
+en `mcUpdate` antes de la de fluido**: la horizontal se fija directa desde la vista (sin inercia de aire)
+y la vertical es `(Espacio) − (Shift)` por `volarVel·√scale`, **cero exacto** sin teclas — no pasa por
+`mcCaidaPaso`, así que no hay ni gravedad ni deriva. El salto se salta (`if(k[' '] && mc.onGround &&
+!mc.volar)`), `mc.onGround` queda en `false` mientras se vuela (nada de parkour ni deslizamiento) y las
+colisiones **se mantienen**: atravesar es `game.fantasma`, y solo surte efecto volando. `game.volar` /
+`game.fantasma` usan el patrón función-valor de `game.showOSDbuttons` (`game.volar` lee, `game.volar(false)`
+manda). Dos cosas que se descubrieron implementando: **`Alt+F` hay que detectarlo por `e.code==='KeyF'`**
+(con Alt pulsado muchos teclados entregan un `e.key` compuesto, mismo motivo que el `Alt+C` que ya
+existía) y **Shift ya venía multiplicando la velocidad horizontal** (`sp`), así que volando se usa un
+`spf` propio o bajar te frena a la mitad. Guardián `tests/test_vuelo.js`: **15 ok / 0 fallos** (la caída
+sin volar se compara contra `−22·n/60` exacto). Doc: [`docs/osd-e-intro.md`](docs/osd-e-intro.md).
+
+**Reportado** 2026-08-12 por el dueño, dentro de la petición grande de la intro
+([contexto literal](data/tickets/REQ-INTRO1/contexto.md)): «que el jugador pueda volar, vamos a cambiar
+la tecla "f" por "alt+f" para sacar fotos, ahora el modo volar seria con la tecla "f". El movimiento
+sería como estar dentro de un fluido pero sin caida hacia abajo (sin gravedad)».
+
+**Por qué esto va en `app.js` y no en un snippet:** es física del jugador, la misma familia que
+`mcCaidaPaso`. El snippet `mundo-autoarranque` **envuelve** `mcUpdate` (`game.bloques`), así que el
+vuelo tiene que vivir DENTRO del `mcUpdate` original o el envoltorio lo pisaría.
+
+- Estado en **`mc`**, nunca en un closure (reejecutar un snippet a mitad de un gesto no puede dejar al
+  jugador flotando): `mc.volar`, `mc.volarVel`, `mc.fantasma`.
+- Rama nueva en `mcUpdate`, **antes** de la de fluido: dirección tomada de la vista igual que al nadar,
+  pero la vertical **no pasa por `mcCaidaPaso`** — es `(Espacio) − (Shift)`, y **cero** si no se pulsa
+  nada. Ni gravedad ni deriva: quieto en el aire es quieto.
+- **Las colisiones se mantienen.** El noclip es aparte (`game.fantasma`) y solo tiene efecto volando,
+  para que no exista por accidente un atravesa-paredes a pie.
+- `game.volar()` / `game.volar(true|false)` con el patrón función-valor de `game.showOSDbuttons`.
+- Teclado: `F` conmuta, **`Alt+F` saca la foto**. El botón táctil 📷 sigue siendo la foto (en táctil no
+  hay Alt) y el vuelo se activa por API, que es como lo usa la intro.
+- **Guardián** `tests/test_vuelo.js` (`@area: fisica`) sobre `/map/test`: sin volar cae; volando y sin
+  teclas la `y` no se mueve en 60 frames; Espacio sube y Shift baja; `Alt+F` no vuela y `F` no fotografía;
+  al apagar, vuelve a caer.
+
+### ✅ REQ-OSD2 · Una capa OSD encima del juego y su API `game.osd` — ✅ done (2026-08-12)
+**Resuelto**: `<div id="mc-osd" hidden>` dentro de `#mc-modal`, `inset:0`, **z-index 25** (encima del
+canvas y de `#mc-loading` z-20, debajo del picker y de los snippets z-50/60). El estado vive en
+`mc.osdPantallas` / `mc.osdAbierta` / `mc.osdAcciones`, no en closures. API completa:
+`define/abrir/cerrar/conmutar/abierta/pantallas` + `alPulsar(texto,fn)` / `pulsar(texto)` / `acciones()`,
+con el texto normalizado (trim + mayúsculas) — **el texto del botón ES su identidad**, que es lo que
+permite que una pantalla pase de `{html:…}` a `{mapa:…}` sin tocar ni una acción registrada. Abrir suelta
+el puntero y vacía `mc.keys`; mientras hay pantalla abierta `mcLockPointer` no recaptura y `mcDoAction`
+sale por arriba (si no, los clics del menú romperían bloques por detrás de la capa). `Esc` es de dos
+pasos: cierra el menú, no el Mundo. Una sola pantalla a la vez. Guardián `tests/test_osd_capa.js`:
+**16 ok / 0 fallos**, y su §1 comprueba que **sin abrir nada el Mundo se comporta exactamente igual que
+antes del ticket** (el clic se espía con la herramienta CUENTAGOTAS, que no toca el mapa del dueño).
+Doc: [`docs/osd-e-intro.md`](docs/osd-e-intro.md).
+
+**Reportado** 2026-08-12 por el dueño: «haria falta poder crear un OSD que se ponga encima del juego
+para las opciones de "JUGAR" y "CONSTRUIR" […] quiero poder diseñar pantallas para OSD y activarlas con
+f12 inspector, asi por ejemplo en mitad del juego puedo querer estando en un mapa arbitrario como "test"
+activar la pantalla "menu1"».
+
+⚠️ **No es `game.showOSDbuttons`** ([REQ-OSD1](#-req-osd1)): eso son los dos botones de la esquina. Lo de
+aquí se llama **pantalla OSD** y vive en `game.osd`.
+
+- `<div id="mc-osd">` dentro de `#mc-modal`, hermano de `#mc-loading`; `z-index:25` (por encima del canvas
+  y del cargando, por debajo del picker y de los snippets).
+- **Abrir un OSD suelta la cámara** (`exitPointerLock` + vaciar `mc.keys`): con el puntero capturado no hay
+  cursor con el que pulsar nada, y las teclas se quedarían pegadas. Mientras hay OSD abierto,
+  `mcLockPointer` **no recaptura** (guarda de una línea) o el cursor desaparecería al mover el ratón.
+- API: `define/abrir/cerrar/conmutar/abierta/pantallas` + el registro de acciones `alPulsar(texto,fn)` /
+  `pulsar(texto)` que comparte con [REQ-OSD4](#-req-osd4). El texto se normaliza (trim + mayúsculas).
+- `Esc` cierra **primero el OSD** y solo después el Mundo.
+- El OSD **se traga el clic**: si no, se rompen bloques por detrás de la pantalla.
+- **Guardián** `tests/test_osd_capa.js` (`@area: render`), y su primera comprobación es que **sin abrir
+  nada el juego se comporta exactamente igual que hoy**.
+
+### ✅ REQ-OSD3 · Una pantalla OSD que es otro mapa (`<iframe>` + `postMessage`) — ✅ done (2026-08-12)
+**Resuelto**: `game.osd.abrir(x)` con `cfg.mapa` monta `<iframe src="/map/<mapa>?osd=1">` a pantalla
+completa, y **`mcOsdCerrar` lo destruye de verdad** (`src='about:blank'` + `remove()`): es un segundo
+contexto WebGL y no puede quedarse colgado. `?osd=1` (`mcEsEscaparate`) se marca **antes de `openWorld`**,
+porque `mcScheduleSave` y la hotbar se consultan durante la carga y enterarse después dejaría una ventana
+en la que la pantalla del menú sí guarda. En escaparate: no guarda, sin captura de puntero, `mc.volar=true`
+(sin gravedad, la cámara se queda en el spawn) y todo lo de jugar escondido con la clase
+**`body.mc-escaparate`** — con `hidden` no bastaba, porque `mcUpdateHotbar` re-muestra la hotbar sola en
+cuanto el jugador se mueve. El puente comprueba `e.origin===location.origin` y **la acción se ejecuta en
+el padre**: la pantalla solo dice qué botón se pulsó. Guardián `tests/test_osd_mapa.js`: **8 ok / 0 fallos**
+(levanta dos mundos en SwiftShader, es lento a propósito). Doc:
+[`docs/osd-e-intro.md`](docs/osd-e-intro.md).
+
+**Reportado** 2026-08-12 por el dueño: «activar la pantalla "menu1" que seria otro mapa (map/menu1) par
+que se ponga como OSD».
+
+**Decidido con el dueño (2026-08-12): iframe, no una segunda escena.** `mc` es un **singleton**; tener dos
+mundos vivos a la vez obligaría a sacarlo a instancias, o sea un refactor de `app.js` entero. La pantalla
+se monta aislada en un `<iframe src="/map/menu1?osd=1">` y el motor no se toca.
+
+- **`?osd=1` = modo escaparate**: no guarda nada (`mcScheduleSave` sale por la primera línea — esto es lo
+  que impide que una pantalla de menú machaque `data/worlds/menu1.json`), sin hotbar, sin botones de
+  esquina, sin mandos táctiles y sin captura de puntero (el cursor visible es lo que hace pulsable un botón).
+- **Puente `postMessage`** con `e.origin===location.origin`: hijo → padre `{vf:'osd-pulsar',texto}`,
+  padre → hijo `{vf:'osd-cerrar'}`. La acción se ejecuta **en el mundo de verdad**, no en la pantalla.
+- **Al cerrar se destruye el iframe**: hay un segundo contexto WebGL vivo y no puede quedarse colgado.
+- **Guardián** `tests/test_osd_mapa.js`.
+
+### ✅ REQ-OSD4 · Un botón del menú es un bloque con una nota — ✅ done (2026-08-12)
+**Resuelto**: en escaparate el clic izquierdo sale por arriba de `mcDoAction` y hace
+raycast → `mcNoteAnchor` → texto de `mc.notes` → acción (`postMessage` al padre si está incrustado,
+`game.osd.pulsar` si no). **Pulsar no rompe**: el bloque y su nota siguen ahí, y es lo primero que
+comprueba el guardián. El detalle que no estaba en el plan: **sin puntero capturado no hay mira**, así que
+la dirección del rayo se deriva del píxel donde se hizo clic (`mcYawPitchDePixel`) y se **reutiliza
+`mcRaycast` VERBATIM** dentro de un `try/finally` que pisa y restaura `mc.yaw`/`mc.pitch` — escribir un
+segundo DDA habría creado dos rayos que se desincronizan. `MC_OSD_ALCANCE=96` (un botón de un menú puede
+estar lejos, no a distancia de brazo) y el cursor pasa a `pointer` sobre un bloque con nota, que es la
+única señal de que aquello se pulsa. Guardián `tests/test_osd_boton.js`: **9 ok / 0 fallos**, y verifica
+además que en escaparate **no sale ni un `POST /api/mundo`** (sin eso, el primer clic escribiría encima
+del dibujo del propio menú). Doc: [`docs/osd-e-intro.md`](docs/osd-e-intro.md).
+
+**Reportado** 2026-08-12 por el dueño: «le pongo yo mecanicas al menu que podrian ser 2 bloques con textos
+para que al hacer clic en uno y otro pase una accion, por ejemplo: se cargue un mapa concreto, se cambien
+las coordenadas (teleport) del usuario».
+
+**Decidido con el dueño (2026-08-12): la acción se declara por el TEXTO DE LA NOTA.** No hace falta infra
+nueva: `mc.notes` ya planta carteles 3D con el texto horneado y legible, y `mcNoteAnchor(celda)` ya lleva de
+la celda apuntada a la celda anotada (incluidos los bloques del propio cartel). Se descartaron declararlo
+por coordenada (se rompe al mover el bloque) y por material dedicado (un asset dibujado por botón).
+
+- En modo escaparate el clic izquierdo **no rompe**: raycast → `mcNoteAnchor` → texto → acción.
+- Fuera del iframe la misma ruta llama a `game.osd.pulsar(texto)`, así que **una pantalla se puede probar
+  sin OSD** entrando a `/map/menu1` a pelo — que es como el dueño la va a diseñar.
+- **Guardián** `tests/test_osd_boton.js`: la acción corre **y el bloque sigue ahí**.
+
+### ✅ REQ-INTRO1 · La intro de `/map/fps`: sobrevuelo en tiempo real + JUGAR / CONSTRUIR — ✅ done (2026-08-12)
+**Resuelto**: `app.js` solo aporta el **disparo** (`mcEsIntro` + `mcIntroArranque`).
+Busca el snippet **`arranque-<mapa>`** — `/map/fps` → `arranque-fps` —, así
+que **cada mapa lleva su propia intro** y probar una no pisa la de otro; si no existe, el mundo entra
+normal y avisa por consola. Todo lo demás vive en `data/snippets/arranque-fps.json`: vuelo fantasma, una
+órbita en `rAF` alrededor del centro con la altura persiguiendo la copa del terreno por suavizado
+exponencial (sin eso cada pico es un salto), la mirada al centro con `yaw = atan2(−dx, −dz)` —la única
+convención—, y el menú `{html:…}` con JUGAR / CONSTRUIR. El bucle vive en `mc._intro` y **se desmonta antes
+de montar otro**. JUGAR **no recarga**: para el bucle, apaga fantasma y vuelo, baja a la superficie de la
+columna de debajo (a mano + `mcUnstick`, para no soltarle el toast «Saltaste a …» en la cara a quien acaba
+de entrar), cierra el menú y **captura el puntero dentro del propio manejador del clic**. Cualquier tecla
+de moverse corta la intro y cae en JUGAR. Guardián `tests/test_intro.js`: **11 ok / 0 fallos** sobre
+`/map/test?intro=1`, y **sirve el snippet real** (`arranque-fps.json`) interceptando la petición con
+`p.route` — protege el código que el dueño va a usar, no una maqueta. De `/map/fps` se verifica a mano.
+Doc: [`docs/osd-e-intro.md`](docs/osd-e-intro.md).
+
+**Retoques del 2026-08-12, probando `/map/fps?intro=1` (los tres del dueño):**
+
+1. «resulta un poco extraño que despues de cargar el mapa pasan unos 10 segundos con el usuario en el
+   suelo, y entonces empieza la animacion».
+2. «despues de renderizar el mundo y salir el osd, antes de empezar a volar se queda trabado como
+   8 segundos».
+3. «cuando se muestra "?intro=1" los botones de "codigo" y "cerrar" deberian de estar ocultos, tambien
+   la pickerbar».
+
+**(1) y (2) son el mismo problema por las dos caras.** `openWorld` deja el mundo pintado y jugable, y
+**lo siguiente que hace —`mundo-autoarranque`, 274 KB de snippet— bloquea el hilo** varios segundos en un
+mapa grande. Con la intro colgada de la cadena del arranque (detrás de `openWorld`) eso se veía como
+«de pie en el suelo ~10 s»; adelantándola al principio de `openWorld` pasó a verse como «menú puesto y
+cámara congelada ~8 s». Adelantarla no quita el bloqueo, solo cambia qué se mira durante él. La solución
+es **no enseñar nada hasta que haya algo que enseñar**: la intro va detrás del `await mcAutoarranque()`
+**pero con el cartel de carga puesto** (`mcShowLoading('Preparando el mundo…')` / `mcHideLoading()`), así
+que el menú y el vuelo se descubren **a la vez**. Un cartel de carga que tarda es normal; un producto que
+arranca trabado, no. De propina, **el snippet se pide en paralelo con el mundo** (`mcIntroPrefetch`, en el
+arranque) para no sumar un viaje de red al final, y la llamada automática lleva **pestillo**
+(`mcIntroArranque(true)` + `mc._introHecha`) porque `openWorld` se reejecuta al volver del editor y la
+intro no puede replantarse encima de alguien que ya le dio a JUGAR — **a mano sigue relanzando**, que es
+como se prueba mientras se edita. ⚠️ El bloqueo **no lo introdujo la intro**: está en cualquier entrada al
+Mundo, solo que antes lo tapaba «el jugador de pie mirando el paisaje». Si algún día molesta, lo que hay
+que mirar es **qué hace `mundo-autoarranque` al entrar en un mapa grande**, no dónde se llama a la intro.
+
+**(3)**: clase **`body.mc-intro`** en `style.css`, la misma lista de selectores que el escaparate
+(hotbar, mira, mandos táctiles, «Código», «Cerrar»). La pone y la quita **el snippet**, no `app.js`, así
+que **JUGAR lo devuelve todo** respetando `game.showOSDbuttons` (que va apagado por defecto: el dueño los
+veía porque los tiene encendidos). Por clase y no por `hidden`, porque `mcUpdateHotbar` re-enseña la
+hotbar sola en cuanto el jugador se mueve.
+
+`tests/test_intro.js` pasa a **16 ok / 0 fallos**. El §2 nuevo anota quién se descubre y cuándo con un
+**`MutationObserver`** sobre el `hidden` de `#mc-loading` / `#mc-osd`, y **no muestreando por `rAF`**:
+durante el tramo que importa el hilo está bloqueado y un muestreo se lo saltaría entero.
+
+**Reportado** 2026-08-12 por el dueño ([contexto literal](data/tickets/REQ-INTRO1/contexto.md)): «podemos
+hacer un script que ponga al jugador en modo vuelo y que con un algoritmo le hagamos volcar por el mapa
+"fps" para que el usuario que entre en el juego/producto vea esa animacion que se genera en tiempo real.
+[…] Jugar mandaria al usuario al mapa/bioma que se esta sobrevolando, aprovechamos que ya esta cargado,
+construir lo mandaria al modo de edicion 2d/3d actual».
+
+**Decidido con el dueño (2026-08-12):**
+- **Se dispara solo con `?intro=1`.** `/map/fps` a secas entra como siempre: nada de lo que hoy funciona
+  cambia, y el producto final apunta a la URL con intro.
+- **CONSTRUIR va al editor `/`** (el 2D/3D de siempre), no a un modo creativo dentro del mapa.
+- **JUGAR no recarga**: para el bucle, apaga vuelo y fantasma, busca la superficie bajo la cámara,
+  teleporta ahí y captura el puntero **dentro del propio manejador del clic** (es gesto de usuario;
+  hacerlo tras un `await` lo rechaza el navegador). Es literalmente lo que pidió el dueño con
+  «aprovechamos que ya esta cargado».
+- **La animación vive en un snippet** (`data/snippets/arranque-fps.json`), no en `app.js`: el dueño la
+  retoca en vivo. Guarda su handle en `mc._intro` y **desmonta el bucle anterior al reejecutarse**, misma
+  regla que el envoltorio de `mcUpdate` — dos bucles apilados moverían la cámara al doble.
+- Cualquier tecla de movimiento **corta la intro** y cae en modo JUGAR: quien ya sabe lo que quiere no
+  espera a la animación.
+
+⚠️ **`fps` no se puede probar con guardián**: es 512×512×40 (20 MB) y bajo SwiftShader no carga. El
+guardián (`tests/test_intro.js`) repite la secuencia sobre `/map/test?intro=1` con un snippet de prueba;
+de `fps` se verifica a mano.
+
+### ✅ REQ-OSD6 · Un OSD se pone ENCIMA, no borra lo que hay — ✅ done (2026-08-12)
+
+**Pedido** 2026-08-12 por el dueño, probando `game.osd.define('menu', {mapa:'menu1'}); game.osd.abrir('menu')`:
+«se ve como se pone todo azul, como empiezan a salir mensajes de cosas que cargan, y luego sale el mapa…
+mucho flash de informacion para algo que deberia de ser un simple menu, basta con que se muestre el mapa
+una vez cargado. como mucho un overlay de carga pero sin el fondo azul que borra lo que hay, además, la
+idea de un menu en plan OSD es que salga encima, como un overlay, igual sin mostrar el cielo en los osd
+que sean mapas queda mejor, asi el azul del cielo no molesta y deja ver a traves».
+
+Lo que se veía era **la apertura del mundo de dentro en directo**. Cuatro costuras:
+
+1. **El cielo no se pinta** en escaparate: `mcClearFondo(gl)` limpia con **alpha 0**, así que donde no
+   hay nada dibujado se ve el juego de debajo. Va en los **tres** sitios que limpian el fondo, incluido
+   el que restaura el clear tras la pasada de sombra — uno que se olvide devuelve el azul un fotograma
+   sí y otro no.
+2. **Ninguna capa del documento vuelve a taparlo**: `body.mc-escaparate` deja transparentes `#mc-modal`
+   (que llevaba el azul del cielo detrás del canvas) y el `body`, `mcAplicaEscaparate` hace lo mismo con
+   `<html>` (no tiene clase donde engancharse), y se esconde el resto del documento — con el modal
+   transparente, la cabecera y las columnas del editor asomaban por detrás.
+3. **La pantalla no habla**: `mcShowLoading` y `toast` no hacen nada en escaparate. ⚠️ La guarda de
+   `toast` pregunta por **`mcEsEscaparate()` (la URL)** y no por `mc.escaparate`: `mc` es un `let` de más
+   abajo y hay toasts antes de que exista — en la zona muerta ni `typeof mc` es seguro, tira
+   `ReferenceError` y convierte un aviso en una página rota.
+4. **Se descubre de una vez, ya cargada**: el iframe nace con `cargando` (`opacity:0`) y una ruedecita
+   **sin fondo** encima (el juego se sigue viendo). El hijo manda `{vf:'osd-listo'}` cuando el mundo está
+   pintado *y* el autoarranque ha corrido — **dos** `requestAnimationFrame`, porque el primero es el que
+   pinta. Reloj de `MC_OSD_ESPERA_MS` (12 s) por si no llega nunca, y cerrar lo mata.
+
+`tests/test_osd_mapa.js` §1 y §5: nace invisible, se descubre, el `clearColor` va con alpha 0, un frame
+entero deja pasar luz por el cielo, `<html>`/`body`/`#mc-modal` sin fondo, la cabecera oculta, y ni
+cartel ni toasts.
+
+### ✅ REQ-OSD7 · El encuadre de una pantalla-mapa — ✅ done (2026-08-12)
+
+**Pedido** 2026-08-12 por el dueño: «cuando se muestra un osd se deberia de poder indicar las coordenadas
+(teleport) del jugador para poder encuadrar correctamente el menu/mapa/osd. Tambien la rotacion de la
+camara. se podrian obtener del juego la posicion y la rotacion y cuando se define el menu que es de tipo
+mapa pasarle esa posicion y rotacion».
+
+```js
+game.osd.define('menu', {mapa:'menu1', pos:[64, 20, 64], yaw:-135, pitch:-20});
+game.osd.encuadre()   // ← la cámara de ahora mismo, impresa como ese define ya escrito
+```
+
+- **`pos`** en coordenadas de mundo (como `game.tp`) y **`yaw`/`pitch` en GRADOS** (como `game.yaw` /
+  `game.pitch`): las mismas unidades que el dueño lee en la consola, para copiar sin convertir nada.
+- Viaja **en la URL del iframe** (`&pos=…&yaw=…&pitch=…`), no por `postMessage`: tiene que estar puesto
+  **antes del primer fotograma**, y un mensaje llega con el hijo ya pintado — se vería como un salto de
+  cámara. Lo aplica `mcEscaparateEncuadre` desde `mcAplicaEscaparate`.
+- Se escribe **directo en `mc`, no con `game.tp`**: `tp` desatasca y sube al aire libre más cercano, y
+  aquí las coordenadas son las de una **cámara**, no las de alguien que va a andar — un menú encuadrado
+  desde dentro de una pared es legítimo.
+- **Sin encuadre no cambia nada**: la cámara se queda donde diga el spawn del mapa, como hasta hoy.
+- La receta de `game.osd.dump()` lo enseña, y el descubridor es `game.osd.encuadre()`: encuadrar es
+  volar por el mapa hasta que se vea bien y copiar la línea, no teclear coordenadas a ojo.
+- **Añadido 2026-08-12, avisando el dueño** («si no se fija `game.playerScale=1` cuando se carguen los
+  OSD que son mapas, estos van a salir descolocados»): **una pantalla-mapa se pone a `mc.scale = 1`**
+  en `mcAplicaEscaparate`. `game.playerScale` **persiste en `localStorage`** y el iframe comparte
+  origen con el padre, así que se heredaba la escala del visitante; el ojo es
+  `pos[1] + MC_EYE*mc.scale`, o sea que el **mismo `pos` de la URL encuadraba distinto en cada
+  navegador** y no había forma de cuadrar el menú para todos. Un menú no es alguien que va a andar por
+  ahí: es una **cámara**. No se toca el `localStorage` (fuera del menú su escala sigue valiendo).
+  Guardián: `test_osd_mapa.js` §13.
+
+`tests/test_osd_mapa.js` §6 (y el fichero entero pasa a **19 ok / 0 fallos**; hoy **55 ok**).
+
+### ✅ REQ-OSD5 · `game.osd.dump()` — el descubridor del OSD — ✅ done (2026-08-12)
+
+**Pedido** 2026-08-12 por el dueño: «para game.osd quiero una funcion que me vuelque las pantallas
+definidas junto con su configuracion y las acciones registradas para los botones, en plan
+game.osd.dump(); de esta forma un usuario que no conoce como funciona el osd puede definir nuevas
+pantallas».
+
+Hermano de `game.bloques.info()`: se pide en la consola y **cuenta el OSD con lo que hay cargado en ese
+momento**, en vez de mandar a leer `app.js`. Imprime legible y **devuelve** el volcado
+(`{abierta, pantallas:[{nombre,tipo,cfg,abierta,botones,sinAccion}], acciones, sinBoton}`), y cierra con
+un recetario de cuatro líneas para definir una pantalla nueva.
+
+**Devuelto por el dueño en la primera pasada**, con la frase que resume qué le faltaba: «con esto no se
+que hace un boton,,, no se crear un boton como los de esta pantalla, el dump deberia de mostrar que
+hacen los botones tambien». Un nombre de botón no es una respuesta. Así que cada botón sale con las
+**dos piezas que lo forman**: `marca` (su HTML exacto, para copiarlo) y `hace` (el **código fuente** de
+la acción registrada, vía `String(fn)`, sin la sangría sobrante y cortado a 18 líneas). Y debajo, un
+recetario de dos pasos —el `<button class="mc-osd-btn">` y su `alPulsar`— con las clases de estilo ya
+hechas, porque eso es lo que no se adivina leyendo el volcado.
+
+- **Los botones se leen igual que los lee `mcOsdAbrir`** (`[data-osd]` o el texto del `<button>`,
+  normalizado con `mcOsdClave`), parseando en un `<template>` — que no ejecuta scripts ni baja imágenes:
+  esto es un informe, no un montaje. Un volcado que no coincida con lo que se va a enganchar de verdad
+  sería peor que no tenerlo.
+- **Señala las dos averías normales**, que es para lo que se mira: `✗ sin acción` (botón que no hace
+  nada al pulsarlo) y `sinBoton` (acción que nadie va a llamar). Casi todo «el OSD no responde» es un
+  texto que no coincide.
+- Una pantalla `{mapa:…}` devuelve `botones: null` **a propósito**: sus botones son bloques con nota y
+  viven en ese otro mapa.
+
+**Devuelto por segunda vez**: el dueño copió el `jugar()` del volcado a la consola y le saltó
+`intro is not defined` (y `cima` igual) — el código se cerraba sobre variables del snippet, que fuera de
+él no existen. Su indicación fue «mejor que pase el entorno», así que `alPulsar` acepta un 3.er
+argumento con lo que la acción usa de su snippet y `game.osd.entorno(texto)` lo sirve en la consola.
+
+**Devuelto por tercera vez**, y ésta es la que fija la forma final: «esto no tiene sentido, no me puedes
+dar un ejemplo con una funcion de la cual no tengo sus parametros: `function jugar(clave, ent)` … que es
+clave, que es ent? **deberian de autoresolverse**». Tenía razón: recibir el entorno por parámetro
+arreglaba el `is not defined` inventando dos parámetros que había que explicar, y un ejemplo que primero
+hay que completar a mano no es un ejemplo. La forma final:
+
+- **Una acción se escribe con CERO parámetros** y se la llama sin argumentos (`fn()`). No hay convención
+  de llamada que aprender.
+- El volcado no imprime `hace` pelado sino **`receta`** (`mcOsdReceta`): la línea
+  `const { intro, cima } = game.osd.entorno('JUGAR');`, el código, y la llamada — en ese orden. **Se
+  copia entera y corre.** Si la acción es anónima o flecha, la receta la ata a `const accion = …;`.
+- El 3.er argumento de `alPulsar` **no cambia cómo corre el botón**: solo **declara** qué usa de su
+  snippet, para que `entorno()` lo sirva y la receta salga completa. Sin él, `falta` avisa de qué nombres
+  no van a existir fuera y trae la línea de `alPulsar` ya escrita para arreglarlo.
+- Se añade **`origen`**: dónde se registró la acción (`el snippet «arranque-intro»` / `la consola (F12)`),
+  vía `mc._snippetActual`, que fija `mcCorreSnippet`. Leído el volcado, lo siguiente que se quiere saber
+  es dónde hay que ir a cambiarlo.
+
+`data/snippets/arranque-intro.json` va por **v5** (`jugar()` y `construir()` sin parámetros, registradas
+con su entorno declarado), parcheado con `parche_snp_intro_sin_params.py` + `parche_snp_intro_comentario.py`.
+
+`tests/test_osd_capa.js` pasa a **26 ok / 0 fallos**: §8 **evalúa la receta en el ámbito global** —el
+copia-pega del dueño, literal— y comprueba que corre, que hace lo del botón, que sin la línea de entorno
+sigue fallando, y que a la acción se la llama con cero argumentos. `tests/test_intro.js`, 23 ok / 0
+fallos. Detalle en [`docs/osd-e-intro.md`](docs/osd-e-intro.md).
+
+### ✅ REQ-INTRO2 · La intro en cualquier mapa, y volver a ella desde el editor sin recargar — ✅ done (2026-08-12)
+
+**Pedido** 2026-08-12 por el dueño, probando `/map/fps?intro=1`: «dos cosas, quiero desde el editor 2d/3d
+si hago click en "VOXELFORGE" volver al modo intro=1 sin necesidad de recargar assets, etc. la otra es
+que cualquier mapa, no solo fps, tiene que aceptar el parametro ?intro=1».
+
+**(1) Cualquier mapa.** `mcIntroArranque` busca **`arranque-<mapa>`** y, si no existe, la intro genérica
+**`arranque-intro`** (`data/snippets/arranque-intro.json`), que está escrita contra `mc.dim` y se orienta
+sola en un mundo que no ha visto nunca. Es un **respaldo, no una copia**: por eso `arranque-fps` se ha
+retirado y `/map/fps?intro=1` corre el mismo snippet que los demás — arreglar la genérica los arregla a
+todos. Un `arranque-<mapa>` propio sigue ganando, y es para quien quiera una intro **distinta**.
+
+**(2) Ida y vuelta sin recargar.** El editor y el Mundo **son la misma página** (el Mundo es el overlay
+`#mc-modal`), así que `location.href='/'` era recargarla entera: mundo, atlas y galerías otra vez.
+Ahora CONSTRUIR llama a **`closeWorld()`**, y la marca «VOXELFORGE» del editor (`#marca-inicio`) llama a
+**`mcVolverAIntro()`** → `openWorld()` (idempotente: con `mc.grid` en memoria no baja nada) +
+`mcIntroArranque()` a mano.
+
+- **`mcIntroArranque(auto)`**: con `auto` exige `?intro=1` y corre **una sola vez** (`mc._introHecha`);
+  sin `auto` relanza **siempre**, aunque la URL no la pida — quien la llama a mano ya ha dicho lo que
+  quiere. Sin esa distinción el pestillo del arranque impediría volver.
+- **La marca solo se ve pulsable si hay un mundo en memoria** (`mcMarcaSync`, clase `.clicable`): en el
+  editor a secas no debe prometer un camino que no existe.
+- **La URL no se toca** (nada de `history.replaceState`): `mcMapName()` la lee para saber en qué mundo
+  está, y cambiarla guardaría el mundo en otro fichero.
+
+`tests/test_intro.js` pasa a **23 ok / 0 fallos**: el §2 nuevo ejerce el respaldo **de verdad** (ya no se
+intercepta el snippet con `p.route`; `/map/test` no tiene intro propia, así que la que corre es la que
+sirve el servidor) y el §7 nuevo hace la ida y vuelta comprobando que un centinela de `window` sobrevive
+y que **no vuelve a haber un GET de `/api/mundo`**. Detalle en
+[`docs/osd-e-intro.md`](docs/osd-e-intro.md).
+
 ### ⬜ REQ-MAP1 · Alt+M = pantalla de mapas conmutable, sin perder el mundo abierto — ⬜ todo
 **Reportado** 2026-08-06 por el dueño: «quiero que Alt+M me muestre la pantalla de elección de mapas,
 si es posible que sea conmutable, sin perder el que tengo actualmente; una segunda vez a Alt+M cierra
@@ -1844,6 +2216,56 @@ cuerpo, subir la letra agranda la caja a la vez y no hay orden que respetar. Sub
 **Verificado** — `node test_notas_panel.js` (nuevo) y `node test_notas_cartel.js`, los dos en verde.
 Medido en la captura de `data/tickets/REQ-CART2/`: **4,5 → 9,9 líneas** sin desplazar, con la nota de
 agente larga entrando entera. A 390px sin regresión (367px de ancho, textarea a 322px de 844).
+
+---
+
+### ✅ REQ-CART3 · Los carteles de un menú: escala, palo, sitio y distancia de lectura — ✅ resuelto 2026-08-12
+**Pedido** 2026-08-12 por el dueño, al hilo de las pantallas OSD: «los carteles/notas que ahora son
+botones de OSD apenas se pueden configurar. Me gustaría poder: **1)** elegir su escala, **2)** si
+tienen palo o no, **3)** reposicionarlos. Por otro lado cambiaría su **distancia de lectura** (la
+aumentaría **1,5 veces**), ya que en un menú si se pone muy lejos la nota/cartel se desvanece y no se
+puede leer (otra opción es que si se carga como menú la distancia sea infinita)».
+
+Las dos opciones de lo último **no se excluyen**, así que están las dos: 14 → **21** de serie, y en
+pantalla-menú (`mc.escaparate`, o sea `?osd=1`) **no se aplica ninguna distancia**.
+
+**La decisión que había que tomar: globales, no por nota.** `mc.notes` es `"x,y,z" → texto` en todos
+los `mundo.json` escritos hasta hoy; meter estilo por nota lo convertiría en un objeto y cambiaría el
+formato del mundo para todo el mundo, a cambio de algo que un mundo-menú **no necesita** (sus botones
+se quieren iguales). Así que los cuatro ajustes viven en `game.carteles`, persistidos en
+`localStorage.vf_mcCarteles`, y `mc.notes` no se toca.
+
+```js
+game.carteles.escala = 2;        // tamaño del cartel; el RÓTULO va con él
+game.carteles.palo   = false;    // solo la tabla → assets/cartel_tabla.vox.json (dibujo nuevo)
+game.carteles.desvio = [0,1,0];  // desde el bloque anotado; [0,0,0] lo mete en su propia celda
+game.carteles.giro   = 1;        // una de las 24 posturas (mcOriNorm)
+game.carteles.info();            // el descubridor
+```
+
+**Lo que costaba caro y por eso tiene guardián:**
+
+- **Replantar.** Los carteles se **derivan** de `mc.notes`: cambiar un ajuste no se vería hasta
+  recargar. La firma de los ajustes (`mcCartelFirma`) viaja en cada instancia (`s.cartel`) y
+  `mcNoteSignsDesfasados` la compara — la misma ruta barata que ya detectaba una nota borrada.
+- **La firma tiene que sobrevivir a `mcRestampAll`**, que sustituye cada instancia por un objeto
+  nuevo (BUG-AG3). La lleva `mcCarryEfimera` junto a `nota` y `efimera`; sin eso, cada repaso vería
+  el cartel desfasado y lo replantaría **una vez por ciclo, para siempre**.
+- **El rótulo va con la escala.** `mcNoteBoardRect` deriva la tabla del bitset de la malla, que está
+  en voxeles finos **del dibujo** y no sabe nada de `s.esc`. Sin multiplicar por la escala, un cartel
+  a escala 2 se rotula en **un cuarto** de su tabla. (La escala entra también en la marca de la
+  caché del rectángulo, o el cambio no se recalcula.)
+- **«Sin palo» es otro dibujo, no un recorte:** `assets/cartel_tabla.vox.json` (32×16 finos = una
+  celda) es el mismo cartel sin el poste. Como la tabla se **deriva** de la forma, ahí todas las
+  filas son anchas y el rótulo ocupa la pieza entera sin tocar `mcNoteBoardRect`.
+
+**Ficheros:** `app.js` (`mc.carteles`, `mcCartelCfg`, `mcCartelFirma`, `mcNoteSignOrigin`,
+`mcSyncNoteSignsRun`, `mcNoteSignsDesfasados`, `mcCarryEfimera`, `mcNoteBoardRect`,
+`mcDrawNoteTexts`, `game.carteles`), `assets/cartel_tabla.vox.json` + `assets/index.json`,
+`tests/test_carteles.js` (**26 ok**), `docs/notas-y-fuente.md`.
+
+**Verificado:** `node tests/test_carteles.js` 26 ok · `node tests/test_notas_cartel.js` todo ok ·
+`node tests/test_symbols_sync.js` 9 ok.
 
 ---
 
@@ -3334,6 +3756,363 @@ reescribir el mundo, o dejar la vieja como alias.
 
 ---
 
+### ✅ REQ-TOOL1 · Una ranura para la herramienta activa, y categorías de bloque — ✅ hecho 2026-08-12
+
+**Petición del dueño, literal:**
+
+> «en el mapa, despues de la ranura 9 quiero otra que sea para mostrar la herramienta actualmente
+> seleccionada y poder cambiarla. Pulsar "p" seguiria rotando entre herramientas y se vería en esa
+> ranura el icono/bloque que la representa (tal y como se muestran los bloques de las otras ranuras),
+> pero clic con raton en "p" o alt+p tendría que abrir la galeria de bloques solamente para mostrar las
+> herramientas definidas. Utilizar el mismo codigo que hay para la galeria/picker de bloques para no
+> mantener más galerias de la cuenta. Para construir hay ya un bloque llamado "hab:pico-de-piedra" si
+> se selecciona esa herramienta deberia de aparecer en la ranura "P", para pintar bloques existe
+> "hab:pincel-de-texturizado", como cuentagotas "hab:cuentagotas" y como seleccion
+> "hab:varita-de-selecci-n". seleccionar una herramienta para la ranura 9 no solamente mostraria la
+> herramienta sino que la activaria, hacer click en 9 o alt+9 abriria la galeria para elegir solamente
+> herramientas. valorar si merece la pena añadirle al json de los bloques alguna categoria que indique
+> que clase de bloque es: herramienta, bloque de construccion, fluido, redstone, etc. como si fuese una
+> estructura de carpetas porque puede que se añadan más bloques que se usen durante el proyecto con
+> diferentes intenciones y, aunque todos son bloques, vamos a poder querer filtrarlos por alguna
+> categoria.»
+
+**Redactado, sin investigar.** Son **dos cosas de tamaño muy distinto** y conviene no mezclarlas: una
+**ranura más en la hotbar** que enseña y cambia la herramienta activa, y una **taxonomía de bloques**
+por categoría. La segunda el dueño la deja explícitamente a valorar («valorar si merece la pena»), y es
+la que puede tocar muchos ficheros.
+
+**Punto 1 · la ranura de la herramienta.** Hoy la herramienta se rota con `P` (`mc.tool` ∈
+`build`/`paint`/`select`/`pick`, `mcSetPlayerTool()`) y **no se ve en ningún sitio** salvo el aviso que
+sale al cambiarla — es justo lo que este ticket arregla, y encaja con [REQ-PICK4](#-req-pick4), que
+añadió el cuentagotas y dejó cuatro herramientas donde antes había dos. La ranura nueva va **detrás de
+la 9**, enseña el dibujo de la herramienta como cualquier otra ranura, y al elegir en ella **activa**
+la herramienta, no solo la enseña.
+
+**Punto 2 · la galería, que es la parte fácil y ya está medio hecha.** El dueño pide reutilizar el
+picker en vez de escribir otra galería, y eso ya es la dirección del proyecto: es lo mismo que
+[REQ-GAL4](#-req-gal4) («que ambas galerías sean una sola, que compartan su funcionalidad y codigo»).
+El picker **ya filtra por categoría** (`mcPickFilter`, hoy con `redstone` / `general`, leyendo
+`meta.categoria` del JSON), así que «abrir la galería solo con las herramientas» pinta a **un filtro
+más**, no a una galería nueva. Está por confirmar.
+
+**Punto 3 · las categorías.** El campo `categoria` **ya existe** en el JSON de las piezas y ya se usa
+(`redstone` vs. el resto). Lo que el dueño plantea es convertirlo en una **taxonomía de verdad**
+—herramienta, construcción, fluido, redstone…— «como si fuese una estructura de carpetas». O sea: el
+trabajo no es inventar el campo, es **decidir la lista de categorías, clasificar lo que ya hay y
+decidir qué pasa con lo que no está clasificado**.
+
+**⚠️ La trampa que ya ha costado dos bugs: las cuatro claves `hab:` de la petición.** El dueño da
+`hab:pico-de-piedra`, `hab:pincel-de-texturizado`, `hab:cuentagotas` y `hab:varita-de-selecci-n`. Una
+tabla en el motor que ate `build → 'hab:pico-de-piedra'` **escrita a mano es exactamente lo que
+provocó [BUG-RS23](#-bug-rs23) y [BUG-FLUID3](#-bug-fluid3)**: `hab:pico-de-piedra` y
+`asset:assets/pico-de-piedra.vox.json` son **el mismo dibujo entrando por puertas distintas**, y cuál
+de las dos existe depende de si la pieza se importó o se exportó. Si el dueño exporta el pico a
+`assets/`, la tabla deja de encontrarlo y la ranura sale vacía **sin que falle nada**. Los ayudantes
+son `mcNombreMat(clave)` / `mcClaveDeNombre(nombre)`. Esto no es una pregunta: es la primera decisión
+de diseño del ticket —**cómo se ata una herramienta a su dibujo sin escribir la clave a mano**— y
+seguramente empuja hacia que sea el **dibujo el que declare que es la herramienta X** (en su
+`meta`), y no el motor quien lo sepa.
+
+**Lo que hay que decidir con el dueño** (nada de esto está resuelto):
+
+- **¿La ranura nueva es la 10 o sustituye a la 9?** El enunciado dice «después de la ranura 9 quiero
+  **otra**» y la llama «la ranura **"P"**», pero luego dice «seleccionar una herramienta para la ranura
+  **9**» y «click en **9** o **alt+9**». Lo más probable es que sea un lapsus y que las dos frases
+  hablen de la ranura nueva (la 10ª, etiquetada **P**), pero **hay que confirmarlo antes de tocar
+  nada**: si de verdad fuese la 9, se perdería una ranura de bloques.
+- **Qué tecla la selecciona.** Las ranuras van con `1`–`9`; la décima no tiene número obvio (`0`
+  sería lo de Minecraft). Y `P` ya está cogida por la rotación, así que abrir la galería queda en
+  **clic** y **alt+P** —que es lo que pide el dueño—, pero conviene decidir si `0` también la
+  selecciona.
+- **Qué pasa si se marca como herramienta un dibujo al que no corresponde ninguna herramienta del
+  motor.** Las herramientas son **cuatro y están en el código**; la galería, en cambio, enseñaría todo
+  lo que lleve la categoría. Si alguien marca un quinto dibujo, ¿se oculta, se enseña en gris, o se
+  puede definir una herramienta nueva desde el dibujo?
+- **La lista de categorías, y qué pasa con lo no clasificado.** Cuántas hay, si son **una sola** por
+  pieza o varias (una «carpeta» admite una; una etiqueta, varias), y si lo que hoy no tiene categoría
+  cae en un cajón «sin clasificar» o se reparte a mano. Son **70 assets + 44 guardados**, así que
+  clasificar es trabajo en sí mismo. Y hay que ver si los filtros de hoy (`redstone`/`general`) se
+  **sustituyen** por la taxonomía nueva o conviven, porque `general` significa hoy «todo lo que no es
+  redstone» y dejaría de tener sentido.
+
+**Y una cuarta, técnica, para no llevarse una sorpresa:** hoy `mc.tool` se guarda en
+`localStorage['vf_mcTool']` pero **al cargar solo se restauran `build` y `paint`**. En cuanto la
+herramienta se **vea** en una ranura, esa asimetría deja de ser invisible: el dueño saldría con la
+varita puesta y volvería con el pico sin haber tocado nada. Hay que decidir si se restauran las cuatro.
+
+También está por ver si la ranura de herramienta debe **entrar en el loadout que se persiste**
+(`vf_mcHotbar` / `vf_mcSlotStruct`, que hoy guardan `MC_SLOTS` entradas): la herramienta ya tiene su
+propia persistencia, así que meterla ahí sería **una segunda fuente de verdad** para lo mismo.
+
+---
+
+### Respuesta del dueño (2026-08-12) — las cinco contestadas
+
+> «1) sería la 10 claramente, 2) lo que hace la tecla "p" es cambiar de tool como hasta ahora, "p"
+> rota, clic de raton abre galeria para elegir entre las que hay o bien alt+p 3) solo se tienen que
+> mostrar las herramientas para "2)" 4) solo una y que se pueda elegir la categoria desde el editor
+> 2d/3d 5) por defecto el pico»
+
+Queda **cerrado el diseño**:
+
+1. **Es la ranura 10**, nueva, detrás de la 9. No se toca la 9 ni se pierde ninguna ranura de bloques.
+   (Las frases del enunciado que decían «9» eran el lapsus que se sospechaba.)
+2. **`P` sigue rotando** como hasta ahora — no cambia nada de lo que ya existe. Lo que abre la galería
+   es el **clic** sobre la ranura o **alt+P**. El dueño **no ha pedido tecla numérica** para
+   seleccionarla (`0` u otra): queda fuera salvo que lo pida.
+3. La galería que se abre desde ahí **enseña solo herramientas** — es el picker de siempre con un
+   filtro, no una galería nueva.
+4. **Una sola categoría por pieza** (es una «carpeta», no etiquetas), y **se elige desde el editor
+   2D/3D**. Esto es lo que convierte el punto de las categorías en trabajo de verdad: no basta con
+   leer `meta.categoria`, hay que **poder ponerlo desde la interfaz** del editor y que se guarde.
+5. **La herramienta por defecto es el pico** (`build`). Con eso se disuelve la asimetría de
+   `vf_mcTool` —que restauraba `build`/`paint` pero no `select`/`pick`— sin tener que decidir si se
+   restauran las cuatro: se arranca siempre con el pico.
+
+**Comprobado (2026-08-12): las cuatro piezas existen** con las claves exactas que dio el dueño —
+`hab:pico-de-piedra` («Pico de Piedra»), `hab:pincel-de-texturizado`, `hab:cuentagotas` y
+`hab:varita-de-selecci-n` («Varita de Selección»)—, las cuatro con `type: objeto` y **`categoria`
+vacía**, así que hoy no las distingue nada: clasificarlas es parte del trabajo.
+
+**Lo único que queda sin decidir, y es menor:** con la categoría elegible desde el editor, cualquiera
+puede marcar como «herramienta» un dibujo **al que no corresponde ninguna herramienta del motor** (las
+herramientas siguen siendo cuatro y viven en el código). Lo natural es **no ofrecerlo** en la ranura —
+que la galería liste lo que es herramienta *y* tiene herramienta detrás—, pero se confirmará al
+implementar, porque la alternativa (enseñarlo apagado) también se defiende.
+
+---
+
+### Cómo quedó (2026-08-12) — ✅ hecho
+
+**El vínculo herramienta → dibujo lo declara EL DIBUJO, no el motor.** Es la decisión de la que cuelga
+todo lo demás, y la que evita repetir [BUG-RS23](#-bug-rs23) / [BUG-FLUID3](#-bug-fluid3). Cada una de
+las cuatro piezas lleva en su `meta` **`categoria:'herramienta'` y `herramienta:'build'|'paint'|
+`'select'|'pick'`**, y el motor **busca en `mc.catalog`** cuál lo dice (`mcHerramientaKey(tool)`). En
+ninguna tabla hay una clave escrita a mano, así que exportar el pico de `hab:` a `asset:` **no rompe
+nada**: la ranura lo sigue. El test lo comprueba cambiándole la clave al catálogo en caliente.
+
+**La taxonomía es una sola lista, `GAL_CATEGORIAS`** (`app.js`), con 7 entradas: sin clasificar,
+herramienta, construcción, fluido, redstone, decoración, personaje. De ahí se pinta **el desplegable
+del editor 2D/3D** (`#meta-categoria`), y cuando la categoría es «herramienta» aparece un sub-selector
+(`#meta-herramienta`, de `MC_HERRAMIENTAS`) — porque preguntarle a un adoquín qué herramienta es no
+tiene sentido. Cambiar de categoría **suelta** el vínculo: un dibujo que pasa a decoración deja de
+reclamar que es el pincel. `server.py` persiste los dos campos y los devuelve en `/api/habitantes`.
+
+**La ranura 10** va detrás de la 9, separada por un hueco, etiquetada **`P`** y **nunca marcada como
+activa** (la herramienta siempre lo está). **`P` rota** exactamente como antes. Reparto del ratón, a
+petición del dueño y **igual que en las ranuras de bloque**: **izquierdo rota** (la misma tabla que la
+tecla, extraída a `mcRotaHerramienta()` para que no haya dos) y **derecho abre la galería**; `alt+P`
+también abre, sin rotar. La galería es **el picker de siempre** con `mc.pickTool`: mismo buscador,
+mismo orden de [REQ-GAL4](#-req-gal4), sin botón «quitar» (siempre hay herramienta activa).
+
+**Se decidió lo que quedaba abierto:** un dibujo marcado «herramienta» con un valor que el motor no
+conoce **no se ofrece** (`mcHerramientasConDibujo` cruza con `MC_HERRAMIENTAS`). Enseñar algo que al
+pulsarlo no hace nada es peor que no enseñarlo.
+
+**`vf_mcTool` se borra y ya no se persiste.** Con el pico por defecto (punto 5), la asimetría vieja
+—guardaba las cuatro, restauraba dos— desaparece en vez de arreglarse.
+
+**Los iconos de la hotbar, de propina y a petición del dueño sobre la marcha.** Al ver la ranura P al
+lado, las nueve de bloque cantaban: recortaban **una cara del atlas a 16 px** y el CSS la estiraba a 42
+(factor 2,625, ni entero ni suavizado). Ahora **las diez** pintan **el dibujo en iso sobre
+transparente** (`mcPintaIconoRanura` → `drawThumbRanura`), con dos arreglos que solo hacen falta a ese
+tamaño: **supersampling ×4** (`renderIso` no suaviza nada; a 120 px son 4 px por voxel y todo filo sale
+en escalera) y **recorte a lo dibujado** (`drawThumb` encuadra la *caja*, y un pico de 58 voxels dentro
+de su lienzo de 16³ ocupa la mitad: en 42 px, un garabato). El atlas queda de reserva para lo que no
+tenga dibujo. **La galería NO pasa por ahí, por decisión del dueño**: sus tarjetas son grandes, el
+encuadre común es lo que deja compararlas, y ahí ya se veía bien. `.mc-slot` pierde el fondo oscuro y
+la barra baja de `.72` a `.36` de opacidad, que es lo que deja ver los iconos.
+
+**Guardián: `tests/test_tool1_ranura_herramienta.js`** (área `editor`, 41 comprobaciones, verde). El
+que de verdad importa es el penúltimo —cambiar la clave del catálogo y exigir que la ranura la siga—,
+porque es el único que se rompería si alguien vuelve a escribir `hab:…` a mano. Los demás cubren el
+servidor sirviendo el vínculo, el desplegable del editor pintado desde `GAL_CATEGORIAS`, el
+sub-selector apareciendo/soltándose, las 10 ranuras con la de herramienta **la última**, `P` dando la
+vuelta entera, el reparto izquierdo/derecho del ratón, la galería listando **4 y solo 4**, elegir la
+varita **activando** `select`, el intruso desconocido que no se ofrece, y la calidad del icono (llena
+la ranura, cabe entera, 120 px de lienzo, esquinas transparentes).
+
+**Área `editor` completa: 17 ok / 2 fallos**, los dos **ajenos** — `test_flor_en_rejilla.js` ya fallaba
+antes de tocar nada (comprobado con `git stash`) y `test_suelo_al_estampar.js` es el intermitente de
+siempre (verde en solitario, rojo en tanda).
+
+---
+### ✅ REQ-GAL4 · Buscador con mínimo de 3 letras y ordenación en la galería y el picker — ✅ hecho 2026-08-12
+
+**Petición del dueño, literal:**
+
+> «en la galería 2d/3d y del mapa/picker quiero: 1) que el buscador necesite al menos 3 letras para
+> poder buscar 2) implementar ordenación, por defecto será "recientes", tambien quiero "fecha
+> creacion", "nombre", y "tamaño"»
+
+**Redactado, sin investigar.** Son **dos peticiones sobre las mismas listas**: el filtro de texto y el
+orden en que salen las tarjetas.
+
+**Dónde.** El dueño nombra **tres superficies**: la galería **2D**, la **3D** y el **picker del
+mapa/Mundo**. No está comprobado si comparten un solo buscador o si son copias distintas del mismo
+patrón — eso es lo primero que hay que mirar, porque decide si esto es un cambio o tres. El selector
+del Mundo es el de [REQ-PICK1](#-req-pick1) / [REQ-PICK3](#-req-pick3); la galería del editor es la de
+[BUG-GAL1](#-bug-gal1) / [BUG-GAL2](#-bug-gal2) y `test_galeria_assets.js` / `test_galeria_namespace.js`.
+
+**Lo que habrá que decidir con el dueño** (nada de esto está resuelto, y son las tres cosas que
+cambian el resultado):
+
+- **Qué hace el buscador con menos de 3 letras.** «Necesita al menos 3 letras para poder buscar» admite
+  dos lecturas: no filtrar (se ve el catálogo entero) o no mostrar nada hasta la tercera letra. Y si
+  hace falta decirlo en la caja («escribe 3 letras…») para que no parezca que está roto.
+- **«Recientes» y «fecha creación» son DOS fechas.** Si fueran la misma no habría pedido las dos: lo
+  natural es que «recientes» sea la **última modificación** (o el último uso) y «fecha creación» la de
+  alta. Hay que ver **qué fechas guarda hoy** cada almacén (`data/habitantes/<id>.json`, los assets de
+  `assets/`) — si la de creación no existe, hay que crearla, y las piezas viejas no la tendrán.
+- **Qué es «tamaño».** Caben tres: número de **voxels**, la **caja** del dibujo (`SX×SY×SZ`) o los
+  **bytes** del fichero. Para una galería de dibujos lo que parece útil es el volumen del objeto, no lo
+  que ocupa en disco, pero lo dice el dueño.
+
+**Y una cuarta, técnica:** el orden por defecto es **«recientes»**, así que hay que mirar si eso
+**cambia el orden actual** de la galería y del picker, y si el orden elegido **se recuerda** entre
+sesiones (como `vf_mcTool` y compañía) o vuelve al defecto cada vez.
+
+---
+
+### Respuesta del dueño (2026-08-12) y estado
+
+> «sobre "REQ-GAL4" punto 1) a la larga hay que intentar hacer que ambas galerías sean una sola, que
+> compartan su funcionalidad y codigo para no mantener más codigo del necesario. ahora implementalo»
+
+Queda contestada la primera pregunta: **son dos copias, y a la larga hay que fundirlas en una**. Pero
+la fusión es **objetivo a largo plazo, no ahora** — lo de ahora era el punto 1.
+
+**✅ Punto 1 hecho (2026-08-12) · el buscador exige 3 letras.** Con menos de 3 **no filtra**: se sigue
+viendo el catálogo entero. Se eligió así porque vaciar la rejilla mientras tecleas parece un buscador
+roto, y porque el catálogo es justo lo que quiere ver quien viene a curiosear en vez de a buscar algo
+concreto. Para que no parezca que la caja no responde, sale un aviso —«Falta 1 letra para buscar»—
+debajo, y el `placeholder` de las dos cajas ya lo anuncia («3 letras mín.»).
+
+**Lo importante es DÓNDE está la regla, no la regla.** Hay dos buscadores casi idénticos
+(`#hab-picker-search` en la galería del editor y `#mc-picker-search` en el picker del Mundo), así que
+el mínimo vive en **una sola constante y una sola función** que los dos llaman:
+
+- `GAL_MIN_BUSCA = 3` y `galConsulta(input)` → devuelve la consulta **efectiva** (`''` mientras no
+  llegue al mínimo, o sea «no filtres»). Los dos `oninput` se reducen a `galConsulta(...)`.
+- `galAvisoMinimo(input, txt)` crea el aviso **al vuelo** colgando de `.mc-picker-bar`, que es el trozo
+  de DOM que las dos galerías **sí** comparten — así no hay que tocar el HTML de cada una por separado.
+  El CSS es `.gal-aviso-min` con `flex:1 0 100%`, para que caiga en su propia línea: como hermano
+  normal se metía entre la caja y los filtros y los empujaba.
+
+Esto es, a propósito, **el primer trozo compartido** entre las dos galerías: el camino hacia la fusión
+que pide el dueño, empezado por donde tocaba en este ticket.
+
+**Guardián: `tests/test_gal4_buscador_min.js`** (área `editor`, 18 comprobaciones, verde). Prueba **las
+dos** galerías, tecleando de verdad (`page.type`, no asignar `.value`: lo que se vigila es el
+`oninput`): con 2 letras el número de tarjetas **no cambia** y sale el aviso, a la 3ª filtra y el aviso
+desaparece, y **borrar hasta 2 vuelve a enseñarlo todo** — que es la regresión fácil, quedarse con el
+filtro viejo puesto.
+
+---
+
+### Respuesta del dueño (2026-08-12) al punto 2, y cierre
+
+> «sobre punto 2: reciente es cuando se ha importado o modificado recientemente ese asset, y sobre
+> tamaño me vale el nº de voxels»
+>
+> «el orden debe recordarse entre sesiones, si»
+
+Contestadas las tres que faltaban: **«recientes» = importado o modificado** (`savedAt`), distinta de
+**«creación»** (`createdAt`, el alta); **«tamaño» = número de voxels** (`count`), ni la caja del dibujo
+ni los bytes; y el orden **se recuerda entre sesiones**.
+
+**✅ Punto 2 hecho (2026-08-12) · ordenación en las dos galerías.**
+
+**Lo que costó no fue ordenar, fue tener por qué ordenar.** Las dos fechas y el recuento **no
+existían** en las dos fuentes: `assets/index.json` no llevaba ninguna de las tres, y `/api/habitantes`
+no devolvía `createdAt`. Así que `server.py` ahora:
+
+- **Rellena lo que falte al vuelo, una sola vez**, al listar: `savedAt`/`createdAt` ausentes salen del
+  **mtime** del fichero y `count` de contar `voxels`. Es un apaño honesto para los 70 assets viejos —
+  el mtime no es la fecha de alta real, pero es la única que existe— y se **persiste** al reescribir el
+  índice, así que no se paga en cada listado.
+- **`createdAt` no se toca al reguardar.** El `POST` de un habitante **relee el fichero previo** y
+  conserva su `createdAt`; solo `savedAt` avanza. Si se pisara, «creación» y «recientes» serían la
+  misma columna con dos nombres, que es exactamente lo que el dueño no pidió. Esto **no lo cubre el
+  test de navegador** —probarlo exige guardar dos veces, y en `data/habitantes/` no se escribe basura de
+  prueba ni se borra nada—: se verificó levantando el propio `server.py` en el puerto 8599 con
+  `server.STORE` apuntando a un directorio de usar y tirar en `/tmp`, guardando dos veces el mismo
+  dibujo y viendo que `createdAt` se queda quieto mientras `savedAt` avanza.
+
+En el front, el orden vive **en un solo sitio** que llaman las dos galerías —segundo trozo compartido,
+detrás de `GAL_MIN_BUSCA`—: `GAL_ORDENES` (las cuatro opciones), `galCompara(orden)`,
+`galOrdenaLista(items)` y `galMontaOrden(barra, onCambio)`, que **inyecta el `<select>`** en
+`.mc-picker-bar` en vez de escribirlo dos veces en `index.html`. Detalles que cuestan caro:
+
+- **Las fechas se comparan como CADENA, a propósito.** Son ISO (`2026-08-12T…`), donde el orden
+  alfabético **es** el cronológico; y así una fecha vacía cae al final sola, sin que un `new Date('')`
+  → `NaN` envenene el `sort`. Hay un test justo para eso.
+- **Los dos órdenes se COMPONEN, no compiten.** La galería del editor agrupa por tipo (`habOrdena`), y
+  ese agrupado se mantiene: se ordena primero por lo que eligió el dueño y encima se agrupa, que es
+  estable. Si el orden ganase al agrupado, «nombre» dejaría las **86 texturas** comiéndose la pantalla,
+  que es justo lo que el agrupado existe para evitar. Se ordena la lista **ya mezclada** (assets +
+  guardados) para que dentro de un tipo se intercalen por fecha, en vez de salir en dos bloques.
+- **Cambiar el orden en una galería sincroniza el `<select>` de la otra**, además de guardarlo en
+  `localStorage['vf_galOrden']`: si no, al abrir la segunda enseñaría un orden que no es el aplicado.
+
+**Guardián: `tests/test_gal4_orden.js`** (área `editor`, 24 comprobaciones, verde). Comprueba primero
+que **el servidor sirve los tres campos** en las dos fuentes (si no, todo lo demás «pasaría» ordenando
+por campos vacíos); luego `galOrdenaLista` en seco con una muestra donde cada orden da un resultado
+**distinto** —si no, un comparador que no ordenase nada pasaría el test—; y luego las dos galerías de verdad:
+agrupado intacto, orden dentro del grupo, que cambiar de orden **mueve** las tarjetas, que sobrevive a
+**recargar la página**, y que el picker del Mundo abre con el orden elegido en la otra.
+
+---
+
+### Correcciones del dueño (2026-08-12), ya aplicadas
+
+> «cuando se escribe en el buscador 1 letra o 2, hacen falta 3 para buscar, cada pulsacion de esa tecla
+> produce un ralentizamiento exagerado del entorno; si no hace busqueda no deberia ralentizarse nada,
+> de fondo se ve hasta como caen los fps. Por otro lado, "creacion" y "recientes" muestra basicamente
+> lo mismo, se puede borrar "creacion" y dejar unicamente recientes.»
+
+**1 · El buscador se frenaba justo cuando había decidido no buscar. Arreglado.** El punto 1 del ticket
+se implementó a medias: `galConsulta()` devolvía `''` («no filtres») pero el `oninput` **repintaba
+igual**. Y repintar no es barato: son **114 tarjetas**, cada una con su `<canvas>`, su `getRoomData()`
+y su `drawThumb()`, y en el picker del Mundo además un `mcStructCells()` por ítem. Con la galería
+abierta encima del Mundo, eso se ve como una caída de fps **del entorno de detrás**, que es lo que
+describe el dueño. O sea: se pagaba el precio entero de buscar **precisamente cuando se había decidido
+no buscar**.
+
+El arreglo es el corte que faltaba, y va en el mismo sitio compartido que el resto:
+`galConsultaNueva(input, anterior)` devuelve la consulta efectiva **solo si ha cambiado**, y `null`
+cuando no —y entonces el `oninput` sale sin tocar la rejilla. El **aviso sí se sigue actualizando** con
+cada tecla, porque su texto es lo único que de verdad cambia («Faltan 2 letras» → «Falta 1 letra»).
+Cubre de paso el caso simétrico: borrar de 2 letras a 1, o teclear algo que no cambia el texto
+normalizado.
+
+**Lección, que es lo que hay que recordar:** «no filtrar» y «no repintar» son **dos cosas distintas**, y
+la primera sin la segunda es un bug de rendimiento con toda la pinta de estar arreglado.
+
+**2 · Fuera «creación». Aplicado.** Enseñaba prácticamente lo mismo que «recientes», y **tiene una
+explicación**: el relleno de lo viejo no tenía de dónde sacar dos fechas distintas y puso
+`createdAt = savedAt` en los 70 assets y en los guardados que no la traían. Las dos fechas solo se
+separan **a partir de que algo se reguarde**. Quedan tres órdenes: recientes (defecto), nombre, tamaño.
+
+⚠️ **Se ha quitado la opción, NO el dato.** `server.py` sigue guardando y sirviendo `createdAt`, a
+propósito: cuesta cero, se separa solo con el uso, y es información que **no se puede reconstruir
+después** —salió del **mtime**, y ese mtime ya no volverá a ser el de entonces—. Si algún día el dueño
+quiere «fecha de alta», el dato estará ahí; si se borrase hoy, se perdería para siempre. Por eso el
+test **sigue exigiendo** `createdAt` en las dos fuentes: es lo que impide que alguien lo borre más
+adelante por parecer código muerto. Si el dueño prefiere quitarlo del todo, es un cambio aparte y
+consciente.
+
+**Guardianes actualizados.** `tests/test_gal4_buscador_min.js` sube a **18 comprobaciones** con lo que
+faltaba: se **marcan** las tarjetas, se teclea por debajo del mínimo y se exige que sigan ahí **los
+mismos nodos** (si alguien vacía la rejilla para volver a llenarla igual, la marca desaparece) — en las
+dos galerías, y comprobando además que a la 3ª letra **sí** repinta. Se verificó que el test **falla
+sin el arreglo** (0 de 114 tarjetas sobreviven), que es la única forma de saber que vigila algo.
+`tests/test_gal4_orden.js` se queda en **24**: sin «creación», y con la muestra en seco rehecha para que los
+tres órdenes den **tres resultados distintos** —y distintos del orden de entrada—, porque si no un
+comparador que no ordenase nada pasaría el test.
+
+---
+
 ### 🔴 REQ-FLUID4 · «Ilusión de agua»: que un lago parezca una masa continua, no cubos transparentes — 🔴 abierto 2026-08-10
 
 **Petición del dueño:** que el agua se vea como en Minecraft —una masa continua y cristalina— en vez
@@ -4229,7 +5008,7 @@ que se quería medir. En los dos casos el motor tenía razón y el test estaba m
 
 ---
 
-### 🔴 REQ-PICK4 · «Block picker» en la rotación de la tecla `P` del Mundo — 🔴 abierto 2026-08-11
+### ✅ REQ-PICK4 · «Block picker» en la rotación de la tecla `P` del Mundo — ✅ cerrado 2026-08-12
 
 **Petición del dueño, literal:**
 
@@ -4259,6 +5038,66 @@ es del editor. Esto vive en el **Mundo** y su destino es la barra rápida.
   o la clave base;
 - y qué pasa cuando el material apuntado **no está** en el cajón: si sustituye la ranura activa —que
   es lo que pide el dueño— o busca antes si ya está en otra.
+
+---
+
+**✅ Hecho (2026-08-12).** La herramienta se llama **Cuentagotas** y es la cuarta entrada de la tecla
+`P`: **Construir → Pintar → Seleccionar → Cuentagotas → Construir**. Con ella, **los dos botones** del
+ratón pillan el material de lo apuntado y lo meten en el cajón, y **ninguno toca el mundo**.
+
+Qué se implementó, respondiendo a las cuatro preguntas de arriba:
+
+- **`mcPickBlock()`** (`app.js`, justo detrás de `mcBreak`) recorre el rayo con la **misma marcha fina
+  que el pico**: estructura primero (`mcAimSolidAt` → `mcStructAt`), luego rejilla con el mismo recorte
+  de `mcRejillaSolidAt` + `mcIsCellReplaceable`. Así **se pilla exactamente lo que se habría roto**;
+  duplicar la marcha con otro criterio era la forma de que cuentagotas y pico apuntaran a bloques
+  distintos desde el mismo píxel. La clave sale de `s.key` (estructura) o de `mc.blockKey[id]`
+  (rejilla), o sea **con espacio de nombres**, sin escribir claves `hab:` a mano (BUG-RS23/BUG-FLUID3).
+- **Se guarda la clave BASE**: `mcClaveBase` quita el `@ori` de las 24 posturas y `mcFluidBase` el nivel
+  del fluido. La orientación la pone la **mano** del jugador (R / Shift+R), así que arrastrar el giro
+  del bloque pillado pelearía con ella; y se pilla «agua», no «agua a 3/7».
+- **Si el material ya está en el cajón, se SELECCIONA esa ranura** en vez de duplicarlo encima de la
+  activa (comportamiento de Minecraft). Así el cuentagotas **no puede pisar** nada de lo que el dueño
+  ya tenía preparado. Si no está, va a la ranura activa vía `mcAssignSlot`, que es lo que pidió.
+- **Herramientas pasivas.** Se añadió `mcToolPasiva()` (`select` o `pick`) y **las tres rutas que
+  colocaban** pasan por ella: la repetición al mantener pulsado, el aviso de «mantén clic derecho» y —la
+  que se escapaba— el **`mouseup` que estampa la estructura al soltar**, que preguntaba por
+  `tool!=='select'` y con el cuentagotas habría colocado una pieza por la puerta de atrás. El fantasma
+  de colocación también se apaga: enseñarlo prometería un bloque que no va a salir.
+
+**Ampliación del dueño (2026-08-12), literal:**
+
+> «sobre REQ-PICK4 quiero que despues de elegir el material (hacer click) la herramienta se ponga en
+> modo pintar»
+
+Hecho: pillar deja la mano en **Pintar**. El gesto que quiere es el de un editor de imagen —
+cuentagotas y a repintar con lo que acabas de coger—, no el de Minecraft, donde el pick block solo
+llena la mano. El aviso va en el **mismo toast** que el material (`mcSetPlayerTool` se llama **sin**
+`announce`, o su «Clic derecho: Pintar bloque» pisaría el nombre de lo pillado y no se vería qué has
+cogido).
+
+⚠️ **El cambio de herramienta reabre por sí solo las dos puertas que `mcToolPasiva()` cerraba**, y por
+eso `mcPickClave` hace `mc.heldBtn=-1` **antes** del `await` de `mcAssignSlot`: en cuanto la
+herramienta pasa a `paint`, `mcToolPasiva()` deja de ser cierta y **el mismo clic que pilló sigue
+pulsado**, así que (a) la repetición de `mcTick` empezaría a **pintar sobre el bloque recién pillado** y
+(b) el `mouseup` con una ranura-estructura armada lo **estamparía**. Soltar el botón al pillar es lo que
+lo evita, y el guardián lo comprueba.
+
+**Guardián: `tests/test_cuentagotas.js`** (área `materiales`, 17 comprobaciones, verde). Cubre el ciclo
+completo de `P`, que el material cae en la ranura activa con espacio de nombres y sin `@ori`, que **ni
+el clic izquierdo ni el derecho** rompen, colocan o dejan entrada en el historial, que un material ya
+presente reutiliza su ranura sin duplicarse, que tras pillar la mano queda en **Pintar** con el botón
+suelto, y **las dos ramas de la marcha** (pieza fina de `mc.grid`
+y pieza estampada de `mc.structures`).
+
+Dos cosas que costó descubrir y que están anotadas en el test para el siguiente:
+
+- **`/map/test` no está vacío**: la primera pasada pillaba `demo-hojas-sin-caras` porque el rayo
+  tropezaba antes de llegar al objetivo. Hay que buscar una columna de chunk libre y despejar el pasillo.
+- **Una flor no llena su celda**: apuntando en horizontal el rayo le pasa por encima y no se pilla nada
+  —que es el comportamiento correcto, el mismo recorte fino del pico—, así que el test apunta a su
+  **geometría** (`pitch = -0.15`) y no a su celda. Y como el mundo sigue corriendo entre `await`s, la
+  postura del jugador se **re-fija antes de cada clic** o se cae y el segundo clic apunta a otro sitio.
 
 ---
 
@@ -6540,6 +7379,16 @@ está actualizado en `redstone/redstone-ejemplos.js` pero **no re-montado** — 
 ---
 
 ## Bitácora
+- 2026-08-12 · 🧱 **Los iconos de la hotbar son el dibujo, no una cara de la textura ([REQ-TOOL1](#-req-tool1), de propina)** · Con la ranura P al lado, las nueve de bloque cantaban: recortaban una cara del atlas a **16 px** y el CSS la estiraba a 42 —factor 2,625, ni entero ni suavizado—, así que media pieza de redstone era un cuadro oscuro con una mota. Ahora **las diez** pintan el objeto en **iso sobre transparente** con el mismo `drawThumb` de las galerías, más dos arreglos que solo hacen falta a ese tamaño: **supersampling ×4** (`renderIso` reparte píxeles enteros por voxel y no suaviza nada) y **recorte a lo dibujado** (`drawThumb` encuadra la *caja*, y un pico de 58 voxels dentro de su lienzo de 16³ ocupa la mitad de ella). El atlas queda de reserva para lo que no tenga dibujo, así que ninguna ranura puede quedarse en blanco. **La galería no pasa por ahí, por decisión del dueño** («donde se tiene que ver nítido es en la ranura, la galería estaba bien»): sus tarjetas son grandes y el encuadre común es justo lo que deja compararlas entre sí.
+- 2026-08-12 · 🔧 **La ranura 10: la herramienta activa se ve, y es el dibujo quien dice cuál es ([REQ-TOOL1](#-req-tool1) — ticket cerrado)** · Detrás de la 9, etiquetada `P`, con el dibujo de la herramienta puesta; `P` sigue rotando, el **clic izquierdo rota también** y el **derecho abre el picker de siempre** filtrado a herramientas (`alt+P` también). Lo que importa no se ve: **el vínculo herramienta → dibujo lo declara el dibujo** (`meta.categoria:'herramienta'` + `meta.herramienta`) y el motor lo **deriva del catálogo**. Una tabla con `build → 'hab:pico-de-piedra'` escrita a mano es literalmente [BUG-RS23](#-bug-rs23) y [BUG-FLUID3](#-bug-fluid3) otra vez, porque `hab:` y `asset:` son el mismo dibujo por dos puertas; el test lo vigila cambiándole la clave al catálogo en caliente y exigiendo que la ranura la siga. De paso entra la taxonomía (`GAL_CATEGORIAS`, 7 entradas, **elegible desde el editor 2D/3D**, con sub-selector solo cuando la categoría es «herramienta») y `vf_mcTool` deja de persistirse: se arranca siempre con el pico.
+- 2026-08-12 · 🐌 **«No filtrar» y «no repintar» son dos cosas distintas ([REQ-GAL4](#-req-gal4), corrección del dueño)** · El buscador con 1 o 2 letras **no buscaba, pero repintaba igual**: 114 tarjetas con su `<canvas>`, su `getRoomData()` y su `drawThumb()` —y en el picker, un `mcStructCells()` por ítem— para acabar dibujando exactamente lo mismo. Con la galería abierta encima del Mundo se veía **caer los fps del entorno de detrás**. Se pagaba el precio entero de buscar **justo cuando se había decidido no buscar**, y el punto 1 parecía terminado. Arreglado con el corte que faltaba, en el mismo sitio compartido: `galConsultaNueva(input, anterior)` devuelve la consulta efectiva **solo si ha cambiado** y `null` cuando no; el **aviso sí sigue actualizándose** con cada tecla, que es lo único que de verdad cambia. El guardián se comprueba **saboteándolo**: se marcan las tarjetas y se exige que sigan siendo **los mismos nodos**, y sin el arreglo sobreviven **0 de 114**. · Y **fuera «creación»**: enseñaba lo mismo que «recientes» porque el relleno de lo viejo puso `createdAt = savedAt` en todo, y las dos fechas solo se separan a partir del primer reguardado. ⚠️ Se quitó **la opción, no el dato**: `server.py` sigue guardando `createdAt` porque **no se puede reconstruir después** (salió del mtime, que ya no volverá), y el test lo sigue exigiendo para que nadie lo borre luego por parecer código muerto.
+- 2026-08-12 · ✍️ [REQ-TOOL1](#-req-tool1) · **Diseño cerrado**: el dueño contesta las cinco. Es la **ranura 10** (no la 9 — era el lapsus que se sospechaba, y de la lectura mala se perdía una ranura de bloques); `P` **sigue rotando igual** y lo que abre la galería es el **clic** o **alt+P**, sin tecla numérica; la galería enseña **solo herramientas**; **una sola categoría** por pieza y **elegible desde el editor 2D/3D** —eso es lo que convierte las categorías en trabajo de verdad: no basta con leer `meta.categoria`, hay que poder ponerlo desde la interfaz—; y **por defecto el pico**, que de paso disuelve la asimetría de `vf_mcTool` (restauraba `build`/`paint` pero no `select`/`pick`) sin tener que decidir nada. Comprobado que **las cuatro piezas existen** con las claves exactas del dueño y las cuatro con **`categoria` vacía**: hoy no las distingue nada.
+- 2026-08-12 · 🎯 [REQ-TOOL1](#-req-tool1) · Abierto: **una ranura para la herramienta activa** (detrás de la 9, enseña su dibujo, y clic o **alt+P** abren el picker **filtrado a herramientas**; `P` sigue rotando) y, aparte, **valorar una taxonomía de categorías** de bloque —herramienta, construcción, fluido, redstone…—, «como si fuese una estructura de carpetas». **Redactado, sin investigar**, que es la regla del dueño para «nuevo ticket». Lo que se deja anotado para no tropezar: la galería **no es una galería nueva** (el picker ya filtra por `meta.categoria`, hoy `redstone`/`general`) y el campo `categoria` **ya existe**, así que el trabajo real es decidir la lista y **clasificar 70 assets + 44 guardados**; ⚠️ las cuatro claves `hab:` que da el dueño (`hab:pico-de-piedra` y compañía) **no pueden acabar escritas a mano en una tabla del motor** —es literalmente lo que costó BUG-RS23 y BUG-FLUID3, porque `hab:` y `asset:` son el mismo dibujo por dos puertas—, lo que empuja a que **sea el dibujo el que declare** qué herramienta es; y el enunciado **se contradice** entre «la ranura P» (la 10ª) y «la ranura 9», que hay que confirmar antes de tocar nada porque de la lectura mala se pierde una ranura de bloques. Más una sorpresa que la ranura haría **visible**: hoy `mc.tool` se persiste pero al cargar solo se restauran `build` y `paint`, así que la herramienta cambiaría sola al recargar.
+- 2026-08-12 · 🔢 **Las galerías se ordenan, y por fin tienen por qué ([REQ-GAL4](#-req-gal4), punto 2 — ticket cerrado)** · Cuatro órdenes en las dos galerías: «recientes» (defecto), «creación», «nombre» y «tamaño». Lo caro no fue ordenar: **los campos no existían**. `assets/index.json` no llevaba ninguno de los tres y `/api/habitantes` no devolvía `createdAt`, así que `server.py` los **rellena al vuelo** para lo viejo —fechas del **mtime**, `count` contando voxels— y los **persiste**, para no pagarlo en cada listado. La regla que cuesta caro romper: **`createdAt` no se pisa al reguardar** (el `POST` relee el fichero previo y lo conserva); si se pisara, «creación» y «recientes» serían la misma columna con dos nombres. Del lado del front, segundo trozo **compartido** por las dos galerías detrás de `GAL_MIN_BUSCA`: `GAL_ORDENES` + `galCompara()` + `galOrdenaLista()` + `galMontaOrden()`, que **inyecta el `<select>`** en `.mc-picker-bar` en vez de duplicarlo en `index.html`, guarda la elección en `localStorage['vf_galOrden']` y **sincroniza el desplegable de la otra**. Dos decisiones no obvias: las fechas se comparan **como cadena** (son ISO, el orden alfabético es el cronológico, y una fecha vacía cae al final sin `NaN` envenenando el `sort`), y el orden **se compone con el agrupado por tipo** en vez de ganarle —si no, «nombre» dejaría las 86 texturas comiéndose la pantalla, que es lo que el agrupado evita. Guardián: `tests/test_gal4_orden.js` (24 comprobaciones, verde), que empieza comprobando que el servidor sirve los tres campos: sin eso, ordenar por campos vacíos «pasaría» sin ordenar nada.
+- 2026-08-12 · 🔍 **El buscador de las galerías exige 3 letras ([REQ-GAL4](#-req-gal4), punto 1)** · Con menos de 3 **no filtra** —se sigue viendo el catálogo entero— en vez de vaciar la rejilla: una lista en blanco mientras tecleas parece un buscador roto. Sale un aviso («Falta 1 letra para buscar») y las dos cajas lo anuncian en el `placeholder`. Lo que importa no es la regla sino **dónde vive**: había **dos buscadores casi idénticos** (galería del editor y picker del Mundo), así que el mínimo está en **una sola constante y una sola función** (`GAL_MIN_BUSCA`, `galConsulta`, `galAvisoMinimo`) que los dos llaman, y el aviso se cuelga de `.mc-picker-bar`, el trozo de DOM que **sí** comparten — sin tocar el HTML de cada una por separado. Es el **primer trozo compartido** de camino a fundir las dos galerías, que es lo que el dueño quiere «a la larga». Guardián nuevo `tests/test_gal4_buscador_min.js` (15 comprobaciones, verde), que teclea de verdad en **las dos** y vigila la regresión fácil: borrar hasta 2 letras tiene que volver a enseñarlo todo. El **punto 2 (ordenación) sigue abierto**, a la espera de qué fecha es «recientes», qué es «tamaño» y si el orden se recuerda.
+- 2026-08-12 · 🖌️ **Pillar deja la mano en Pintar ([REQ-PICK4](#-req-pick4), ampliación del dueño)** · «después de elegir el material la herramienta se pone en modo pintar»: el gesto que quiere es el de un editor de imagen —cuentagotas y a repintar—, no el de Minecraft, donde el pick block solo llena la mano. Va en el **mismo toast** que el material, porque el aviso propio de `mcSetPlayerTool` pisaría el nombre de lo pillado. Lo que no se ve venir: **el cambio de herramienta reabre solo las dos puertas que `mcToolPasiva()` cerraba** — en cuanto la mano es `paint`, el mismo clic que pilló **sigue pulsado**, así que la repetición de `mcTick` se pondría a **pintar sobre el bloque recién pillado** y el `mouseup` con una ranura-estructura armada lo **estamparía**. De ahí el `mc.heldBtn=-1` **antes** del `await` de `mcAssignSlot`. `tests/test_cuentagotas.js` sube a 17 comprobaciones, verde.
+- 2026-08-12 · 🎯 [REQ-GAL4](#-req-gal4) · Abierto: **buscador con mínimo de 3 letras y ordenación** en la galería 2D/3D y en el picker del mapa — por defecto «recientes», y además «fecha creación», «nombre» y «tamaño». **Redactado, sin investigar**, que es la regla del dueño para «nuevo ticket». Anotado lo que hay que decidir antes de tocar nada: si las tres superficies comparten buscador o son copias (decide si esto es un cambio o tres); qué hace la caja con **menos de 3 letras** (no filtrar, o no mostrar nada); que «recientes» y «fecha creación» son **dos fechas distintas** y está por ver cuál guarda hoy cada almacén; y qué se entiende por **«tamaño»** (voxels, caja del dibujo o bytes del fichero). Más una cuarta, técnica: el defecto «recientes» puede cambiar el orden actual, y hay que decidir si el orden elegido se recuerda entre sesiones.
+- 2026-08-12 · 🎨 **Cuentagotas: la cuarta entrada de la tecla `P` ([REQ-PICK4](#-req-pick4))** · Apuntar y clic, y el material de lo apuntado pasa al cajón — el *pick block* de Minecraft. El ciclo de `P` queda **Construir → Pintar → Seleccionar → Cuentagotas**. `mcPickBlock()` recorre el rayo con la **misma marcha fina que el pico** (estructura primero, luego rejilla con el recorte de `mcRejillaSolidAt`), así que se pilla exactamente lo que se habría roto; la clave sale de `s.key` o de `mc.blockKey[id]`, o sea **con espacio de nombres**, y se guarda **base**: sin el `@ori` de las 24 posturas (la orientación la pone la mano con R, arrastrarla pelearía con ella) y sin el nivel del fluido. Si el material **ya está en el cajón se selecciona esa ranura** en vez de duplicarlo encima de la activa, así el cuentagotas no puede pisar nada de lo que el dueño tenía preparado. Lo que se escapaba: el `mouseup` que estampa una estructura al soltar preguntaba por `tool!=='select'` y con la herramienta nueva habría **colocado una pieza por la puerta de atrás** — de ahí `mcToolPasiva()`, que ahora cubre las tres rutas que colocan. Guardián nuevo: `tests/test_cuentagotas.js` (15 comprobaciones, verde), con las dos trampas anotadas: `/map/test` **no está vacío** (la primera pasada pillaba `demo-hojas-sin-caras` porque el rayo tropezaba antes) y **una flor no llena su celda**, así que en horizontal el rayo le pasa por encima y hay que apuntar a su geometría.
 - 2026-08-11 · 🎯 [REQ-PICK4](#-req-pick4) · Abierto: un **«block picker» en la rotación de la tecla `P`** del Mundo — clic en un bloque del mapa y ese material pasa a la ranura elegida del cajón, o sea el *pick block* de Minecraft. **Redactado, sin investigar**, que es la regla del dueño para «nuevo ticket». Lo único que hubo que decidir es el **nombre**: lo pidió como «color picker» y se corrigió él mismo en el acto («seria mas block picker en este caso»), y la corrección es la buena — lo que se coge es la **clave del material**, no un color. Anotado en el ticket que **no** es duplicado de [REQ-PICK1](#-req-pick1) ni de [REQ-PICK3](#-req-pick3) (aquéllos son el selector del **editor**; éste es del **Mundo**) y las cuatro preguntas que habrá que resolver al implementarlo: qué rota hoy la tecla `P`, que la clave puede venir de `mc.grid` **o** de `mc.structures`, qué hacer con el giro horneado en la clave (`clave@n`), y si sustituye la ranura activa o busca antes si el material ya está en el cajón.
 - 2026-08-11 · 🎯 **El aim ya no choca con la celda entera de un cable ni de una alfombra ([BUG-RAY2](#-bug-ray2), cerrado)** (dueño: «aunque no este apuntando los voxels del cable sino al objeto que se ve detras, es como si el aim colisionase con el rigidbody del bloque del cable»). El ticket **no existía**: se redactó y se arregló en la misma pasada, por petición expresa («revisar si este ticket existe, sino crearlo y corregirlo, es prioritario»). Lo que hizo el trabajo fue **reconocerlo como [BUG-RAY1](#-bug-ray1) en la otra mitad del mundo** en vez de investigarlo de cero: aquél ya había arreglado exactamente esto para las estructuras finas (la celda respondía por su caja de 16³ ⇒ sub-DDA a 1/16 acotado a la celda), y la rejilla se quedó fuera porque entonces en `mc.grid` solo había macizos. Desde `mcCabeEnRejilla`, un cable de **1 voxel de alto** es **terreno**, y `mcRaycast` seguía preguntando `mcSolid`, que responde por la celda entera. Así que el arreglo es el mismo patrón, no uno nuevo: `mcRejillaSolidAt` (sondeo fino con **la misma indexación que `mcTerrenoChoca`**, leyendo `bitsAim`) + `mcRejillaRayHit` (sub-DDA acotado, `3·T+3` pasos), cableados en **dos sitios y solo dos** — `mcRaycast` y `mcBreak`; colocar salió gratis porque `mcPlace` consume el `cell + normal` del rayo. **Ninguna de las nueve funciones que envuelve `mundo-autoarranque` o que extrae *verbatim* el test se ha tocado**, y sin materiales finos (`mc._geoFina` a `null`) el camino es byte-idéntico. `test_rayo_apuntado.js` pasa de 12 a **19 ok**, y que los 7 casos nuevos no sean un verde vacío se probó por **A/B**: revirtiendo los dos puntos de llamada de `mcRaycast` en una copia, el test cae a 17 ok / 2 fallos reproduciendo el síntoma exacto del reporte (el rayo para en la celda del cable y el bloque nuevo iría **encima** de él). Vecinos sin regresión: `test_clic_derecho_rejilla.js` (incluido su §0, «el mundo del dueño queda como estaba») y `test_rayos_x.js`. ⚠️ `test_flor_en_rejilla.js` falla **3**, pero falla **igual con el `app.js` de antes**: son de mallado/proyección (`mc.finoExtra`), previos y ajenos a esto.
 - 2026-08-11 · ♾️ **Fuentes infinitas: el hoyo de 2×2 se cierra solo ([REQ-FLUID8](#-req-fluid8), cerrado)** (dueño: «si un bloque está tocando por los lados fuentes de fluido, y por debajo tiene un bloque sólido, entonces se convierte también en una fuente»). Una celda de corriente que toca **dos o más** fuentes por los lados y tiene roca debajo asciende a fuente. Lo que hizo el trabajo fue **preguntar antes de teclear**: el enunciado se podía leer como «≥1», y con ≥1 cada fuente convierte a su vecina y ésa a la suya hasta volver fuente el llano entero — no es una fuente infinita, es una inundación. Las otras tres respuestas del dueño (sólido es sólido y no vale otra fuente; vale para cualquier fluido; romper la original no degrada a las demás) cerraron el diseño antes de escribir nada. Y el ticket salió **barato porque el motor ya estaba preparado**: «fuente» ya era `fluidLevel === 0` —así que convertir es `setFluid(...,0)` y no hay concepto nuevo ni cambio de formato— y el simulador ya iba por **cola de eventos**, así que la regla son cuatro sondeos dentro de `processCell` sobre una celda que ya se estaba procesando, sin barrer el mundo. 25 líneas en `app.js` + válvula `mc.sinFuentesInfinitas`. `test_fuentes_infinitas.js` (8 ok), con la bandeja partida en **cuatro compartimentos estancos**: en la primera versión el agua de un caso se coló en el de al lado y la lava ni se asentó — un charco que se filtra de un caso a otro convierte un verde en una casualidad. Sin regresión en `test_caras_fluido.js` ni `test_vista_subacuatica.js`. ⚠️ `test_fluido_importado.js` falla **2** (paleta compartida entre `agua.vox.json` y su nivel `-1`), pero falla **igual con el `app.js` de HEAD**: es previo y no de aquí — ojo, porque ese fichero es el guardián de [BUG-FLUID3](#-bug-fluid3), que está dado por resuelto.

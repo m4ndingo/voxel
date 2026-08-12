@@ -11,20 +11,20 @@ tocar un área, **abre su `docs/` primero**; si solo pasas por al lado, lo de aq
 
 ## 🗺️ MAPA RÁPIDO — para no quemar contexto navegando a ciegas
 
-**`app.js` son 13 314 líneas / ~217 k tokens: NO cabe entero en la ventana y NO se lee entero.**
+**`app.js` son 14439 líneas / ~232 k tokens: NO cabe entero en la ventana y NO se lee entero.**
 Para localizar una función usa **`SYMBOLS.md`** (mapa `función → app.js:línea`, ~2 k tokens, una sola
 lectura reemplaza docenas de sondeos). Regenéralo si cambia:
 `grep -nE '^[[:space:]]*(async )?function ' app.js`. Guardián: `node tests/test_symbols_sync.js`.
 
-- **Poner/colocar un bloque:** `app.js:setVoxel(239)` · `mcSetVoxel(11756)` · `mcSetBlock(6354)` ·
-  `mcCabeEnRejilla(6981)` · `mcPlace(10282)` · `mcResolveMat(11617)`/`mcMatKey(11595)`.
+- **Poner/colocar un bloque:** `app.js:setVoxel(239)` · `mcSetVoxel(12596)` · `mcSetBlock(6565)` ·
+  `mcCabeEnRejilla(7192)` · `mcPlace(10573)` · `mcResolveMat(12457)`/`mcMatKey(12435)`.
 - **Nombre corto de un asset:** léelo de **`assets/index.json`** (22 KB, cubre los 70), **NUNCA** de un
   `*.vox.json` (taberna = 283 k tokens, más que una ventana entera; están vetados en
   `.claude/settings.json`).
 - **Minas vetadas al `Read`** (binarios / blobs): `data/worlds/*.vox` (20 MB), `data/mundo.vox`,
   `data/fotos/*.png`, `releases/*`, los tres assets grandes. Verlo por otra vía (tamaño, `grep`, index).
 
-**Flujo «revisar tickets → nuevo → implementar» sin releer `PLAN.md` entero** (6 559 líneas / ~181 k tokens):
+**Flujo «revisar tickets → nuevo → implementar» sin releer `PLAN.md` entero** (7 445 líneas / ~205 k tokens):
 - **Revisar abiertos:** lee **solo** el índice, `PLAN.md:74` (~108 líneas / ~8 k tokens, el 4 % del fichero).
   No hagas `grep`/`Read` del fichero completo para esto.
 - **Implementar uno:** el detalle de cada ticket es una sección propia (mediana ~1 k tokens; ubícala por su
@@ -55,13 +55,16 @@ sección **y** su fila, con **un commit por ticket cerrado**.
 `pgrep -af server.py`). Lo que se planta o se estampa para probar va a **`/map/test`**, nunca a
 `/map/default` ni a `/map/agents`, y lo que ya hay ahí **no se borra**.
 
-**4. Sí hay tests: 106 `test_*.js` en `tests/`.** 93 abren un Chromium de verdad (Playwright +
+**4. Sí hay tests: 117 `test_*.js` en `tests/`.** 104 abren un Chromium de verdad (Playwright +
 SwiftShader) contra `http://localhost:8500`; 13 son Node puro. Hay runner
 (`node correr_tests.js --node | --area=redstone | --list`) y cada fichero declara `@area` /
 `@necesita`. **Corre solo los del área que tocas** — la suite entera tarda muchísimo.
 ⚠️ Los tests se escribieron **desde la raíz**: leen `data/…` y `assets/…` relativos al **cwd**, así
 que se lanzan desde la raíz (`node tests/test_caras_mundo.js`), no desde dentro de `tests/`. El
 runner ya lo hace. Lo que cuelga de `__dirname` lleva `..` por la mudanza.
+⚠️ **Un test que entre por `/` pide `?noauto=1`**: la raíz ejecuta el snippet `editor-autoarranque` del
+dueño, que hoy **navega a otro mapa**, así que sin la escotilla el test busca el editor donde ya no está
+(y falla con un error que no se parece en nada a la causa). Detalle en `docs/osd-e-intro.md`.
 
 ⚠️ En un clon recién hecho **Playwright no está**: `node_modules/` está en `.gitignore`. Se instala a
 mano y la versión importa (la 1.48+ pide Node 20):
@@ -88,6 +91,7 @@ marca, nunca se reescribe entero.
 | [`docs/luz-y-sombra.md`](docs/luz-y-sombra.md) | skylight incremental, emisores en la rejilla, `luz:'pasa'/'tapa'`, materiales sin sombra |
 | [`docs/redstone.md`](docs/redstone.md) | todo `redstone/`: motor, piezas, pistón, puerta, mapa de ejemplos |
 | [`docs/notas-y-fuente.md`](docs/notas-y-fuente.md) | notas → carteles 3D, el texto horneado en la tabla, el panel `N`, la fuente Pixeloid |
+| [`docs/osd-e-intro.md`](docs/osd-e-intro.md) | **modo vuelo (`F`)**, las pantallas OSD (`game.osd`), el escaparate `?osd=1` y la intro `?intro=1` |
 
 ---
 
@@ -153,8 +157,8 @@ volver a las coordenadas sin leer la imagen). Tres cosas que no son obvias:
   imagen no vale el apaño de `execCommand` de `mcCopyTraceText`). Por eso el camino que siempre
   funciona es el servidor, y la ficha va **quemada en el PNG** para sobrevivir a copiar y pegar.
 
-**Hay 79 `test_*.js`** en la raíz del repo (ver § ARRANQUE punto 4): 66 abren un Chromium de verdad
-con Playwright contra `http://localhost:8500` —compilan el GLSL, así que valen para el Mundo— y 12
+**Hay 117 `test_*.js`** en `tests/` (ver § ARRANQUE punto 4): 104 abren un Chromium de verdad
+con Playwright contra `http://localhost:8500` —compilan el GLSL, así que valen para el Mundo— y 13
 son Node puro. La API también se verifica con `curl` (`/api/mapa`, `/api/habitantes`).
 
 ## Arquitectura → [`docs/editor.md`](docs/editor.md)
@@ -233,7 +237,9 @@ decide es si **cabe en su celda** (`mcCabeEnRejilla`), no el prefijo de la clave
 - **Un id sin espacio de nombres no identifica nada**: `hab:cable` y `asset:assets/cable.vox.json`
   son el mismo dibujo entrando por puertas distintas (exportar/importar cambia cuál). **Ninguna tabla
   del motor puede llevar claves `hab:` escritas a mano** — fue BUG-RS23 y BUG-FLUID3. Los ayudantes
-  son `mcNombreMat(clave)` y `mcClaveDeNombre(nombre)`.
+  son `mcNombreMat(clave)` y `mcClaveDeNombre(nombre)`. El patrón para atar una pieza a algo del motor
+  es al revés: **que lo declare el dibujo** en su `meta` y el motor lo derive del catálogo, como hace
+  la ranura de herramienta (`meta.categoria:'herramienta'` + `meta.herramienta`, REQ-TOOL1).
 - **Las 24 posturas se DERIVAN, no se escriben a mano.** El giro va **en la clave** (`flor@7`), se
   decodifica siempre con `mcOriNorm`/`mcOriParts`, y **nada de `(rot|0)&15`**: ese recorte convierte
   en silencio una postura nueva en una vieja (costó BUG-RS7, BUG-RS8 y BUG-ROT2). La composición vive
@@ -287,6 +293,37 @@ game.bloques.info();   // ← el descubridor: la clave EXACTA de lo que piso / t
   **todos** los argumentos (comerse el 6º apaga el nadar y el 7º la mirada, sin que nada falle).
   ⚠️ `test_hundirse.js` y `test_nadar.js` están **en rojo a propósito** desde que el dueño retuneó las
   constantes: es **BUG-FLUID5** en `PLAN.md`, no una regresión.
+- **Vuelo** (`F`; la foto pasó a **`Alt+F`**) → [`docs/osd-e-intro.md`](docs/osd-e-intro.md). Rama
+  propia en `mcUpdate` **antes** de la de fluido: la vertical **no pasa por `mcCaidaPaso`** y es **cero
+  exacto** sin teclas. Las colisiones se mantienen — atravesar es `game.fantasma`, y solo volando.
+
+## Pantallas OSD e intro por URL → [`docs/osd-e-intro.md`](docs/osd-e-intro.md)
+
+`game.osd` (una pantalla encima del juego) **no es** `game.showOSDbuttons` (los dos botones de la
+esquina). Un botón **es un bloque con una nota** y se identifica **por su texto**, así que una pantalla
+pasa de `{html:…}` a `{mapa:'menu1'}` sin tocar ni una acción. **`game.osd.dump()` es el descubridor**
+(como `game.bloques.info()`): pantallas, su cfg, y qué botón se ha quedado sin acción o al revés. Las
+cuatro reglas caras:
+
+- **Una acción de botón se escribe con CERO parámetros** y se la llama sin argumentos. Lo que el volcado
+  imprime de cada botón es una **receta** (entorno resuelto + código + llamada) que se copia entera a F12
+  y **corre**; el 3.er argumento de `alPulsar` no cambia cómo corre el botón, solo **declara** qué usa de
+  su snippet para que `game.osd.entorno(texto)` lo sirva. El dueño devolvió esto tres veces (REQ-OSD5):
+  un ejemplo con parámetros que hay que adivinar no es un ejemplo.
+
+- Una pantalla-mapa va en **`<iframe>` con `?osd=1`** (modo **escaparate**: no guarda, sin hotbar, sin
+  captura de puntero) y **el iframe se destruye al cerrar** — `mc` es un singleton y eso es un segundo
+  contexto WebGL vivo. La acción se ejecuta **en el padre**, por `postMessage`; la pantalla solo dice
+  qué botón se pulsó.
+- **`?intro=1` es la única forma de disparar la intro**, y la acepta **cualquier mapa**: la animación
+  vive en el snippet **`arranque-<mapa>`** o, si ese no existe, en el genérico **`arranque-intro`**
+  (respaldo, **no** copia: hoy solo existe el genérico, y arreglarlo los arregla todos). Nunca en
+  `app.js`. Su bucle en `mc._intro` se **desmonta antes de montar otro** (misma regla que el envoltorio
+  de `mcUpdate`).
+- **Ni JUGAR ni CONSTRUIR recargan**, y volver por la marca «VOXELFORGE» tampoco: el editor y el Mundo
+  son **la misma página** (`#mc-modal` es el overlay del Mundo), así que se sale y se entra con
+  `closeWorld()` / `mcVolverAIntro()`, jamás con `location.href`. JUGAR **captura el puntero dentro del
+  propio manejador del clic**: pedirlo tras un `await` lo rechaza el navegador.
 
 ## Luz y sombra → [`docs/luz-y-sombra.md`](docs/luz-y-sombra.md)
 
@@ -331,7 +368,7 @@ los cuerpos de `--font-game`.
 
 ## 🧪 Batería de Pruebas y Runner (`correr_tests.js`)
 
-El repositorio contiene **85 ficheros `test_*.js`** en la raíz. Cada fichero incluye una cabecera declarativa:
+El repositorio contiene **115 ficheros `test_*.js`** en `tests/`. Cada fichero incluye una cabecera declarativa:
 ```javascript
 // @area: redstone | agentes | caras | fisica | render | editor | materiales | general
 // @necesita: node | servidor, playwright

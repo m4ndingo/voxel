@@ -197,6 +197,41 @@ def list_agentes():
     out.sort(key=lambda a: a.get('savedAt', ''), reverse=True)   # más recientes primero
     return out
 
+# REQ-GAL4 · los assets del juego no llevaban ninguna fecha ni el número de voxels, y la galería los
+# necesita para ordenar. Se rellenan UNA vez en `assets/index.json` (que sí se versiona) leyendo el
+# fichero del disco, y a partir de ahí viajan con el índice.
+#
+# ⚠️ Por qué se persiste en vez de calcularlo en cada petición: la fecha sale del **mtime**, y el mtime
+# no sobrevive a un `git clone` —todos los ficheros quedarían con la hora del clonado— ni a un
+# `atomic_dump`, que crea un inodo nuevo. Escribirla al índice la congela en el momento en que aún es
+# cierta. Y el número de voxels obliga a abrir el .vox.json (los 70 son 8,7 MB): una vez, no cada vez.
+def completar_fechas_asset(item, ruta):
+    """Rellena savedAt/createdAt/count si faltan. Devuelve True si tocó algo (hay que reescribir)."""
+    tocado = False
+    if not item.get('savedAt') or not item.get('createdAt'):
+        try:
+            sello = datetime.datetime.fromtimestamp(os.path.getmtime(ruta)).isoformat(timespec='seconds')
+        except OSError:
+            sello = now_iso()
+        # Un asset del juego que nunca se ha reguardado se creó cuando se escribió: las dos fechas son
+        # la misma y no hay nada mejor que decir. En cuanto se reguarde, `savedAt` avanzará y
+        # `createdAt` se quedará donde está.
+        if not item.get('savedAt'):
+            item['savedAt'] = sello
+            tocado = True
+        if not item.get('createdAt'):
+            item['createdAt'] = item['savedAt']
+            tocado = True
+    if item.get('count') is None:
+        try:
+            with open(ruta, 'r', encoding='utf-8') as f:
+                item['count'] = len(json.load(f).get('voxels', {}) or {})
+        except Exception:
+            item['count'] = 0
+        tocado = True
+    return tocado
+
+
 def list_all():
     out = []
     for fn in sorted(os.listdir(STORE)):
@@ -210,8 +245,15 @@ def list_all():
         out.append({'id': fn[:-5], 'name': meta.get('name', '(sin nombre)'),
                     'role': meta.get('role', ''), 'type': meta.get('type', 'objeto'),
                     'categoria': meta.get('categoria', ''),
+                    # REQ-TOOL1: qué herramienta del Mundo ES este dibujo ('build'|'paint'|...).
+                    # Viaja en el listado para que la ranura 10 la resuelva SIN claves escritas a mano.
+                    'herramienta': meta.get('herramienta', ''),
                     'size': d.get('size', 16), 'count': len(d.get('voxels', {})),
-                    'savedAt': d.get('savedAt', '')})
+                    'savedAt': d.get('savedAt', ''),
+                    # REQ-GAL4: dos fechas distintas. `savedAt` = último guardado («recientes»);
+                    # `createdAt` = alta. Los dibujos anteriores al ticket no la traen: se cae a
+                    # `savedAt`, que es lo más antiguo que consta de ellos.
+                    'createdAt': d.get('createdAt') or d.get('savedAt', '')})
     out.sort(key=lambda h: h.get('savedAt', ''), reverse=True)   # más recientes primero
     return out
 
@@ -411,6 +453,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     for item in idx:
                         rel = item.get('file', '')
                         if rel and os.path.exists(os.path.join(BASE, rel)):
+                            changed |= completar_fechas_asset(item, os.path.join(BASE, rel))
                             valid_idx.append(item)
                         else:
                             changed = True
@@ -679,10 +722,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     for k in ('role', 'icon', 'alias', 'description'):
                         if meta.get(k):
                             item[k] = meta[k]
-                    if meta.get('categoria'):
-                        item['categoria'] = meta['categoria']
-                    else:
-                        item.pop('categoria', None)
+                    for campo in ('categoria', 'herramienta'):     # REQ-TOOL1: 'herramienta' igual que 'categoria'
+                        if meta.get(campo):
+                            item[campo] = meta[campo]
+                        else:
+                            item.pop(campo, None)                  # quitarla en el editor tiene que quitarla aquí
+                    # REQ-GAL4: reguardar mueve `savedAt` («recientes») pero NO `createdAt`, que es la
+                    # fecha de alta y solo se pone una vez. `count` se recalcula porque el dibujo cambió.
+                    item['savedAt'] = now_iso()
+                    item.setdefault('createdAt', item['savedAt'])
+                    item['count'] = len(d.get('voxels', {}) or {})
                     found = True
                     break
 
@@ -695,10 +744,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     'type': meta.get('type', 'textura'),
                     'group': meta.get('group', 'Bloques de construcción'),
                     'size': d.get('size', 16),
-                    'file': rel_file
+                    'file': rel_file,
+                    'savedAt': now_iso(),
+                    'createdAt': now_iso(),     # alta: esta es la única vez que se escribe
+                    'count': len(d.get('voxels', {}) or {})
                 }
-                if meta.get('categoria'):
-                    nuevo['categoria'] = meta['categoria']
+                for campo in ('categoria', 'herramienta'):         # REQ-TOOL1
+                    if meta.get(campo):
+                        nuevo[campo] = meta[campo]
                 # Solo si los hay: una entrada con 'alias':'' es ruido en el índice y además el cliente
                 # registraría la cadena vacía como clave de material.
                 for k in ('alias', 'description'):
@@ -713,6 +766,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             d.pop('id', None)
             idd = slugify(d.get('meta', {}).get('name'))     # id = nombre => sin duplicados
             d['savedAt'] = now_iso()
+            # REQ-GAL4: `createdAt` es del ALMACÉN, no del dibujo, y sobrevive a cada sobrescritura —
+            # se relee del fichero que hay ahora, no de lo que mande el cliente (que reenvía el
+            # documento entero y borraría la fecha de alta de un dibujo viejo al reguardarlo).
+            previo = {}
+            if os.path.exists(self._path(idd)):
+                try:
+                    previo = json.load(open(self._path(idd), encoding='utf-8')) or {}
+                except Exception:
+                    previo = {}
+            d['createdAt'] = previo.get('createdAt') or previo.get('savedAt') or d['savedAt']
             to_trash(self._path(idd), move=False)             # respaldo antes de sobrescribir
             atomic_dump(d, self._path(idd))
             dedup(idd)                                        # consolida otros con el mismo nombre (a papelera)

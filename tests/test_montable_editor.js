@@ -49,7 +49,8 @@ const ok = (cond, txt, extra) => {
     return r.abort();
   });
 
-  await pe.goto(BASE + '/', { timeout: 60000 });
+  // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
+  await pe.goto(BASE + '/?noauto=1', { timeout: 60000 });
   await pe.click('#btn-mas');                       // «🦴 Agentes» vive dentro del menú «⋯» (REQ-NAV1)
   await pe.click('[data-tab="agentes"]');
   await pe.waitForFunction('window.game && game.esqueletos && typeof agDoc !== "undefined" && agDoc && !document.querySelector("#ag-modal").hidden',

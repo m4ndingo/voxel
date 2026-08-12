@@ -1741,7 +1741,7 @@ function load(map,meta,size,pivotes,caras,atravesable){
   clearHistory();                       // documento nuevo: sin historial que cruzar
   $('#meta-name').value=state.meta.name;
   $('#meta-type').value=state.meta.type;
-  if($('#meta-categoria')) $('#meta-categoria').value=state.meta.categoria||'';
+  syncMetaCategoria();                 // categoría + el sub-selector de herramienta (REQ-TOOL1)
   $('#meta-atravesable').checked=state.atravesable;
   const roleEl=$('#meta-role');
   roleEl.textContent=state.meta.role||'';
@@ -1861,6 +1861,32 @@ function drawThumb(cv, d){
   renderIso(cv.getContext('2d'), cv.width, cv.height, 0, 40, false);   // rot 0 (no depende de SX/SY), sin rejilla
   state.voxels=saved; state.caras=savedCaras;
 }
+// Miniatura para la RANURA de la hotbar, que es un sello de 42 px. Es el mismo dibujo del dueño por el
+// mismo `drawThumb`, con dos arreglos que solo hacen falta a ese tamaño:
+//   · **Recorte**: `drawThumb` encuadra la caja del objeto, no lo dibujado. Una herramienta fina dentro
+//     de su lienzo de 16³ ocupa la mitad de su caja, y en 42 px eso es un garabato irreconocible.
+//   · **Supersampling**: `renderIso` reparte píxeles enteros por voxel y no suaviza nada; a 120 px son
+//     4 px por voxel y todo filo sale en escalera. Dibujando a ×4 hay 13 px por voxel y el reescalado
+//     del navegador hace el antialias.
+// **La galería NO pasa por aquí a propósito** (decisión del dueño): sus tarjetas son grandes, el
+// encuadre común es lo que deja comparar unas con otras, y ahí ya se ve bien.
+function drawThumbRanura(cv, d){
+  const SS=4, off=document.createElement('canvas');
+  off.width=cv.width*SS; off.height=cv.height*SS;
+  drawThumb(off, d);
+  const px=off.getContext('2d').getImageData(0,0,off.width,off.height).data;
+  let x0=off.width, y0=off.height, x1=-1, y1=-1;
+  for(let y=0;y<off.height;y++) for(let x=0;x<off.width;x++){
+    if(px[(y*off.width+x)*4+3]>8){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+  }
+  if(x1<0){ x0=0; y0=0; x1=off.width-1; y1=off.height-1; }   // lienzo vacío: ni recorte ni división por cero
+  const w=x1-x0+1, h=y1-y0+1, borde=cv.width*0.06;
+  const s=Math.min((cv.width-2*borde)/w, (cv.height-2*borde)/h);
+  const cx=cv.getContext('2d');
+  cx.clearRect(0,0,cv.width,cv.height);
+  cx.imageSmoothingEnabled=true; cx.imageSmoothingQuality='high';
+  cx.drawImage(off, x0, y0, w, h, (cv.width-w*s)/2, (cv.height-h*s)/2, w*s, h*s);
+}
 async function loadHabitante(id){
   try{
     const d=await fetch('/api/habitantes/'+id,{cache:'no-store'}).then(r=>r.json());
@@ -1905,6 +1931,134 @@ async function delAsset(id,name){
 function habBucket(t){ return t==='bloque' ? 'habitacion' : t==='textura' ? 'textura' : (t==='objeto'||t==='decoracion') ? 'objeto' : 'habitante'; }
 const HAB_TITLE={habitacion:'Habitaciones', objeto:'Objetos', habitante:'Habitantes', textura:'Texturas'};
 const HAB_EMPTY={habitacion:'Aún no hay habitaciones guardadas.', objeto:'Aún no hay objetos guardados.', habitante:'Aún no hay habitantes guardados.', textura:'Aún no hay texturas guardadas.'};
+// ── El buscador de las galerías (REQ-GAL4) ────────────────────────────────────────────────────────
+// Regla del dueño: **no se busca hasta la 3ª letra**. Con menos NO se filtra (se sigue viendo el
+// catálogo entero) en vez de vaciar la rejilla: una lista en blanco mientras tecleas parece rota, y
+// además el catálogo es lo que quiere ver quien viene a curiosear, no a buscar algo concreto.
+//
+// Vive en UN solo sitio a propósito. Hay **dos buscadores casi idénticos** —la galería del editor
+// (`#hab-picker-search`) y el picker del Mundo (`#mc-picker-search`)— y la regla tiene que ser la misma
+// en los dos; si se escribe dos veces, la próxima se cambia una y se olvida la otra. Fundir las dos
+// galerías en una es el objetivo **a la larga** del ticket: esto es el primer trozo compartido.
+const GAL_MIN_BUSCA = 3;
+// Lee la caja y devuelve la consulta EFECTIVA: '' mientras no llegue al mínimo, o sea «no filtres».
+function galConsulta(input){
+  const txt = ((input && input.value) || '').trim().toLowerCase();
+  galAvisoMinimo(input, txt);
+  return txt.length >= GAL_MIN_BUSCA ? txt : '';
+}
+// ⚠️ Y el corte que hace que teclear NO cueste nada: si la consulta efectiva **no ha cambiado**, no hay
+// nada que repintar. Sin esto, cada tecla por debajo del mínimo repintaba el catálogo **entero** —114
+// tarjetas, cada una con su `<canvas>`, su `getRoomData()` y su `drawThumb()`, y en el picker además un
+// `mcStructCells()`— para acabar dibujando exactamente lo mismo. Se notaba como una caída de fps del
+// entorno detrás de la galería, que es justo lo que el dueño vio: se estaba pagando el precio de buscar
+// **precisamente cuando se había decidido no buscar**.
+//
+// Cubre de paso el otro caso simétrico: borrar de 2 letras a 1, o pasar de 3 a 4 sin que cambie el
+// texto normalizado (espacios, mayúsculas). Devuelve `null` = «no toques la rejilla»; el aviso, en
+// cambio, sí se actualiza siempre, porque su texto sí cambia con cada letra.
+function galConsultaNueva(input, anterior){
+  const q = galConsulta(input);
+  return q === anterior ? null : q;
+}
+// El aviso bajo la caja: sin él, teclear una o dos letras y no ver cambiar nada parece un buscador roto.
+// Se crea al vuelo y colgando del propio `.mc-picker-bar`, que es el trozo de DOM que las dos galerías
+// SÍ comparten, así que no hay que tocar el HTML de cada una por separado.
+function galAvisoMinimo(input, txt){
+  if(!input || !input.parentNode) return;
+  const faltan = GAL_MIN_BUSCA - txt.length;
+  const avisar = txt.length > 0 && faltan > 0;
+  let el = input.parentNode.querySelector('.gal-aviso-min');
+  if(!el){
+    if(!avisar) return;                       // no se ensucia el DOM hasta que hace falta
+    el = document.createElement('div'); el.className = 'gal-aviso-min';
+    input.insertAdjacentElement('afterend', el);
+  }
+  el.textContent = avisar ? (faltan === 1 ? 'Falta 1 letra para buscar' : 'Faltan ' + faltan + ' letras para buscar') : '';
+  el.hidden = !avisar;
+}
+// ── La taxonomía de categorías (REQ-TOOL1) ────────────────────────────────────────────────────────
+// Una pieza tiene UNA categoría, como una carpeta —no etiquetas—, y se elige desde el editor 2D/3D.
+// La lista vive aquí y de aquí sale el desplegable del editor: si se escribiera también en el HTML
+// habría dos listas que se separarían al primer añadido. `''` = sin clasificar, que es donde está
+// hoy casi todo y por eso tiene que seguir siendo una opción válida y la primera.
+//
+// ⚠️ `redstone` ya existía y ya lo usan los filtros del picker y `game.bloques`: NO se renombra ni se
+// reordena por gusto, o se despareja de lo que hay guardado en las piezas.
+const GAL_CATEGORIAS = [
+  ['',             'Sin clasificar'],
+  ['herramienta',  '🔧 Herramienta'],
+  ['construccion', '🧱 Construcción'],
+  ['fluido',       '💧 Fluido'],
+  ['redstone',     '⚡ Redstone'],
+  ['decoracion',   '🌿 Decoración'],
+  ['personaje',    '🧍 Personaje'],
+];
+// Las herramientas del Mundo, en el mismo orden en que las rota `P`. Son CUATRO y viven en el código:
+// esta lista es la que se ofrece en el editor para decir «este dibujo ES la herramienta X», y la que
+// lee la ranura 10. Añadir una entrada aquí sin implementarla en `mcDoAction` no crea una herramienta.
+const MC_HERRAMIENTAS = [
+  ['build',  '⛏️ Construir'],
+  ['paint',  '🖌️ Pintar'],
+  ['select', '🪄 Seleccionar'],
+  ['pick',   '💉 Cuentagotas'],
+];
+function mcEtiquetaHerramienta(t){
+  const e = MC_HERRAMIENTAS.find(h => h[0] === t);
+  return e ? e[1] : t;
+}
+function galEtiquetaCategoria(cat){
+  const e = GAL_CATEGORIAS.find(c => c[0] === (cat || ''));
+  return e ? e[1] : cat;                    // una categoría desconocida se enseña tal cual, no se oculta
+}
+// ── La ordenación de las galerías (REQ-GAL4 punto 2) ──────────────────────────────────────────────
+// Tres órdenes, decididos por el dueño. «Recientes» es el defecto y significa **importado o
+// modificado** (`savedAt`). «Tamaño» es el **número de voxels** (`count`), no los bytes del fichero ni
+// la caja del dibujo.
+//
+// Igual que el mínimo del buscador, esto vive en UN sitio y lo llaman las dos galerías: la comparación
+// trabaja sobre campos normalizados (`name`, `savedAt`, `count`) que hoy traen ya las tres fuentes
+// —`/api/habitantes`, `assets/index.json` y `mc.catalog`—, así que ninguna galería necesita su propio
+// comparador.
+//
+// ⚠️ «Creación» SE QUITÓ (2026-08-12, a petición del dueño): enseñaba prácticamente lo mismo que
+// «recientes». No es casualidad ni un fallo del orden — es que las dos fechas **coinciden** en todo lo
+// que existía antes del ticket, porque el relleno de lo viejo no tenía de dónde sacar dos fechas
+// distintas y puso `createdAt = savedAt`. Solo se separan cuando algo se reguarda.
+// El campo `createdAt` **se sigue guardando** en el servidor a propósito: cuesta cero, se separa solo
+// con el uso, y es información que **no se puede reconstruir después** (el mtime del que salió ya no
+// volverá a ser el de entonces). Lo que se ha quitado es la opción del desplegable, no el dato.
+const GAL_ORDENES = [['recientes','🕒 Recientes'], ['nombre','🔤 Nombre'], ['tamano','📦 Tamaño']];
+let galOrden = 'recientes';
+try{ const o=localStorage.getItem('vf_galOrden'); if(o && GAL_ORDENES.some(x=>x[0]===o)) galOrden=o; }catch(e){}
+// Fechas y nombres se comparan como CADENA a propósito: `savedAt`/`createdAt` son ISO (`2026-08-12T…`),
+// donde el orden alfabético ES el cronológico, y así una fecha vacía (un dibujo viejo sin `createdAt`)
+// cae al final sola, sin `new Date('')` → `NaN` envenenando el `sort`.
+function galCompara(orden){
+  if(orden==='nombre')  return (a,b)=> String(a.name||'').localeCompare(String(b.name||''), 'es', {sensitivity:'base'});
+  if(orden==='tamano')  return (a,b)=> ((b.count|0)-(a.count|0)) || String(a.name||'').localeCompare(String(b.name||''), 'es');
+  return (a,b)=> String(b.savedAt||'').localeCompare(String(a.savedAt||''));      // recientes (defecto)
+}
+function galOrdenaLista(items){ return items.slice().sort(galCompara(galOrden)); }
+// El desplegable se INYECTA en `.mc-picker-bar`, el trozo de DOM que las dos galerías comparten, para
+// no escribir el mismo `<select>` dos veces en index.html y que se queden desparejados. `onCambio` es
+// lo único que cambia entre una y otra: a quién hay que pedirle que repinte.
+function galMontaOrden(barra, onCambio){
+  if(!barra || barra.querySelector('.gal-orden')) return;
+  const sel=document.createElement('select');
+  sel.className='gal-orden'; sel.title='Ordenar por';
+  sel.innerHTML=GAL_ORDENES.map(([v,et])=>`<option value="${v}">${et}</option>`).join('');
+  sel.value=galOrden;
+  sel.onchange=()=>{
+    galOrden=sel.value;
+    try{ localStorage.setItem('vf_galOrden', galOrden); }catch(e){}
+    // Un solo ajuste para las dos galerías (van hacia ser una sola): si la otra está montada, se le
+    // sincroniza el desplegable, o al abrirla enseñaría un orden que ya no es el que está aplicado.
+    document.querySelectorAll('.gal-orden').forEach(o=>{ o.value=galOrden; });
+    onCambio();
+  };
+  barra.appendChild(sel);
+}
 // Orden en que se agrupa la galería SIN filtro: si se mezcla todo tal cual, las 86 texturas se comen la
 let habKind = null;
 let habSearch = '';
@@ -1916,10 +2070,13 @@ function initHabPickerUI(){
   const searchInput = $('#hab-picker-search');
   if(searchInput){
     searchInput.oninput = () => {
-      habSearch = (searchInput.value || '').trim().toLowerCase();
+      const q = galConsultaNueva(searchInput, habSearch);   // null = la consulta efectiva no ha cambiado
+      if(q === null) return;                                // …y entonces repintar sería tirar frames
+      habSearch = q;                                        // '' hasta la 3ª letra = no filtra (REQ-GAL4)
       renderHabGrid();
     };
   }
+  galMontaOrden(searchInput && searchInput.closest('.mc-picker-bar'), renderHabGrid);
   const filterContainer = $('#hab-picker-filters');
   if(filterContainer){
     filterContainer.onclick = (e) => {
@@ -1990,7 +2147,16 @@ function renderHabGrid(){
   }
   grid.innerHTML='';
 
-  const todo = habOrdena(assets.map(a=>({b:habBucket(a.type), asset:a})).concat(list.map(h=>({b:habBucket(h.type), hab:h}))));
+  // Los dos órdenes se COMPONEN, no compiten: primero el que ha elegido el dueño (REQ-GAL4), y encima
+  // el agrupado por tipo, que es estable y por tanto conserva dentro de cada grupo lo que acaba de
+  // ordenarse. Así «Nombre» no deshace el agrupado (las 86 texturas seguirían comiéndose la pantalla)
+  // pero sí manda dentro de Habitantes, dentro de Objetos, etc. Se ordena la lista YA MEZCLADA para que
+  // un asset y un guardado del mismo tipo se intercalen por fecha o nombre en vez de ir en dos bloques.
+  const campos = o => ({ name:o.name, savedAt:o.savedAt, createdAt:o.createdAt, count:o.count });
+  const todo = habOrdena(galOrdenaLista(
+    assets.map(a=>Object.assign({b:habBucket(a.type), asset:a}, campos(a)))
+      .concat(list.map(h=>Object.assign({b:habBucket(h.type), hab:h}, campos(h))))
+  ));
   for(const e of todo){
     const card=document.createElement('div'); card.className='hab-card';
     card.dataset.bucket=e.b;
@@ -2309,6 +2475,13 @@ function importJSON(file){
 // ===================== Toast =====================
 let toastT;
 function toast(msg, secs){                          // secs opcional = duración en segundos (def. 1.8 s)
+  // REQ-OSD6 · Un menú no habla. En escaparate (?osd=1) el mundo es la PANTALLA de un OSD, y los avisos
+  // que suelta al abrirse («Mundo cargado», lo que diga su autoarranque) salían encima del menú como
+  // mensajes sueltos que no vienen a cuento de nada de lo que el jugador acaba de hacer.
+  // Se pregunta por la URL (`mcEsEscaparate`, función declarada = hoisted) y NO por `mc.escaparate`: `mc`
+  // es un `let` de más abajo y hay toasts que salen antes de que exista. En la zona muerta ni siquiera
+  // `typeof mc` es seguro — tira ReferenceError, y eso convertiría un aviso en una página rota.
+  if(mcEsEscaparate()) return;
   const el=$('#toast'); el.textContent=msg;
   el.classList.toggle('mc-mode', !$('#mc-modal').hidden);   // en el Mundo, el toast sube por encima de la hotbar
   el.hidden=false;
@@ -3218,9 +3391,34 @@ window.addEventListener('resize',()=>{ if(modalOpen){ sizeBig(); drawIsoBig(); }
 // meta
 $('#meta-name').oninput=e=>state.meta.name=e.target.value;
 $('#meta-type').onchange=e=>state.meta.type=e.target.value;
+// Las dos listas se pintan una sola vez desde las constantes compartidas (REQ-TOOL1).
+(function montaCategorias(){
+  const sc=$('#meta-categoria'); if(!sc) return;
+  sc.innerHTML=GAL_CATEGORIAS.map(([v,et])=>`<option value="${v}">${esc(et)}</option>`).join('');
+  const sh=$('#meta-herramienta');
+  if(sh) sh.innerHTML='<option value="">— ninguna —</option>'+
+    MC_HERRAMIENTAS.map(([v,et])=>`<option value="${v}">${esc(et)}</option>`).join('');
+})();
+// Enseña el sub-selector de herramienta solo cuando la categoría es «herramienta»: preguntar «¿qué
+// herramienta es?» de un adoquín no tiene sentido, y dejarlo siempre visible invita a rellenarlo.
+function syncMetaCategoria(){
+  const sc=$('#meta-categoria'); if(!sc) return;
+  sc.value=state.meta.categoria||'';
+  const campo=$('#meta-herramienta-campo'), sh=$('#meta-herramienta');
+  if(campo) campo.hidden = sc.value!=='herramienta';
+  if(sh) sh.value=state.meta.herramienta||'';
+}
 if($('#meta-categoria')) $('#meta-categoria').onchange=e=>{
   if(e.target.value) state.meta.categoria=e.target.value;
   else delete state.meta.categoria;
+  // Cambiar de categoría a otra que no sea «herramienta» SUELTA el vínculo: si no, un dibujo que
+  // pasa a ser decoración seguiría reclamando ser el pico y saldría en la ranura de herramienta.
+  if(e.target.value!=='herramienta') delete state.meta.herramienta;
+  syncMetaCategoria();
+};
+if($('#meta-herramienta')) $('#meta-herramienta').onchange=e=>{
+  if(e.target.value) state.meta.herramienta=e.target.value;
+  else delete state.meta.herramienta;
 };
 // No entra en el historial de deshacer: como el nombre y el tipo, es una propiedad de la FICHA, no del
 // dibujo, y un Ctrl+Z que deshiciera una casilla en vez del último trazo desconcierta más que ayuda.
@@ -3330,6 +3528,7 @@ window.addEventListener('keydown',e=>{
     if(!$('#ag-modal').hidden){ closeAgentes(); return; }                         // 1º ídem el panel de agentes (Alt+A)
     if(!$('#mc-note').hidden){ mcCloseNote(); return; }                          // 1º si el editor de nota está abierto → cerrarlo
     if(!$('#mc-picker').hidden){ mcClosePicker(); return; }                     // 1º si el selector está abierto → cerrarlo
+    if(mc.osdAbierta){ mcOsdCerrar(); return; }                                 // 1º una pantalla OSD (REQ-OSD2): cierra el menú, no el Mundo
     if(mc.active && (document.pointerLockElement===mc.canvas || performance.now()-mc.unlockedAt<350)){ document.exitPointerLock(); return; } // 1º Esc: suelta el ratón, NO cierra
     closeWorld(); return;                                                       // 2º Esc (ratón ya libre): cierra el Mundo
   }
@@ -3752,11 +3951,22 @@ async function snipDelete(){
   toast('Snippet borrado'); snipCur=null; await snipReload();
   if(snips.length) snipLoad(snips[0].id); else snipNew();
 }
+// Ejecuta un snippet DEJANDO CONSTANCIA de cuál es mientras corre (`mc._snippetActual`). Lo que un
+// snippet registre en el motor —una acción de OSD, un comportamiento de bloque— puede así decir de
+// dónde salió. Sin esto, «¿dónde cambio este botón?» no tiene respuesta: el código no está en ningún
+// fichero del repo, sino en un documento del servidor que se edita en vivo.
+async function mcCorreSnippet(nombre, code){
+  const antes = (typeof mc!=='undefined') ? mc._snippetActual : undefined;
+  if(typeof mc!=='undefined') mc._snippetActual = nombre || null;
+  const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+  try{ return await (new AsyncFunction(code))(); }
+  finally{ if(typeof mc!=='undefined') mc._snippetActual = antes; }
+}
+
 async function snipRun(){
   const code=$('#snip-code').value;
   try{
-    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-    await (new AsyncFunction(code))();
+    await mcCorreSnippet(snipCur ? (snipCur.id || snipCur.name) : '(sin guardar, editor de snippets)', code);
     toast('▶ Snippet ejecutado');
   }catch(err){ console.error('[snippet]',err); toast('Error en el snippet: '+err.message); }
 }
@@ -5896,6 +6106,18 @@ const MC_VISTA_FLUIDO = {
 // Color de fondo/niebla EFECTIVO de este fotograma. Es lo único que cambia al sumergirse, y por eso
 // los uniformes uSky lo leen a él y no a MC_SKY.
 let mcCieloEf = MC_SKY.slice();
+// REQ-OSD6 · El color con el que se limpia el frame. Fuera del escaparate es el cielo de siempre; dentro
+// (`?osd=1`, o sea el mundo que hace de PANTALLA de un menú) se limpia con **alpha 0**. Una pantalla OSD
+// es algo que se pone ENCIMA del juego: pintar ahí el cielo es un telón azul opaco que borra lo que hay
+// detrás, y el dueño lo pidió al revés — «igual sin mostrar el cielo en los osd que sean mapas queda
+// mejor, así el azul del cielo no molesta y deja ver a través». Lo único opaco de la pantalla acaba
+// siendo lo que él dibujó. El acompañante en CSS es `body.mc-escaparate` (fondo del modal y del body).
+// TIENE que llamarse en TODOS los sitios que limpian el fondo, incluido el que restaura el clear tras la
+// pasada de sombra: uno solo que se olvide devuelve el azul un fotograma de cada dos.
+function mcClearFondo(gl){
+  if(mc.escaparate) gl.clearColor(0, 0, 0, 0);
+  else gl.clearColor(mcCieloEf[0], mcCieloEf[1], mcCieloEf[2], 1);
+}
 let mcNieblaEf = null;   // null = la niebla de siempre; si no, [near, far] en bloques
 let mcTinteEf = 0;       // suelo de niebla: 0 = ninguno (fuera del agua no cambia nada)
 // ¿En qué fluido está el OJO? El ojo, no los pies: agachado en un charco se ve agua aunque los pies
@@ -6145,7 +6367,8 @@ const mc={
   notes:{}, noteCell:null,        // t1 · notas post-it: "x,y,z" → texto (persiste en mundo.json); noteCell = bloque que edita el panel
   noteAlpha:0.85,                 // opacidad del marcador flotante de nota (game.noteAlpha) — solo para las notas SIN cartel
   noteSigns:true,                 // game.noteSigns: cada nota planta un cartel de verdad (assets/cartel.vox.json) en vez del post-it
-  noteText:true, noteTextDist:14, // game.noteText / game.noteTextDist: el texto escrito en la tabla del cartel, y desde cuántos bloques se lee
+  noteText:true, noteTextDist:21, // game.noteText / game.noteTextDist: el texto escrito en la tabla del cartel, y desde cuántos bloques se lee
+  carteles:{escala:1, palo:true, desvio:[0,1,0], giro:1}, // game.carteles: CÓMO se planta ese cartel (REQ-CART3)
   noteFont:18, noteWidth:720,     // game.noteFont / game.noteWidth: cuerpo (múltiplo de 9) y ancho del panel DOM de editar/ver nota — REQ-CART2
   unlockedAt:0,                   // instante (perf.now) en que se soltó el pointer-lock (para el Esc de 2 pasos)
   chunks:new Map(),               // "cx,cz" -> {vbo, count, dirty}
@@ -6165,7 +6388,15 @@ const mc={
   airAccel:6,                     // game.airAccel: aceleración hacia wishdir en el aire (mayor = el nudge alcanza el tope más rápido)
   airCap:3,                       // game.airCap: tope (u/s, ∝√scale) de la componente de velocidad que se puede AÑADIR en el aire por dirección → cuánto se puede desviar/ganar. Mientras sea < velocidad de salto no hay acel. recta hacia delante (anti-truco)
   scale:1,                        // escala del jugador (game.playerScale; >1 = grande → todo más pequeño)
-  tool:'build',                   // acción del clic derecho (game.playerTool: 'build' pone al lado | 'paint' repinta el bloque)
+  // REQ-FLY1 · vuelo. El estado vive AQUÍ, en `mc`, y no en un closure: el snippet del Mundo se
+  // reejecuta en vivo (mcUpdate se envuelve/desenvuelve) y no puede dejar al jugador flotando.
+  volar:false,                    // game.volar: sin gravedad. Se mueve como dentro de un fluido (dirección tomada de la vista) pero quieto es quieto: sin teclas, la vertical es CERO
+  volarVel:6,                     // game.volarVel: subida/bajada en u/s (∝√scale, como el salto)
+  fantasma:false,                 // game.fantasma: atraviesa el terreno. Solo tiene efecto VOLANDO, para que no exista un noclip a pie por accidente
+  // REQ-OSD3 · modo ESCAPARATE (URL ?osd=1): este mundo es la PANTALLA de un menú, no una partida.
+  // No guarda, no captura el puntero, no enseña hotbar y el clic PULSA bloques en vez de romperlos.
+  escaparate:false,
+  tool:'build',                   // acción del clic (game.playerTool: 'build' pone al lado | 'paint' repinta | 'select' marca caja | 'pick' cuentagotas)
   structTextures:true,            // game.structTextures: true = estructuras texturadas de verdad (detalle del editor, coste nivel 1) · false = color plano por cara (media, más barato)
   structGreedy:true,              // game.structGreedy: true = greedy meshing (fusiona caras coplanares de la misma textura/color → muchas menos caras) · false = una cara por voxel (como antes)
   useOldStructBuild:false,        // game.useOldStructBuildCall: true = el clic derecho vuelve a estampar SIEMPRE una pieza suelta (mcStampStruct, 1 draw call cada una). false (defecto) = lo que cabe en una celda se pone con setVoxel, dentro de la malla del chunk
@@ -6847,7 +7078,7 @@ function mcInitGL(){
   mc.gl2 = (typeof WebGL2RenderingContext!=='undefined') && (gl instanceof WebGL2RenderingContext);
   mc.deriv = mc.gl2 || !!gl.getExtension('OES_standard_derivatives');
   if(!mc.deriv) console.warn('[mundo] sin OES_standard_derivatives → sin sombra de sol');
-  gl.clearColor(mcCieloEf[0],mcCieloEf[1],mcCieloEf[2],1);
+  mcClearFondo(gl);
   gl.enable(gl.DEPTH_TEST);
   cv.addEventListener('webglcontextlost',e=>{ e.preventDefault(); }, false);   // MVP: mínimo (F3 re-mesha al volver)
   return gl;
@@ -8080,7 +8311,7 @@ function mcRenderShadow(){
   // están en ninguna de las listas de arriba). app.js no sabe qué es: solo le presta el dibujante de la pasada.
   if(mc.sunExtra) try{ mc.sunExtra(draw); }catch(e){ console.error('[mundo] sunExtra:', e); }
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  gl.clearColor(mcCieloEf[0],mcCieloEf[1],mcCieloEf[2],1);
+  mcClearFondo(gl);
   S.dirty=false;
   return S;
 }
@@ -8758,7 +8989,7 @@ function mcRemeshAround(x,z,x1c,z1c){
 // estable entre reconstrucciones.
 // `nota` va en el mismo saco por el mismo motivo: es lo que ata un cartel a su nota, y sin copiarlo
 // una edición cerca convertiría el cartel en un mueble suelto que ya nadie retira ni sabe leer.
-function mcCarryEfimera(from,to){ if(from && from.efimera) to.efimera=true; if(from && from.nota) to.nota=from.nota; return to; }
+function mcCarryEfimera(from,to){ if(from && from.efimera) to.efimera=true; if(from && from.nota){ to.nota=from.nota; to.cartel=from.cartel; } return to; }
 async function mcRebakeStructsNear(x,z,x1,z1){
   if(x1===undefined){ x1=x; z1=z; }
   const R=MC_MAXLIGHT+1;   // solape de cajas: con (x1,z1) igual a (x,z) es el mismo test de punto de siempre
@@ -9236,6 +9467,25 @@ function mcUpdate(dt){
   let mira = 0;
   if(cabalgando && !reposicionando){
     mx=0; mz=0; mc.vel[0]=0; mc.vel[2]=0;
+  } else if(mc.volar){
+    // REQ-FLY1 · vuelo: «como estar dentro de un fluido pero sin caída». Se copia el reparto de la rama
+    // de nadar —la vista redirige, W mirando arriba sube— porque es lo que pidió el dueño, pero la
+    // vertical NO pasa por mcCaidaPaso: aquí no hay gravedad ni rozamiento que integrar, y sin teclas la
+    // velocidad vertical es CERO. Quieto en el aire es quieto: una deriva de 0,1 u/s arruina un
+    // sobrevuelo de cámara, que es justo para lo que nació esto (REQ-INTRO1).
+    let f=0, st=0;
+    if(k['w']) f+=1; if(k['s']) f-=1; if(k['d']) st+=1; if(k['a']) st-=1;
+    const cp=Math.cos(mc.pitch);
+    let hx=fwd[0]*f*cp + right[0]*st, hz=fwd[2]*f*cp + right[2]*st;
+    const hl=Math.hypot(hx,hz);
+    if(hl>1){ hx/=hl; hz/=hl; }        // se ACOTA, no se normaliza: mirando a plomo, W no empuja en horizontal
+    // Shift aquí BAJA, así que no puede además frenar a la mitad como al andar: se usa la marcha entera.
+    const spf=mc.speed*Math.sqrt(mc.scale);
+    mc.vel[0]=hx*spf; mc.vel[2]=hz*spf;  // sin inercia: soltar las teclas para en seco (a diferencia del aire)
+    let sube=f*Math.sin(mc.pitch) + (k[' ']?1:0) - (k['shift']?1:0);   // mirar arriba con W sube, Espacio sube, Shift baja
+    sube=Math.max(-1,Math.min(1,sube));                                 // sumar los dos no vale por el doble
+    mc.vel[1]=sube*mc.volarVel*Math.sqrt(mc.scale);
+    mc.onGround=false;                 // volando no se pisa nada: ni parkour, ni deslizamiento, ni salto
   } else if(enFluido){
     // Se manda DIRECTO y no por air-strafe: lo que se pide es que girar la vista te REDIRIJA, y el
     // air-strafe por definición no reescribe la velocidad. Es la trampa de BUG-ESC1 vista del otro lado —
@@ -9275,9 +9525,20 @@ function mcUpdate(dt){
   // que andar por un charco te convierta en nadador. Con suelo debajo gana el salto de toda la vida, así
   // que un charco de un bloque se sigue saltando igual que antes; fuera del agua `nadando` no hace nada.
   const nadando = !!k[' '] && !mc.onGround;
-  mc.vel[1]=mcCaidaPaso(mc.vel[1], dt, mc.pos[0], mc.pos[1], mc.pos[2], nadando, mira);   // gravedad (REQ-FLUID6: dentro de un líquido, 1/16 y con rozamiento; REQ-FLUID9: la vista y Shift)
-  if(k[' '] && mc.onGround){ mc.vel[1]=8.0*Math.sqrt(mc.scale); mc.onGround=false; }   // salto: altura ∝ scale (√ porque h=v²/2g) → el doble de grande salta el doble de bloques, igual que la marcha escala con el tamaño
+  // REQ-FLY1 · volando NO se llama a mcCaidaPaso: la vertical ya la fijó la rama de vuelo y pasarla por
+  // el integrador de gravedad la iría comiendo frame a frame (deriva hacia abajo con las manos quietas).
+  if(!mc.volar){
+    mc.vel[1]=mcCaidaPaso(mc.vel[1], dt, mc.pos[0], mc.pos[1], mc.pos[2], nadando, mira);   // gravedad (REQ-FLUID6: dentro de un líquido, 1/16 y con rozamiento; REQ-FLUID9: la vista y Shift)
+    if(k[' '] && mc.onGround){ mc.vel[1]=8.0*Math.sqrt(mc.scale); mc.onGround=false; }   // salto: altura ∝ scale (√ porque h=v²/2g) → el doble de grande salta el doble de bloques, igual que la marcha escala con el tamaño
+  }
   const p=mc.pos;
+  // REQ-FLY1 · fantasma = volar ATRAVESANDO el terreno. Es el único camino que no pasa por mcMoveAxis /
+  // mcCollides, y por eso está atado a `mc.volar`: a pie sería un noclip suelto, y aquí lo pide el
+  // sobrevuelo de la intro, que no puede engancharse en una montaña a mitad de la animación.
+  if(mc.volar && mc.fantasma){
+    p[0]+=mc.vel[0]*dt; p[1]+=mc.vel[1]*dt; p[2]+=mc.vel[2]*dt;
+    return;
+  }
   // Horizontal eje a eje CON auto-escalón (∝ tamaño): un bloque de altura 1 es un escalón enano para un
   // gigante, así que si un eje choca probamos a subir hasta MC_STEP·scale y pasar por encima. Sin esto,
   // cualquier saliente de 1 bloque frena a un x8 y ni siquiera se puede montar el terreno (borde de 15).
@@ -9285,7 +9546,7 @@ function mcUpdate(dt){
   mcMoveAxis(2, p[2]+mc.vel[2]*dt);
   let ny=p[1]+mc.vel[1]*dt;
   if(!mcCollides(p[0],ny,p[2])){ p[1]=ny; mc.onGround=false; }
-  else { if(mc.vel[1]<0) mc.onGround=true; mc.vel[1]=0; }         // choca arriba o aterriza
+  else { if(mc.vel[1]<0 && !mc.volar) mc.onGround=true; mc.vel[1]=0; }   // choca arriba o aterriza (volando nunca se «aterriza»: se apoya y ya)
 }
 function mcViewMatrix(){
   const p=mc.pos, ex=p[0], ey=p[1]+MC_EYE*mc.scale, ez=p[2];   // ojo = pies + altura del ojo (escala con game.playerScale)
@@ -9342,7 +9603,7 @@ function mcRender(){
   // ANTES del clear porque el color de fondo es la mitad del efecto (lo que se ve más allá de la
   // niebla es fondo, no cielo).
   mcActualizaVista();
-  gl.clearColor(mcCieloEf[0],mcCieloEf[1],mcCieloEf[2],1);
+  mcClearFondo(gl);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   if(!mc.prog || !mc.atlasTex) return;
   // Pasada 1 · el mundo visto desde el sol (solo si la geometría cambió). Deja el mapa en la unidad 1 para que lo
@@ -9703,7 +9964,7 @@ function mcDrawOverlays(pj, view){
   const lines=[], structLines=[], xray=[];   // lines/structLines: fantasma de bloque (game.ghostAlpha) vs. huella de estructura (game.structGhostAlpha)
   // 1) Fantasma de colocación / marcador «demasiado lejos» (solo mientras juegas y con algo que colocar).
   const sk=mc.slotStruct[mc.sel];
-  if(playing && (sk || mc.hotbar[mc.sel]) && mc.tool!=='paint'){
+  if(playing && (sk || mc.hotbar[mc.sel]) && mc.tool!=='paint' && mc.tool!=='pick'){   // el cuentagotas no coloca: enseñar el fantasma prometería un bloque que no va a salir
     const near=mcRaycast(mcReach(), true);   // el fantasma de colocación también aparece sobre caras de estructura
     if(near){
       const n=near.normal, px=near.cell[0]+n[0], py=near.cell[1]+n[1], pz=near.cell[2]+n[2];
@@ -10277,6 +10538,56 @@ function mcBreak(){
     if(mcRejillaSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T)) && !mcIsCellReplaceable(bx,by,bz)){ const before=mc.grid[mcIdx(bx,by,bz)]; mcSetBlock(bx,by,bz,0); mcPushHist({t:'b',x:bx,y:by,z:bz,before,after:0}); mcRemeshAround(bx,bz); mcScheduleSave(); return; }
   }
 }
+// Cuentagotas (REQ-PICK4): el material de lo apuntado va a la ranura activa. Es el «pick block» de
+// Minecraft y NO toca el mundo: ni rompe, ni pone, ni entra en el historial.
+//
+// Recorre el rayo con la MISMA marcha fina que mcBreak —estructura primero, luego rejilla, y el mismo
+// recorte de `mcRejillaSolidAt`/`mcIsCellReplaceable`— para que se pille exactamente lo que se habría
+// roto. Duplicar la marcha con otro criterio sería la manera de que el cuentagotas y el pico apunten a
+// bloques distintos desde el mismo píxel.
+function mcPickBlock(){
+  const o=[mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]], cp=Math.cos(mc.pitch);
+  const d=[-Math.sin(mc.yaw)*cp, Math.sin(mc.pitch), -Math.cos(mc.yaw)*cp];
+  const T=MC_TILE, MAXD=mcReach(), step=1/T;
+  for(let t=step; t<=MAXD; t+=step){
+    const px=o[0]+d[0]*t, py=o[1]+d[1]*t, pz=o[2]+d[2]*t;
+    if(mc.structures.length && mcAimSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T))){
+      const s=mcStructAt(px,py,pz);
+      if(s) return mcPickClave(s.key);
+    }
+    const bx=Math.floor(px), by=Math.floor(py), bz=Math.floor(pz);
+    if(mcRejillaSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T)) && !mcIsCellReplaceable(bx,by,bz))
+      return mcPickClave(mc.blockKey[mc.grid[mcIdx(bx,by,bz)]]);
+  }
+  toast('Cuentagotas: no hay nada a tiro');
+}
+// Lleva una clave a la hotbar. Se guarda la clave BASE (sin el `@ori` de las 24 posturas): al colocar,
+// la orientación la pone la mano del jugador (R / Shift+R), así que arrastrar el giro del bloque pillado
+// pelearía con ella. El nivel de fluido se recorta por lo mismo: se pilla «agua», no «agua a 3/7».
+function mcPickClave(clave){
+  if(!clave){ toast('Cuentagotas: eso no tiene material'); return; }
+  const k=mcFluidBase(mcClaveBase(clave));
+  // Pillar SUELTA el botón a efectos de las dos rutas que colocan. En cuanto pasemos a Pintar,
+  // `mcToolPasiva()` deja de ser cierto, y el mismo clic que pilló seguiría pulsado: la repetición de
+  // `mcTick` empezaría a pintar sobre el bloque recién pillado, y el `mouseup` con una ranura-estructura
+  // armada lo estamparía. Esto se hace ANTES del `await` de mcAssignSlot, que si no llega tarde.
+  mc.heldBtn=-1;
+  // Si ya está en el cajón se SELECCIONA esa ranura en vez de duplicarla encima de la activa: es lo que
+  // hace Minecraft y deja el cuentagotas sin poder pisar nada de lo que el dueño ya había preparado.
+  for(let i=0;i<mc.hotbar.length;i++){
+    const kh = mc.slotStruct[i] || (mc.hotbar[i] ? mc.blockKey[mc.hotbar[i]] : null);
+    if(kh && mcFluidBase(mcClaveBase(kh))===k){ mc.sel=i; mcSelectSlot(); mcSaveLoadout(); mcTrasPillar(k, 'ranura '+(i+1)); return; }
+  }
+  mcAssignSlot(mc.sel, k, mcNombreMat(k)).then(()=>mcTrasPillar(k, 'ranura '+(mc.sel+1))).catch(()=>toast('No se pudo pillar el material'));
+}
+// Pillado el material, la herramienta pasa sola a **Pintar** (petición del dueño): el gesto natural es
+// cuentagotas → repintar con lo que acabas de coger, como en un editor de imagen. Se anuncia en el MISMO
+// toast que el material, y por eso `mcSetPlayerTool` va sin `announce`: si no, su aviso pisaría al de la
+// ranura y el dueño no vería qué ha pillado.
+function mcTrasPillar(k, donde){
+  mcSetPlayerTool('paint');
+  toast(mcNombreMat(k)+' · '+donde+' — ahora Pintar (P cambia)');
+}
 // Cuarto de vuelta (0..3) para que el FRENTE de la sala mire al jugador: se toma de hacia dónde mira (yaw),
 // ajustado a la dirección cardinal más cercana. Colocarla desde distintos lados la orienta distinto (ticket #3).
 function mcPlace(){
@@ -10338,9 +10649,22 @@ function mcPaint(){
 }
 // Clic derecho: 'paint' repinta el bloque apuntado; 'build' (o ranura de estructura) pone al lado / estampa.
 function mcUseRight(){ if(mc.tool==='paint' && !mc.slotStruct[mc.sel]) mcPaint(); else mcPlace(); }
+// Herramientas PASIVAS: no rompen, no colocan y no estampan. Las rutas de estructura (mantener clic
+// derecho → estampar al soltar) y la repetición al mantener pulsado tienen que preguntar por esto y no
+// por `tool!=='select'`, o cada herramienta nueva vuelve a colocar bloques por la puerta de atrás.
+function mcToolPasiva(){ return mc.tool==='select' || mc.tool==='pick'; }
 // Acción de un botón de ratón (para el clic inicial y la repetición al mantener pulsado).
 function mcDoAction(btn){
+  // REQ-OSD4 · en una pantalla incrustada (?osd=1) el clic izquierdo PULSA el bloque, no lo rompe: un
+  // menú donde el botón «JUGAR» se desintegra al pulsarlo no es un menú. Va lo primero, antes que
+  // cualquier herramienta, porque en escaparate ninguna de ellas tiene sentido.
+  if(mc.escaparate){ if(btn===0) mcEscaparatePulsa(); return; }
+  // Con una pantalla OSD abierta no se toca el mundo de debajo. La capa ya tapa el canvas y el ratón
+  // está suelto, así que esto no debería alcanzarse nunca: es el cinturón, por si un camino nuevo
+  // (un mando táctil, un script) llamara aquí sin pasar por el ratón.
+  if(mc.osdAbierta) return;
   if(mc.tool==='select'){ if(btn===0) mcSelectClick(); else if(btn===2) mcSelectClear(); mcRevealHotbar(); return; }   // Seleccionar: izq marca esquinas, dcho limpia (NO rompe/pone)
+  if(mc.tool==='pick'){ mcPickBlock(); mcRevealHotbar(); return; }   // Cuentagotas: los DOS botones pillan; ninguno rompe ni pone
   if(btn===0) mcBreak(); else if(btn===2) mcUseRight(); mcRevealHotbar();   // dibujar/romper trae la hotbar de vuelta
 }
 // ── Herramienta Seleccionar (tool='select') ────────────────────────────────────────────────────────────
@@ -10489,16 +10813,33 @@ const MC_NOTE_MAX=280;                                  // tope de una nota (pos
 // la nota: mcNoteAnchor es la vuelta del cartel a su bloque, y es lo que hace que la tecla N y el
 // visor de texto funcionen mirando el cartel, que es justo lo que uno mira.
 const MC_NOTE_SIGN='asset:assets/cartel.vox.json';
+const MC_NOTE_SIGN_PLANO='asset:assets/cartel_tabla.vox.json';  // el mismo cartel SIN el poste (game.carteles.palo=false)
 const MC_NOTE_SIGN_ROT=1;                               // canto en Z: la tabla mira de frente a quien llega
 const MC_NOTE_SIGN_MAX=64;                              // tope de carteles: cada uno es una malla y una llamada de dibujo
 const MC_NOTE_SIGN_LOTE=8;                              // cuántos se plantan por repaso (ver mcSyncNoteSignsRun)
-function mcNoteSignOrigin(k){ const q=k.split(','); return [+q[0], +q[1]+1, +q[2]]; }   // se planta SOBRE el bloque
 
-// ¿Hay algún cartel de más o de menos? Es el chequeo barato que corre en el bucle: recorre las
-// estructuras (no las notas), y solo si no cuadra se paga la sincronización de verdad.
+// REQ-CART3 · Cómo se planta el cartel. Son cuatro ajustes GLOBALES (no por nota): un mundo-menú los
+// quiere todos iguales, y meterlos por nota obligaría a que mc.notes dejase de ser "clave → texto",
+// que es el formato que ya está escrito en todos los mundo.json. mcCartelFirma es lo que hace que
+// cambiar cualquiera de ellos replante los carteles que ya estaban puestos.
+function mcCartelCfg(){
+  const c=(mc.carteles=mc.carteles||{}), d=Array.isArray(c.desvio)?c.desvio:[0,1,0];
+  return { esc: Math.max(0.1, Math.min(8, isFinite(+c.escala)?+c.escala:1)),
+           palo: c.palo!==false,
+           dx:(+d[0]||0), dy:(d[1]===undefined?1:(+d[1]||0)), dz:(+d[2]||0),
+           rot: mcOriNorm(c.giro===undefined?MC_NOTE_SIGN_ROT:c.giro) };
+}
+function mcCartelFirma(){ const c=mcCartelCfg(); return c.esc+'|'+(c.palo?1:0)+'|'+c.dx+','+c.dy+','+c.dz+'|'+c.rot; }
+function mcNoteSignOrigin(k){                                        // por defecto, SOBRE el bloque
+  const q=k.split(','), c=mcCartelCfg();
+  return [+q[0]+c.dx, +q[1]+c.dy, +q[2]+c.dz];
+}
+
+// ¿Hay algún cartel de más, de menos o plantado con otros ajustes? Es el chequeo barato que corre en
+// el bucle: recorre las estructuras (no las notas), y solo si no cuadra se paga la sincronización.
 function mcNoteSignsDesfasados(){
-  const quiere=mc.noteSigns!==false; let n=0;
-  for(const s of mc.structures) if(s.nota){ if(!quiere || !mc.notes[s.nota]) return true; n++; }
+  const quiere=mc.noteSigns!==false, firma=mcCartelFirma(); let n=0;
+  for(const s of mc.structures) if(s.nota){ if(!quiere || !mc.notes[s.nota] || s.cartel!==firma) return true; n++; }
   return n!==(quiere ? Math.min(Object.keys(mc.notes).length, MC_NOTE_SIGN_MAX) : 0);
 }
 // Las sincronizaciones se ENCOLAN, no se descartan: estampar es asíncrono, y una nota escrita
@@ -10511,10 +10852,10 @@ function mcSyncNoteSigns(){
 }
 async function mcSyncNoteSignsRun(){
   if(!mc.grid) return;
-  const quiere=mc.noteSigns!==false, tienen=new Map();
+  const quiere=mc.noteSigns!==false, c=mcCartelCfg(), firma=mcCartelFirma(), tienen=new Map();
   for(const s of mc.structures.slice()) if(s.nota){
-    if(quiere && mc.notes[s.nota] && !tienen.has(s.nota)) tienen.set(s.nota, s);
-    else mcRemoveStruct(s, true);                       // nota borrada, carteles apagados o duplicado
+    if(quiere && mc.notes[s.nota] && s.cartel===firma && !tienen.has(s.nota)) tienen.set(s.nota, s);
+    else mcRemoveStruct(s, true);                       // nota borrada, carteles apagados, ajustes cambiados o duplicado
   }
   if(!quiere) return;
   // Se plantan por tandas: estampar construye malla (y a veces re-hornea el atlas), así que un
@@ -10527,9 +10868,9 @@ async function mcSyncNoteSignsRun(){
     if(plantados>=MC_NOTE_SIGN_LOTE) break;
     const o=mcNoteSignOrigin(k);
     if(!mcInside(o[0],o[1],o[2])) continue;
-    const s=await mcStampStruct(MC_NOTE_SIGN, o[0],o[1],o[2], MC_NOTE_SIGN_ROT, true);
+    const s=await mcStampStruct(c.palo?MC_NOTE_SIGN:MC_NOTE_SIGN_PLANO, o[0],o[1],o[2], c.rot, true, c.esc);
     if(!s) continue;
-    s.efimera=true; s.nota=k;                           // marcar DESPUÉS del await: antes no hay instancia viva
+    s.efimera=true; s.nota=k; s.cartel=firma;           // marcar DESPUÉS del await: antes no hay instancia viva
     tienen.set(k, s); plantados++;
   }
 }
@@ -10587,7 +10928,7 @@ const MC_GAME_FONT='"Pixeloid Sans"';   // == --font-game de style.css: si se ca
 // en orientación de mundo — o sea que el giro de la instancia ya viene aplicado y no hay que rotar nada.
 // Se cachea en la propia instancia porque el barrido es de miles de celdas y esto corre en cada cuadro.
 function mcNoteBoardRect(s){
-  const marca=s.key+'|'+(s.rot|0)+'|'+s.ox+','+s.oy+','+s.oz;   // el origen entra en la marca: el mundo se desplaza (mcShift)
+  const marca=s.key+'|'+(s.rot|0)+'|'+s.ox+','+s.oy+','+s.oz+'|'+(s.esc||1); // el origen entra en la marca: el mundo se desplaza (mcShift)
   if(s._boardFor===marca) return s._board;
   const g=mcStructColl(s); if(!g) return null;     // malla invalidada (re-horneado): se reintenta al cuadro siguiente
   s._boardFor=marca; s._board=null;
@@ -10617,17 +10958,19 @@ function mcNoteBoardRect(s){
   for(let y=y1;y>=y0;y--){ const f=filas[y]; if(!f || (f[1]-f[0]+1) < ancho*0.7) break; abajo=y; }
   let a=1e9,b=-1;
   for(let y=abajo;y<=y1;y++){ const f=filas[y]; if(f){ if(f[0]<a)a=f[0]; if(f[1]>b)b=f[1]; } }
-  // A coordenadas de mundo: fino + origen de la instancia, dividido por el tamaño de celda fina. Los
-  // límites altos son EXCLUSIVOS (la cara exterior del último voxel), que es donde se pega el rótulo.
-  const T=MC_TILE, base=[s.ox*T, s.oy*T, s.oz*T];
+  // A coordenadas de mundo: fino × ESCALA + origen de la instancia, dividido por el tamaño de celda fina.
+  // Los límites altos son EXCLUSIVOS (la cara exterior del último voxel), que es donde se pega el rótulo.
+  // La escala (REQ-AGESC1) no es opcional: bits/fdim van siempre en voxeles finos del DIBUJO, así que un
+  // cartel a escala 2 ocupa el doble de mundo por voxel y sin la E el rótulo se queda en un cuarto de tabla.
+  const T=MC_TILE, E=s.esc||1, base=[s.ox*T, s.oy*T, s.oz*T];
   const h0=a+MC_NOTE_TEXT_PAD, h1=b+1-MC_NOTE_TEXT_PAD;
   const v0=abajo+MC_NOTE_TEXT_PAD, v1=y1+1-MC_NOTE_TEXT_PAD;
   if(h1-h0<4 || v1-v0<3) return null;              // tabla diminuta: no cabe ni una letra legible
   const nmin=(na===0)?x0:z0, nmax=(na===0)?x1:z1;
   s._board={ na, ha,
-    h0:(base[ha]+h0)/T, h1:(base[ha]+h1)/T,
-    v0:(base[1]+v0)/T,  v1:(base[1]+v1)/T,
-    n0:(base[na]+nmin)/T, n1:(base[na]+nmax+1)/T };
+    h0:(base[ha]+h0*E)/T, h1:(base[ha]+h1*E)/T,
+    v0:(base[1]+v0*E)/T,  v1:(base[1]+v1*E)/T,
+    n0:(base[na]+nmin*E)/T, n1:(base[na]+(nmax+1)*E)/T };
   return s._board;
 }
 // La fuente del juego es un @font-face: hornear antes de que llegue dejaría la de reserva pegada en la
@@ -10767,7 +11110,9 @@ function mcDrawNoteTexts(pj, view){
   if(!mc.noteTxtProg) mcBuildNoteTextProgram();
   const L=mc.noteTxtLoc; if(!L) return;
   const ex=mc.pos[0], ey=mc.pos[1]+MC_EYE*mc.scale, ez=mc.pos[2];
-  const dmax=Math.max(1, mc.noteTextDist*mc.scale), d0=dmax*0.75;
+  // En una pantalla-menú (?osd=1) el rótulo NO se desvanece: la cámara está donde la puso el encuadre,
+  // a menudo lejos para que quepa el menú entero, y un botón ilegible no es un botón (REQ-CART3).
+  const dmax=mc.escaparate ? Infinity : Math.max(1, mc.noteTextDist*mc.scale), d0=dmax*0.75;
   let listo=false;
   for(const s of mc.structures){
     if(!s.nota) continue;
@@ -10920,7 +11265,645 @@ function mcCopyFallback(txt){
   toast('Traza volcada a la consola F12');
 }
 
-// --- Tecla F · foto del Mundo -------------------------------------------------------------------
+// ── REQ-OSD2 · Pantallas OSD: una capa de menú ENCIMA del juego ──────────────────────────────────
+// «haria falta poder crear un OSD que se ponga encima del juego para las opciones de "JUGAR" y
+// "CONSTRUIR" […] quiero poder diseñar pantallas para OSD y activarlas con f12 inspector».
+//
+// ⚠️ NO es `game.showOSDbuttons` (REQ-OSD1): eso son los dos botones de la esquina. Esto es
+// `game.osd`, y en el código se le llama «pantalla OSD» para que los dos no se confundan nunca.
+//
+// Una pantalla se declara de dos maneras y las dos acaban en el mismo sitio (#mc-osd):
+//   game.osd.define('menu', {html:'<div class="mc-osd-panel">…</div>'})   ← andamio, para scripts
+//   game.osd.define('menu', {mapa:'menu1'})                              ← la de verdad (REQ-OSD3):
+//                                                                          se DIBUJA otro mapa
+//   game.osd.define('menu', {mapa:'menu1', html:'…'})                    ← las dos (REQ-OSD9): el mapa de
+//                                                                          fondo y el html de botones
+//   …, sitio:'abajo-derecha')                                            ← dónde cae el html (REQ-OSD10):
+//                                                                          centro|arriba|abajo|izquierda|derecha
+// El estado vive en `mc` y no en un closure, como el resto del Mundo: el dueño reejecuta snippets en
+// vivo y no puede quedarse con un menú abierto que ya nadie sabe cerrar.
+mc.osdPantallas = {};     // nombre → cfg
+mc.osdAbierta   = null;   // nombre de la pantalla abierta, o null
+mc.osdAcciones  = {};     // TEXTO del botón → función (lo comparten el HTML y los bloques-nota de REQ-OSD4)
+mc.osdListo     = null;   // REQ-OSD6 · descubre la pantalla-mapa cuando el iframe avisa de que ya está
+mc._osdEsperaT  = 0;      // …y el reloj que la descubre igual si no avisa nunca
+// El ENTORNO de cada acción: los ayudantes de los que depende, que viven dentro del snippet que la
+// registró y por tanto no existen en la consola. Sin esto, el código que enseña `dump()` se lee pero no
+// se puede tocar —copiarlo da «intro is not defined»—, que es exactamente lo que le pasó al dueño. Se
+// le pasa a la acción al llamarla y se sirve por `game.osd.entorno(texto)` para trabajar desde F12.
+mc.osdEntornos  = {};     // TEXTO → objeto con lo que la acción necesita de su snippet
+mc.osdOrigen    = {};     // TEXTO → dónde se registró (qué snippet, o la consola): dónde hay que ir a cambiarlo
+
+// El texto de un botón es lo que el dueño escribió en una nota o en un <button>: se normaliza para que
+// «Jugar», « JUGAR » y «jugar» sean el mismo botón. Un menú no es un lenguaje de programación.
+function mcOsdClave(t){ return String(t==null?'':t).trim().toUpperCase(); }
+
+function mcOsdDefine(nombre, cfg){
+  nombre = String(nombre||'').trim();
+  if(!nombre) throw new Error('game.osd.define: hace falta un nombre');
+  if(!cfg || (!cfg.html && !cfg.mapa)) throw new Error('game.osd.define("'+nombre+'"): la pantalla necesita {html:…} o {mapa:…}');
+  mc.osdPantallas[nombre] = Object.assign({}, cfg);
+  return nombre;
+}
+
+// REQ-OSD10 · DÓNDE se pone el panel dentro de la pantalla. «el OSD de botones tapa el gráfico de fondo,
+// quiero poder colocarlo en otros lugares». Con el mapa de fondo, un panel centrado se come justo lo que
+// se ha ido a enseñar. Se declara en el define, `sitio:'abajo-derecha'`, y se resuelve como dos ejes
+// independientes, no como una lista de nueve casos: así 'abajo', 'derecha' y 'abajo-derecha' salen de la
+// misma regla y da igual el orden en que se escriban.
+// No se ofrecen píxeles ni coordenadas a propósito: el panel tiene que caer bien en cualquier ventana, y
+// el margen con el borde lo pone el CSS (`.mc-osd-html`), no cada pantalla.
+const MC_OSD_SITIOS = ['centro','arriba','abajo','izquierda','derecha'];
+function mcOsdSitio(panel, sitio){
+  const partes = String(sitio==null ? 'centro' : sitio).toLowerCase().split(/[\s,\-_]+/).filter(Boolean);
+  // Un sitio mal escrito centraría en silencio, y «no me hace caso» es de lo más caro de diagnosticar.
+  const malas = partes.filter(t => MC_OSD_SITIOS.indexOf(t) < 0);
+  if(malas.length) console.warn('game.osd: sitio "'+sitio+'": no entiendo «'+malas.join('», «')+'». '+
+    'Vale ' + MC_OSD_SITIOS.join(', ') + ' y sus combinaciones (p.ej. "abajo-derecha").');
+  panel.style.alignItems     = partes.indexOf('arriba')>=0 ? 'flex-start' : partes.indexOf('abajo')>=0 ? 'flex-end' : 'center';
+  panel.style.justifyContent = partes.indexOf('izquierda')>=0 ? 'flex-start' : partes.indexOf('derecha')>=0 ? 'flex-end' : 'center';
+}
+
+// REQ-OSD11 · la identidad del FONDO de una pantalla: qué mapa y desde dónde se mira. Dos pantallas con
+// la misma clave se ven exactamente igual por detrás, así que el <iframe> de una vale para la otra.
+function mcOsdFondoClave(cfg){ return cfg.mapa ? cfg.mapa + mcOsdEncuadreURL(cfg) : ''; }
+
+// Los botones del andamio HTML declaran su acción igual que un bloque-nota: por su TEXTO. Así una
+// pantalla se puede pasar de {html:…} a {mapa:…} sin tocar ni una de las acciones registradas.
+function mcOsdEngancha(raiz){
+  raiz.querySelectorAll('[data-osd], button').forEach(b=>{
+    b.addEventListener('click', ()=>mcOsdPulsar(b.dataset.osd || b.textContent));
+  });
+}
+
+function mcOsdAbrir(nombre){
+  const cfg = mc.osdPantallas[nombre];
+  if(!cfg){ throw new Error('game.osd.abrir("'+nombre+'"): esa pantalla no está definida (game.osd.pantallas())'); }
+  const capa = $('#mc-osd'); if(!capa) return null;
+  // REQ-OSD11 · Si la pantalla nueva pide EL MISMO fondo que la abierta, se le deja el <iframe> que ya
+  // está vivo y solo se cambia el panel de botones. Antes cada `conmutar` entre dos pantallas del mismo
+  // mapa lo destruía y lo levantaba de cero: segundo contexto WebGL, descarga del mundo, mallado y luz
+  // otra vez — el spinner reapareciendo y varios segundos de espera para cambiar un botón de sitio.
+  // ⚠️ El iframe NO se mueve de padre ni se re-inserta: reparentarlo lo recarga, que es justo lo que se
+  // está evitando. Se vacía la capa a mano dejándolo donde está.
+  const vivo = mc.osdAbierta ? capa.querySelector('iframe') : null;
+  const reusa = !!vivo && !vivo.classList.contains('cargando') && vivo.dataset.osdFondo === mcOsdFondoClave(cfg);
+  if(reusa){
+    Array.from(capa.childNodes).forEach(n => { if(n !== vivo) n.remove(); });
+    mc.osdAbierta = null;                   // se cambia de pantalla sin pasar por cerrar: el fondo sigue puesto
+  }else{
+    if(mc.osdAbierta) mcOsdCerrar();        // una sola pantalla a la vez: dos iframes son dos contextos WebGL
+    capa.innerHTML = '';
+    if(cfg.mapa) mcOsdMontaMapa(capa, cfg); // REQ-OSD3
+  }
+  // REQ-OSD9 · `mapa` y `html` no se excluyen: el mapa es el FONDO y el html son los BOTONES. Antes había
+  // que elegir, y quien quería las dos cosas acababa abriendo su panel dentro de la pantalla (un snippet
+  // en el mundo del <iframe>), donde las acciones corren en el mundo equivocado: allí `game.volar()` vuela
+  // la cámara del menú y `game.map()` navega el iframe. Poniendo el html AQUÍ, en el DOM del padre, los
+  // botones son botones del mundo de verdad y no necesitan puente — el puente sigue siendo solo para los
+  // botones que son bloques del mapa de dentro.
+  if(cfg.html){
+    const panel = document.createElement('div');
+    panel.className = 'mc-osd-html';
+    panel.innerHTML = cfg.html;
+    mcOsdSitio(panel, cfg.sitio);           // REQ-OSD10 · dónde se pone dentro de la pantalla
+    // Se descubre a la vez que el mapa: enseñar los botones sobre un hueco vacío es el mismo parpadeo
+    // que quitó REQ-OSD6. Sin mapa (o si la pantalla ya estaba lista) nace visible.
+    if(cfg.mapa && mc.osdListo){
+      panel.classList.add('cargando');
+      const revela = mc.osdListo;
+      mc.osdListo = () => { panel.classList.remove('cargando'); revela(); };
+    }
+    capa.appendChild(panel);
+  }
+  mcOsdEngancha(capa);
+  capa.hidden = false;
+  // REQ-OSD12 · Con un menú puesto, el HUD del juego sobra: la hotbar y la mira no sirven de nada sin
+  // puntero capturado (el OSD lo suelta y `mcDoAction` sale pronto), y los botones de esquina —CÓDIGO y
+  // CERRAR— compiten con los del menú. Se esconde el MISMO grupo que ya escondía la intro, y por la misma
+  // razón: con `hidden` no bastaría, porque `mcUpdateHotbar` la re-enseña sola en el siguiente frame.
+  // `hud:true` en el define lo deja puesto, para una pantalla que sea un panel sobre la partida viva.
+  document.body.classList.toggle('mc-osd-puesto', !cfg.hud);
+  // …salvo «✕ Cerrar» en táctil: ahí no hay Esc, así que esconderlo deja al visitante encerrado en el
+  // menú si su pantalla no trae botón de salida. Misma condición que `updateOSDbuttons` (REQ-OSD1).
+  document.body.classList.toggle('mc-osd-tactil', !!mcTouchOn);
+  mc.osdAbierta = nombre;
+  // Con el puntero capturado no hay cursor con el que pulsar nada, y las teclas que estuvieran
+  // pulsadas se quedarían pegadas (el jugador saldría del menú andando solo).
+  try{ if(document.pointerLockElement) document.exitPointerLock(); }catch(e){}
+  mc.keys = {};
+  return nombre;
+}
+
+// REQ-OSD11 · Repintar SOLO el panel de la pantalla abierta, dejando el fondo intacto. Es lo que hace
+// falta para un botón que cambia de estado (VOLAR: ON/OFF): volver a `define` + `abrir` la misma
+// pantalla tiraba el mundo del fondo y lo recargaba entero para cambiar tres letras.
+function mcOsdHtml(html){
+  if(!mc.osdAbierta) throw new Error('game.osd.html(…): no hay ninguna pantalla abierta (game.osd.abrir(…) primero)');
+  const capa = $('#mc-osd'); if(!capa) return null;
+  const cfg = mc.osdPantallas[mc.osdAbierta] || {};
+  cfg.html = String(html==null ? '' : html);   // se queda en la definición: reabrirla enseña lo mismo
+  let panel = capa.querySelector('.mc-osd-html');
+  if(!panel){ panel = document.createElement('div'); panel.className = 'mc-osd-html'; capa.appendChild(panel); }
+  panel.innerHTML = cfg.html;
+  mcOsdSitio(panel, cfg.sitio);
+  mcOsdEngancha(panel);
+  return mc.osdAbierta;
+}
+
+function mcOsdCerrar(){
+  const capa = $('#mc-osd'); if(!capa) return null;
+  const iframe = capa.querySelector('iframe');
+  // Un iframe con un mundo dentro es un SEGUNDO contexto WebGL: hay que soltarlo de verdad, no
+  // esconderlo. Se le vacía el src antes de quitarlo para que el navegador corte la carga en curso.
+  if(iframe){ try{ iframe.src='about:blank'; }catch(e){} iframe.remove(); }
+  capa.innerHTML = '';
+  capa.hidden = true;
+  // REQ-OSD6 · cerrar antes de que el hijo terminara de cargar: el reloj de espera y su callback tienen
+  // que morir con él, o descubren una pantalla que ya no existe (y la siguiente hereda el temporizador).
+  clearTimeout(mc._osdEsperaT); mc.osdListo = null;
+  document.body.classList.remove('mc-osd-puesto');   // REQ-OSD12 · el HUD del juego vuelve con el menú fuera
+  const era = mc.osdAbierta;
+  mc.osdAbierta = null;
+  return era;
+}
+
+// ── REQ-OSD3 · Una pantalla que es OTRO MAPA ─────────────────────────────────────────────────────
+// «activar la pantalla "menu1" que seria otro mapa (map/menu1) par que se ponga como OSD».
+//
+// Va en un <iframe>, no en una segunda escena del motor, y el motivo es de arquitectura: `mc` es un
+// SINGLETON (una rejilla, un programa GL, un jugador). Tener dos mundos vivos a la vez obliga a
+// sacarlo a instancias, o sea a reescribir app.js entero. El iframe da el mismo resultado visible hoy
+// y sin tocar el motor; lo que cuesta es un segundo contexto WebGL mientras la pantalla está abierta,
+// y por eso mcOsdCerrar lo destruye de verdad en vez de esconderlo.
+// El modo escaparate se pide por URL (?osd=1) porque quien abre la pantalla es el <iframe>, no un
+// script: cuando app.js arranca ahí dentro no hay nadie todavía que pueda decirle lo que es.
+function mcEsEscaparate(){
+  try{ return new URLSearchParams(location.search).get('osd')==='1'; }catch(e){ return false; }
+}
+// REQ-OSD11 · …y `&postal=1` dice que este decorado NO quiere el autoarranque del mundo: ni redstone, ni
+// comportamientos de bloque, ni agentes paseando. Solo el dibujo. Lo pide `vivo:false` en el define.
+function mcEscaparatePostal(){
+  try{ return new URLSearchParams(location.search).get('postal')==='1'; }catch(e){ return false; }
+}
+// Quitar de encima todo lo de JUGAR. No es cosmético: una hotbar en un menú invita a construir dentro
+// del menú, y el mundo de la pantalla no se guarda — el bloque puesto se perdería sin avisar.
+function mcAplicaEscaparate(){
+  if(!mc.escaparate) return;
+  // Se esconde por CSS (body.mc-escaparate) y no poniendo `hidden` a cada uno: la hotbar se re-muestra
+  // sola desde mcUpdateHotbar en cuanto el jugador se mueve, así que un `hidden` puntual no aguanta.
+  document.body.classList.add('mc-escaparate');
+  // Sin gravedad: la cámara se queda EXACTAMENTE donde la dejó el spawn del mapa. Si cayera, el menú
+  // que el dueño dibujó a la altura del spawn saldría de plano en el primer segundo.
+  mc.volar = true;
+  // Y a TAMAÑO 1, pase lo que pase. `game.playerScale` persiste en localStorage y el iframe comparte
+  // origen con el padre, así que un visitante que se hubiera hecho grande o pequeño heredaba su escala
+  // aquí dentro: el ojo es `pos[1] + MC_EYE*mc.scale`, o sea que el mismo `pos` de la URL encuadra
+  // DISTINTO en cada navegador. Un menú no es alguien que va a andar por ahí: es una CÁMARA, y su
+  // encuadre tiene que salir igual para todos. No se toca el localStorage: solo esta instancia.
+  mc.scale = 1;
+  // REQ-OSD7 · y el encuadre que haya pedido quien abre la pantalla, ANTES del primer fotograma.
+  mcEscaparateEncuadre();
+  // REQ-OSD6 · el fondo del DOCUMENTO. El <html> tiene el fondo del sitio y no lleva clase donde
+  // engancharse, así que se pone aquí a mano: un iframe solo compone sobre el padre si su documento es
+  // transparente de arriba abajo — con que una capa quede pintada, se acabó el «ver a través».
+  document.documentElement.style.background = 'transparent';
+  mcEscaparateTeclado();
+}
+
+// REQ-OSD8 · El teclado de una pantalla-mapa NO es suyo: es del juego que hay DETRÁS.
+// En cuanto pulsas un botón del menú, el clic le da el foco al <iframe> y a partir de ahí TODAS las
+// teclas llegan al hijo y ninguna al padre. Como el hijo es un app.js entero, las atendía él: Esc le
+// hacía `closeWorld()` DENTRO del iframe (el mundo del menú desaparecía y el padre seguía creyendo que
+// la pantalla estaba abierta) y Alt+C le abría SU panel de código, invisible detrás del menú. Desde
+// fuera se ve como «Esc y Alt+C no funcionan», que es lo que son: teclas que se traga el hijo.
+// Por eso el escaparate no interpreta ni una tecla: las reenvía por el mismo puente que los botones y
+// las corta aquí (fase de captura + stopImmediatePropagation, para llegar antes que los dos handlers
+// de app.js). Se exceptúa lo que se escribe en un campo, que sí es del hijo.
+function mcEscaparateTeclado(){
+  if(!mc.escaparate || window.parent === window) return;
+  window.addEventListener('keydown', e=>{
+    const t = e.target, etq = t && t.tagName;
+    if(etq==='INPUT' || etq==='TEXTAREA' || (t && t.isContentEditable)) return;
+    try{ window.parent.postMessage({ vf:'osd-tecla', key:e.key, code:e.code,
+      alt:e.altKey, ctrl:e.ctrlKey, meta:e.metaKey, shift:e.shiftKey }, location.origin); }catch(err){}
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
+}
+
+// REQ-OSD6 · «basta con que se muestre el mapa una vez cargado». El hijo avisa al padre de que ya está,
+// y hasta entonces el padre lo tiene invisible: así no se ve ni el azul, ni el cartel contando fases, ni
+// el mapa a medio mallar. Se espera a DOS fotogramas porque el primero es el que lo pinta: avisar antes
+// descubre un canvas todavía en blanco, que es el mismo parpadeo con otro color.
+function mcEscaparateListo(){
+  if(!mc.escaparate || window.parent === window) return;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    try{ window.parent.postMessage({vf:'osd-listo'}, location.origin); }catch(e){}
+  }));
+}
+
+// REQ-OSD6 · cuánto se espera a un hijo que no dice ni mu (mapa roto, WebGL caído): pasado esto se
+// enseña igual. Un menú que no aparece nunca es peor que un menú que aparece a medio hacer.
+const MC_OSD_ESPERA_MS = 12000;
+
+// REQ-OSD7 · el trozo de URL con el encuadre declarado en la pantalla. Se omite entero lo que no se
+// declare: sin `pos` la cámara se queda donde diga el spawn del mapa, que es lo que hacía hasta hoy.
+function mcOsdEncuadreURL(cfg){
+  let q = '';
+  const p = cfg.pos;
+  if(Array.isArray(p) && p.length === 3 && p.every(n => isFinite(+n)))
+    q += '&pos=' + p.map(n => +(+n).toFixed(2)).join(',');
+  if(isFinite(+cfg.yaw))   q += '&yaw='   + +(+cfg.yaw).toFixed(1);
+  if(isFinite(+cfg.pitch)) q += '&pitch=' + +(+cfg.pitch).toFixed(1);
+  if(cfg.vivo === false) q += '&postal=1';   // REQ-OSD11 · decorado quieto: sin el autoarranque del mundo
+  return q;
+}
+
+// El lado de dentro: coger el encuadre de la URL y ponerlo. Se escribe DIRECTO en `mc` y no con `game.tp`
+// a propósito — tp desatasca (mcUnstick) y sube al jugador al aire libre más cercano, que para encuadrar
+// un menú es justo lo que no se quiere: aquí las coordenadas son las de una CÁMARA, no las de alguien que
+// va a andar por ahí, y una pantalla dentro de una pared es un encuadre legítimo.
+function mcEscaparateEncuadre(){
+  let q; try{ q = new URLSearchParams(location.search); }catch(e){ return false; }
+  let puesto = false;
+  const pos = (q.get('pos')||'').split(',').map(Number);
+  if(pos.length === 3 && pos.every(isFinite)){ mc.pos = pos.slice(); mc.vel = [0,0,0]; puesto = true; }
+  const yaw = parseFloat(q.get('yaw'));
+  if(isFinite(yaw)){ mc.yaw = yaw * Math.PI/180; puesto = true; }
+  const pitch = parseFloat(q.get('pitch'));
+  if(isFinite(pitch)){ mc.pitch = Math.max(-89, Math.min(89, pitch)) * Math.PI/180; puesto = true; }
+  return puesto;
+}
+function mcOsdMontaMapa(capa, cfg){
+  const f = document.createElement('iframe');
+  f.setAttribute('title', 'Pantalla OSD: '+cfg.mapa);
+  // ?osd=1 = MODO ESCAPARATE (ver mcEsEscaparate): sin guardar, sin hotbar, sin captura de puntero.
+  // REQ-OSD7 · y el ENCUADRE, si la pantalla lo declara: de dónde mira la cámara del menú. Va en la URL
+  // y no por postMessage porque tiene que estar puesto ANTES del primer fotograma — un mensaje llega
+  // cuando el hijo ya ha pintado, y eso es un salto de cámara a la vista de todos. Coordenadas de mundo
+  // como `game.tp`, y yaw/pitch en GRADOS como `game.yaw`/`game.pitch`: las mismas unidades que el dueño
+  // lee en la consola, para poder copiarlas de un sitio a otro sin convertir nada.
+  f.src = '/map/' + encodeURIComponent(cfg.mapa) + '?osd=1' + mcOsdEncuadreURL(cfg);
+  f.dataset.osdFondo = mcOsdFondoClave(cfg);   // REQ-OSD11 · para saber si otra pantalla puede heredarlo
+  // REQ-OSD6 · nace INVISIBLE. Lo que se veía antes era la apertura del mundo de dentro en directo —el
+  // azul del cielo tapándolo todo, el cartel contando fases, y al final el mapa—: cuatro pantallazos
+  // para lo que debería ser «sale el menú». Se descubre de una vez cuando el hijo manda `osd-listo`.
+  f.classList.add('cargando');
+  const espera = document.createElement('div');
+  espera.className = 'mc-osd-espera';
+  capa.appendChild(f);
+  capa.appendChild(espera);
+  mc.osdListo = () => {            // lo llama el puente postMessage; también el reloj, por si no llega
+    if(!f.classList.contains('cargando')) return;
+    f.classList.remove('cargando');
+    espera.remove();
+    clearTimeout(mc._osdEsperaT);
+    mc.osdListo = null;
+  };
+  mc._osdEsperaT = setTimeout(()=>{ if(mc.osdListo) mc.osdListo(); }, MC_OSD_ESPERA_MS);
+  return f;
+}
+
+// ── REQ-OSD4 · Un botón del menú es un BLOQUE CON UNA NOTA ───────────────────────────────────────
+// «le pongo yo mecanicas al menu que podrian ser 2 bloques con textos para que al hacer clic en uno y
+// otro pase una accion».
+//
+// La acción se declara por el TEXTO de la nota y no por coordenada ni por material, porque `mc.notes`
+// ya existe y ya planta un cartel 3D legible encima del bloque: el dueño escribe «JUGAR» en la nota,
+// lo ve escrito en el mundo, y `game.osd.alPulsar('JUGAR', fn)` engancha la acción. Mover el botón de
+// sitio no rompe nada, que es lo que sí pasaba declarándolo por coordenada.
+const MC_OSD_ALCANCE = 96;   // un botón de un menú puede estar lejos: el alcance de romper (6) no vale aquí
+
+// Un rayo que sale por el PÍXEL del cursor y no por la mira. En una pantalla de menú el puntero está
+// SUELTO (hace falta, si no no se puede pulsar), así que la mira no apunta a lo que el usuario cree.
+// Se devuelve el (yaw,pitch) equivalente para poder reutilizar mcRaycast VERBATIM: escribir aquí un
+// segundo DDA sería una copia que se desincroniza del de verdad en cuanto uno de los dos cambie.
+function mcYawPitchDePixel(px, py){
+  const r = mc.canvas.getBoundingClientRect();
+  const ndcX = ((px - r.left) / r.width) * 2 - 1;
+  const ndcY = 1 - ((py - r.top) / r.height) * 2;
+  const t = Math.tan(mc.fov/2), aspect = r.width / Math.max(1, r.height);
+  const vx = ndcX*t*aspect, vy = ndcY*t, vz = -1;          // dirección en espacio de VISTA (se mira a -Z)
+  const cp = Math.cos(mc.pitch), sp = Math.sin(mc.pitch);  // …y de vuelta a MUNDO deshaciendo la matriz de
+  const y1 = vy*cp - vz*sp, z1 = vy*sp + vz*cp;            //   vista: rotX(-pitch)·rotY(-yaw) ⇒ su inversa
+  const cy = Math.cos(mc.yaw), sy = Math.sin(mc.yaw);      //   es rotX(+pitch) y luego rotY(+yaw)
+  const wx = vx*cy + z1*sy, wz = -vx*sy + z1*cy, wy = y1;
+  const l = Math.hypot(wx, wy, wz) || 1;
+  return { yaw: Math.atan2(-wx/l, -wz/l), pitch: Math.asin(Math.max(-1, Math.min(1, wy/l))) };
+}
+
+// El texto de la nota del bloque que hay bajo ese píxel, o null. mcNoteAnchor hace el trabajo fino:
+// lleva de la celda apuntada a la celda ANOTADA, así que también vale apuntar al cartel y no al bloque.
+function mcNotaBajoPixel(px, py){
+  if(!mc.active || !mc.grid) return null;
+  const yp = (px==null) ? {yaw:mc.yaw, pitch:mc.pitch} : mcYawPitchDePixel(px, py);
+  const yaw0 = mc.yaw, pitch0 = mc.pitch;
+  mc.yaw = yp.yaw; mc.pitch = yp.pitch;
+  let hit = null;
+  try{ hit = mcRaycast(MC_OSD_ALCANCE, true); }
+  finally{ mc.yaw = yaw0; mc.pitch = pitch0; }              // el finally no es adorno: si mcRaycast tira, la cámara se quedaría torcida
+  if(!hit) return null;
+  const ancla = mcNoteAnchor(hit.cell);
+  if(!ancla) return null;
+  const txt = mc.notes[mcNoteKey(ancla)];
+  return txt ? String(txt) : null;
+}
+
+function mcEscaparatePulsa(px, py){
+  const texto = mcNotaBajoPixel(px, py);
+  if(!texto) return false;
+  return mcOsdEnvia(texto);
+}
+
+// Dentro de un iframe la acción NO se ejecuta aquí: la pantalla solo dice QUÉ se ha pulsado, y quien
+// carga un mapa o teleporta es el mundo de verdad, que vive en la ventana de fuera.
+function mcOsdEnvia(texto){
+  if(window.parent && window.parent !== window){
+    try{ window.parent.postMessage({vf:'osd-pulsar', texto:String(texto)}, location.origin); return true; }catch(e){}
+  }
+  return mcOsdPulsar(texto);   // pantalla suelta (/map/menu1 a pelo): así se prueba sin montar el OSD
+}
+
+// El puente. Mismo origen siempre (la pantalla es un mapa de este mismo servidor), y aun así se
+// comprueba: una capa que ejecuta acciones a partir de mensajes de fuera es un agujero, y `origin` es
+// lo único que separa «mi menú» de «cualquier pestaña que sepa que existo».
+window.addEventListener('message', e=>{
+  if(e.origin !== location.origin) return;
+  const d = e.data;
+  if(!d || typeof d !== 'object') return;
+  // La acción se ejecuta EN EL MUNDO DE VERDAD, no en la pantalla: la pantalla solo dice qué botón se
+  // ha pulsado. Por eso «cargar un mapa» o «teleportar» afectan a quien está jugando y no al menú.
+  if(d.vf === 'osd-pulsar' && mc.osdAbierta) mcOsdPulsar(d.texto);
+  if(d.vf === 'osd-cerrar'  && mc.osdAbierta) mcOsdCerrar();
+  // REQ-OSD6 · «ya estoy pintado»: hasta aquí la pantalla venía cargándose invisible, con el juego de
+  // debajo a la vista y una ruedecita encima. Ahora se descubre entera y de una vez.
+  if(d.vf === 'osd-listo' && mc.osdListo) mc.osdListo();
+  // REQ-OSD8 · una tecla pulsada con el foco dentro de la pantalla. Se re-lanza tal cual sobre este
+  // window para que la atiendan los handlers de siempre: el Esc de dos pasos, Alt+C, Alt+A… Así el
+  // repertorio de atajos no se duplica aquí (duplicarlo sería garantizar que un día divergen), y la
+  // pantalla no necesita saber qué teclas existen. Y se recupera el foco: a partir de la primera tecla
+  // el teclado vuelve a ser del padre sin tener que pasar por el puente.
+  if(d.vf === 'osd-tecla' && mc.osdAbierta){
+    try{ window.focus(); }catch(err){}
+    window.dispatchEvent(new KeyboardEvent('keydown', { key:d.key, code:d.code,
+      altKey:!!d.alt, ctrlKey:!!d.ctrl, metaKey:!!d.meta, shiftKey:!!d.shift,
+      bubbles:true, cancelable:true }));
+  }
+});
+
+function mcOsdPulsar(texto){
+  const clave = mcOsdClave(texto);
+  const fn = mc.osdAcciones[clave];
+  if(!fn){ console.warn('OSD: nadie ha registrado la acción «'+clave+'» (game.osd.alPulsar)'); return false; }
+  // La acción NO recibe argumentos: es una función de CERO parámetros. Sus ayudantes los coge de donde se
+  // escribió (su snippet), y `game.osd.entorno(texto)` los sirve aparte para poder copiarla a la consola.
+  // Pasarle `(clave, entorno)` obligaba a explicar dos parámetros que nadie pidió, y un ejemplo cuyos
+  // parámetros hay que adivinar no es un ejemplo: por eso el entorno se resuelve solo (REQ-OSD5).
+  try{ fn(); }
+  catch(err){ console.error('game.osd.alPulsar("'+clave+'"):', err); }
+  return true;
+}
+
+// Los botones que trae una pantalla, leídos de la MISMA forma que los lee mcOsdAbrir (`[data-osd]` o el
+// texto del <button>), para que el volcado no pueda mentir sobre lo que se va a enganchar de verdad. Se
+// parsea en un <template>, que no ejecuta scripts ni baja imágenes: esto es un informe, no un montaje.
+// Una pantalla {mapa:…} devuelve null a propósito: sus botones son bloques con nota y viven en ESE mapa,
+// así que aquí no se pueden saber sin abrirla.
+function mcOsdBotonesDe(cfg){
+  if(!cfg || !cfg.html) return null;
+  const t = document.createElement('template');
+  t.innerHTML = cfg.html;
+  return Array.from(t.content.querySelectorAll('[data-osd], button')).map(b => ({
+    texto: mcOsdClave(b.dataset.osd || b.textContent),
+    marca: b.outerHTML.trim()        // el HTML EXACTO de ese botón: es lo que hay que copiar para hacer otro igual
+  }));
+}
+
+// El código de una acción, tal cual lo escribió quien la registró. Es lo que contesta «¿y este botón qué
+// hace?» sin salir de la consola: un nombre no dice nada, y el snippet que lo registró puede estar en
+// otro fichero (o haberse editado en vivo). Se recorta la sangría sobrante para que se lea, y se corta
+// por arriba: esto es una respuesta, no un listado — para el resto está el snippet.
+// Los nombres que el código usa y que NO se pueden resolver desde la consola: ni son globales ni están
+// en el entorno que la acción declaró. Son exactamente los que hacen que copiar la función a F12 dé
+// «intro is not defined». Es una lectura con expresiones regulares, no un parser: puede quedarse corta
+// (nunca inventa), y por eso lo que sale es una pista para arreglar la llamada a `alPulsar`, no un
+// veredicto. Se quitan comentarios, textos, propiedades (`.algo`), claves de objeto y todo lo declarado
+// dentro de la propia función, que sí existe al ejecutarla.
+const MC_JS_PALABRAS = new Set(('function return const let var if else for while do new typeof instanceof in of this true '
+  + 'false null undefined async await try catch finally throw switch case break continue delete void class extends super '
+  + 'yield static get set default arguments').split(' '));
+function mcOsdLibres(src, entorno){
+  let s = String(src)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')                     // comentarios
+    .replace(/'(?:\\.|[^'\\])*'/g, "''").replace(/"(?:\\.|[^"\\])*"/g, '""').replace(/`(?:\\.|[^`\\])*`/g, '``');
+  const declarados = new Set();
+  const params = s.match(/^[^(]*\(([^)]*)\)/) || s.match(/^\s*([A-Za-z_$][\w$]*)\s*=>/);
+  ((params && params[1]) || '').split(',').forEach(t => { const m = t.match(/[A-Za-z_$][\w$]*/g); if(m) m.forEach(n => declarados.add(n)); });
+  let d; const reDecl = /(?:function|class|catch\s*\()\s*\(?\s*([A-Za-z_$][\w$]*)/g;
+  while((d = reDecl.exec(s))) declarados.add(d[1]);
+  // Una declaración declara TODOS sus nombres, no solo el primero: `const x = …, z = …` deja x y z. Se
+  // barre el enunciado entero (hasta el `;` o el fin de línea) y se recogen los destinos de cada `=` y
+  // los nombres sueltos separados por comas; pasarse de generoso aquí solo hace que el aviso calle,
+  // que es el lado bueno en el que equivocarse.
+  (s.match(/(?:const|let|var)\s+[^;\n]*/g) || []).forEach(t => {
+    (t.match(/([A-Za-z_$][\w$]*)\s*=/g) || []).forEach(m => declarados.add(m.replace(/\s*=$/, '')));
+    t.replace(/^(?:const|let|var)\s+/, '').split(',').forEach(tr => { const m = tr.match(/^[\s{[]*([A-Za-z_$][\w$]*)/); if(m) declarados.add(m[1]); });
+  });
+  s = s.replace(/\.\s*[A-Za-z_$][\w$]*/g, '.').replace(/[A-Za-z_$][\w$]*\s*:/g, ':');   // propiedades y claves
+  // La pregunta exacta es «¿resolvería la CONSOLA este nombre?», y eso no es `n in window`: los `let` y
+  // `const` de arriba de app.js (mc, game…) viven en el ámbito léxico global, que no es un objeto. Un
+  // eval indirecto se evalúa en ese mismo ámbito, así que contesta lo mismo que contestaría F12. Los
+  // nombres salen de una regex de identificadores, así que esto es una consulta, nunca código de nadie.
+  const resuelve = n => { try{ (0, eval)(n); return true; }catch(e){ return typeof window !== 'undefined' && n in window; } };
+  const libres = [];
+  (s.match(/[A-Za-z_$][\w$]*/g) || []).forEach(n => {
+    if(MC_JS_PALABRAS.has(n) || declarados.has(n) || libres.indexOf(n) >= 0) return;
+    if(entorno && Object.prototype.hasOwnProperty.call(entorno, n)) return;
+    if(resuelve(n)) return;
+    libres.push(n);
+  });
+  return libres;
+}
+
+const MC_OSD_MAX_LINEAS = 18;
+function mcOsdFuente(fn){
+  let s = '';
+  try{ s = String(fn); }catch(e){ return '(no se puede leer el código de esta acción)'; }
+  const li = s.replace(/\r/g, '').split('\n');
+  const sangrias = li.slice(1).filter(l => l.trim()).map(l => l.match(/^[ \t]*/)[0].length);
+  const quitar = sangrias.length ? Math.min.apply(null, sangrias) : 0;
+  const limpio = li.map((l, i) => i ? l.slice(quitar) : l);
+  const de_mas = limpio.length - MC_OSD_MAX_LINEAS;
+  return (de_mas > 0 ? limpio.slice(0, MC_OSD_MAX_LINEAS).concat('… (' + de_mas + ' líneas más)') : limpio).join('\n');
+}
+
+// El bloque listo para copiar: la línea que resuelve el entorno, el código del botón y la llamada, en ese
+// orden. Se entrega ENTERO a propósito — quien lee el volcado no tiene por qué saber de dónde salen `intro`
+// o `cima`, así que el ejemplo se resuelve solo: se pega en F12 y corre. Un ejemplo que primero hay que
+// completar a mano no es un ejemplo (REQ-OSD5, tercera vuelta).
+function mcOsdReceta(clave, hace, entorno){
+  const ayudas = entorno ? Object.keys(entorno) : [];
+  // Una función con nombre ya es una sentencia y se llama por su nombre; una anónima o una flecha, no.
+  const nombre = (/^\s*(?:async\s+)?function\s*([A-Za-z_$][\w$]*)/.exec(hace) || [])[1];
+  const li = [];
+  if(ayudas.length) li.push('const { ' + ayudas.join(', ') + " } = game.osd.entorno('" + clave + "');"
+                            + '   // lo que esta acción usa de su snippet');
+  li.push(nombre ? hace : 'const accion = ' + hace + ';');
+  li.push((nombre || 'accion') + '();');
+  return li.join('\n');
+}
+
+// El descubridor del OSD, hermano de `game.bloques.info()`: quien no sabe cómo funciona esto no tiene
+// que leerse app.js ni el doc para empezar — se lo cuenta el propio motor, con lo que hay AHORA mismo.
+// Devuelve el volcado (para trabajar con él) y además lo imprime legible en la consola, que es donde se
+// pide. Lo que de verdad importa son las dos columnas de la derecha: un botón sin acción no hace nada al
+// pulsarlo, y una acción sin botón es una función que nadie va a llamar. Casi todo «el OSD no responde»
+// es una de esas dos, y suele ser un texto que no coincide (las claves van en MAYÚSCULAS y sin espacios).
+// Todo lo que se sabe de una acción: qué hace (su código), de dónde salió, con qué ayudantes cuenta y
+// qué nombres usa que aquí no se pueden resolver. Es lo que convierte el volcado en algo con lo que se
+// puede trabajar y no solo mirar.
+function mcOsdAccionInfo(texto){
+  const clave = mcOsdClave(texto), fn = mc.osdAcciones[clave];
+  if(!fn) return { accion:false, hace:null, receta:null, origen:null, entorno:null, falta:null };
+  const entorno = mc.osdEntornos[clave] || null;
+  const hace = mcOsdFuente(fn);
+  return {
+    accion: true, hace,
+    receta: mcOsdReceta(clave, hace, entorno),
+    origen: mc.osdOrigen[clave] || '(no consta: se registró antes de que se anotara el origen)',
+    entorno: entorno ? Object.keys(entorno) : [],
+    falta: mcOsdLibres(hace, entorno)
+  };
+}
+
+function mcOsdDump(){
+  const pantallas = Object.keys(mc.osdPantallas).map(nombre => {
+    const cfg = mc.osdPantallas[nombre];
+    const crudos = mcOsdBotonesDe(cfg);
+    const botones = crudos && crudos.map(b => Object.assign({}, b, mcOsdAccionInfo(b.texto)));
+    return {
+      nombre, tipo: cfg.mapa ? 'mapa' : 'html', cfg: Object.assign({}, cfg),
+      abierta: mc.osdAbierta === nombre,
+      botones: botones,                                   // null en las {mapa:…}: los botones están en el mapa
+      sinAccion: botones ? botones.filter(b => !b.accion).map(b => b.texto) : null
+    };
+  });
+  const usados = new Set(pantallas.reduce((a, p) => a.concat((p.botones || []).map(b => b.texto)), []));
+  const acciones = Object.keys(mc.osdAcciones).map(texto => Object.assign({ texto }, mcOsdAccionInfo(texto)));
+  const volcado = { abierta: mc.osdAbierta, pantallas, acciones,
+                    sinBoton: acciones.map(a => a.texto).filter(t => !usados.has(t)) };
+
+  const sangra = (txt, n) => String(txt).split('\n').map(l => ' '.repeat(n) + l).join('\n');
+  // El HTML de la pantalla, un tag por línea: se lee, y sobre todo se copia para hacer otra igual.
+  const html = h => sangra(String(h).replace(/>\s*</g, '>\n<'), 10);
+
+  console.log('%cgame.osd — ' + pantallas.length + ' pantalla(s), ' + acciones.length + ' acción(es). Abierta: '
+    + (mc.osdAbierta || '(ninguna)'), 'font-weight:bold');
+  if(!pantallas.length) console.log('  (no hay ninguna pantalla definida todavía)');
+  pantallas.forEach(p => {
+    console.log('\n  • pantalla «' + p.nombre + '»  [' + p.tipo + ']' + (p.abierta ? '  ← ABIERTA' : '')
+      + (p.tipo === 'mapa' ? '  → se dibuja en /map/' + p.cfg.mapa + '?osd=1' : ''));
+    if(!p.botones){
+      console.log('      Sus botones son BLOQUES CON NOTA puestos en el mapa «' + p.cfg.mapa + '»: el texto de la\n'
+        + '      nota es el nombre del botón. Para verlos, entra a /map/' + p.cfg.mapa + ' y mira las notas.');
+    } else if(!p.botones.length){
+      console.log('      (esta pantalla no tiene ningún botón)');
+      console.log('      Su HTML:\n' + html(p.cfg.html));
+    } else {
+      p.botones.forEach(b => {
+        console.log('      ── botón «' + b.texto + '» ' + (b.accion ? '✓  lo registró ' + b.origen
+          : '✗ NADIE ha registrado su acción: al pulsarlo no pasa nada'));
+        console.log('         se escribe así:  ' + b.marca);
+        if(!b.accion) return;
+        console.log('         al pulsarlo corre esto, y se pulsa sin ratón con  game.osd.pulsar(\'' + b.texto + '\')');
+        // Se imprime la RECETA, no la función pelada: lleva delante la línea que resuelve sus ayudantes, así
+        // que el bloque se copia entero a F12 y corre. Nada que rellenar mano, ningún parámetro que adivinar.
+        console.log('         cópialo ENTERO en la consola y corre tal cual:\n' + sangra(b.receta, 12));
+        if(b.falta && b.falta.length) console.log('         ⚠ usa nombres que aquí no existen: ' + b.falta.join(', ')
+          + '\n           copiado a la consola dará «' + b.falta[0] + ' is not defined». Se arregla al registrarlo,'
+          + '\n           pasando esos ayudantes como 3.er argumento (y entonces salen solos en esta receta):'
+          + "\n           game.osd.alPulsar('" + b.texto + '\', ' + (/^function\s+([A-Za-z_$][\w$]*)/.exec(b.hace) || [,'fn'])[1]
+          + ', {' + b.falta.join(', ') + '});');
+      });
+      console.log('      El HTML entero de la pantalla (cópialo para hacer otra parecida):\n' + html(p.cfg.html));
+    }
+  });
+  if(volcado.sinBoton.length) console.log('\n  Acciones registradas que hoy no tiene ningún botón (nadie las va a llamar): '
+    + volcado.sinBoton.join(' · '));
+
+  // El recetario: un botón son SIEMPRE dos piezas —el trozo de HTML y la acción atada a su texto— y esa
+  // es la parte que no se adivina leyendo el volcado de arriba.
+  console.log('\n  ── Hacer un botón nuevo: son dos piezas, y lo que las une es el TEXTO ──\n'
+    + "    1) el HTML, dentro del panel:   <button class=\"mc-osd-btn\">AJUSTES</button>\n"
+    + "    2) lo que hace, por su texto:   game.osd.alPulsar('AJUSTES', () => { game.osd.cerrar(); });\n"
+    + "       (pruébalo sin ratón: game.osd.pulsar('AJUSTES'))\n"
+    + '    La acción NO recibe argumentos: se escribe con CERO parámetros y usa lo que tenga a mano en tu\n'
+    + '    snippet. Si usa ayudantes de ahí, decláralos como 3.er argumento al registrarla — no cambia cómo se\n'
+    + '    escribe la función, solo hace que dump() sepa enseñarla de forma que se pueda copiar y correr:\n'
+    + "       function ajustes(){ panel.abrir(); }\n"
+    + "       game.osd.alPulsar('AJUSTES', ajustes, {panel});     // y en F12: game.osd.entorno('AJUSTES')\n"
+    + '    Sin ese 3.er argumento la acción funciona igual al pulsarla, pero copiada a la consola dirá\n'
+    + '    «panel is not defined» — y dump() te lo avisa.\n'
+    + '    El texto se normaliza a MAYÚSCULAS y sin espacios: «Ajustes», « AJUSTES » y «ajustes» son el mismo\n'
+    + '    botón. Por eso una pantalla puede pasar de {html:…} a {mapa:…} sin tocar ni una acción.\n'
+    + '\n  ── Una pantalla nueva ──\n'
+    + "    game.osd.define('menu', {html:\n"
+    + "      '<div class=\"mc-osd-panel\">' +\n"
+    + "        '<div class=\"mc-osd-title\">Mi menú</div>' +\n"
+    + "        '<button class=\"mc-osd-btn\">JUGAR</button>' +\n"
+    + "        '<button class=\"mc-osd-btn\">AJUSTES</button>' +\n"
+    + "      '</div>'});\n"
+    + "    game.osd.define('menu', {mapa:'menu1'});   // …o que la pantalla sea otro mapa DIBUJADO (botones = bloques con nota)\n"
+    + '    Y el ENCUADRE de esa pantalla-mapa: desde dónde la mira la cámara. No se teclea a ojo — entra a\n'
+    + '    /map/menu1, vuela (F) hasta que se vea bien, y game.osd.encuadre() te imprime el define hecho:\n'
+    + "       game.osd.define('menu', {mapa:'menu1', pos:[64, 20, 64], yaw:-135, pitch:-20});\n"
+    + '       (pos en coordenadas de mundo como game.tp; yaw y pitch en GRADOS como game.yaw / game.pitch.\n'
+    + '        Sin encuadre, la cámara se queda donde el mapa tenga el spawn, como hasta ahora.)\n'
+    + "    game.osd.abrir('menu')  ·  game.osd.cerrar()  ·  game.osd.conmutar('menu')\n"
+    + "    game.osd.html('<b>…</b>')  cambia SOLO los botones de la pantalla abierta (el mapa del fondo no se recarga)\n"
+    + '    Clases de estilo ya hechas: mc-osd-panel (la caja), mc-osd-title (el título), mc-osd-btn (cada botón).\n'
+    + '  Detalle: docs/osd-e-intro.md');
+  return volcado;
+}
+
+game.osd = {
+  define:  mcOsdDefine,
+  dump:    mcOsdDump,
+  abrir:   mcOsdAbrir,
+  cerrar:  mcOsdCerrar,
+  html:    mcOsdHtml,   // REQ-OSD11 · repinta el panel de la pantalla abierta sin tocar el fondo
+  conmutar(nombre){ return mc.osdAbierta===nombre ? mcOsdCerrar() : mcOsdAbrir(nombre); },
+  pulsar:  mcOsdPulsar,
+  // `fn` se escribe con CERO parámetros; se la llama sin argumentos. `entorno` (opcional) es solo la
+  // DECLARACIÓN de lo que esa función usa de su snippet: game.osd.alPulsar('JUGAR', jugar, {intro, cima}).
+  // No cambia cómo corre el botón — lo que hace es que `game.osd.entorno('JUGAR')` pueda servir esos
+  // ayudantes en la consola y que `dump()` imprima un ejemplo que se resuelve solo (REQ-OSD5).
+  alPulsar(texto, fn, entorno){
+    const k = mcOsdClave(texto);
+    mc.osdAcciones[k] = fn;
+    mc.osdEntornos[k] = entorno || null;
+    mc.osdOrigen[k]   = mc._snippetActual ? 'snippet «'+mc._snippetActual+'»' : 'la consola (F12)';
+    return k;
+  },
+  entorno(texto){ return mc.osdEntornos[mcOsdClave(texto)] || {}; },
+  // REQ-OSD7 · El encuadre de AHORA MISMO, listo para pegar en un define. Encuadrar un menú es cosa de
+  // volar por el mapa hasta que se vea bien y entonces quedarse con el sitio: teclear coordenadas a ojo
+  // no es forma. Se usa desde el propio mapa del menú (entra a `/map/menu1`, colócate, cópialo) y también
+  // desde dentro del OSD ya abierto, en la consola del hijo, para retocar sin salir.
+  encuadre(){
+    const e = { mapa: mcMapName(),
+                pos: [+mc.pos[0].toFixed(2), +mc.pos[1].toFixed(2), +mc.pos[2].toFixed(2)],
+                yaw: game.yaw, pitch: game.pitch };   // grados, como game.yaw/game.pitch
+    console.log("game.osd.define('menu', {mapa:'" + e.mapa + "', pos:[" + e.pos.join(', ')
+      + '], yaw:' + e.yaw + ', pitch:' + e.pitch + '});');
+    return e;
+  },
+  pantallas(){ return Object.keys(mc.osdPantallas); },
+  acciones(){ return Object.keys(mc.osdAcciones); },
+  get abierta(){ return mc.osdAbierta; }
+};
+
+// --- Alt+F · foto del Mundo (la F suelta ahora es volar, REQ-FLY1) -------------------------------------------------------------------
 // Una captura de lo que se ve, con la ficha (mapa, coordenadas, orientación…) QUEMADA en la imagen:
 // así sigue ahí después de copiar y pegar, que es para lo que se saca. La misma ficha se guarda
 // aparte en crudo (data/fotos/<id>.json) para que la galería pueda ordenar y volver a las coords.
@@ -11085,8 +12068,47 @@ async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet, esc){
   return mc.structures.find(t=>t.key===srcKey && t.ox===ox && t.oy===oy && t.oz===oz && (t.rot|0)===rot) || null;
 }
 const MC_SLOTS=9;                                     // ranuras de la hotbar (teclas 1-9)
+// ── La ranura 10: la herramienta activa (REQ-TOOL1) ───────────────────────────────────────────────
+// Va DETRÁS de la 9 y no le quita sitio a ningún bloque. No tiene número: se etiqueta «P», que es la
+// tecla que rota las herramientas, y se abre con clic o alt+P como las demás con alt+<n>.
+//
+// ⚠️ El vínculo herramienta → dibujo se DERIVA del catálogo, nunca se escribe a mano. Poner aquí
+// `{build:'hab:pico-de-piedra'}` es exactamente lo que costó BUG-RS23 y BUG-FLUID3: `hab:pico-de-piedra`
+// y `asset:assets/pico-de-piedra.vox.json` son el MISMO dibujo entrando por puertas distintas, y cuál
+// de las dos existe depende de si la pieza se importó o se exportó. En cuanto el dueño exportara el
+// pico a `assets/`, la tabla dejaría de encontrarlo y la ranura saldría vacía sin que fallara nada.
+// Así que manda el dibujo: el que lleve `categoria:'herramienta'` y `herramienta:'build'` ES el pico,
+// venga por donde venga.
+function mcHerramientaKey(tool){
+  const c=(mc.catalog||[]).find(x => x.categoria==='herramienta' && x.herramienta===tool);
+  return c ? c.key : null;
+}
+// Las herramientas que hoy tienen dibujo. Se usa para no ofrecer en la galería un dibujo marcado como
+// herramienta que no corresponda a ninguna de las cuatro del motor: se enseñaría algo que al pulsarlo
+// no haría nada.
+function mcHerramientasConDibujo(){
+  return (mc.catalog||[]).filter(c => c.categoria==='herramienta' && MC_HERRAMIENTAS.some(h => h[0]===c.herramienta));
+}
 // Pinta las 9 ranuras desde mc.hotbar (id de bloque, 0=vacía). Clic izq: vacía→selector, llena→seleccionar;
 // clic der: abre el selector (cambiar). NO fija mc.hotbar (eso lo hace openWorld al restaurar el loadout).
+// Lado del lienzo de un icono de ranura. NO es `MC_TILE`: recortar una cara del atlas a 16 px y dejar
+// que el CSS la estirase a 42 daba un factor 2,625 —ni entero ni suavizado—, que es lo que se veía
+// escalonado. Aquí se dibuja el objeto entero y el navegador reduce 120→42 con filtro.
+const MC_ICONO_PX=120;
+// El icono de una ranura es EL DIBUJO, en iso y sobre transparente, no la cara superior de su textura.
+// La cara de arriba de media pieza de redstone es un cuadro oscuro con una mota: en 42 px no se
+// distingue una de otra. El atlas queda de reserva para lo que no tenga dibujo que enseñar (un material
+// declarado a mano, una textura suelta), donde sigue siendo lo único que hay.
+function mcPintaIconoRanura(cv, key, fila){
+  const delAtlas=()=>{
+    const cx=cv.getContext('2d'); cx.clearRect(0,0,cv.width,cv.height); cx.imageSmoothingEnabled=false;
+    if(mc.atlas && fila>0) cx.drawImage(mc.atlas, 0, (fila-1)*MC_TILE, MC_TILE, MC_TILE, 0,0, cv.width,cv.height);
+  };
+  delAtlas();                                   // algo se ve ya en este frame; el modelo llega y lo sustituye
+  getRoomData(key).then(d=>{
+    if(d && d.voxels && Object.keys(d.voxels).length) drawThumbRanura(cv, d);
+  }).catch(()=>{});                             // sin dibujo (o sin red) se queda el atlas: nunca una ranura en blanco
+}
 function mcBuildHotbar(){
   const bar=$('#mc-hotbar'); if(!bar) return; bar.innerHTML='';
   for(let i=0;i<MC_SLOTS;i++){
@@ -11094,18 +12116,65 @@ function mcBuildHotbar(){
     const slot=document.createElement('div');
     slot.className='mc-slot'+(i===mc.sel?' is-active':'')+(b?'':' empty');
     slot.title=b?b.name:'Vacía · clic para elegir de la galería';
-    const cv=document.createElement('canvas'); cv.width=cv.height=MC_TILE;
-    const cx=cv.getContext('2d'); cx.imageSmoothingEnabled=false;
+    const cv=document.createElement('canvas'); cv.width=cv.height=MC_ICONO_PX;
     // Una variante girada («…@5») no tiene fila propia en el atlas —comparte la del original, ver
     // mcAltaVariante—, así que el icono se saca de la fila de su clave base.
     const fila=b ? (mcClaveOri(b.key) ? mc.blockKey.indexOf(mcClaveBase(b.key)) : id) : 0;
-    if(b && mc.atlas && fila>0) cx.drawImage(mc.atlas, 0, (fila-1)*MC_TILE, MC_TILE, MC_TILE, 0,0, MC_TILE,MC_TILE); // cara superior
+    if(b) mcPintaIconoRanura(cv, b.key, fila);
     slot.appendChild(cv);
     const key=document.createElement('span'); key.className='mc-slot-key'; key.textContent=(i+1); slot.appendChild(key);
     slot.onclick=()=>{ if(mc.hotbar[i]){ mc.sel=i; mcSelectSlot(); } else mcOpenPicker(i); };
     slot.oncontextmenu=e=>{ e.preventDefault(); mcOpenPicker(i); };
     bar.appendChild(slot);
   }
+  bar.appendChild(mcSlotHerramienta());
+}
+// La ranura 10. No entra en el bucle de arriba porque no es una ranura de bloque: no tiene `mc.hotbar`
+// detrás, no se selecciona con un número, y su icono no sale del atlas (el dibujo de una herramienta no
+// tiene por qué estar en la paleta de este mundo) sino de `getRoomData`+`drawThumb`, los mismos
+// ayudantes con los que las galerías pintan sus miniaturas.
+function mcSlotHerramienta(){
+  const slot=document.createElement('div');
+  slot.className='mc-slot mc-slot-tool';
+  slot.id='mc-slot-tool';
+  const cv=document.createElement('canvas'); cv.width=cv.height=MC_ICONO_PX; slot.appendChild(cv);
+  const key=document.createElement('span'); key.className='mc-slot-key'; key.textContent='P'; slot.appendChild(key);
+  // Mismo reparto que en las ranuras de bloque: izquierdo elige (aquí, rota a la siguiente, que es lo
+  // que hace la tecla P) y derecho abre la galería.
+  slot.onclick=()=>mcRotaHerramienta();
+  slot.oncontextmenu=e=>{ e.preventDefault(); mcOpenPickerHerramientas(); };
+  mcPintaSlotHerramienta(slot);
+  return slot;
+}
+// Repinta el icono y el rótulo con la herramienta activa. Se llama al construir la hotbar y cada vez
+// que cambia `mc.tool`, venga de `P`, de la galería o del setter de consola.
+function mcPintaSlotHerramienta(slot){
+  slot=slot||$('#mc-slot-tool'); if(!slot) return;
+  const etiqueta=mcEtiquetaHerramienta(mc.tool);
+  slot.title=etiqueta+' · clic (o P) rota · clic derecho (o alt+P) para elegir';
+  const cv=slot.querySelector('canvas'); if(!cv) return;
+  // El catálogo se construye al abrir el picker, y al cargar el mundo todavía no existe. Se pide una
+  // sola vez y en segundo plano —no se mete en la secuencia de carga, que ya es larga— y al llegar se
+  // repinta: hasta entonces la ranura va vacía, con su `title` diciendo ya qué herramienta hay puesta.
+  if(!mc.catalog && !mc._catPend){
+    mc._catPend=1;
+    mcBuildCatalog().then(()=>{ mc._catPend=0; mcPintaSlotHerramienta(); }).catch(()=>{ mc._catPend=0; });
+  }
+  const k=mcHerramientaKey(mc.tool);
+  const cx=cv.getContext('2d'); cx.clearRect(0,0,cv.width,cv.height);
+  slot.classList.toggle('empty', !k);
+  // Sin dibujo asignado la ranura se queda VACÍA, igual que una de bloque sin bloque: aquí no se
+  // inventa ningún gráfico (ni texto ni emoji): lo que se enseña son los dibujos que ha hecho el
+  // dueño y nada más. El rótulo del `title` sigue diciendo qué herramienta está puesta.
+  if(!k) return;
+  // `getRoomData` es asíncrono: si mientras llega el dibujo el dueño ha vuelto a cambiar de
+  // herramienta, lo que vuelve ya no vale y pintarlo dejaría el icono equivocado puesto.
+  getRoomData(k).then(d=>{ if(mc.tool===mcToolDe(k)) drawThumbRanura(cv, d); }).catch(()=>{});
+}
+// Qué herramienta representa una clave del catálogo (la vuelta de `mcHerramientaKey`).
+function mcToolDe(key){
+  const c=(mc.catalog||[]).find(x => x.key===key);
+  return c ? c.herramienta : null;
 }
 function mcSelectSlot(){ [...$('#mc-hotbar').children].forEach((s,i)=>s.classList.toggle('is-active',i===mc.sel)); mcRevealHotbar(); }
 // La hotbar se OCULTA (se hunde abajo desvaneciéndose) tras correr bastante sin dibujar —«modo carrera»— y
@@ -11138,8 +12207,8 @@ function mcSlotStructKeys(){ try{ const a=JSON.parse(localStorage.getItem('vf_mc
 async function mcBuildCatalog(){
   const cat=[];
   try{ const idx=await fetch('assets/index.json',{cache:'no-store'}).then(r=>r.json());
-    idx.filter(a=>a.type!=='habitacion').forEach(a=>cat.push({key:'asset:'+a.file, name:a.name, icon:a.icon||(a.type==='textura'?'🎨':'🏠'), badge:a.type, categoria:a.categoria||''})); }catch(e){}
-  try{ (await apiHabitantes()).filter(h=>h.type!=='habitacion').forEach(h=>cat.push({key:'hab:'+h.id, name:h.name, icon:h.icon||(h.type==='textura'?'🎨':'🏠'), badge:'guardada', categoria:h.categoria||''})); }catch(e){}
+    idx.filter(a=>a.type!=='habitacion').forEach(a=>cat.push({key:'asset:'+a.file, name:a.name, icon:a.icon||(a.type==='textura'?'🎨':'🏠'), badge:a.type, categoria:a.categoria||'', herramienta:a.herramienta||'', savedAt:a.savedAt||'', createdAt:a.createdAt||'', count:a.count|0})); }catch(e){}
+  try{ (await apiHabitantes()).filter(h=>h.type!=='habitacion').forEach(h=>cat.push({key:'hab:'+h.id, name:h.name, icon:h.icon||(h.type==='textura'?'🎨':'🏠'), badge:'guardada', categoria:h.categoria||'', herramienta:h.herramienta||'', savedAt:h.savedAt||'', createdAt:h.createdAt||'', count:h.count|0})); }catch(e){}
   mc.catalog=cat; mcKindCache.clear();   // el badge de cada clave alimenta la etiqueta de rayos-X (mcMatKind)
   return cat;
 }
@@ -11154,11 +12223,14 @@ function mcInitPickerUI(){
   const searchInput = $('#mc-picker-search');
   if(searchInput){
     searchInput.oninput = () => {
-      mcPickSearch = (searchInput.value || '').trim().toLowerCase();
+      const q = galConsultaNueva(searchInput, mcPickSearch);   // null = la consulta efectiva no ha cambiado
+      if(q === null) return;                                   // …y aquí cada repintado son 114 miniaturas
+      mcPickSearch = q;                                        // '' hasta la 3ª letra = no filtra (REQ-GAL4)
       mcRenderPickerGrid();
     };
   }
 
+  galMontaOrden(searchInput && searchInput.closest('.mc-picker-bar'), mcRenderPickerGrid);
   const filterContainer = $('#mc-picker-filters');
   if(filterContainer){
     filterContainer.onclick = (e) => {
@@ -11198,6 +12270,7 @@ function mcInitPickerUI(){
 
 async function mcOpenPicker(slot){
   mc.pickSlot=slot;
+  mc.pickTool=false;                                                            // galería normal (bloques y texturas)
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();       // liberar el ratón para poder elegir
   mcInitPickerUI();
   const pk=$('#mc-picker'), g=$('#mc-picker-grid');
@@ -11208,12 +12281,38 @@ async function mcOpenPicker(slot){
   mcRenderPickerGrid();
   $('#mc-picker-remove').hidden=!mc.hotbar[slot];
 }
+// Elegir en la galería de herramientas: la ACTIVA y cierra, como al elegir un bloque para una ranura.
+function mcEligeHerramienta(c){
+  mcSetPlayerTool(c.herramienta, true);
+  mcClosePicker();
+  mcRevealHotbar();
+}
+// La galería de la ranura 10 (REQ-TOOL1). Es EL MISMO picker con `mc.pickTool` puesto: mismo grid,
+// mismo buscador, mismo orden, mismas miniaturas. Lo único que cambia es qué se lista y qué pasa al
+// hacer clic — que era justo la condición del dueño, no mantener otra galería.
+async function mcOpenPickerHerramientas(){
+  mc.pickTool=true;
+  if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
+  mcInitPickerUI();
+  const pk=$('#mc-picker'), g=$('#mc-picker-grid');
+  $('#mc-picker-title').textContent='Herramienta · ranura P';
+  g.innerHTML='<p class="hab-empty">Cargando galería…</p>';
+  pk.hidden=false;
+  try{ await mcBuildCatalog(); }catch(e){}
+  mcRenderPickerGrid();
+  $('#mc-picker-remove').hidden=true;              // una herramienta no se «quita»: siempre hay una activa
+}
 
 function mcRenderPickerGrid(){
   const g=$('#mc-picker-grid'); if(!g) return;
   g.innerHTML='';
   const slot = mc.pickSlot;
-  const items = mc.catalog || [];
+  // En modo herramienta (REQ-TOOL1) la lista se reduce a los dibujos que declaran ser una de las
+  // CUATRO herramientas del motor. Un dibujo marcado «herramienta» con un valor que el motor no
+  // conoce no se ofrece: pulsarlo no haría nada, y una galería que enseña cosas que no funcionan es
+  // peor que una que no las enseña.
+  const base = mc.pickTool ? mcHerramientasConDibujo() : (mc.catalog || []);
+  const items = galOrdenaLista(base);              // mismo orden que la galería del editor (REQ-GAL4)
   let shown = 0;
 
   items.forEach(c => {
@@ -11227,11 +12326,14 @@ function mcRenderPickerGrid(){
     // Identificación de Redstone (data-driven: lee meta.categoria del JSON)
     const isRs = c.categoria === 'redstone';
 
-    // 2. Filtros por categoría (Redstone vs General)
-    if(mcPickFilter === 'redstone'){
-      if(!isRs) return;
-    } else if(mcPickFilter === 'general'){
-      if(isRs) return;
+    // 2. Filtros por categoría (Redstone vs General). En modo herramienta no se aplican: la lista ya
+    // está acotada, y «General» la vaciaría entera dejando la galería en blanco sin explicación.
+    if(!mc.pickTool){
+      if(mcPickFilter === 'redstone'){
+        if(!isRs) return;
+      } else if(mcPickFilter === 'general'){
+        if(isRs) return;
+      }
     }
 
     shown++;
@@ -11239,16 +12341,18 @@ function mcRenderPickerGrid(){
     o.dataset.key = c.key;
     o.title = c.name + ' (' + c.key + ')';
     o.innerHTML=`<div class="mo-thumb"><canvas width="120" height="120"></canvas></div>`+
-                `<div class="mo-name">${c.icon} ${esc(c.name)}</div><div class="mo-badge">${c.badge}</div>`;
+                `<div class="mo-name">${c.icon} ${esc(c.name)}</div>`+
+                `<div class="mo-badge">${mc.pickTool ? esc(mcEtiquetaHerramienta(c.herramienta)) : c.badge}</div>`;
     getRoomData(c.key).then(d=>drawThumb(o.querySelector('canvas'),d)).catch(()=>{});
-    
+
     mcStructCells(c.key).then(rRec=>{
       if(rRec.w>1||rRec.h>1||rRec.d>1){
         const bd=o.querySelector('.mo-badge'); if(bd) bd.textContent=rRec.count+' bloques';
       }
     }).catch(()=>{});
 
-    o.onclick=()=>mcAssignSlot(slot,c.key,c.name);
+    // Elegir una herramienta la ACTIVA, no solo la enseña (lo pidió el dueño explícitamente).
+    o.onclick=()=> mc.pickTool ? mcEligeHerramienta(c) : mcAssignSlot(slot,c.key,c.name);
     o.oncontextmenu=(e)=>{
       e.preventDefault(); e.stopPropagation();
       mcOpenPickerCtx(e, c);
@@ -11256,7 +12360,9 @@ function mcRenderPickerGrid(){
     g.appendChild(o);
   });
 
-  if(!shown) g.innerHTML='<p class="hab-empty">No se encontraron bloques ni texturas.</p>';
+  if(!shown) g.innerHTML='<p class="hab-empty">'+(mc.pickTool
+    ? 'Ningún dibujo está marcado como herramienta. Se marca en el editor: Categoría «Herramienta» + «Es la herramienta».'
+    : 'No se encontraron bloques ni texturas.')+'</p>';
 }
 
 function mcOpenPickerCtx(e, c){
@@ -11333,7 +12439,10 @@ function mcRemoveSlot(){
 // requestPointerLock() devuelve una PROMESA que rechaza (SecurityError «cannot be acquired immediately after user
 // has exited lock») si se pide dentro del enfriamiento tras salir del lock; el try/catch síncrono NO la captura →
 // "Uncaught (in promise)". mcLockPointer() traga ese rechazo: el ratón se capturará en el siguiente clic/tecla.
-function mcLockPointer(){ if(!mc.active || document.pointerLockElement===mc.canvas) return;
+// REQ-OSD2 · con una pantalla OSD abierta NO se recaptura el puntero: si no, mover el ratón sobre el
+// menú se traga el cursor y el menú deja de ser pulsable (y no hay forma de saber que ha pasado).
+// Va aquí y no en cada llamador porque mcRelock/las galerías/los toques llaman a esto desde diez sitios.
+function mcLockPointer(){ if(!mc.active || mc.osdAbierta || mc.escaparate || document.pointerLockElement===mc.canvas) return;
   try{ const p=mc.canvas.requestPointerLock(); if(p&&p.catch) p.catch(()=>{}); }catch(e){} }
 function mcRelock(){ mcLockPointer(); }                // elegir un bloque/estructura devuelve el foco al juego
 
@@ -11539,7 +12648,7 @@ game.aim=function(alcance){
   const o=[mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]];
   return [Math.floor(o[0]+dir[0]*d), Math.floor(o[1]+dir[1]*d), Math.floor(o[2]+dir[2]*d)];
 };
-// game.foto() · lo mismo que la tecla F, para scripts y pruebas. Devuelve una promesa con
+// game.foto() · lo mismo que Alt+F, para scripts y pruebas. Devuelve una promesa con
 // {id, url, bytes, ficha}: `const f = await game.foto()` deja en f.ficha las coordenadas exactas
 // desde las que se sacó, y en f.url la ruta para verla o descargarla (galería completa en /fotos).
 game.foto=mcFoto;
@@ -11887,7 +12996,10 @@ let mcSaveT=0;
 // asi que hace falta poder apagarlo y guardar a mano. Es un tunable de consola, no UI:
 //   game.autosave(false)   game.autosave()  → estado    game.saveWorld()  → guarda YA
 let mcAutosave = localStorage.getItem('vf_mcAutosave') !== '0';
-function mcScheduleSave(){ if(!mcAutosave) return; clearTimeout(mcSaveT); mcSaveT=setTimeout(mcSaveWorld, 900); }   // debounce (serializa dentro)
+// REQ-OSD3 · `mc.escaparate` va PRIMERO y no es una optimización: una pantalla de menú (?osd=1) tiene
+// el mundo cargado y clicable, así que sin esta línea el primer roce escribiría encima de
+// data/worlds/menu1.json y el dueño perdería el dibujo de su propio menú.
+function mcScheduleSave(){ if(mc.escaparate || !mcAutosave) return; clearTimeout(mcSaveT); mcSaveT=setTimeout(mcSaveWorld, 900); }   // debounce (serializa dentro)
 // Manda SOLO lo que ha cambiado. Poner un bloque pasa de 18,5 s de congelacion y un POST de 257 MB
 // a un POST de ~1 KB: el servidor hace un seek y escribe 2 bytes en el .vox.
 // El pendiente se vacia unicamente al confirmar el 200; si el guardado falla se reintenta en el
@@ -11989,7 +13101,7 @@ function mcTick(now){
   // Construir/romper CONTINUO: mientras se mantiene el botón (y el puntero está bloqueado), repite la acción
   // a intervalos (no cada frame). El estampado de estructuras NO se repite (una pieza por pulsación).
   if(mc.heldBtn>=0 && document.pointerLockElement===mc.canvas && now-mc.actAt>=MC_ACT_MS){
-    if(mc.tool!=='select' && !(mc.heldBtn===2 && mc.slotStruct[mc.sel])) mcDoAction(mc.heldBtn);   // Seleccionar NO se repite: cada clic marca una esquina
+    if(!mcToolPasiva() && !(mc.heldBtn===2 && mc.slotStruct[mc.sel])) mcDoAction(mc.heldBtn);   // Seleccionar y Cuentagotas NO se repiten: cada clic es un gesto suelto
     mc.actAt=now;
   }
   mcUpdatePreview();              // refresca la malla de la vista-previa si cambió el objetivo/giro (asíncrono, no bloquea)
@@ -12126,10 +13238,18 @@ function mcLoadReport(){
   }
   return { total, fases:mcLoad.fases, bloques:mcLoad.bloques };
 }
-function mcShowLoading(txt){ const el=$('#mc-loading'); if(!el) return; const t=$('#mc-loading-text'); if(t) t.textContent=txt||'Cargando…'; el.hidden=false; }
+// REQ-OSD6 · En escaparate el cartel de carga NO se enseña: la pantalla de un menú entera se descubre de
+// una vez cuando ya está («basta con que se muestre el mapa una vez cargado»), y este cartel es azul a
+// pantalla completa y va contando fases en voz alta — dentro de un OSD eso es el parpadeo de información
+// que el dueño no quiere. Quien avisa de la espera es el PADRE, con su ruedecita y sin tapar el juego.
+function mcShowLoading(txt){ if(mc.escaparate) return; const el=$('#mc-loading'); if(!el) return; const t=$('#mc-loading-text'); if(t) t.textContent=txt||'Cargando…'; el.hidden=false; }
 function mcHideLoading(){ const el=$('#mc-loading'); if(el) el.hidden=true; }
 async function openWorld(){
   $('#mc-modal').hidden=false;
+  // REQ-EDIT1 · …y con el modal ya puesto se quita la tapa del arranque: en /map/<x> la página estuvo
+  // tapada hasta aquí justo para que no se viera el editor de fondo mientras se pedía el índice de assets.
+  // Va DESPUÉS del `hidden=false` y en la misma tarea: entre las dos líneas no hay ningún pintado.
+  mcDestapaApp();
   mcLoadStart();
   mcLoadPhase('WebGL: crear contexto');
   if(!mc.gl && !mcInitGL()){ $('#mc-modal').hidden=true; mcLoadStop(); return; }
@@ -12202,10 +13322,34 @@ async function openWorld(){
   mcResize();
   mc.hotbarShown=1; mcRevealHotbar();     // la hotbar arranca visible en su sitio
   mc.active=true; mc.fpsN=0; mc.fpsT=0; mc.last=performance.now();
+  mcMarcaSync();        // REQ-INTRO2 · con el Mundo delante, la marca del editor no es pulsable
   mcTouchShow(true);    // joystick y salto, si esto es un móvil (o game.touchControls=true)
+  mcAplicaEscaparate(); // REQ-OSD3: si esto es la PANTALLA de un menú (?osd=1), quitar de encima todo lo de jugar
   mcResumeAgents();     // reanudar agentes pausados al volver del editor
   mc.raf=requestAnimationFrame(mcTick);
-  await mcAutoarranque();
+  // REQ-INTRO1 · con ?intro=1 el mundo NO se enseña todavía. En esta línea ya está pintado y jugable,
+  // pero lo siguiente —'mundo-autoarranque', 274 KB de snippet— **bloquea el hilo** varios segundos en un
+  // mapa grande (~8 s medidos por el dueño en /map/fps). Enseñarlo antes daba las dos versiones del mismo
+  // problema: primero al visitante de pie en el suelo esperando, y luego el menú puesto y la cámara
+  // congelada sin volar. Así que se deja el cartel de carga puesto y se descubre TODO a la vez: menú y
+  // vuelo. Un cartel de carga que tarda es normal; un producto que arranca trabado, no.
+  const _conIntro = mcEsIntro() && !mc._introHecha;
+  if(_conIntro) mcShowLoading('Preparando el mundo…');
+  // REQ-OSD11 · Una pantalla-mapa paga el autoarranque entero del mundo: 'mundo-autoarranque' son 274 KB
+  // y detrás vienen el motor de redstone, sus piezas y la lista de habitantes — y después queda simulando
+  // para siempre por detrás de unos botones. Medido sobre /map/voxelforge: ~200 ms de los ~1,5 s que
+  // tarda en salir (el grueso es levantar una segunda copia de la app: mundo, malla y luz), más la CPU
+  // que ya no se gasta. O sea, esto NO arregla el «tarda»; quita el trabajo que sobra.
+  // `vivo:false` en el define (→ `&postal=1`) se lo salta, para un decorado que solo tiene que estar ahí.
+  // ⚠️ NO es gratis y por eso NO es el modo por defecto: el autoarranque no solo anima, también da de alta
+  // materiales, y sin él algunos se pintan distinto (medido en /map/voxelforge: la lava y la lámpara
+  // cambian de color). Se enciende mirando el decorado, no a ciegas.
+  if(!mc.escaparate || !mcEscaparatePostal()) await mcAutoarranque();
+  if(_conIntro) mcHideLoading();
+  await mcIntroArranque(true);
+  // REQ-OSD6 · y aquí, con el autoarranque ya corrido, es cuando una pantalla-mapa está de verdad lista
+  // para verse: antes de esta línea le faltarían los comportamientos y saldría a medio vestir.
+  mcEscaparateListo();
 }
 // PUNTO DE EXTENSIÓN DEL MUNDO. Los snippets no se ejecutan solos (solo a mano desde Alt+C), así que
 // nada podía hacer que el mundo «se comporte» al abrirlo: la escalera dejaba de ser escalera en cada
@@ -12217,9 +13361,106 @@ async function mcAutoarranque(){
   let s=null;
   try{ s=await fetch('/api/snippets/mundo-autoarranque',{cache:'no-store'}).then(r=>r.ok?r.json():null); }catch(e){}
   if(!s || !s.code) return;                       // no hay snippet de arranque: nada que hacer
-  const AsyncFn=Object.getPrototypeOf(async function(){}).constructor;   // igual que el modal (app.js:2851)
-  try{ await (new AsyncFn(s.code))(); }
+  try{ await mcCorreSnippet('mundo-autoarranque', s.code); }
   catch(e){ console.warn('mundo-autoarranque falló:', e && e.message ? e.message : e); }
+}
+
+// PUNTO DE EXTENSIÓN DEL EDITOR — el gemelo del de arriba para la entrada por `/`.
+// Abrir la aplicación sin /map/ en la URL no ejecutaba NADA tuyo: el único autoarranque que había lo
+// lanza openWorld, así que hasta no entrar en un mapa no corría una línea. Esto engancha el snippet
+// 'editor-autoarranque' cuando la página abre el EDITOR, una sola vez, y **con el índice de assets ya
+// cargado** (lo espera quien lo llama): sin eso, un snippet que resuelva materiales por nombre corto
+// —o que abra un mundo— se encontraría el registro a medias, que es la misma carrera que ya se cuidó
+// para el Mundo. `/map/<x>` no pasa por aquí: allí manda 'mundo-autoarranque'.
+//
+// **Escotilla de salida: `?noauto=1`.** Un autoarranque de editor que lanza una excepción, o que navega
+// a otro sitio nada más entrar, deja la aplicación inservible **y sin forma de llegar al panel Código
+// para arreglarlo** — que es justo donde vive el snippet culpable. Con esto siempre queda una URL que
+// entra limpia. Por lo mismo, un fallo del snippet nunca tumba el editor: se avisa y se sigue.
+const MC_EDITOR_AUTOARRANQUE = 'editor-autoarranque';
+function mcEditorSaltaAuto(){
+  try{ return new URLSearchParams(location.search).get('noauto')==='1'; }catch(e){ return false; }
+}
+// `pedido` = la promesa del snippet, ya lanzada por el arranque para no esperarla dos veces (REQ-EDIT1).
+async function mcEditorAutoarranque(pedido){
+  if(mc._editorAutoHecho) return;                 // una vez por carga, aunque alguien reencadene la promesa
+  mc._editorAutoHecho = true;
+  if(mcEditorSaltaAuto()){ console.log(MC_EDITOR_AUTOARRANQUE+': saltado por ?noauto=1'); return; }
+  const s = await (pedido || mcPideSnippet(MC_EDITOR_AUTOARRANQUE));
+  if(!s || !s.code) return;                       // no hay snippet de editor: la aplicación arranca como siempre
+  try{ await mcCorreSnippet(MC_EDITOR_AUTOARRANQUE, s.code); }
+  catch(e){ console.warn(MC_EDITOR_AUTOARRANQUE+' falló:', e && e.message ? e.message : e); }
+}
+
+// ── REQ-EDIT1 · El editor no se enseña para tapárselo un cuarto de segundo después ───────────────
+// Si 'editor-autoarranque' navega a otro sitio (`location.href='/map/empty?intro=1'`), la página pintaba
+// el editor entero y lo tiraba a los ~100-250 ms: un flashazo de 2D/3D antes del Mundo. El arreglo NO es
+// esperar menos, es no enseñar nada hasta saber si nos quedamos: `<body class="app-tapada">` viene ya
+// puesto en el HTML —desde el primer píxel, sin JS de por medio— y se quita en cuanto se sabe.
+// Se destapa cuanto antes en los cuatro casos en los que no hay nada que esperar: en /map/, con
+// ?noauto=1, cuando no hay snippet, y cuando el snippet acaba sin irse a ningún sitio.
+function mcDestapaApp(){ try{ document.body.classList.remove('app-tapada'); }catch(e){} }
+
+// ── REQ-INTRO1 · La intro se pide por la URL ─────────────────────────────────────────────────────
+// «el goal es que se pueda pasar la url a un usuario donde poder empezar a ver el producto con el
+// menu/osd y modo vuelo».
+//
+// SOLO con ?intro=1. `/map/fps` a secas entra como ha entrado siempre: la intro es una forma más de
+// abrir un mapa, no un cambio en lo que ya funciona. Es la misma decisión que ?osd=1 (mcEsEscaparate)
+// y por el mismo motivo — quien abre la URL es el usuario, no un script que pueda avisar antes.
+function mcEsIntro(){
+  try{ return new URLSearchParams(location.search).get('intro')==='1'; }catch(e){ return false; }
+}
+// El snippet se PIDE mientras el mundo todavía está cargando. En /map/fps el mundo tarda, y si la
+// petición se hiciera después el usuario se comería otro viaje de red **viéndose de pie en el suelo**,
+// que es justo lo que la intro viene a tapar.
+// REQ-INTRO2 · CUALQUIER mapa acepta ?intro=1, no solo el que tenga snippet propio: se busca primero
+// 'arranque-<mapa>' y, si no existe, la intro GENÉRICA 'arranque-intro'. La genérica está escrita contra
+// `mc.dim`, así que se orienta sola en un mapa que no ha visto nunca. Así darle intro a un mundo nuevo
+// no cuesta nada, y quien quiera una distinta para el suyo la escribe con el nombre del mapa y esa gana.
+const MC_INTRO_GENERICA = 'arranque-intro';
+let _mcIntroSnip = null;
+function mcPideSnippet(nombre){
+  return fetch('/api/snippets/'+encodeURIComponent(nombre),{cache:'no-store'})
+    .then(r=>r.ok?r.json():null).catch(()=>null);
+}
+function mcIntroPrefetch(forzar){
+  if(!forzar && !mcEsIntro()) return null;
+  if(!_mcIntroSnip){
+    const propio = 'arranque-' + mcMapName();
+    _mcIntroSnip = mcPideSnippet(propio).then(s => (s && s.code) ? {nombre:propio, snip:s}
+      : mcPideSnippet(MC_INTRO_GENERICA).then(g => (g && g.code) ? {nombre:MC_INTRO_GENERICA, snip:g} : null));
+  }
+  return _mcIntroSnip;
+}
+// La animación NO vive en app.js: vive en un snippet, que es lo que el dueño edita en vivo. app.js solo
+// sabe CUÁNDO llamarla.
+//
+// `auto` = la llamada del arranque, que es de UNA sola vez y solo si la URL la pide: openWorld se vuelve
+// a ejecutar al volver del editor, y sin el pestillo la intro se replantaría encima de alguien que ya le
+// dio a JUGAR. Sin `auto` —consola, guardián, o el clic en la marca VOXELFORGE (REQ-INTRO2)— la intro se
+// relanza SIEMPRE, aunque la URL no lleve ?intro=1: quien la llama a mano ya ha dicho lo que quiere.
+async function mcIntroArranque(auto){
+  if(auto){ if(!mcEsIntro() || mc._introHecha) return; mc._introHecha = true; }
+  let r=null;
+  try{ r = await (mcIntroPrefetch(true) || Promise.resolve(null)); }catch(e){}
+  _mcIntroSnip = null;                       // el dueño lo edita en vivo: la próxima vez se vuelve a pedir
+  if(!r){ console.warn('intro pedida pero no hay snippet «arranque-'+mcMapName()+'» ni «'+MC_INTRO_GENERICA+'»: el mundo entra normal'); return; }
+  try{ await mcCorreSnippet(r.nombre, r.snip.code); }
+  catch(e){ console.warn(r.nombre+' falló:', e && e.message ? e.message : e); }
+}
+// REQ-INTRO2 · volver a la intro DESDE el editor sin recargar la página. El Mundo y el editor son la
+// misma página (el Mundo es el overlay #mc-modal), así que CONSTRUIR ya no hace location.href='/' —que
+// rebajaba la página entera y volvía a descargar mundo, atlas y galerías— sino closeWorld(). Este es el
+// camino de vuelta: openWorld es idempotente (con mc.grid ya en memoria no baja nada) y la intro se
+// relanza a mano. Si nunca se ha abierto un mundo no hay nada a lo que volver y no hace nada.
+async function mcVolverAIntro(){
+  if(!mc.grid || mc.active) return false;
+  mcShowLoading('Preparando el mundo…'); await mcYield();   // el cartel tiene que pintarse ANTES del autoarranque, que bloquea
+  await openWorld();
+  await mcIntroArranque();   // el cartel se quita DESPUÉS: menú y vuelo se descubren a la vez (misma razón que en openWorld)
+  mcHideLoading();
+  return true;
 }
 // Tunables de consola del Mundo (patrón game.nearClip): game.fov (grados) y game.renderDist (nº de chunks).
 try{ const f=parseFloat(localStorage.getItem('vf_mcFov')); if(f) mc.fov=f*Math.PI/180; }catch(e){}
@@ -12301,11 +13542,33 @@ try{ const d=parseFloat(localStorage.getItem('vf_mcNoteTextDist')); if(isFinite(
 // el cartel queda en blanco y solo se lee apuntando (el visor de debajo de la mira).
 // game.noteTextDist = desde cuántos bloques se lee (se escala con game.playerScale); el último cuarto se
 // desvanece. De más lejos no se dibuja: «de muy lejos no haría falta». Un rótulo que se lee ENTERO releva
-// al visor; si el texto no cupo y se recortó con «...», el visor sigue saliendo.
+// al visor; si el texto no cupo y se recortó con «...», el visor sigue saliendo. En una pantalla-menú
+// (?osd=1) no se aplica: ahí el rótulo se lee siempre (ver mcDrawNoteTexts).
 Object.defineProperty(game,'noteText',{ enumerable:true, get:()=>mc.noteText,
   set:v=>{ v=!!v; mc.noteText=v; try{localStorage.setItem('vf_mcNoteText', v?'1':'0');}catch(e){} return v; } });
 Object.defineProperty(game,'noteTextDist',{ enumerable:true, get:()=>mc.noteTextDist,
-  set:v=>{ v=Math.max(1,Math.min(200, isFinite(+v)?+v:14)); mc.noteTextDist=v; try{localStorage.setItem('vf_mcNoteTextDist',v);}catch(e){} return v; } });
+  set:v=>{ v=Math.max(1,Math.min(200, isFinite(+v)?+v:21)); mc.noteTextDist=v; try{localStorage.setItem('vf_mcNoteTextDist',v);}catch(e){} return v; } });
+
+// game.carteles (REQ-CART3) = CÓMO se planta el cartel de cada nota. Son cuatro ajustes globales al mundo,
+// no por nota: `mc.notes` es "clave → texto" en todos los mundo.json escritos hasta hoy y no se toca.
+//   game.carteles.escala = 1      tamaño del cartel (el rótulo lo sigue: mcNoteBoardRect va con la escala)
+//   game.carteles.palo   = true   false = solo la tabla (assets/cartel_tabla.vox.json), para colgar o flotar
+//   game.carteles.desvio = [0,1,0]  desde el bloque anotado; [0,0,0] lo mete DENTRO de su propia celda
+//   game.carteles.giro   = 1      una de las 24 posturas (mcOriNorm); 1 = mirando de frente a quien llega
+// Cambiar cualquiera replanta los carteles ya puestos: la firma de los ajustes viaja en cada instancia
+// (`s.cartel`) y mcNoteSignsDesfasados la compara, que es la misma ruta que usa borrar una nota.
+try{ const s=localStorage.getItem('vf_mcCarteles'); if(s) Object.assign(mc.carteles, JSON.parse(s)); }catch(e){}
+game.carteles=(function(){
+  const api={};
+  const guarda=()=>{ try{ localStorage.setItem('vf_mcCarteles', JSON.stringify(mc.carteles)); }catch(e){} mcSyncNoteSigns(); };
+  ['escala','palo','desvio','giro'].forEach(k=>Object.defineProperty(api,k,{ enumerable:true,
+    get:()=>mc.carteles[k], set:v=>{ mc.carteles[k]=v; guarda(); return v; } }));
+  api.info=()=>{ const c=mcCartelCfg();
+    console.log('carteles: escala '+c.esc+' · '+(c.palo?'con palo':'sin palo')+' · desvio ['+c.dx+','+c.dy+','+c.dz+'] · giro '+c.rot
+      +' · '+mc.structures.filter(s=>s.nota).length+' plantado(s) de '+Object.keys(mc.notes).length+' nota(s)');
+    return c; };
+  return api;
+})();
 // game.noteFont / game.noteWidth (REQ-CART2) = el PANEL DOM de editar/ver la nota, no el cartel 3D: cuerpo
 // de letra y ancho del diálogo. Son estética discutible, así que van por consola y en vivo en vez de por un
 // ajuste en la UI. El alto del textarea sale del cuerpo (10 líneas), así que subir la letra agranda la caja
@@ -12376,18 +13639,54 @@ Object.defineProperty(game,'airAccel',{ enumerable:true, get:()=>mc.airAccel,
   set:v=>{ v=Math.max(0,Math.min(50, isFinite(+v)?+v:6)); mc.airAccel=v; try{localStorage.setItem('vf_mcAirAccel',v);}catch(e){} return v; } });
 Object.defineProperty(game,'airCap',{ enumerable:true, get:()=>mc.airCap,
   set:v=>{ v=Math.max(0,Math.min(20, isFinite(+v)?+v:3)); mc.airCap=v; try{localStorage.setItem('vf_mcAirCap',v);}catch(e){} return v; } });
+// ── REQ-FLY1 · game.volar / game.fantasma / game.volarVel ────────────────────────────────────────────
+// `game.volar` sigue el patrón función-valor de game.showOSDbuttons: vale como LECTURA (`game.volar` →
+// false), como ORDEN (`game.volar(true)`) y como CONMUTADOR (`game.volar()`), que es lo que necesita la
+// tecla F y lo que hace cómodo teclearlo en el inspector.
+// NO se persiste en localStorage a propósito: el vuelo es un modo de una sesión, y encontrarse volando al
+// abrir un mapa dos días después sería un fallo, no una comodidad (playerScale/speed sí persisten porque
+// son preferencias del jugador, esto no).
+function mcSetVolar(v){
+  const antes=mc.volar;
+  mc.volar=!!v;
+  if(antes && !mc.volar) mc.vel[1]=0;   // al aterrizar el mando lo recoge la gravedad desde parado, sin un impulso heredado
+  if(!mc.volar) mc.fantasma=false;      // sin vuelo no hay fantasma: el noclip a pie no existe
+  return mc.volar;
+}
+Object.defineProperty(game,'volar',{ enumerable:true,
+  get(){ const f=v=>mcSetVolar(v===undefined?!mc.volar:v); f.valueOf=()=>mc.volar; f.toString=()=>String(mc.volar); return f; },
+  set(v){ mcSetVolar(v); } });
+Object.defineProperty(game,'fantasma',{ enumerable:true,   // atraviesa el terreno; SOLO surte efecto volando
+  get(){ const f=v=>{ mc.fantasma=(v===undefined?!mc.fantasma:!!v); return mc.fantasma; }; f.valueOf=()=>mc.fantasma; f.toString=()=>String(mc.fantasma); return f; },
+  set(v){ mc.fantasma=!!v; } });
+Object.defineProperty(game,'volarVel',{ enumerable:true, get:()=>mc.volarVel,
+  set:v=>{ v=Math.max(0.5,Math.min(60, isFinite(+v)?+v:6)); mc.volarVel=v; return v; } });
 // game.playerScale = tamaño del jugador (>1 grande → todo se ve más pequeño; <1 pequeño → todo más grande).
 try{ const s=parseFloat(localStorage.getItem('vf_mcScale')); if(isFinite(s)&&s>0) mc.scale=s; }catch(e){}
 Object.defineProperty(game,'playerScale',{ enumerable:true, get:()=>mc.scale,
   set:v=>{ v=Math.max(0.25,Math.min(64,+v||1)); mc.scale=v; try{localStorage.setItem('vf_mcScale',v);}catch(e){} if(mc.active) mcUnstick(); return v; } });
-// game.playerTool = acción del clic derecho: 'build' (pone al lado) | 'paint' (repinta el bloque apuntado).
-try{ const t=localStorage.getItem('vf_mcTool'); if(t==='build'||t==='paint') mc.tool=t; }catch(e){}
+// game.playerTool = qué hace el clic: 'build' (pone al lado) | 'paint' (repinta el apuntado) | 'select' (marca caja)
+// | 'pick' (cuentagotas: el material del apuntado va a la ranura activa). Se rotan con P.
+//
+// REQ-TOOL1: **por defecto el pico** (`build`), decisión del dueño, y la herramienta YA NO SE PERSISTE.
+// Antes se guardaba en `vf_mcTool` pero al cargar solo se restauraban `build` y `paint`: una asimetría
+// que no se veía porque la herramienta tampoco se veía. Con la ranura 10 delante, salir con la varita
+// y volver con el pico habría parecido un fallo. Se arranca siempre igual y no hay nada que explicar.
+try{ localStorage.removeItem('vf_mcTool'); }catch(e){}   // limpia lo que dejaron las versiones anteriores
 function mcSetPlayerTool(v, announce){    // centraliza mc.tool (setter de consola + atajos B/P); persiste
-  v=(v==='paint'||v==='select')?v:'build'; mc.tool=v; try{localStorage.setItem('vf_mcTool',v);}catch(e){}
+  v=(v==='paint'||v==='select'||v==='pick')?v:'build'; mc.tool=v;
+  mcPintaSlotHerramienta();          // la ranura 10 se entera aquí, venga el cambio de P, de la galería o de consola
   mc.selA=null;                                      // al cambiar de herramienta, olvida la esquina a medio marcar (la caja confirmada se conserva para Ctrl+C)
   if(announce && mc.active) toast(v==='select' ? 'Seleccionar: clic marca 2 esquinas · Ctrl+C copia · clic dcho limpia'
+                                : v==='pick' ? 'Cuentagotas: clic sobre un bloque y su material va a la ranura'
                                 : 'Clic derecho: '+(v==='paint'?'Pintar bloque':'Construir'));
   return v;
+}
+// La rotación de la herramienta, en UN sitio: la usan la tecla P y el clic izquierdo en su ranura, y si
+// cada uno llevara su propia tabla acabarían girando en orden distinto.
+function mcRotaHerramienta(){
+  const next={build:'paint',paint:'select',select:'pick',pick:'build'};
+  return mcSetPlayerTool(next[mc.tool]||'build', true);
 }
 Object.defineProperty(game,'playerTool',{ enumerable:true, get:()=>mc.tool, set:v=>mcSetPlayerTool(v) });
 try{ const t=localStorage.getItem('vf_mcStructTex'); if(t!==null) mc.structTextures=(t!=='0'); }catch(e){}
@@ -12545,8 +13844,20 @@ function closeWorld(){
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
   if(mc.raf){ cancelAnimationFrame(mc.raf); mc.raf=0; }
   $('#mc-modal').hidden=true;
+  mcDestapaApp();   // REQ-EDIT1 · CONSTRUIR sale al editor sin recargar: la tapa no puede seguir puesta
+  mcMarcaSync();
 }
 $('#mc-close').onclick=closeWorld;
+// REQ-INTRO2 · la marca «VOXELFORGE» del editor devuelve al Mundo en modo intro, sin recargar. Solo se
+// ve pulsable cuando de verdad hay un mundo en memoria al que volver (si no, el editor a secas y la
+// marca es lo que era: un rótulo).
+function mcMarcaSync(){
+  const m=$('#marca-inicio'); if(!m) return;
+  const activa = !!mc.grid && !mc.active;
+  m.classList.toggle('clicable', activa);
+  m.title = activa ? 'Volver a la intro del mundo' : '';
+}
+if($('#marca-inicio')) $('#marca-inicio').onclick=()=>{ mcVolverAIntro(); };
 if($('#mc-code-btn')) $('#mc-code-btn').onclick=openSnips;
 $('#mc-picker-close').onclick=mcClosePicker;
 $('#mc-picker-remove').onclick=mcRemoveSlot;
@@ -12567,7 +13878,19 @@ const MC_ACT_MS=140;   // periodo de repetición al mantener el botón (construi
 const mcUserKeys={};   // atajos de teclado definidos por el usuario vía game.onKey (tecla → función)
 // Teclas que usa el motor y NO se pueden re-ligar (evita romper controles por accidente).
 const MC_RESERVED=new Set([...MC_KEYS,'p','b','x','u','n','r','z','escape','1','2','3','4','5','6','7','8','9']);
-$('#mc-canvas').addEventListener('click',()=>{ mcLockPointer(); });
+// REQ-OSD4 · en una pantalla de menú (?osd=1) el clic PULSA el bloque, no captura la cámara: capturarla
+// escondería el cursor y dejaría el menú inservible. Se trabaja aquí, en el 'click', y no en el
+// 'mousedown' de más abajo, porque aquel exige tener el puntero capturado — que es justo lo que no hay.
+$('#mc-canvas').addEventListener('click',e=>{
+  if(mc.escaparate){ mcEscaparatePulsa(e.clientX, e.clientY); return; }
+  mcLockPointer();
+});
+// El cursor avisa de lo que es pulsable. Solo en escaparate: fuera, es un raycast por movimiento de
+// ratón que nadie ha pedido.
+$('#mc-canvas').addEventListener('mousemove',e=>{
+  if(!mc.escaparate) return;
+  mc.canvas.style.cursor = mcNotaBajoPixel(e.clientX, e.clientY) ? 'pointer' : '';
+});
 // Marca cuándo se soltó el pointer-lock: así el mismo Esc que lo libera no cierra el Mundo (Esc de 2 pasos).
 document.addEventListener('pointerlockchange',()=>{ if(mc.active && document.pointerLockElement!==mc.canvas){ mc.unlockedAt=performance.now(); mc.heldBtn=-1; mcClearPreview(); } });
 document.addEventListener('mousemove',e=>{
@@ -12586,12 +13909,21 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   const k=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey) && k==='c'){ mcCopySelection(); e.preventDefault(); return; }   // Ctrl+C: copia la selección (tool=select) al portapapeles compatible con el editor
   if((e.ctrlKey||e.metaKey) && k==='v'){ mcPasteWorld(); e.preventDefault(); return; }        // Ctrl+V: pega el portapapeles EN EL MAPA, apoyado en la cara apuntada (el Mundo no se cierra)
-  if(k==='p'){ const next={build:'paint',paint:'select',select:'build'}; mcSetPlayerTool(next[mc.tool]||'build', true); e.preventDefault(); return; }   // P = rota la herramienta de clic derecho: Construir → Pintar → Seleccionar
+  if(k==='p'){                                                                                              // REQ-TOOL1: alt+P abre la galería de la ranura 10, igual que alt+<n> abre la de una ranura de bloque
+    if(e.altKey){ mcOpenPickerHerramientas(); e.preventDefault(); return; }
+    mcRotaHerramienta(); e.preventDefault(); return; }   // P = rota la herramienta de clic derecho: Construir → Pintar → Seleccionar → Cuentagotas
   if(k==='b'){ const st=1.15; game.playerScale=mc.scale*(e.shiftKey?1/st:st); toast('Tamaño ×'+(+mc.scale.toFixed(2))); e.preventDefault(); return; }   // b = más grande («big») · B (mayús) = más pequeño (paso fino ×1.15)
   if(k==='x'){ mc.xray=!mc.xray; toast('Rayos-X: '+(mc.xray?'ON':'OFF')); e.preventDefault(); return; }    // modo depuración: ver el volumen de colisión
   if(k==='u'){ mcForceUnstick(); toast('Desatascado'); e.preventDefault(); return; }                       // U = sácame de aquí (sube sobre lo que estorbe; si no, al spawn)
   if(k==='n'){ mcOpenNote(); e.preventDefault(); return; }                                                  // N = anota el bloque apuntado (post-it)
-  if(k==='f'){ mcFoto(); e.preventDefault(); return; }                                                      // F = foto de lo que se ve (ficha quemada en la imagen) → data/fotos/ y galería en /fotos
+  // REQ-FLY1 · la F pasa a ser VOLAR y la foto se va a Alt+F. El dueño lo pidió así porque volar es de
+  // cada minuto y la foto de vez en cuando; el botón táctil 📷 sigue siendo la foto (en táctil no hay Alt).
+  // La rama de Alt mira e.code (tecla FÍSICA) y no `k`, por lo mismo que Alt+C (app.js:3529): con Alt
+  // pulsado, e.key llega compuesto en varios teclados (en Mac, Alt+F es 'ƒ') y la foto no se dispararía.
+  if(e.altKey && e.code==='KeyF' && !e.ctrlKey && !e.metaKey){ mcFoto(); e.preventDefault(); return; }       // Alt+F = foto de lo que se ve (ficha quemada en la imagen) → data/fotos/ y galería en /fotos
+  if(k==='f' && !e.altKey){
+    toast('Vuelo: '+(mcSetVolar(!mc.volar)?'ON':'OFF')+' — Espacio sube, Shift baja');
+    e.preventDefault(); return; }
   if(k==='r' && mc.slotStruct[mc.sel]){                                                                       // coloca la estructura en cualquiera de sus 24 posturas (mantén clic derecho para ver la vista-previa; suelta = estampa así)
     // Dos pasos, que es como se piensa: primero QUÉ CARA queda arriba, y luego cómo está girada sobre ella.
     if(e.shiftKey){ mc.previewGiro=(mc.previewGiro+1)&3; toast('Giro: '+(mc.previewGiro*90)+'° sobre esa cara'); }   // Shift+R = los 4 giros dentro de la cara elegida
@@ -12732,6 +14064,20 @@ game.onKey=function(tecla, fn){
 };
 // game.keys() · lista las teclas que has ligado con game.onKey
 game.keys=function(){ const ks=Object.keys(mcUserKeys); console.log(ks.length?('teclas ligadas: '+ks.join(', ')):'sin teclas ligadas (game.onKey)'); return ks; };
+
+// game.snippet('mi-menu') · corre OTRO snippet desde el tuyo. El argumento es el ID del documento (el de
+// la URL /api/snippets/<id>), no el nombre bonito del panel Código. Devuelve lo que el invitado retorne,
+// así que también vale de librería: `const util = await game.snippet('mis-utiles');` con un `return {…}`
+// al final del otro. Es await-able sin envolver nada porque un snippet ya es el cuerpo de un AsyncFunction.
+// Va por mcCorreSnippet y NO por eval a propósito: así lo que el invitado registre —una acción de OSD, un
+// comportamiento de bloque— sigue sabiendo de qué documento salió (`mc._snippetActual`), que es lo único
+// que contesta «¿y esto dónde lo cambio?» cuando el código no está en ningún fichero del repo.
+// No hay guardia contra ciclos: si A llama a B y B a A, se cuelga la pestaña.
+game.snippet=async function(id){
+  const s=await mcPideSnippet(String(id==null?'':id).trim());
+  if(!s || !s.code) throw new Error('game.snippet("'+id+'"): no existe ese snippet (el argumento es el ID, mira el panel Código)');
+  return mcCorreSnippet(s.id||id, s.code);
+};
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 // AGENTES (NPC) del Mundo · game.defineAgent
@@ -13284,11 +14630,11 @@ $('#mc-canvas').addEventListener('mousedown',e=>{
   mc.heldBtn=e.button; mc.actAt=performance.now();
   // Estructuras (clic derecho sobre una ranura-estructura): NO se colocan al pulsar; el fantasma sigue la mira y
   // se estampa al SOLTAR (colocación precisa). R gira 90° la vista-previa. El resto de acciones actúan al pulsar.
-  if(mc.tool!=='select' && e.button===2 && mc.slotStruct[mc.sel]) toast('Mantén clic derecho · R gira · suelta coloca');
+  if(!mcToolPasiva() && e.button===2 && mc.slotStruct[mc.sel]) toast('Mantén clic derecho · R gira · suelta coloca');
   else mcDoAction(e.button);
 });
 window.addEventListener('mouseup',e=>{ if(!mc.active) return;
-  if(mc.tool!=='select' && mc.heldBtn===2 && mc.slotStruct[mc.sel] && document.pointerLockElement===mc.canvas) mcPlace();   // soltar = estampa la estructura donde apunta el fantasma
+  if(!mcToolPasiva() && mc.heldBtn===2 && mc.slotStruct[mc.sel] && document.pointerLockElement===mc.canvas) mcPlace();   // soltar = estampa la estructura donde apunta el fantasma
   mc.heldBtn=-1; mcClearPreview(); });
 $('#mc-canvas').addEventListener('contextmenu',e=>{ if(mc.active) e.preventDefault(); });
 
@@ -13301,11 +14647,23 @@ buildPalette();
 // Aquí se separa lo que el Mundo sí necesita (los nombres cortos del índice, que usan los snippets) de
 // lo que solo mira el editor, y esto último se arranca cuando el Mundo ya está en pie.
 const _enMundo=/^\/map\//.test(location.pathname);
-if(!_enMundo){ loadServerAssets(); refreshHabitantesList(); }
+// REQ-OSD3 · se marca ANTES de abrir el mundo: mcScheduleSave y la hotbar se consultan durante la
+// carga, así que enterarse después dejaría una ventana en la que la pantalla del menú sí guarda.
+mc.escaparate = _enMundo && mcEsEscaparate();
+// REQ-INTRO1 · con ?intro=1, el snippet de la intro se pide YA, en paralelo con la carga del mundo: para
+// cuando openWorld lo necesite tiene que estar en la mano, no a un viaje de red de distancia.
+if(_enMundo) mcIntroPrefetch();
+// REQ-EDIT1 · En /map/ la tapa NO se quita aquí: entre el final de este script y `openWorld()` hay un
+// viaje de red (`assetIndex()`), y en ese hueco la página pintaba el editor 2D/3D — el mismo flashazo,
+// por el otro lado. La quita `openWorld` en cuanto enseña el modal del Mundo, que es su primera línea.
+// Red de seguridad para los dos caminos: si algo se cuelga, la página no se queda en negro.
+setTimeout(mcDestapaApp, 5000);
+let _assetsEditorP=null;
+if(!_enMundo){ _assetsEditorP = loadServerAssets().catch(()=>{}); refreshHabitantesList(); }
 if(!restore()){ setSize(16,16,16); state.voxels=presetBarril(); }
 $('#meta-name').value=state.meta.name;
 $('#meta-type').value=state.meta.type;
-if($('#meta-categoria')) $('#meta-categoria').value=state.meta.categoria||'';
+syncMetaCategoria();                   // categoría + el sub-selector de herramienta (REQ-TOOL1)
 $('#meta-role').textContent=state.meta.role||'';
 $('#meta-role').hidden=!state.meta.role;
 $('#meta-atravesable').checked=state.atravesable;
@@ -13326,5 +14684,24 @@ setMode('3d');   // arrancar en Edición 3D (no en Capas)
 // era async y openWorld() salía sin esperarla—, así que el snippet podía encontrarse el registro a medias.
 // Son unos KB de index.json; las galerías, que son lo caro, van después de que el Mundo esté cargado.
 if(_enMundo) assetIndex().then(mcIndexAssets).catch(()=>{})
-  .then(openWorld)
+  .then(openWorld)   // REQ-INTRO1 · la intro la lanza openWorld por dentro, en cuanto el mundo está pintado
   .then(()=>{ loadServerAssets(); refreshHabitantesList(); });
+// …y sin /map/, el gemelo: el snippet 'editor-autoarranque' (mcEditorAutoarranque). Va enganchado al
+// final del arranque a propósito: cuando corre, el editor ya está montado y en Edición 3D y las galerías
+// están cargadas, así que el snippet puede tocar el modelo, abrir el Mundo o irse a un mapa con game.map.
+// Si no existe ese snippet no pasa nada; si falla, tampoco. `?noauto=1` lo salta.
+else {
+  // REQ-EDIT1 · El snippet se PIDE ya, en paralelo con las galerías, y no porque corra antes (sigue
+  // corriendo al final): es para poder destapar la página cuanto antes cuando resulta que no hay ninguno.
+  const _autoP = mcEditorSaltaAuto() ? Promise.resolve(null)
+                                     : mcPideSnippet(MC_EDITOR_AUTOARRANQUE).catch(()=>null);
+  _autoP.then(s => { if(!s || !s.code) mcDestapaApp(); });   // nada que esperar: el editor, ya
+  // `beforeunload` llega SÍNCRONO al asignar `location.href` (medido en Chromium), así que cuando el
+  // snippet vuelve ya se sabe si se ha ido. Si se fue, no se destapa: destaparlo es exactamente el flash.
+  addEventListener('beforeunload', ()=>{ mc._navegando = true; });
+  addEventListener('pagehide',     ()=>{ mc._navegando = true; });
+  setTimeout(mcDestapaApp, 5000);   // red de seguridad: un snippet colgado no deja la página en negro
+  _assetsEditorP.then(()=>mcEditorAutoarranque(_autoP))
+    .catch(e=>console.warn(MC_EDITOR_AUTOARRANQUE+': '+(e && e.message ? e.message : e)))
+    .then(()=>{ if(!mc._navegando) mcDestapaApp(); });   // se quedó: el editor, ahora sí, entero
+}

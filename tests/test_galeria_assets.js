@@ -51,7 +51,8 @@ const entrada = () => leerIdx().find(a => a.id === ID);
   try {
     assert(creado.id === ID, 'el POST devolvio ' + JSON.stringify(creado));
 
-    await p.goto(URL, { waitUntil: 'load', timeout: 60000 });
+    // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
+    await p.goto(URL + '?noauto=1', { waitUntil: 'load', timeout: 60000 });
     await p.waitForFunction('typeof openHabitantes === "function"', { timeout: 60000 });
 
     // La galeria de Texturas: ahi es donde aterriza lo que se guarda como textura.

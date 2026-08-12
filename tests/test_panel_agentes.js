@@ -44,7 +44,8 @@ const cerca = (a, b, e, msg) => assert(Math.abs(a - b) <= e, msg + ' (' + a + ' 
     return r.abort();
   });
 
-  await p.goto(URL, { timeout: 60000 });
+  // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
+  await p.goto(URL + '?noauto=1', { timeout: 60000 });
   // REQ-NAV1 · «🦴 Agentes» ya no está en la barra: vive dentro del menú «⋯», que hay que abrir antes.
   await p.click('#btn-mas');
   await p.click('[data-tab="agentes"]');

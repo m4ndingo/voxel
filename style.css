@@ -44,6 +44,10 @@ body{
   font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   display:flex; flex-direction:column;
 }
+/* REQ-EDIT1 · La tapa del arranque. `visibility:hidden` y no `display:none` a propósito: el layout se
+   calcula igual, así que al destapar no hay reflow ni salto, y el fondo del `body` sigue pintándose —lo
+   que se ve mientras tanto es el color de siempre, no un blanco. Se quita desde `mcDestapaApp()`. */
+body.app-tapada > *{visibility:hidden}
 
 /* ---------- Cabecera ---------- */
 .topbar{
@@ -58,6 +62,10 @@ body{
   filter:drop-shadow(0 0 6px rgba(226,164,74,.4));
 }
 .brand-txt strong{letter-spacing:.14em; font-size:15px}
+/* REQ-INTRO2 · la marca solo se ve pulsable cuando hay un mundo en memoria al que volver (la clase la
+   pone y la quita mcMarcaSync). Sin mundo es un rótulo y no debe prometer nada. */
+.brand-txt strong.clicable{cursor:pointer}
+.brand-txt strong.clicable:hover{color:var(--accent)}
 .brand-txt small{display:block; color:var(--muted); font-size:11px; letter-spacing:.04em}
 
 /* A la derecha: el «⋯» queda bajo el borde por el que se abre su menú (REQ-NAV1). */
@@ -647,18 +655,37 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
   pointer-events:none; opacity:.85}
 .mc-hotbar{position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:6;
   display:flex; gap:4px; padding:5px; border-radius:8px;
-  background:rgba(14,17,25,.72); border:1px solid var(--line); backdrop-filter:blur(3px)}
+  /* .36 y no .72: desde que los iconos son el objeto en iso sobre transparente, la barra se ve DETRÁS
+     de ellos y un fondo opaco los apaga. El `blur` es el que sigue separándola del mundo. */
+  background:rgba(14,17,25,.36); border:1px solid var(--line); backdrop-filter:blur(3px)}
 .mc-hotbar:empty{display:none}
+/* Sin fondo: el icono es el objeto en iso sobre transparente, y un cuadro oscuro detrás se le come el
+   contorno. La barra ya pone su propio fondo, que es donde se apoyan todos por igual. */
 .mc-slot{width:42px; height:42px; border-radius:6px; border:2px solid rgba(255,255,255,.25);
-  background:rgba(0,0,0,.25); display:flex; align-items:center; justify-content:center;
+  background:transparent; display:flex; align-items:center; justify-content:center;
   overflow:hidden; cursor:pointer; position:relative}
-.mc-slot canvas{width:100%; height:100%; image-rendering:pixelated; display:block}
+/* `auto` y no `pixelated`: el icono se dibuja a 120 px y lo reduce el navegador; a `pixelated` esa
+   reducción no es entera y deja los filos en escalera. */
+.mc-slot canvas{width:100%; height:100%; image-rendering:auto; display:block}
 .mc-slot.is-active{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent)}
 .mc-slot .mc-slot-key{position:absolute; top:1px; left:3px; font-size:9px; color:#fff;
   text-shadow:0 0 2px #000; font-family:ui-monospace,monospace}
 .mc-slot.empty{border-style:dashed; border-color:rgba(255,255,255,.35); background:rgba(0,0,0,.15)}
 .mc-slot.empty::after{content:'+'; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
   color:rgba(255,255,255,.4); font-size:20px; line-height:1; pointer-events:none}
+/* REQ-TOOL1 · la ranura 10: la herramienta activa. Va separada de las nueve por un hueco y una línea
+   porque NO es una ranura de bloque —no se selecciona con un número ni guarda nada—, y confundirlas
+   invita a buscarle la tecla «10». Nunca se pinta como activa: la herramienta siempre lo está. */
+.mc-slot-tool{margin-left:8px; border-color:rgba(255,255,255,.4)}
+.mc-slot-tool::before{content:''; position:absolute; left:-6px; top:4px; bottom:4px;
+  border-left:1px solid rgba(255,255,255,.22)}
+/* Y sin el «+» de las vacías: aquí «vacía» significa «esta herramienta no tiene dibujo asignado», no
+   «pincha para llenarla», y para eso ya está el rótulo del `title`. */
+.mc-slot-tool.empty{border-style:solid; background:rgba(0,0,0,.25)}
+.mc-slot-tool.empty::after{content:none}
+/* El dibujo se renderiza a 120 px y se reduce aquí: `pixelated` (que es lo que quieren las otras
+   ranuras, recortes del atlas a tamaño nativo) haría picadillo con esa reducción. */
+.mc-slot-tool canvas{image-rendering:auto; padding:2px; box-sizing:border-box}
 /* Controles táctiles del Mundo. El CONTENEDOR no intercepta nada (pointer-events:none): el resto
    del canvas tiene que seguir siendo la zona de mirar, y la hotbar (z-index:6) tiene que seguir
    pulsándose aunque esto vaya por encima. Solo el joystick y el botón capturan el dedo. */
@@ -715,6 +742,15 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .mc-picker-bar{display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:8px 12px; background:rgba(0,0,0,0.25); border-bottom:1px solid rgba(255,255,255,0.1)}
 .mc-picker-search{flex:1; min-width:200px; padding:6px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.4); color:#fff; font-family:var(--font-game), sans-serif; font-size:11px}
 .mc-picker-search:focus{outline:none; border-color:#55aaff; box-shadow:0 0 6px rgba(85,170,255,0.4)}
+/* REQ-GAL4: el aviso de «faltan N letras» del buscador. `flex-basis:100%` para que caiga en su PROPIA
+   línea dentro de la barra: como hermano normal se metería entre la caja y los filtros y los empujaría. */
+.gal-aviso-min{flex:1 0 100%; margin:-4px 0 0 4px; color:#ffcc66; font-family:var(--font-game), sans-serif; font-size:9px; opacity:.85}
+/* REQ-GAL4: el desplegable de orden. Sin `flex:1` a propósito —se queda del ancho de su texto y es el
+   buscador el que estira—, y `option` lleva color propio: sin él, el desplegable abierto sale con texto
+   blanco sobre el fondo blanco del sistema. */
+.gal-orden{padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.4); color:#fff; font-family:var(--font-game), sans-serif; font-size:10px; cursor:pointer}
+.gal-orden:focus{outline:none; border-color:#55aaff}
+.gal-orden option{background:#1a1a1a; color:#fff}
 .mc-picker-filters{display:flex; gap:4px; flex-wrap:wrap}
 .mc-pick-filter{background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); color:#ccc; border-radius:6px; padding:4px 10px; font-family:var(--font-game), sans-serif; font-size:9px; cursor:pointer; transition:all 0.15s ease}
 .mc-pick-filter:hover{background:rgba(255,255,255,0.2); color:#fff}
@@ -748,6 +784,95 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 .mc-loading-text{color:#0e2036; font-weight:600; font-size:15px; letter-spacing:.3px;
   text-shadow:0 1px 0 rgba(255,255,255,.4)}
 @keyframes mc-spin{to{transform:rotate(360deg)}}
+/* REQ-OSD2 · pantalla OSD: la capa de menú que se pone ENCIMA del juego (JUGAR / CONSTRUIR / lo que
+   defina game.osd). z-index 25 = por encima del canvas y del cargando (20), por debajo del selector y
+   de los snippets (50/60): abrir la galería estando en un menú tiene que seguir viéndose.
+   `inset:0` no es decorativo: la capa TIENE que tapar el canvas entero o los clics del menú caen
+   detrás y rompen bloques del mundo que hay debajo. */
+.mc-osd{position:absolute; inset:0; z-index:25; display:flex; align-items:center; justify-content:center}
+.mc-osd[hidden]{display:none}
+/* Una pantalla que es otro mapa (REQ-OSD3) va en un iframe a sangre: es la pantalla, no una ventana.
+   REQ-OSD6 · fondo TRANSPARENTE y no negro: la pantalla es un OSD, o sea algo que se pone ENCIMA del
+   juego, y lo único opaco tiene que ser lo que el dueño dibujó en ese mapa. Y aparece con `cargando`
+   puesto: mientras el mundo de dentro se hornea no se enseña nada —ni azul, ni carteles, ni el mapa a
+   medio mallar—, solo se descubre cuando el hijo avisa de que ya está (`{vf:'osd-listo'}`). */
+.mc-osd iframe{width:100%; height:100%; border:0; display:block; background:transparent;
+  opacity:1; transition:opacity .18s ease}
+.mc-osd iframe.cargando{opacity:0}
+/* El aviso de que la pantalla está viniendo: un punto girando, SIN fondo. Tapar el juego con un cartel
+   opaco para decir «espera» es justo el parpadeo que se quiere quitar.
+   ⚠️ Lleva keyframes PROPIOS y no `mc-spin`, y el motivo es que este está centrado con
+   `transform:translate(-50%,-50%)`: una animación que solo dice `to{transform:rotate(360deg)}` **pisa la
+   propiedad entera**, así que el navegador interpola de `translate(-50%,-50%)` a `rotate(360deg)` como
+   matrices — el punto se DESLIZA hacia abajo a la derecha y ni siquiera gira (360° se descompone en 0°).
+   Medido: `matrix(1,0,0,1,-11,-11)` → `matrix(1,0,0,1,-3,-3)`, rotación cero. Con las dos funciones
+   escritas en los dos fotogramas la interpolación es función a función y gira en su sitio. */
+.mc-osd-espera{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:26px; height:26px; border-radius:50%; border:3px solid rgba(255,255,255,.35);
+  border-top-color:rgba(255,255,255,.9); animation:mc-spin-centro .8s linear infinite; pointer-events:none}
+@keyframes mc-spin-centro{
+  from{transform:translate(-50%,-50%) rotate(0deg)}
+  to  {transform:translate(-50%,-50%) rotate(360deg)}}
+/* REQ-OSD9 · El html cuando la pantalla ADEMÁS es un mapa: el mapa es el fondo y esto son los botones.
+   Va superpuesto (no como hermano en el flex, que lo pondría al lado del iframe) y sobre todo va
+   `pointer-events:none`: una capa a `inset:0` por encima del mapa se tragaría los clics y dejaría muertos
+   los botones que son BLOQUES del mapa de dentro. Solo sus hijos vuelven a recibir el ratón.
+   REQ-OSD10 · el `align-items`/`justify-content` los pisa `mcOsdSitio` según `sitio:` del define; aquí se
+   deja el centro, que es el de siempre. El `padding` es el margen con el borde de la ventana: lo pone la
+   capa y no cada pantalla, para que un panel «abajo-derecha» no salga pegado al canto en ningún tamaño. */
+.mc-osd-html{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  padding:26px; box-sizing:border-box;
+  pointer-events:none; opacity:1; transition:opacity .18s ease}
+.mc-osd-html > *{pointer-events:auto}
+.mc-osd-html.cargando{opacity:0}
+/* Lo de dentro de una pantalla de HTML. Se queda en lo mínimo a propósito: el dueño diseña las suyas
+   dibujando mapas, y esto es solo el andamio para las que se declaran con {html:…}. */
+.mc-osd-panel{display:flex; flex-direction:column; align-items:center; gap:22px; padding:34px 44px;
+  border-radius:16px; background:rgba(8,11,18,.72); border:1px solid rgba(255,255,255,.14);
+  backdrop-filter:blur(6px); box-shadow:0 18px 60px rgba(0,0,0,.55)}
+.mc-osd-title{font-family:var(--font-game,inherit); font-size:27px; color:#fff; letter-spacing:1px;
+  text-shadow:0 2px 0 rgba(0,0,0,.6)}
+.mc-osd-btn{font-family:var(--font-game,inherit); font-size:18px; color:#fff; cursor:pointer;
+  min-width:260px; padding:18px 26px; border-radius:10px; border:1px solid rgba(255,255,255,.28);
+  background:rgba(30,40,58,.85); letter-spacing:1px}
+.mc-osd-btn:hover{background:rgba(52,72,104,.95); border-color:rgba(255,255,255,.5)}
+/* REQ-OSD3 · modo ESCAPARATE: este mundo es la PANTALLA de un menú (URL ?osd=1), no una partida. Se
+   quita todo lo de jugar. No es cosmético: una hotbar dentro de un menú invita a construir ahí, y una
+   pantalla no se guarda — el bloque puesto se perdería sin avisar. */
+/* REQ-INTRO1 · `body.mc-intro` es lo mismo pero MIENTRAS dura la intro (?intro=1): durante el sobrevuelo
+   esto no es una partida todavía, es una postal, y la hotbar/mira/botones de esquina sobran igual. La
+   diferencia con el escaparate es que la clase la pone y la quita el snippet, así que **JUGAR lo devuelve
+   todo** — ahí sí empieza la partida. Con `hidden` no bastaría: `mcUpdateHotbar` la re-enseña sola. */
+body.mc-escaparate .mc-hotbar,
+body.mc-escaparate .mc-crosshair,
+body.mc-escaparate .mc-touch,
+body.mc-escaparate .mc-code-btn,
+body.mc-escaparate .mc-close,
+body.mc-intro .mc-hotbar,
+body.mc-intro .mc-crosshair,
+body.mc-intro .mc-touch,
+body.mc-intro .mc-code-btn,
+body.mc-intro .mc-close,
+/* REQ-OSD12 · y lo mismo MIENTRAS hay un menú puesto (`game.osd.abrir`), por la misma razón: sin puntero
+   capturado la hotbar y la mira no hacen nada, y CÓDIGO/CERRAR compiten con los botones del propio menú.
+   La clase la pone y la quita `mcOsdAbrir`/`mcOsdCerrar`; `hud:true` en el define no la pone. Esconder
+   CERRAR no deja a nadie encerrado: Esc sigue cerrando el menú y, con el menú cerrado, el Mundo. */
+body.mc-osd-puesto .mc-hotbar,
+body.mc-osd-puesto .mc-crosshair,
+body.mc-osd-puesto .mc-touch,
+body.mc-osd-puesto .mc-code-btn{display:none !important}
+/* «✕ Cerrar» se esconde igual, PERO no en táctil: allí no hay Esc y sería encerrar al visitante en el
+   menú. Es la misma excepción que hace `updateOSDbuttons` desde REQ-OSD1. */
+body.mc-osd-puesto:not(.mc-osd-tactil) .mc-close{display:none !important}
+/* REQ-OSD6 · una pantalla-mapa se ve A TRAVÉS. El `#mc-modal` lleva el azul del cielo detrás del canvas
+   (.mc-modal, arriba) y el canvas se limpia con el cielo: dentro de un OSD las dos cosas son un telón
+   opaco que borra el juego de debajo. Aquí se quitan las dos capas de fondo —el clear del canvas lo pone
+   a alpha 0 `mcClearFondo`— y lo único que queda pintado es lo que el dueño dibujó en ese mapa.
+   Lo demás del documento (cabecera y columnas del editor) se esconde: con el modal transparente asomaría
+   por detrás, que antes no pasaba porque el azul lo tapaba. */
+body.mc-escaparate{background:transparent}
+body.mc-escaparate > *:not(.mc-modal){display:none !important}
+body.mc-escaparate .mc-modal{background:transparent}
 /* t1 · post-its: editor de nota (tecla N) centrado sobre la hotbar, y visor de solo lectura junto a la mira */
 .mc-note{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:60;
   width:min(var(--note-w,720px),94vw); display:flex; flex-direction:column; gap:10px; padding:14px;

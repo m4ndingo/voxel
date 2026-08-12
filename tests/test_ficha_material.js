@@ -53,7 +53,8 @@ const entrada = () => leerIdx().find(a => a.id === ID);
   let tomado = null, stoneSigue = null, cambiado = null, viejoMuerto = null;
   let trasReguardar = null, enIndice = null;
   try {
-    await p.goto(URL, { waitUntil: 'load', timeout: 60000 });
+    // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
+    await p.goto(URL + '?noauto=1', { waitUntil: 'load', timeout: 60000 });
     await p.waitForFunction('typeof openFicha === "function"', { timeout: 60000 });
 
     // Abrir la ficha por el boton de la tarjeta, no llamando a openFicha() a pelo: lo que se esta

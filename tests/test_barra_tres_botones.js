@@ -36,7 +36,8 @@ function test(nombre, cond, extra) {
     };
   });
 
-  await p.goto(URL, { timeout: 60000 });
+  // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
+  await p.goto(URL + '?noauto=1', { timeout: 60000 });
   // `state` es un `const` de nivel superior: NO es propiedad de `window`. Se pregunta por el ámbito
   // léxico, como hacen los demás tests con `typeof openHabitantes`.
   await p.waitForFunction('typeof state !== "undefined" && typeof openHabitantes === "function" && document.querySelector("#tabs")',

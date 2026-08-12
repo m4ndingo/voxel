@@ -10,7 +10,10 @@
       "y": 112,
       "z": 52
     },
-    "file": "assets/taberna.vox.json"
+    "file": "assets/taberna.vox.json",
+    "savedAt": "2026-07-20T08:41:27",
+    "createdAt": "2026-07-20T08:41:27",
+    "count": 55317
   },
   {
     "id": "herreria",
@@ -23,7 +26,10 @@
       "y": 112,
       "z": 52
     },
-    "file": "assets/herreria.vox.json"
+    "file": "assets/herreria.vox.json",
+    "savedAt": "2026-07-20T08:41:27",
+    "createdAt": "2026-07-20T08:41:27",
+    "count": 48171
   },
   {
     "id": "mazmorra",
@@ -36,7 +42,10 @@
       "y": 112,
       "z": 52
     },
-    "file": "assets/mazmorra.vox.json"
+    "file": "assets/mazmorra.vox.json",
+    "savedAt": "2026-07-20T08:41:27",
+    "createdAt": "2026-07-20T08:41:27",
+    "count": 51825
   },
   {
     "id": "cubo",
@@ -45,7 +54,10 @@
     "type": "objeto",
     "icon": "🧊",
     "size": 16,
-    "file": "assets/cubo.vox.json"
+    "file": "assets/cubo.vox.json",
+    "savedAt": "2026-07-21T13:40:36",
+    "createdAt": "2026-07-21T13:40:36",
+    "count": 4096
   },
   {
     "id": "hierba",
@@ -55,7 +67,10 @@
     "icon": "🌿",
     "size": 16,
     "file": "assets/hierba.vox.json",
-    "group": "Básicas"
+    "group": "Básicas",
+    "savedAt": "2026-07-21T17:47:24",
+    "createdAt": "2026-07-21T17:47:24",
+    "count": 4096
   },
   {
     "id": "tierra",
@@ -65,7 +80,10 @@
     "icon": "🟫",
     "size": 16,
     "file": "assets/tierra.vox.json",
-    "group": "Básicas"
+    "group": "Básicas",
+    "savedAt": "2026-07-21T17:47:24",
+    "createdAt": "2026-07-21T17:47:24",
+    "count": 4096
   },
   {
     "id": "madera",
@@ -75,7 +93,10 @@
     "icon": "🪵",
     "size": 16,
     "file": "assets/madera.vox.json",
-    "group": "Básicas"
+    "group": "Básicas",
+    "savedAt": "2026-07-21T17:47:24",
+    "createdAt": "2026-07-21T17:47:24",
+    "count": 4096
   },
   {
     "id": "roca",
@@ -85,7 +106,10 @@
     "icon": "🪨",
     "size": 16,
     "file": "assets/roca.vox.json",
-    "group": "Básicas"
+    "group": "Básicas",
+    "savedAt": "2026-07-21T17:47:24",
+    "createdAt": "2026-07-21T17:47:24",
+    "count": 4096
   },
   {
     "id": "adoquin",
@@ -95,7 +119,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/adoquin.vox.json"
+    "file": "assets/adoquin.vox.json",
+    "savedAt": "2026-07-21T20:11:09",
+    "createdAt": "2026-07-21T20:11:09",
+    "count": 4096
   },
   {
     "id": "ladrillo_piedra",
@@ -105,7 +132,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/ladrillo_piedra.vox.json"
+    "file": "assets/ladrillo_piedra.vox.json",
+    "savedAt": "2026-07-21T20:11:09",
+    "createdAt": "2026-07-21T20:11:09",
+    "count": 4096
   },
   {
     "id": "ladrillo",
@@ -115,7 +145,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/ladrillo.vox.json"
+    "file": "assets/ladrillo.vox.json",
+    "savedAt": "2026-07-21T20:11:09",
+    "createdAt": "2026-07-21T20:11:09",
+    "count": 4096
   },
   {
     "id": "tablones",
@@ -125,7 +158,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/tablones.vox.json"
+    "file": "assets/tablones.vox.json",
+    "savedAt": "2026-07-21T20:11:09",
+    "createdAt": "2026-07-21T20:11:09",
+    "count": 4096
   },
   {
     "id": "tronco",
@@ -137,7 +173,10 @@
     "size": 16,
     "file": "assets/tronco.vox.json",
     "description": "",
-    "alias": "oak"
+    "alias": "oak",
+    "savedAt": "2026-08-05T10:28:01",
+    "createdAt": "2026-08-05T10:28:01",
+    "count": 4096
   },
   {
     "id": "arena",
@@ -147,7 +186,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/arena.vox.json"
+    "file": "assets/arena.vox.json",
+    "savedAt": "2026-07-21T20:11:09",
+    "createdAt": "2026-07-21T20:11:09",
+    "count": 4096
   },
   {
     "id": "arenisca",
@@ -157,7 +199,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/arenisca.vox.json"
+    "file": "assets/arenisca.vox.json",
+    "savedAt": "2026-07-21T20:11:09",
+    "createdAt": "2026-07-21T20:11:09",
+    "count": 4096
   },
   {
     "id": "grava",
@@ -167,7 +212,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/grava.vox.json"
+    "file": "assets/grava.vox.json",
+    "savedAt": "2026-07-21T20:11:09",
+    "createdAt": "2026-07-21T20:11:09",
+    "count": 4096
   },
   {
     "id": "musgo_adoquin",
@@ -177,7 +225,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/musgo_adoquin.vox.json"
+    "file": "assets/musgo_adoquin.vox.json",
+    "savedAt": "2026-07-21T20:11:09",
+    "createdAt": "2026-07-21T20:11:09",
+    "count": 4096
   },
   {
     "id": "obsidiana",
@@ -187,7 +238,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/obsidiana.vox.json"
+    "file": "assets/obsidiana.vox.json",
+    "savedAt": "2026-07-21T20:11:09",
+    "createdAt": "2026-07-21T20:11:09",
+    "count": 4096
   },
   {
     "id": "white_whool",
@@ -199,7 +253,10 @@
     "size": 16,
     "file": "assets/white_whool.vox.json",
     "description": "",
-    "alias": "white_wool"
+    "alias": "white_wool",
+    "savedAt": "2026-08-04T16:13:36",
+    "createdAt": "2026-08-04T16:13:36",
+    "count": 4096
   },
   {
     "id": "red_concrete",
@@ -209,7 +266,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/red_concrete.vox.json"
+    "file": "assets/red_concrete.vox.json",
+    "savedAt": "2026-07-24T18:02:30",
+    "createdAt": "2026-07-24T18:02:30",
+    "count": 4096
   },
   {
     "id": "bloque_redstone",
@@ -225,7 +285,10 @@
     },
     "file": "assets/bloque_redstone.vox.json",
     "description": "Bloque de redstone — fuente permanente de señal (emite 15 por sus seis caras).",
-    "categoria": "redstone"
+    "categoria": "redstone",
+    "savedAt": "2026-08-10T20:32:10",
+    "createdAt": "2026-08-10T20:32:10",
+    "count": 4096
   },
   {
     "id": "snow",
@@ -235,7 +298,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/snow.vox.json"
+    "file": "assets/snow.vox.json",
+    "savedAt": "2026-07-24T18:05:37",
+    "createdAt": "2026-07-24T18:05:37",
+    "count": 4096
   },
   {
     "id": "yellow",
@@ -245,7 +311,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/yellow_concrete.vox.json"
+    "file": "assets/yellow_concrete.vox.json",
+    "savedAt": "2026-07-24T18:33:20",
+    "createdAt": "2026-07-24T18:33:20",
+    "count": 4096
   },
   {
     "id": "lava",
@@ -262,7 +331,10 @@
     "file": "assets/lava.vox.json",
     "description": "",
     "alias": "lava",
-    "categoria": "fluido"
+    "categoria": "fluido",
+    "savedAt": "2026-08-11T10:51:41",
+    "createdAt": "2026-08-11T10:51:41",
+    "count": 4096
   },
   {
     "id": "tejado",
@@ -276,7 +348,10 @@
       "y": 16,
       "z": 16
     },
-    "file": "assets/tejado.vox.json"
+    "file": "assets/tejado.vox.json",
+    "savedAt": "2026-07-28T09:25:13",
+    "createdAt": "2026-07-28T09:25:13",
+    "count": 4096
   },
   {
     "id": "hormig-n-verde",
@@ -286,7 +361,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/hormig-n-verde.vox.json"
+    "file": "assets/hormig-n-verde.vox.json",
+    "savedAt": "2026-07-28T11:42:17",
+    "createdAt": "2026-07-28T11:42:17",
+    "count": 4096
   },
   {
     "id": "cubo-trans",
@@ -302,7 +380,10 @@
     },
     "file": "assets/cubo-trans.vox.json",
     "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir.",
-    "alias": "cubo_trans"
+    "alias": "cubo_trans",
+    "savedAt": "2026-08-10T20:32:10",
+    "createdAt": "2026-08-10T20:32:10",
+    "count": 4096
   },
   {
     "id": "cubo-liso",
@@ -316,7 +397,10 @@
       "y": 16,
       "z": 16
     },
-    "file": "assets/cubo-liso.vox.json"
+    "file": "assets/cubo-liso.vox.json",
+    "savedAt": "2026-07-29T11:54:41",
+    "createdAt": "2026-07-29T11:54:41",
+    "count": 4096
   },
   {
     "id": "diana",
@@ -330,7 +414,10 @@
       "y": 16,
       "z": 1
     },
-    "file": "assets/diana.vox.json"
+    "file": "assets/diana.vox.json",
+    "savedAt": "2026-07-30T13:43:44",
+    "createdAt": "2026-07-30T13:43:44",
+    "count": 151
   },
   {
     "id": "hierba-escalonada",
@@ -344,7 +431,10 @@
       "y": 16,
       "z": 16
     },
-    "file": "assets/hierba-escalonada.vox.json"
+    "file": "assets/hierba-escalonada.vox.json",
+    "savedAt": "2026-07-30T14:35:02",
+    "createdAt": "2026-07-30T14:35:02",
+    "count": 3072
   },
   {
     "id": "valla-madera",
@@ -358,7 +448,10 @@
       "y": 16,
       "z": 4
     },
-    "file": "assets/valla-madera.vox.json"
+    "file": "assets/valla-madera.vox.json",
+    "savedAt": "2026-07-31T09:42:56",
+    "createdAt": "2026-07-31T09:42:56",
+    "count": 360
   },
   {
     "id": "hielo",
@@ -370,7 +463,10 @@
     "size": 16,
     "file": "assets/hielo.vox.json",
     "description": "",
-    "alias": "ice"
+    "alias": "ice",
+    "savedAt": "2026-08-04T16:05:22",
+    "createdAt": "2026-08-04T16:05:22",
+    "count": 4096
   },
   {
     "id": "hielo-pista-de-patinaje",
@@ -380,7 +476,10 @@
     "type": "textura",
     "group": "Bloques de construcción",
     "size": 16,
-    "file": "assets/hielo-pista-de-patinaje.vox.json"
+    "file": "assets/hielo-pista-de-patinaje.vox.json",
+    "savedAt": "2026-07-31T11:04:20",
+    "createdAt": "2026-07-31T11:04:20",
+    "count": 4096
   },
   {
     "id": "cabeza",
@@ -394,7 +493,10 @@
       "y": 16,
       "z": 16
     },
-    "file": "assets/cabeza.vox.json"
+    "file": "assets/cabeza.vox.json",
+    "savedAt": "2026-07-31T13:51:58",
+    "createdAt": "2026-07-31T13:51:58",
+    "count": 4092
   },
   {
     "id": "brazo",
@@ -408,7 +510,10 @@
       "y": 16,
       "z": 32
     },
-    "file": "assets/brazo.vox.json"
+    "file": "assets/brazo.vox.json",
+    "savedAt": "2026-07-31T18:03:37",
+    "createdAt": "2026-07-31T18:03:37",
+    "count": 7190
   },
   {
     "id": "cabeza-zombie",
@@ -422,7 +527,10 @@
     },
     "file": "assets/cabeza-zombie.vox.json",
     "icon": "🧟",
-    "group": "Agentes"
+    "group": "Agentes",
+    "savedAt": "2026-08-02T12:10:42",
+    "createdAt": "2026-08-02T12:10:42",
+    "count": 3367
   },
   {
     "id": "torso-zombie",
@@ -436,7 +544,10 @@
     },
     "file": "assets/torso-zombie.vox.json",
     "icon": "🧟",
-    "group": "Agentes"
+    "group": "Agentes",
+    "savedAt": "2026-08-02T12:10:42",
+    "createdAt": "2026-08-02T12:10:42",
+    "count": 1320
   },
   {
     "id": "brazo-zombie",
@@ -450,7 +561,10 @@
     },
     "file": "assets/brazo-zombie.vox.json",
     "icon": "🧟",
-    "group": "Agentes"
+    "group": "Agentes",
+    "savedAt": "2026-08-02T12:10:42",
+    "createdAt": "2026-08-02T12:10:42",
+    "count": 350
   },
   {
     "id": "pierna-zombie",
@@ -464,7 +578,10 @@
     },
     "file": "assets/pierna-zombie.vox.json",
     "icon": "🧟",
-    "group": "Agentes"
+    "group": "Agentes",
+    "savedAt": "2026-08-02T12:10:42",
+    "createdAt": "2026-08-02T12:10:42",
+    "count": 300
   },
   {
     "id": "torso-perro",
@@ -478,7 +595,10 @@
     },
     "file": "assets/torso-perro.vox.json",
     "icon": "🐕",
-    "group": "Agentes"
+    "group": "Agentes",
+    "savedAt": "2026-08-02T17:59:53",
+    "createdAt": "2026-08-02T17:59:53",
+    "count": 896
   },
   {
     "id": "cabeza-perro",
@@ -492,7 +612,10 @@
     },
     "file": "assets/cabeza-perro.vox.json",
     "icon": "🐕",
-    "group": "Agentes"
+    "group": "Agentes",
+    "savedAt": "2026-08-02T17:59:53",
+    "createdAt": "2026-08-02T17:59:53",
+    "count": 508
   },
   {
     "id": "pata-perro",
@@ -506,7 +629,10 @@
     },
     "file": "assets/pata-perro.vox.json",
     "icon": "🐕",
-    "group": "Agentes"
+    "group": "Agentes",
+    "savedAt": "2026-08-02T17:59:53",
+    "createdAt": "2026-08-02T17:59:53",
+    "count": 108
   },
   {
     "id": "cola-perro",
@@ -520,7 +646,10 @@
     },
     "file": "assets/cola-perro.vox.json",
     "icon": "🐕",
-    "group": "Agentes"
+    "group": "Agentes",
+    "savedAt": "2026-08-02T17:59:53",
+    "createdAt": "2026-08-02T17:59:53",
+    "count": 80
   },
   {
     "id": "cabeza-de-personaje",
@@ -535,7 +664,10 @@
       "z": 15
     },
     "file": "assets/cabeza-de-personaje.vox.json",
-    "description": "Pieza articulable del zombie. Generada por make_zombie.js."
+    "description": "Pieza articulable del zombie. Generada por make_zombie.js.",
+    "savedAt": "2026-08-07T19:21:46",
+    "createdAt": "2026-08-07T19:21:46",
+    "count": 3367
   },
   {
     "id": "brazo-de-personaje",
@@ -549,7 +681,10 @@
       "y": 5,
       "z": 14
     },
-    "file": "assets/brazo-de-personaje.vox.json"
+    "file": "assets/brazo-de-personaje.vox.json",
+    "savedAt": "2026-08-04T12:39:28",
+    "createdAt": "2026-08-04T12:39:28",
+    "count": 350
   },
   {
     "id": "pierna-de-personaje",
@@ -563,7 +698,10 @@
       "y": 5,
       "z": 12
     },
-    "file": "assets/pierna-de-personaje.vox.json"
+    "file": "assets/pierna-de-personaje.vox.json",
+    "savedAt": "2026-08-04T11:38:46",
+    "createdAt": "2026-08-04T11:38:46",
+    "count": 300
   },
   {
     "id": "torso-de-personaje",
@@ -577,7 +715,10 @@
       "y": 8,
       "z": 14
     },
-    "file": "assets/torso-de-personaje.vox.json"
+    "file": "assets/torso-de-personaje.vox.json",
+    "savedAt": "2026-08-04T12:38:15",
+    "createdAt": "2026-08-04T12:38:15",
+    "count": 1344
   },
   {
     "id": "hormig-n-verde-hojas",
@@ -593,7 +734,10 @@
     },
     "file": "assets/hormig-n-verde-hojas.vox.json",
     "description": "",
-    "alias": "green_concrete"
+    "alias": "green_concrete",
+    "savedAt": "2026-08-04T13:56:39",
+    "createdAt": "2026-08-04T13:56:39",
+    "count": 4096
   },
   {
     "id": "hierba-caras",
@@ -608,7 +752,10 @@
       "z": 16
     },
     "file": "assets/hierba-caras.vox.json",
-    "description": "Hormigón verde mate 16³ (ideal para estructuras sólidas o follaje de árboles)."
+    "description": "Hormigón verde mate 16³ (ideal para estructuras sólidas o follaje de árboles).",
+    "savedAt": "2026-08-04T20:58:38",
+    "createdAt": "2026-08-04T20:58:38",
+    "count": 352
   },
   {
     "id": "hierba-caras-2",
@@ -623,7 +770,10 @@
       "z": 16
     },
     "file": "assets/hierba-caras-2.vox.json",
-    "description": "Hormigón verde mate 16³ (ideal para estructuras sólidas o follaje de árboles)."
+    "description": "Hormigón verde mate 16³ (ideal para estructuras sólidas o follaje de árboles).",
+    "savedAt": "2026-08-04T20:58:09",
+    "createdAt": "2026-08-04T20:58:09",
+    "count": 214
   },
   {
     "id": "leaves",
@@ -639,7 +789,10 @@
     },
     "file": "assets/leaves.vox.json",
     "alias": "leaves",
-    "description": ""
+    "description": "",
+    "savedAt": "2026-08-05T00:04:17",
+    "createdAt": "2026-08-05T00:04:17",
+    "count": 1548
   },
   {
     "id": "demo-hojas-sin-caras",
@@ -655,7 +808,10 @@
     },
     "file": "assets/demo-hojas-sin-caras.vox.json",
     "alias": "demo-hojas-sin-caras",
-    "description": "Solo para la zona de pruebas de /map/test: el cubo verde macizo de antes del arreglo."
+    "description": "Solo para la zona de pruebas de /map/test: el cubo verde macizo de antes del arreglo.",
+    "savedAt": "2026-08-05T10:10:32",
+    "createdAt": "2026-08-05T10:10:32",
+    "count": 1548
   },
   {
     "id": "hierba-alta",
@@ -663,7 +819,10 @@
     "role": "Bloque · mata de hierba",
     "type": "textura",
     "size": 16,
-    "file": "assets/hierba-alta.vox.json"
+    "file": "assets/hierba-alta.vox.json",
+    "savedAt": "2026-08-04T21:58:06",
+    "createdAt": "2026-08-04T21:58:06",
+    "count": 153
   },
   {
     "id": "flor-amarilla",
@@ -679,7 +838,10 @@
     },
     "file": "assets/flor-amarilla.vox.json",
     "description": "Flor amarilla",
-    "alias": "flor_amarilla"
+    "alias": "flor_amarilla",
+    "savedAt": "2026-08-05T14:20:06",
+    "createdAt": "2026-08-05T14:20:06",
+    "count": 52
   },
   {
     "id": "flor-roja",
@@ -695,7 +857,10 @@
     },
     "file": "assets/flor-roja.vox.json",
     "alias": "flor_roja",
-    "description": "Hormigón Amarillo — bloque de construcción 16³ (textura lisa y mate)."
+    "description": "Hormigón Amarillo — bloque de construcción 16³ (textura lisa y mate).",
+    "savedAt": "2026-08-05T14:30:39",
+    "createdAt": "2026-08-05T14:30:39",
+    "count": 52
   },
   {
     "id": "cartel",
@@ -711,7 +876,10 @@
     },
     "file": "assets/cartel.vox.json",
     "description": "Cartel",
-    "alias": "sign"
+    "alias": "sign",
+    "savedAt": "2026-08-06T08:46:10",
+    "createdAt": "2026-08-06T08:46:10",
+    "count": 544
   },
   {
     "id": "observador",
@@ -727,7 +895,10 @@
     },
     "file": "assets/observador.vox.json",
     "description": "Observador activo — emite 15 por la cara trasera.",
-    "categoria": "redstone"
+    "categoria": "redstone",
+    "savedAt": "2026-08-10T20:32:10",
+    "createdAt": "2026-08-10T20:32:10",
+    "count": 4092
   },
   {
     "id": "observador-on",
@@ -743,7 +914,10 @@
     },
     "file": "assets/observador-on.vox.json",
     "description": "Observador activo — emite 15 por la cara trasera.",
-    "categoria": "redstone"
+    "categoria": "redstone",
+    "savedAt": "2026-08-10T20:32:10",
+    "createdAt": "2026-08-10T20:32:10",
+    "count": 4092
   },
   {
     "id": "piston-pegajoso",
@@ -758,7 +932,10 @@
       "z": 16
     },
     "file": "assets/piston-pegajoso.vox.json",
-    "categoria": "redstone"
+    "categoria": "redstone",
+    "savedAt": "2026-08-10T21:36:41",
+    "createdAt": "2026-08-10T21:36:41",
+    "count": 3856
   },
   {
     "id": "piston-pegajoso-on",
@@ -773,7 +950,10 @@
       "z": 16
     },
     "file": "assets/piston-pegajoso-on.vox.json",
-    "categoria": "redstone"
+    "categoria": "redstone",
+    "savedAt": "2026-08-10T21:37:03",
+    "createdAt": "2026-08-10T21:37:03",
+    "count": 3136
   },
   {
     "id": "piston-pegajoso-cabeza",
@@ -788,7 +968,10 @@
       "z": 16
     },
     "file": "assets/piston-pegajoso-cabeza.vox.json",
-    "categoria": "redstone"
+    "categoria": "redstone",
+    "savedAt": "2026-08-10T21:37:20",
+    "createdAt": "2026-08-10T21:37:20",
+    "count": 976
   },
   {
     "id": "hierba-l-tetris",
@@ -803,7 +986,10 @@
       "z": 16
     },
     "file": "assets/hierba-l-tetris.vox.json",
-    "description": "Textura Hierba — objeto 16³ usado como pincel."
+    "description": "Textura Hierba — objeto 16³ usado como pincel.",
+    "savedAt": "2026-08-10T21:51:05",
+    "createdAt": "2026-08-10T21:51:05",
+    "count": 3072
   },
   {
     "id": "agua",
@@ -818,7 +1004,10 @@
       "z": 16
     },
     "file": "assets/agua.vox.json",
-    "categoria": "fluido"
+    "categoria": "fluido",
+    "savedAt": "2026-08-11T08:24:13",
+    "createdAt": "2026-08-11T08:24:13",
+    "count": 4096
   },
   {
     "id": "alfombra",
@@ -834,7 +1023,10 @@
     },
     "file": "assets/alfombra.vox.json",
     "categoria": "fluido",
-    "alias": "lava"
+    "alias": "lava",
+    "savedAt": "2026-08-11T12:01:16",
+    "createdAt": "2026-08-11T12:01:16",
+    "count": 240
   },
   {
     "id": "cabeza-de-oso",
@@ -849,7 +1041,10 @@
       "z": 15
     },
     "file": "assets/cabeza-de-oso.vox.json",
-    "description": "Cabeza de oso estilo voxel para el formato voxelforge-1."
+    "description": "Cabeza de oso estilo voxel para el formato voxelforge-1.",
+    "savedAt": "2026-08-11T12:51:44",
+    "createdAt": "2026-08-11T12:51:44",
+    "count": 1316
   },
   {
     "id": "torso-de-oso",
@@ -864,7 +1059,10 @@
       "z": 14
     },
     "file": "assets/torso-de-oso.vox.json",
-    "description": "Torso de oso en formato voxelforge-1 coordinado con la cabeza de oso."
+    "description": "Torso de oso en formato voxelforge-1 coordinado con la cabeza de oso.",
+    "savedAt": "2026-08-11T12:24:09",
+    "createdAt": "2026-08-11T12:24:09",
+    "count": 1344
   },
   {
     "id": "brazo-de-oso",
@@ -879,7 +1077,10 @@
       "z": 14
     },
     "file": "assets/brazo-de-oso.vox.json",
-    "description": "Brazo de oso en formato voxelforge-1 coordinado con el oso."
+    "description": "Brazo de oso en formato voxelforge-1 coordinado con el oso.",
+    "savedAt": "2026-08-11T12:43:14",
+    "createdAt": "2026-08-11T12:43:14",
+    "count": 350
   },
   {
     "id": "pierna-de-oso",
@@ -894,7 +1095,10 @@
       "z": 12
     },
     "file": "assets/pierna-de-oso.vox.json",
-    "description": "Pierna de oso en formato voxelforge-1 coordinada con el conjunto del oso."
+    "description": "Pierna de oso en formato voxelforge-1 coordinada con el conjunto del oso.",
+    "savedAt": "2026-08-11T12:48:38",
+    "createdAt": "2026-08-11T12:48:38",
+    "count": 300
   },
   {
     "id": "hormig-n-amarillo-i",
@@ -909,7 +1113,10 @@
       "z": 16
     },
     "file": "assets/hormig-n-amarillo-i.vox.json",
-    "description": "Hormigón Amarillo — bloque de construcción 16³ (textura lisa y mate)."
+    "description": "Hormigón Amarillo — bloque de construcción 16³ (textura lisa y mate).",
+    "savedAt": "2026-08-11T13:54:49",
+    "createdAt": "2026-08-11T13:54:49",
+    "count": 2048
   },
   {
     "id": "hormig-n-amarillo-dot",
@@ -924,6 +1131,28 @@
       "z": 16
     },
     "file": "assets/hormig-n-amarillo-dot.vox.json",
-    "description": "Hormigón Amarillo — bloque de construcción 16³ (textura lisa y mate)."
+    "description": "Hormigón Amarillo — bloque de construcción 16³ (textura lisa y mate).",
+    "savedAt": "2026-08-11T13:56:04",
+    "createdAt": "2026-08-11T13:56:04",
+    "count": 1024
+  },
+  {
+    "id": "hormig-n-naranja",
+    "name": "Hormigón Naranja",
+    "role": "Bloque · orange_concrete",
+    "icon": "🟧",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hormig-n-naranja.vox.json",
+    "savedAt": "2026-08-12T22:17:27",
+    "createdAt": "2026-08-12T22:17:10",
+    "count": 4096,
+    "description": "Hormigón naranja mate 16³ con textura porosa fina.",
+    "categoria": "construccion"
   }
 ]

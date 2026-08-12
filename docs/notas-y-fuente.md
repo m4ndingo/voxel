@@ -126,8 +126,44 @@ con `depthMask` apagado: un muro por delante lo tapa, pero el rótulo no escribe
 - Caché LRU de texturas (`MC_NOTE_TEXT_CACHE`, 24) por `texto|aspecto`, con `deleteTexture` al desalojar
   y al cerrar el Mundo.
 - Tunables: **`game.noteText`** (apaga el rótulo; el cartel queda en blanco y se lee apuntando) y
-  **`game.noteTextDist`** (14 bloques, escala con `game.playerScale`; el último cuarto se desvanece y
-  más allá no se dibuja — «de muy lejos no haría falta»). Persistidos y en `game.dumpVars()`.
+  **`game.noteTextDist`** (**21** bloques, escala con `game.playerScale`; el último cuarto se
+  desvanece y más allá no se dibuja — «de muy lejos no haría falta»). Persistidos y en
+  `game.dumpVars()`.
+- ⚠️ **En una pantalla-menú (`mc.escaparate`, o sea `?osd=1`) la distancia no se aplica**: el rótulo
+  se pinta siempre y a opacidad plena. Ahí la cámara está donde la dejó el encuadre —a menudo lejos,
+  para que quepa el menú entero— y un botón que se desvanece **deja de ser un botón** (REQ-CART3).
+
+### Cómo se planta el cartel: `game.carteles` (REQ-CART3)
+
+Los carteles empezaron siendo botones de menú (`?osd=1`, ver [`osd-e-intro.md`](osd-e-intro.md)) y
+ahí uno los quiere **más grandes, sin el poste y pegados a otro sitio**. Cuatro ajustes:
+
+```js
+game.carteles.escala = 2;          // tamaño del cartel; el RÓTULO va con él
+game.carteles.palo   = false;      // solo la tabla → assets/cartel_tabla.vox.json
+game.carteles.desvio = [0,1,0];    // desde el bloque anotado; [0,0,0] lo mete en su propia celda
+game.carteles.giro   = 1;          // una de las 24 posturas (mcOriNorm)
+game.carteles.info();              // el descubridor: qué hay puesto y cuántos carteles hay plantados
+```
+
+- **Son GLOBALES al mundo, no por nota, y eso es a propósito**: `mc.notes` es `"x,y,z" → texto` en
+  **todos** los `mundo.json` escritos hasta hoy. Meter estilo por nota lo convertiría en un objeto y
+  cambiaría el formato del mundo para todos. Un mundo-menú los quiere iguales de todas formas.
+- **Cambiar cualquiera REPLANTA los carteles ya puestos.** La firma de los ajustes (`mcCartelFirma`)
+  viaja en cada instancia (`s.cartel`) y `mcNoteSignsDesfasados` la compara — la misma ruta barata
+  que detecta una nota borrada. Sin eso, subir la escala no se vería hasta recargar.
+  ⚠️ La firma tiene que sobrevivir a **`mcRestampAll`**, que sustituye cada instancia por un objeto
+  nuevo (BUG-AG3): la lleva `mcCarryEfimera` junto a `nota` y `efimera`. Si no la llevara, cada
+  repaso vería el cartel desfasado y lo replantaría **una vez por ciclo, para siempre**.
+- **`mcNoteBoardRect` va con la escala.** El bitset y `fdim` están en voxeles finos **del dibujo**,
+  que no saben nada de `s.esc`; sin multiplicar, un cartel a escala 2 se rotularía en **un cuarto**
+  de su tabla. La escala entra también en la marca de la caché.
+- **`palo:false` es OTRO DIBUJO**, no un recorte: `assets/cartel_tabla.vox.json` es el mismo cartel
+  sin el poste (32×16 finos = una celda). Como la tabla se **deriva** de la forma, ahí todas las
+  filas son anchas y el rótulo ocupa la pieza entera sin tocar una línea de `mcNoteBoardRect`.
+- `desvio` se asigna **entero** (`game.carteles.desvio = [0,0,0]`): tocar `desvio[1]` a mano no pasa
+  por el setter y no replanta nada.
+- Persistidos en `localStorage.vf_mcCarteles`. Guardián: **`tests/test_carteles.js`**.
 
 ### El panel DOM de la nota (≠ el cartel 3D)
 

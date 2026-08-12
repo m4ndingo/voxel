@@ -70,7 +70,8 @@ const nVoxels = id => Object.keys(JSON.parse(fs.readFileSync(FICH(id), 'utf8')).
     assert(creado.id === ID, 'crear la pieza con id explícito devolvió ' + JSON.stringify(creado));
     const voxelsAntes = nVoxels(ID);
 
-    await p.goto(URL, { waitUntil: 'load', timeout: 60000 });
+    // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
+    await p.goto(URL + '?noauto=1', { waitUntil: 'load', timeout: 60000 });
     await p.waitForFunction('typeof openHabitantes === "function"', { timeout: 60000 });
 
     // 1) Cargarla como lo hace el dueño: galería de Texturas → Cargar.

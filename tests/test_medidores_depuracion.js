@@ -98,7 +98,8 @@ const RAIZ = 'http://localhost:8500';
 
   // ── 3 · el mismo interruptor en el editor 3D ────────────────────────────────────────────────
   console.log('\nEl editor 3D obedece los mismos dos');
-  await p.goto(RAIZ + '/', { waitUntil: 'load', timeout: 60000 });
+  // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
+  await p.goto(RAIZ + '/?noauto=1', { waitUntil: 'load', timeout: 60000 });
   await p.waitForFunction('typeof setMode === "function" && typeof game !== "undefined"', { timeout: 120000 });
   await p.waitForTimeout(1000);
   const r3 = await p.evaluate(() => {

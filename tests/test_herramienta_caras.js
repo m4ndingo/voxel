@@ -26,7 +26,8 @@ const ok = (nom, cond, extra) => {
   const p = await b.newPage();
   const errores = [];
   p.on('pageerror', e => errores.push(String(e)));
-  await p.goto('http://localhost:8500/', { waitUntil: 'load', timeout: 60000 });
+  // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
+  await p.goto('http://localhost:8500/?noauto=1', { waitUntil: 'load', timeout: 60000 });
   await p.waitForFunction('typeof state !== "undefined" && typeof setTool === "function"', { timeout: 60000 });
 
   // Un voxel suelto en medio de la rejilla, en modo 3D: todas sus caras estan expuestas.
