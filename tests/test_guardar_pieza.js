@@ -23,7 +23,7 @@ const path = require('path');
 
 const URL = process.argv[2] || 'http://localhost:8500/';
 const API = URL.replace(/\/$/, '');
-const IDX = path.join(__dirname, 'assets', 'index.json');
+const IDX = path.join(__dirname, '..', 'assets', 'index.json');
 
 // La gracia está aquí: el id NO es el slug del nombre. Si el guardado vuelve a deducirlo del rótulo,
 // el dibujo aterrizará en zz-pieza-de-prueba.vox.json y este test lo verá.
@@ -32,7 +32,7 @@ const NOMBRE = 'ZZ Pieza De Prueba';
 const ID_BIFURCADO = 'zz-pieza-de-prueba';
 const NOMBRE_NUEVO = 'ZZ Pieza De Prueba Renombrada';
 const ID_RENOMBRADO = 'zz-pieza-de-prueba-renombrada';
-const FICH = id => path.join(__dirname, 'assets', id + '.vox.json');
+const FICH = id => path.join(__dirname, '..', 'assets', id + '.vox.json');
 const CLAVE = 'asset:assets/' + ID + '.vox.json';        // como la nombra un agente
 
 let ok = 0, fallos = 0;

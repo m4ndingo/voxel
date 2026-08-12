@@ -18,8 +18,8 @@ const ok = (nom, cond, extra) => {
 };
 
 (async () => {
-  const motor = fs.readFileSync(__dirname + '/redstone/redstone.js', 'utf8');
-  const piezas = fs.readFileSync(__dirname + '/redstone/redstone-piezas.js', 'utf8');
+  const motor = fs.readFileSync(__dirname + '/../redstone/redstone.js', 'utf8');
+  const piezas = fs.readFileSync(__dirname + '/../redstone/redstone-piezas.js', 'utf8');
 
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
   const p = await b.newPage();

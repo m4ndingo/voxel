@@ -10,7 +10,7 @@
 // Escenarios sacados de los fallos reales: «un cubo solo se ve oscurecido por arriba», «salen esquinas de los
 // bloques sin sombrear» y «hay zonas mas iluminadas en algunos puntos del suelo junto al bloque».
 const fs = require('fs');
-const SRC = fs.readFileSync(__dirname + '/app.js', 'utf8');
+const SRC = fs.readFileSync(__dirname + '/../app.js', 'utf8');
 
 let ok = 0, fallos = 0;
 function test(nombre, fn) {

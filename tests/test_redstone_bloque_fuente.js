@@ -36,8 +36,12 @@ const ok = (nom, cond, extra) => {
 };
 
 (async () => {
-  const motor  = fs.readFileSync(__dirname + '/redstone/redstone.js', 'utf8');
-  const piezas = fs.readFileSync(__dirname + '/redstone/redstone-piezas.js', 'utf8');
+  const motor  = fs.readFileSync(__dirname + '/../redstone/redstone.js', 'utf8');
+  const piezas = fs.readFileSync(__dirname + '/../redstone/redstone-piezas.js', 'utf8');
+  // La version se SACA de la fuente que acabamos de leer, no se clava aqui: lo que hay que
+  // comprobar es que el mundo corre ESTE motor y no un snippet publicado viejo. Con el literal
+  // escrito a mano, el test fallaba en cada subida de VERSION sin que nada estuviera roto.
+  const VERSION = (motor.match(/VERSION\s*=\s*'([^']+)'/) || [])[1];
 
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
   const p = await b.newPage();
@@ -201,7 +205,7 @@ const ok = (nom, cond, extra) => {
 
   if (r.errs && r.errs.length) console.log('  · ' + r.errs.join('\n  · '));
   console.log('\n--- Redstone · el bloque de redstone es una fuente permanente ---\n');
-  ok('la version es la nueva', r.version === 'r1.2', r.version);
+  ok('la version es la de la fuente', r.version === VERSION, r.version + ' vs ' + VERSION);
   ok('el bloque de redstone existe en el catalogo', (r.faltan || []).length === 0,
     'faltan: ' + (r.faltan || []).join(' '));
   if ((r.faltan || []).length) { await b.close(); process.exit(1); }
@@ -234,7 +238,7 @@ const ok = (nom, cond, extra) => {
   console.log('\n§4 · red_concrete sigue siendo decoracion');
   // Las tres fuentes de verdad, porque una sola miente: el fuente de las piezas, el fuente del
   // arranque (la tabla DEFECTOS, que es la que se coló) y lo que el mundo tiene cargado AHORA.
-  const arranque = fs.readFileSync(__dirname + '/redstone/redstone-arranque.js', 'utf8');
+  const arranque = fs.readFileSync(__dirname + '/../redstone/redstone-arranque.js', 'utf8');
   const declaraRojo = /^\s*'asset:assets\/red_concrete\.vox\.json'\s*:/m.test(arranque);
   ok('la tabla DEFECTOS del arranque NO lo declara', declaraRojo === false, 'redstone-arranque.js');
   ok('y el mundo cargado tampoco lo tiene como pieza',

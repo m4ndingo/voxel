@@ -27,8 +27,8 @@ const path = require('path');
 
 const RAIZ = (process.argv[2] || 'http://localhost:8500/').replace(/\/$/, '');
 const MAPA = 'zz-test-grande';
-const WF = path.join(__dirname, 'data', 'worlds', MAPA + '.json');
-const VOX = path.join(__dirname, 'data', 'worlds', MAPA + '.vox');
+const WF = path.join(__dirname, '..', 'data', 'worlds', MAPA + '.json');
+const VOX = path.join(__dirname, '..', 'data', 'worlds', MAPA + '.vox');
 const DIM = { x: 128, y: 40, z: 128 };          // 655.360 celdas: bastante para que el camino viejo se note
 
 let ok = 0, fallos = 0;

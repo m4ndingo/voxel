@@ -23,11 +23,11 @@ const fs = require('fs');
 const path = require('path');
 
 const URL = (process.argv[2] || 'http://localhost:8500/').replace(/\/$/, '');
-const IDX = path.join(__dirname, 'assets', 'index.json');
+const IDX = path.join(__dirname, '..', 'assets', 'index.json');
 const ID = 'zz-test-namespace';
 const NOMBRE = 'ZZ Test Namespace';
-const HAB = path.join(__dirname, 'data', 'habitantes', ID + '.json');
-const ASSET = path.join(__dirname, 'assets', ID + '.vox.json');
+const HAB = path.join(__dirname, '..', 'data', 'habitantes', ID + '.json');
+const ASSET = path.join(__dirname, '..', 'assets', ID + '.vox.json');
 
 let ok = 0, fallos = 0;
 function test(nombre, fn) {

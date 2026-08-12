@@ -27,8 +27,12 @@ const ok = (nom, cond, extra) => {
 };
 
 (async () => {
-  const motor  = fs.readFileSync(__dirname + '/redstone/redstone.js', 'utf8');
-  const piezas = fs.readFileSync(__dirname + '/redstone/redstone-piezas.js', 'utf8');
+  const motor  = fs.readFileSync(__dirname + '/../redstone/redstone.js', 'utf8');
+  const piezas = fs.readFileSync(__dirname + '/../redstone/redstone-piezas.js', 'utf8');
+  // La version se SACA de la fuente que acabamos de leer, no se clava aqui: lo que hay que
+  // comprobar es que el mundo corre ESTE motor y no un snippet publicado viejo. Con el literal
+  // escrito a mano, el test fallaba en cada subida de VERSION sin que nada estuviera roto.
+  const VERSION = (motor.match(/VERSION\s*=\s*'([^']+)'/) || [])[1];
 
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
   const p = await b.newPage();
@@ -254,8 +258,8 @@ const ok = (nom, cond, extra) => {
   });
 
   if (r.errs && r.errs.length) console.log('  · ' + r.errs.join('\n  · '));
-  console.log('Motor r1.2 — vocabulario');
-  ok('la version es la nueva', r.version === 'r1.2', r.version);
+  console.log('Motor ' + VERSION + ' — vocabulario');
+  ok('la version es la de la fuente', r.version === VERSION, r.version + ' vs ' + VERSION);
   ok('las 8 piezas cargan de la galeria', (r.cargadas || []).length === 8, (r.cargadas || []).join(' '));
   ok('el cable se declara como conductor', !!(r.cable && r.cable.conduce), JSON.stringify(r.cable));
   ok('la palanca se declara manual', !!(r.palanca && r.palanca.manual), JSON.stringify(r.palanca));

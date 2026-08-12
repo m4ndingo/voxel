@@ -172,7 +172,9 @@ function checkPlaywrightInstalled() {
     const tStart = Date.now();
 
     const res = spawnSync(process.execPath, [item.fullPath], {
-      cwd: dir,
+      // Raíz del repo, no `tests/`: los tests leen `data/...` y `assets/...` relativos al cwd
+      // (así se escribieron cuando vivían en la raíz), y desde `tests/` esos ficheros no existen.
+      cwd: __dirname,
       encoding: 'utf8',
       stdio: 'pipe',
       env: process.env

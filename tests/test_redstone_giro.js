@@ -17,8 +17,8 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 
-const motor = fs.readFileSync(__dirname + '/redstone/redstone.js', 'utf8');
-const piezas = fs.readFileSync(__dirname + '/redstone/redstone-piezas.js', 'utf8');
+const motor = fs.readFileSync(__dirname + '/../redstone/redstone.js', 'utf8');
+const piezas = fs.readFileSync(__dirname + '/../redstone/redstone-piezas.js', 'utf8');
 
 const NOMBRE = ['+X', '-X', '+Y', '-Y', '+Z', '-Z'];
 const FRENTE = [0, 4, 1, 5];   // la tabla del snippet, replicada aquí para poder contrastarla

@@ -19,8 +19,8 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 
-const motor = fs.readFileSync(__dirname + '/redstone/redstone.js', 'utf8');
-const piezas = fs.readFileSync(__dirname + '/redstone/redstone-piezas.js', 'utf8');
+const motor = fs.readFileSync(__dirname + '/../redstone/redstone.js', 'utf8');
+const piezas = fs.readFileSync(__dirname + '/../redstone/redstone-piezas.js', 'utf8');
 
 let fallos = 0;
 const ok = (cond, txt, extra) => {

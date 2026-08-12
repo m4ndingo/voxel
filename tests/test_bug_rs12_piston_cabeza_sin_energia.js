@@ -4,8 +4,8 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 
-const motor = fs.readFileSync(__dirname + '/redstone/redstone.js', 'utf8');
-const piezas = fs.readFileSync(__dirname + '/redstone/redstone-piezas.js', 'utf8');
+const motor = fs.readFileSync(__dirname + '/../redstone/redstone.js', 'utf8');
+const piezas = fs.readFileSync(__dirname + '/../redstone/redstone-piezas.js', 'utf8');
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });

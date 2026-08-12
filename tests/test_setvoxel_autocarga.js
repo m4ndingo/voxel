@@ -4,7 +4,7 @@
 // solo, en vez de poner roca. Antes había que llamar a game.addMaterial() a mano y, si se te olvidaba,
 // aparecían bloques de piedra gris donde querías flores.
 //   node test_setvoxel_autocarga.js          (necesita el servidor en :8500)
-const { chromium } = require(__dirname + '/node_modules/playwright');
+const { chromium } = require(__dirname + '/../node_modules/playwright');
 
 let fallos = 0, oks = 0;
 const ok = (nom, cond, extra) => {

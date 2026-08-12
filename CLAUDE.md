@@ -55,10 +55,13 @@ sección **y** su fila, con **un commit por ticket cerrado**.
 `pgrep -af server.py`). Lo que se planta o se estampa para probar va a **`/map/test`**, nunca a
 `/map/default` ni a `/map/agents`, y lo que ya hay ahí **no se borra**.
 
-**4. Sí hay tests: 79 `test_*.js` en la raíz.** 66 abren un Chromium de verdad (Playwright +
-SwiftShader) contra `http://localhost:8500`; 12 son Node puro. Se corren de uno en uno
-(`node test_caras_mundo.js`) y **solo los del área que tocas** — la suite entera tarda muchísimo. Que
-no haya runner ni forma de saber qué necesita cada test es el ticket **REQ-TEST1**.
+**4. Sí hay tests: 106 `test_*.js` en `tests/`.** 93 abren un Chromium de verdad (Playwright +
+SwiftShader) contra `http://localhost:8500`; 13 son Node puro. Hay runner
+(`node correr_tests.js --node | --area=redstone | --list`) y cada fichero declara `@area` /
+`@necesita`. **Corre solo los del área que tocas** — la suite entera tarda muchísimo.
+⚠️ Los tests se escribieron **desde la raíz**: leen `data/…` y `assets/…` relativos al **cwd**, así
+que se lanzan desde la raíz (`node tests/test_caras_mundo.js`), no desde dentro de `tests/`. El
+runner ya lo hace. Lo que cuelga de `__dirname` lleva `..` por la mudanza.
 
 ⚠️ En un clon recién hecho **Playwright no está**: `node_modules/` está en `.gitignore`. Se instala a
 mano y la versión importa (la 1.48+ pide Node 20):

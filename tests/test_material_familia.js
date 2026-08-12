@@ -19,7 +19,7 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const doc = JSON.parse(fs.readFileSync(__dirname + '/data/snippets/mundo-autoarranque.json', 'utf8'));
+const doc = JSON.parse(fs.readFileSync(__dirname + '/../data/snippets/mundo-autoarranque.json', 'utf8'));
 const src = doc.code;
 
 // El snippet vive dentro de una IIFE, asi que sus funciones cierran con '}' en la columna 2 (no en

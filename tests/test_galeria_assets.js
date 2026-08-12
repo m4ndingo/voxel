@@ -17,9 +17,9 @@ const fs = require('fs');
 const path = require('path');
 
 const URL = process.argv[2] || 'http://localhost:8500/';
-const IDX = path.join(__dirname, 'assets', 'index.json');
+const IDX = path.join(__dirname, '..', 'assets', 'index.json');
 const ID = 'zz-test-galeria';
-const FICH = path.join(__dirname, 'assets', ID + '.vox.json');
+const FICH = path.join(__dirname, '..', 'assets', ID + '.vox.json');
 
 let ok = 0, fallos = 0;
 function test(nombre, fn) {
@@ -131,7 +131,7 @@ const entrada = () => leerIdx().find(a => a.id === ID);
   });
 
   test('nada se borra de verdad: esta en la papelera', () => {
-    const t = path.join(__dirname, 'data', 'habitantes_trash');
+    const t = path.join(__dirname, '..', 'data', 'habitantes_trash');
     assert(fs.readdirSync(t).some(f => f.endsWith('__' + ID + '.vox.json')), 'no aparecio en ' + t);
   });
 

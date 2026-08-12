@@ -2462,6 +2462,32 @@ entran.
 > Queda un cabo suelto que **no** justifica mantenerlo abierto: el runner lee `@area:` con dos puntos
 > y hay 1 test escrito con `@area=`, que por eso cae en «general».
 
+> **Apéndice 2026-08-12 — la mudanza a `tests/` había dejado rutas colgando.** Al mover los 85
+> ficheros de la raíz a `tests/` (commit `b36b434`) las rutas siguieron apuntando a la raíz **desde
+> dentro de `tests/`**, así que 44 referencias de 25 ficheros no encontraban su fuente. Se veía como
+> «el test de redstone ya no arranca» (ENOENT sobre `tests/redstone/redstone.js`). Dos clases, las dos
+> arregladas:
+>
+> - **Relativas a `__dirname`** (44 en 25 ficheros): `__dirname + '/redstone/…'` → `'/../redstone/…'`,
+>   y `path.join(__dirname, 'assets')` → `path.join(__dirname, '..', 'assets')`. Afectaba a `app.js`,
+>   `assets/`, `data/`, `redstone/` y hasta al `require` de `node_modules/playwright`.
+> - **Relativas al cwd** (`readFileSync('data/…')`, 7 ficheros): ésas no se tocan — el que estaba mal
+>   era el runner, que lanzaba cada test con `cwd: tests/`. Ahora usa `cwd: __dirname` (la raíz), que
+>   es lo que los tests asumían cuando vivían allí, y así siguen valiendo corridos a mano.
+>
+> Y de paso, **tres tests clavaban la versión del motor a mano** (`r.version === 'r1.2'`), con lo que
+> subir `VERSION` los ponía en rojo sin que nada estuviera roto — justo lo que pasó al cerrar
+> BUG-RS25 con `r1.3`. Los tres ya leen el motor de disco, así que la versión se **saca de la fuente**
+> con un `match(/VERSION\s*=\s*'([^']+)'/)`: la comprobación que importaba (que el mundo no corra un
+> snippet publicado viejo) se mantiene, y deja de romperse en cada subida.
+>
+> Comprobado: `--node` **13/13**, y el área de redstone pasa de 14 a **18 de 22**. Los 4 que siguen
+> en rojo —`test_observador_rotacion`, `test_pistones_enfrentados`, `test_redstone_antorcha`,
+> `test_redstone_arranque`— **ya fallaban antes**: se verificó publicando el motor anterior a BUG-RS25
+> (`3d85fd0^`) y comparando, y fallan **en lo mismo y en la misma cantidad** (6, 4, 2 y 3). No son de
+> esta mudanza ni de BUG-RS25. Ojo con `test_bug_rs13_piston_placa`: es **inestable bajo carga** (falló
+> una vez dentro de la suite y pasa 5 de 5 suelto), no una regresión.
+
 **Redactado sin investigar** (regla del dueño). Sale de una auditoría externa del repo, cuya fila
 «Batería de Pruebas — ⚠️ Descentralizado» es **la única que resultó exacta al comprobarla**.
 
