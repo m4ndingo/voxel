@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wiki · VoxelForge</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="wiki.css">
+<link rel="stylesheet" href="/scrollbars.css">   <!-- ruta ABSOLUTA: la wiki no cuelga de la raíz -->
+<!-- Wiki de VoxelForge, servida en /wiki (el servidor estático ya sirve wiki/index.html; no hay ruta
+     que añadir a server.py). El contenido son ficheros Markdown en wiki/paginas/ y la referencia de
+     API es wiki/api.json: NO hay compilación, se editan y se recargan. El índice del panel lateral
+     está en wiki/indice.json. Detalle del renderizador y del enlazado automático, en wiki.js. -->
+<body>
+<a class="salta" href="#doc">Saltar al contenido</a>
+
+<nav id="lateral">
+  <a class="marca" href="/">VOXELFORGE</a>
+  <div class="marca-sub">Wiki</div>
+
+  <input id="buscar" type="search" placeholder="Buscar…" autocomplete="off" spellcheck="false">
+
+  <div id="nav"></div>
+
+  <div class="pie">
+    <a href="/">Editor</a>
+    <a href="/map/">Mundos</a>
+    <a href="/fotos">Fotos</a>
+  </div>
+</nav>
+
+<main id="doc" tabindex="-1">
+  <article id="cuerpo"><p class="cargando">Cargando…</p></article>
+</main>
+
+<script src="wiki.js"></script>
+</body>

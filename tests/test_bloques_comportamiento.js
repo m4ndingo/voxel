@@ -2668,7 +2668,13 @@ function docZombie() {
 
 async function seccionEsqueletos() {
   cargarPiezasZombie();
+  // El zombie de disco no trae `vision`, o sea 180 (BUG-AG10), y nace mirando a -z. Todas las
+  // pruebas de aqui plantan al jugador en +z, o sea JUSTO A SU ESPALDA: con el cono por defecto no
+  // le ve nunca, se queda en «fuera de alcance» y no anda ni un bloque. Esta seccion mide FISICA
+  // (marcha, bordes, trampolines, placas), no vision — el cono tiene sus propios guardianes en
+  // test_vision_agente.js y test_req_ag13_conos_vision.js. Se le abre a esfera para poder medir.
   const ZOMBIE = docZombie();
+  ZOMBIE.seguir = Object.assign({}, ZOMBIE.seguir, { vision: 360 });
   const GRADO = Math.PI / 180;
   const wrap = (a) => { a %= 360; if (a > 180) a -= 360; if (a < -180) a += 360; return a; };
 

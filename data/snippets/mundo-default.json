@@ -1,0 +1,6 @@
+{
+  "id": "mundo-default",
+  "name": "mundo-default",
+  "code": "toast(\"default\")\nconsole.log(\"aaa\")\ngame.bloques.define('asset:assets/cabeza.vox.json', { mirar: { ejes: 'xy', limites: { y: [-70, 70], x: [-25, 25] }, alcance: 12 } })\ngame.bloques.define('asset:assets/brazo.vox.json', { mirar: { ejes: 'xy', alcance: 12, pivote: 1,\n    frente: { x: -90 }, limites: { y: [-180, 180], x: [30, 90] },\n    sinVolteo: true } })\n\n",
+  "savedAt": "2026-08-13T09:00:00"
+}

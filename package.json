@@ -1,0 +1,23 @@
+{
+  "name": "voxel",
+  "version": "1.0.0",
+  "description": "Voxel editor + Minecraft-style world engine in raw WebGL",
+  "main": "web/app.js",
+  "scripts": {
+    "test": "node correr_tests.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/m4ndingo/voxel.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/m4ndingo/voxel/issues"
+  },
+  "homepage": "https://github.com/m4ndingo/voxel#readme",
+  "devDependencies": {
+    "playwright": "1.47.2"
+  }
+}

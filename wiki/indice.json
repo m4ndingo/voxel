@@ -1,0 +1,39 @@
+{
+  "_comentario": [
+    "El árbol del panel lateral de /wiki. `pagina` = fichero de wiki/paginas/<id>.md; la entrada especial",
+    "`tipo:'api'` la genera wiki.js a partir de wiki/api.json y no tiene fichero .md.",
+    "Añadir una página: crear el .md y añadir aquí su fila. No hay compilación de por medio."
+  ],
+  "titulo": "VoxelForge",
+  "subtitulo": "Wiki",
+  "secciones": [
+    {
+      "titulo": "La aplicación",
+      "paginas": [
+        { "id": "atajos", "titulo": "Atajos de teclado" },
+        { "id": "iconos", "titulo": "Los iconos salen de dibujos tuyos" }
+      ]
+    },
+    {
+      "titulo": "Aspecto del mundo",
+      "paginas": [
+        { "id": "iluminacion", "titulo": "Iluminación y ambiente" }
+      ]
+    },
+    {
+      "titulo": "Scripting",
+      "paginas": [
+        { "id": "scripting",    "titulo": "Snippets: qué son y cómo corren" },
+        { "id": "autoarranque", "titulo": "Autoarranque: los cuatro puntos de entrada" },
+        { "id": "depurar",      "titulo": "Depurar un snippet que revienta" },
+        { "id": "agentes",      "titulo": "Agentes articulados: crear y manejar" }
+      ]
+    },
+    {
+      "titulo": "Referencia",
+      "paginas": [
+        { "id": "api", "titulo": "API", "tipo": "api" }
+      ]
+    }
+  ]
+}

@@ -4,10 +4,11 @@
    Almacén: data/habitantes/<id>.json  (formato vox export)."""
 import http.server, socketserver, json, os, re, sys, datetime, shutil, time, urllib.parse
 import gzip, threading, base64, binascii
-import mundos                                              # listado de /map/: estadísticas + miniatura cenital
-import voxfmt                                              # formato de mundo voxelworld-2 (cabecera + .vox denso)
+from servidor import mundos                                # listado de /map/: estadísticas + miniatura cenital
+from servidor import voxfmt                                # formato de mundo voxelworld-2 (cabecera + .vox denso)
 
 BASE  = os.path.dirname(os.path.abspath(__file__))
+WEB   = os.path.join(BASE, 'web')                          # el SITIO: los .html/.js/.css que se sirven tal cual
 STORE = os.path.join(BASE, 'data', 'habitantes')
 TRASH = os.path.join(BASE, 'data', 'habitantes_trash')   # NADA se borra de verdad: va aquí
 MAPFILE = os.path.join(BASE, 'data', 'mapa.json')         # mapa del mundo (rejilla de habitaciones)
@@ -16,6 +17,8 @@ WORLDS = os.path.join(BASE, 'data', 'worlds')             # mundos con nombre: /
 SNIPS = os.path.join(BASE, 'data', 'snippets')             # gestor de snippets de código (data/snippets/<id>.json)
 AGENTS = os.path.join(BASE, 'data', 'agentes')             # agentes articulados (data/agentes/<id>.json) — el documento, no el motor
 FOTOS = os.path.join(BASE, 'data', 'fotos')                # fotos del Mundo (tecla F): <n>_<mapa>_<fecha>.png + .json con la ficha
+UI = os.path.join(BASE, 'data', 'ui')                      # iconos de la aplicación horneados desde /images (favicon, marca, herramientas)
+UIFILE = os.path.join(UI, 'ranuras.json')                  # la ASIGNACIÓN (ranura → dibujo@postura, modo, aa): la fuente de verdad de los .png
 # Snippets que NO se pueden borrar desde la UI. 'mundo-autoarranque' lo busca app.js POR ESE ID al
 # entrar al Mundo (openWorld), así que borrarlo no rompe nada visible al momento: simplemente el
 # Mundo deja de tener bloques con comportamiento y no hay ningún error que lo delate. Editarlo y
@@ -27,6 +30,7 @@ os.makedirs(WORLDS, exist_ok=True)
 os.makedirs(SNIPS, exist_ok=True)
 os.makedirs(AGENTS, exist_ok=True)
 os.makedirs(FOTOS, exist_ok=True)
+os.makedirs(UI, exist_ok=True)
 
 DEFAULT_MAP = {'cols': 8, 'rows': 8, 'cells': {}}
 # Mundo vacío por defecto: sin voxels => el cliente genera terreno plano (mcGenFlat)
@@ -307,6 +311,39 @@ def list_fotos():
     return out
 
 # ---------------------------------------------------------------------------------------------
+# Iconos de la aplicación (/images). Dos cosas distintas viven en data/ui/:
+#   · `ranuras.json` — la ASIGNACIÓN: qué dibujo, en qué postura, plano o iso, con o sin suavizado.
+#     Es la fuente de verdad y lo único que hay que conservar: de ahí se rehornea todo.
+#   · `<ranura>-<px>.png` — el DERIVADO que consumen los HTML por una URL fija. Se versiona igual
+#     (ver .gitignore) porque un clon recién hecho enseñaría la pestaña rota hasta que alguien
+#     entrase en /images a publicar. NO se editan a mano nunca.
+# El horneado lo hace el NAVEGADOR (es quien tiene el rasterizador de `pinta`), así que aquí solo
+# se valida y se escribe: mismo trato que /api/fotos.
+UI_MAX_BYTES = 4 * 1024 * 1024        # un icono de 64 px son ~2 KB; 4 MB cubren el lote entero con margen
+RE_UI_PNG = re.compile(r'^[a-z][a-z0-9-]*-\d{1,4}$')   # 'favicon-16', 'tool-hand-32', 'marca-64'
+
+def ui_leer():
+    """La asignación guardada, o {} si nadie ha publicado todavía."""
+    try:
+        d = json.load(open(UIFILE, encoding='utf-8'))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+def png_crudo(dato):
+    """Un data-URL de PNG → sus bytes, o None si no lo es. La comprobación es de BYTES MÁGICOS y no
+    de la cabecera del data-URL: el cliente la escribe él y no prueba nada."""
+    if not isinstance(dato, str):
+        return None
+    if ',' in dato[:64] and dato.startswith('data:'):
+        dato = dato.split(',', 1)[1]
+    try:
+        crudo = base64.b64decode(dato, validate=True)
+    except Exception:
+        return None
+    return crudo if crudo[:8] == b'\x89PNG\r\n\x1a\n' else None
+
+# ---------------------------------------------------------------------------------------------
 # Compresión. `data/mundo.json` son 5,3 MB de JSON con la misma clave repetida 81.000 veces: gzip lo
 # deja en 262 KB (×20). Medido desde un móvil (20 Mbps, 40 ms de ida y vuelta) eso son ~2,1 s de la
 # apertura del Mundo. Los assets de bloque comprimen ×4.
@@ -359,7 +396,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
     def __init__(self, *a, **k):
-        super().__init__(*a, directory=BASE, **k)
+        super().__init__(*a, directory=WEB, **k)
+
+    # El sitio vive en `web/` y los datos (dibujos, mundos, fotos, wiki, /images) siguen en la raíz
+    # del repo, porque sus URLs son públicas y llevan años escritas así. `translate_path` elige la
+    # raíz por el PRIMER TRAMO de la URL, y todo lo demás cae en `web/`: la consecuencia buscada es
+    # que `/server.py`, `/PLAN.md`, `/tests/…` y el resto del código dejan de estar servidos por HTTP.
+    # Se cambia `self.directory` en vez de rehacer la ruta a mano para no perder el confinamiento
+    # que ya hace SimpleHTTPRequestHandler (el que impide salir con `..`).
+    RAIZ_URL = ('assets', 'data', 'wiki', 'images')
+
+    def translate_path(self, path):
+        tramo = urllib.parse.urlparse(path).path.lstrip('/').split('/')[0]
+        self.directory = BASE if tramo in self.RAIZ_URL else WEB
+        return super().translate_path(path)
 
     def handle_one_request(self):
         self._cuerpo_leido = False
@@ -442,6 +492,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # SPA: /map/<nombre> (elige el mundo por URL) sirve el mismo index.html; el cliente lee el nombre
         # de la ruta y carga /api/mundo?map=<nombre>. Los assets del index van con ruta absoluta (/app.js…).
         path_only = urllib.parse.urlparse(self.path).path
+        # El favicon es el PNG de 32 horneado en /images. Se sirve por esta ruta en vez de cambiar
+        # el <link> de los cuatro HTML porque el navegador lo pide SOLO igualmente, y así el sitio
+        # entero cambia de icono publicando, sin tocar una línea de HTML. Sin publicar, 404 — que
+        # es exactamente lo que devolvía antes, porque /favicon.ico nunca ha existido en disco.
+        if path_only == '/favicon.ico':
+            self.path = '/data/ui/favicon-32.png'
+            return super().do_GET()
         if path_only == '/assets/index.json':
             idx_path = os.path.join(BASE, 'assets', 'index.json')
             if os.path.exists(idx_path):
@@ -474,6 +531,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return super().do_GET()
         if path_only == '/api/fotos':
             return self._send(200, list_fotos())
+        if path_only == '/api/ui':                                # asignación de iconos de /images
+            return self._send(200, ui_leer())
         if path_only == '/api/mundos':                            # listado de /map/ (cache por mtime en data/_thumbs/)
             try:
                 return self._send(200, mundos.listar())
@@ -602,6 +661,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             atomic_dump(ficha, os.path.join(FOTOS, idd + '.json'))
             return self._send(200, {'ok': True, 'id': idd, 'url': '/data/fotos/' + idd + '.png',
                                     'bytes': len(crudo)})
+        if ruta_post == '/api/ui':                                # «Publicar» en /images: asignación + PNG horneados
+            if int(self.headers.get('Content-Length', 0) or 0) > UI_MAX_BYTES:
+                return self._send(413, {'error': 'el lote de iconos pesa demasiado'})
+            d = self._read()
+            if not isinstance(d, dict) or not isinstance(d.get('ranuras'), dict):
+                return self._send(400, {'error': 'falta ranuras'})
+            pngs = d.get('png') if isinstance(d.get('png'), dict) else {}
+            # Se valida el lote ENTERO antes de escribir un solo byte: publicar es una operación sola,
+            # y una tanda a medias deja el favicon nuevo con los botones viejos y nadie sabe por qué.
+            crudos = {}
+            for nombre, dato in pngs.items():
+                if not RE_UI_PNG.match(nombre):
+                    return self._send(400, {'error': 'nombre de icono inválido: ' + str(nombre)[:40]})
+                crudo = png_crudo(dato)
+                if crudo is None:
+                    return self._send(400, {'error': 'no es un PNG: ' + nombre})
+                crudos[nombre] = crudo
+            to_trash(UIFILE, move=False)                          # respaldo de la asignación anterior
+            atomic_dump(d['ranuras'], UIFILE)
+            for nombre, crudo in crudos.items():
+                fp = os.path.join(UI, nombre + '.png')
+                tmp = fp + '.tmp'
+                with open(tmp, 'wb') as f:
+                    f.write(crudo); f.flush(); os.fsync(f.fileno())
+                os.replace(tmp, fp)                               # los HTML piden estos .png a la vez: nunca a medio escribir
+            # Los .png de las ranuras que se han quitado se van a la papelera, no se borran: el
+            # consumidor tiene que volver a su emoji/carácter de siempre, y el fichero se recupera.
+            vivos = {n + '.png' for n in crudos}
+            for fn in os.listdir(UI):
+                if fn.endswith('.png') and fn not in vivos:
+                    to_trash(os.path.join(UI, fn))
+            return self._send(200, {'ok': True, 'ranuras': len(d['ranuras']), 'png': len(crudos)})
         if ruta_post == '/api/mundo/edits':                       # poner/quitar bloques: seek + 2 bytes por celda
             # Este es el camino que arregla la congelación. NO se lee ni se reescribe el mundo entero:
             # el cuerpo son las celdas que han cambiado, [[x,y,z,'asset:assets/roca.vox.json'], ...],

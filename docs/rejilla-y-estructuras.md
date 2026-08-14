@@ -490,7 +490,7 @@ para lo que tarda un viaje, y ese error ya costó una vuelta entera de diagnóst
 
 ### La zona de pruebas de `/map/test`
 
-`monta_zona_caras.js` (raíz del repo) planta en **`/map/test`** cinco puestos en fila con una **nota
+`herramientas/monta_zona_caras.js` planta en **`/map/test`** cinco puestos en fila con una **nota
 post-it** al lado de cada uno, para poder mirar con los ojos lo que los tests miden. Es idempotente:
 barre lo fino que hubiera en la caja `x 34-62 · z 40-46` antes de repoblar, porque `game.stamp` **no**
 lo es (cada pasada apila otra estructura en la misma celda).
@@ -512,3 +512,12 @@ Test: `node test_stamp_scripting.js` (que la hoja es de recorte y **ya no avisa*
 pegadas emiten sus 12 caras y dos rocas solo 10; que la mata va al lote fino del chunk y ya no avisa;
 que `mcSolid` no cambia; que `game.stamp` crea la pieza con `bits` en ceros y `bitsAim` ocupado; y el
 precio de cada vía en ms y draw calls).
+
+## Atar una pieza al motor: que lo declare el dibujo (REQ-TOOL1)
+
+*(movido verbatim desde `CLAUDE.md` el 2026-08-13, tope de 15 KB)*
+
+El patrón para atar una pieza a algo del motor es al revés de lo que parece: **que lo declare el dibujo**
+en su `meta` y el motor lo derive del catálogo, como hace la ranura de herramienta
+(`meta.categoria:'herramienta'` + `meta.herramienta`, REQ-TOOL1). Escribir la tabla en el motor obliga a
+poner claves `hab:` a mano, que es exactamente lo que rompió BUG-RS23 y BUG-FLUID3.

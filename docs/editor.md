@@ -253,7 +253,7 @@ punto de partida para nuevos assets y el ejemplo de cómo se construye geometrí
 **Assets del servidor** (`assets/`, requiere servir por HTTP): la app hace `fetch('assets/index.json')`
 (`loadServerAssets`) y carga cada `.vox.json` por URL (`loadFromUrl`). Para añadir un NPC/objeto:
 escribe su `.vox.json` (formato export, con `meta.role`/`meta.description`/`meta.icon` opcionales) y
-añádelo a `index.json` (`{id,name,role,type,icon,file}` + `alias`/`description` opcionales). Ejemplo reproducible: `node make_alis.js`
+añádelo a `index.json` (`{id,name,role,type,icon,file}` + `alias`/`description` opcionales). Ejemplo reproducible: `node herramientas/make_alis.js`
 construye el NPC «Alis la Duplicadora» con helpers `box()/set()` y regenera el índice — patrón a copiar.
 `loadServerAssets` reparte el índice por `type`: los personajes/objetos van a **Assets del servidor** y
 los `type:'bloque'` a **Habitaciones** (`loadRooms`); ambos cargan con `loadFromUrl` al hacer clic.
@@ -307,7 +307,7 @@ cuatro, enseña la clave exacta `asset:assets/<id>.vox.json` y deja editar `alia
   `assets/` sale de `assets/`, y el de una de la galería, de la galería. Ojo con el orden en
   `mcMatKey`: la rama de fluidos va **antes** que el índice de assets, así que una clave a pelo ahí lo
   tapa entero. Lo cubren `test_fluido_importado.js` y `test_piezas_importadas.js`.
-Las 3 **habitaciones** (Taberna/Herrería/Mazmorra) están **a escala de personaje**: `make_rooms.js`
+Las 3 **habitaciones** (Taberna/Herrería/Mazmorra) están **a escala de personaje**: `herramientas/make_rooms.js`
 dibuja en unidades gruesas (geometría 28×28×13) pero escribe bloques finos S=4 → assets
 **112×112×52** con paredes de 40 frente a personajes 32³; solo guarda la **cáscara** (superficie,
 ~50k vox) y JSON compacto (~1MB). En el juego/composición el personaje va SIEMPRE a resolución
@@ -330,13 +330,13 @@ name,cell,exits,pos}`; `room.doorTrim` devuelve el nº; `ROOM_PROPS` en app.js; 
 control en la UI. Además `window.game` vuelca `{fps,voxels,mode,room,showFPS,showVoxels,nearClip}`; `game.showFPS(false)`/`=false`
 y `game.showVoxels(true)`/`=true` muestran/ocultan los medidores de FPS y de voxels dibujados —**cada
 uno el suyo, y en los tres modos** (editor 3D `#e3-*`, Play `#play-*`, Mundo `#mc-*`); persistidos.
-`game.showOSDbuttons(true)`/`=true` enseña los dos botones de la esquina del Mundo (🧩 Código y
-✕ Cerrar), que **nacen ocultos** para que no salgan en las capturas — con teclado sobran, porque Esc
-cierra y Alt+C abre los snippets. ⚠️ **En táctil `✕ Cerrar` no se puede esconder**: sin teclado no hay
-Esc y el Mundo se quedaría sin salida, así que `updateOSDbuttons` lo fuerza visible. El «¿es táctil?»
-lo da **`mcTouchOn`** (lo que decide `game.touchControls`), no la constante `MC_TOUCH`, para que las
-dos cosas no digan lo contrario en un portátil táctil. `game.nearClip` (nº) y `game.nearClip = 8` regulan el umbral de zoom del recorte de cercanía (ver arriba). `project3d` hace **culling por visor** (descarta voxels con el centro fuera del
+Los dos botones de la esquina del Mundo (🧩 Código y ✕ Cerrar) y su interruptor
+`game.showOSDbuttons` **ya no existen** (quitados 2026-08-13, REQ-OSD1): se llega a lo mismo con `Esc`
+y `Alt+C`, y estorbaban en todas las capturas. La salida de **táctil** es `#mc-tsalir`, un botón
+dentro de `#mc-touch` — allí no hay `Esc`, así que el Mundo no puede quedarse sin puerta, y vivir
+dentro de la capa de mandos hace que se encienda y se apague con ellos (`mcTouchShow`), sin un segundo
+sitio que mantener en sincronía. `game.nearClip` (nº) y `game.nearClip = 8` regulan el umbral de zoom del recorte de cercanía (ver arriba). `project3d` hace **culling por visor** (descarta voxels con el centro fuera del
 lienzo; `occupied` se deja completo), por eso `game.voxels` baja al acercar el zoom. La pisabilidad usa cuerpo ~28 y **erosión** de obstáculos r=3
 (huella del personaje).
-Verificación visual sin navegador: `node render_rooms.js <asset.vox.json> <out.png>` (rasteriza un iso
+Verificación visual sin navegador: `node herramientas/render_rooms.js <asset.vox.json> <out.png>` (rasteriza un iso
 propio a PNG). Ya NO hay mock de Habitaciones.

@@ -46,15 +46,17 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     return {
       escaparate: mc.escaparate, volar: mc.volar,
       clase: document.body.classList.contains('mc-escaparate'),
-      hotbar: vis('#mc-hotbar'), mira: vis('#mc-crosshair'), cerrar: vis('#mc-close')
+      hotbar: vis('#mc-hotbar'), mira: vis('#mc-crosshair'), mandos: vis('#mc-touch')
     };
   });
   test('§1 ?osd=1 pone el mundo en modo ESCAPARATE', () =>
     assert(modo.escaparate === true, 'mc.escaparate = ' + modo.escaparate));
-  test('§1 …sin hotbar, sin mira y sin los botones de la esquina', () => {
+  test('§1 …sin hotbar, sin mira y sin mandos tactiles', () => {
     assert(!modo.hotbar, 'la hotbar se ve en una pantalla de menu');
     assert(!modo.mira, 'la mira se ve en una pantalla de menu');
-    assert(!modo.cerrar, 'el boton de cerrar se ve en una pantalla de menu');
+    // Los botones «Codigo»/«Cerrar» de la esquina ya no existen (REQ-OSD1 · 2026-08-13); lo que
+    // queda por comprobar es que tampoco asoman los mandos tactiles dentro de una pantalla de menu.
+    assert(!modo.mandos, 'los mandos tactiles se ven en una pantalla de menu');
   });
   test('§1 …y sin gravedad: la camara se queda donde la dejo el spawn', () =>
     assert(modo.volar === true, 'la pantalla no esta en modo vuelo: la camara se caera'));

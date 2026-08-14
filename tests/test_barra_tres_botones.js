@@ -63,13 +63,26 @@ function test(nombre, cond, extra) {
     abierto: !document.querySelector('#mas-menu').hidden,
     aria: document.querySelector('#btn-mas').getAttribute('aria-expanded'),
     items: [...document.querySelectorAll('#mas-menu .menu-item')].map(i => i.firstChild.nodeValue.trim()),
+    // «Se ve» ≠ «está»: Mapa y Jugar siguen en el DOM pero están APARCADOS (`data-rpg`), y los tres
+    // enlaces de abajo son <a> que salen a otra pestaña. Contar solo nodos mezclaba las tres cosas.
+    visibles: [...document.querySelectorAll('#mas-menu .menu-item')]
+                .filter(i => i.getBoundingClientRect().height > 0).map(i => i.firstChild.nodeValue.trim()),
   }));
   test('un clic en ⋯ lo abre', B.abierto && B.aria === 'true');
   // Las nueve que el dueño quería dentro, ni una menos.
   const esperadas = ['🗺 Mapa', '▶ Jugar', '🧩 Código', '🦴 Agentes', 'Nuevo', 'Guardar', 'Guardar como…', 'Exportar', 'Importar'];
-  const faltan = esperadas.filter(e => !B.items.some(i => i === e));
-  test('están las 9 entradas que salieron de la barra', faltan.length === 0 && B.items.length === 9,
+  // Y los tres enlaces a las otras páginas del sitio, que entraron después. El total se DERIVA de
+  // las dos listas: escrito como un número suelto («9»), cada entrada nueva rompe este test por el
+  // motivo equivocado y hay que venir a traducir el número a mano.
+  const enlaces = ['🗺 Mundos ↗', '📷 Fotos ↗', '🖼 Iconos ↗', '📖 Wiki ↗'];
+  const faltan = [...esperadas, ...enlaces].filter(e => !B.items.some(i => i === e));
+  test('están las 9 entradas que salieron de la barra, y los 4 enlaces',
+    faltan.length === 0 && B.items.length === esperadas.length + enlaces.length,
     B.items.length + ' entradas' + (faltan.length ? ' · faltan: ' + faltan.join(', ') : ''));
+  // Mapa y Jugar están aparcados: en el DOM sí, a la vista no (ver test_rpg_aparcado.js).
+  test('…pero Mapa y Jugar no se VEN (línea de RPG aparcada)',
+    !B.visibles.includes('🗺 Mapa') && !B.visibles.includes('▶ Jugar'),
+    B.visibles.length + ' visibles: ' + B.visibles.join(' · '));
   // Importar tiene que seguir siendo un <label> con su <input type=file>: como <button> no abriría nada.
   const imp = await p.evaluate(() => {
     const l = [...document.querySelectorAll('#mas-menu .menu-item')].find(i => i.textContent.trim().startsWith('Importar'));

@@ -120,17 +120,31 @@ function cerca(a, b, tol, msg) {
     quieto.vys.forEach((v, i) => cerca(v, 0, 1e-12, 'vy del frame ' + (i + 1)));
   });
 
-  // ── §3 · Espacio sube y Shift baja, a game.volarVel ────────────────────────────────────────────
-  const vel = await p.evaluate(() => mc.volarVel);
+  // ── §3 · Espacio sube y Shift baja, PROPORCIONAL a playerSpeed (REQ-FLY2) ───────────────────────
+  // La vertical de vuelo va a `playerSpeed · √scale · volarVel` (volarVel es un MULTIPLICADOR, defecto 1),
+  // igual que la horizontal. Antes usaba el fijo `volarVel=6` u/s y subir/bajar iba mucho más lento al
+  // subir la velocidad. El test corre con scale=1, así que la vertical esperada = mc.speed · mc.volarVel.
+  const vel = await p.evaluate(() => mc.speed * mc.volarVel);
   const sube = await volar({ x: X, y: yAlto, z: Z, n: 60, volar: true, teclas: [' '] });
   const baja = await volar({ x: X, y: yAlto, z: Z, n: 60, volar: true, teclas: ['shift'] });
-  test('§3 Espacio sube a game.volarVel', () => {
+  test('§3 Espacio sube proporcional a playerSpeed', () => {
     cerca(sube.vys[0], vel, 1e-9, 'vy con Espacio');
     cerca(sube.ys[59] - yAlto, vel, vel * 0.02, 'bloques subidos en 1 s');
   });
-  test('§3 Shift baja a game.volarVel (y no frena la marcha a la mitad como al andar)', () => {
+  test('§3 Shift baja igual (y no frena la marcha a la mitad como al andar)', () => {
     cerca(baja.vys[0], -vel, 1e-9, 'vy con Shift');
   });
+  // El corazón de REQ-FLY2: subir playerSpeed acelera la vertical en la MISMA proporción que la horizontal.
+  const propor = await p.evaluate(async () => {
+    const sp0 = mc.speed, vv0 = mc.volarVel, pos0 = mc.pos.slice(), vel0 = mc.vel.slice(), sc0 = mc.scale, k0 = mc.keys;
+    mc.scale = 1; mc.volarVel = 1; mc.volar = true; mc.keys = { ' ': true };
+    mc.speed = 5;  mc.pos = [pos0[0], 40, pos0[2]]; mc.vel = [0, 0, 0]; mcUpdate(1 / 60); const vyLento = mc.vel[1];
+    mc.speed = 20; mc.pos = [pos0[0], 40, pos0[2]]; mc.vel = [0, 0, 0]; mcUpdate(1 / 60); const vyRapido = mc.vel[1];
+    mc.speed = sp0; mc.volarVel = vv0; mc.pos = pos0; mc.vel = vel0; mc.scale = sc0; mc.keys = k0; mc.volar = false;
+    return { vyLento, vyRapido, razon: vyRapido / vyLento };
+  });
+  test('§3 subir playerSpeed acelera la vertical en la misma proporción (×4 con speed 5→20)', () =>
+    cerca(propor.razon, 4, 0.01, 'razón vertical rápido/lento (' + propor.vyLento.toFixed(2) + ' → ' + propor.vyRapido.toFixed(2) + ')'));
   // El tope esta en ±1 antes de multiplicar: sin el, mirar arriba + Espacio daria el doble de
   // velocidad que Espacio solo, y la camara de la intro pegaria tirones.
   const ambos = await volar({ x: X, y: yAlto, z: Z, n: 10, volar: true, teclas: [' ', 'shift'] });
@@ -169,7 +183,7 @@ function cerca(a, b, tol, msg) {
     game.volar(true); game.fantasma(true);
     r.apagarVolarQuitaFantasma = (game.volar(false), mc.fantasma);
     game.volarVel = 1e6; r.tope = mc.volarVel;
-    game.volarVel = 6;
+    game.volarVel = 1;
     mc.volar = antes;
     return r;
   });
@@ -182,7 +196,7 @@ function cerca(a, b, tol, msg) {
     cerca(api.apagaDejaVelACero, 0, 1e-9, 'vel[1] tras game.volar(false)'));
   test('§5 apagar el vuelo apaga tambien el fantasma', () =>
     assert(api.apagarVolarQuitaFantasma === false, 'el fantasma sobrevive al vuelo'));
-  test('§5 game.volarVel esta acotada', () => assert(api.tope <= 60, 'volarVel acepta ' + api.tope));
+  test('§5 game.volarVel (multiplicador) esta acotada', () => assert(api.tope <= 10, 'volarVel acepta ' + api.tope));
 
   // ── §6 · las teclas: F vuela, Alt+F fotografia ─────────────────────────────────────────────────
   const teclas = await p.evaluate(() => {

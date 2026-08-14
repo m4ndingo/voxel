@@ -80,17 +80,16 @@ async function abrir(b, url) {
   const vistos = () => p.evaluate(() => {
     const vis = sel => { const e = $(sel); if (!e) return false; const s = getComputedStyle(e); return s.display !== 'none' && !e.hidden; };
     return { clase: document.body.classList.contains('mc-intro'), hotbar: vis('#mc-hotbar'),
-             mira: vis('#mc-crosshair'), codigo: vis('#mc-code-btn'), cerrar: vis('#mc-close') };
+             mira: vis('#mc-crosshair') };
   });
   const arranque = await p.evaluate(() => ({
     volar: mc.volar, fantasma: mc.fantasma, osd: game.osd.abierta,
     botones: Array.from($('#mc-osd').querySelectorAll('button')).map(x => x.textContent.trim()),
     acciones: game.osd.acciones()
   }));
-  // Los botones de la esquina van APAGADOS por defecto (`game.showOSDbuttons`), y el dueño los tiene
-  // encendidos — que es por lo que los vio durante la intro. Se encienden aquí a propósito: lo que hay
-  // que comprobar es que la intro los tapa IGUAL, y que JUGAR devuelve la decisión de ese ajuste.
-  await p.evaluate(() => game.showOSDbuttons(true));
+  // Aquí se encendían los botones de la esquina para comprobar que la intro los tapaba y JUGAR los
+  // devolvía. Ya no existen (REQ-OSD1, quitados 2026-08-13), así que el observable de «la intro es una
+  // postal, no una partida» pasa a ser la hotbar y la mira — que además es lo que se quiere de verdad.
   const chrome = await vistos();
   test('§2 ?intro=1 pone al jugador en vuelo fantasma', () => {
     assert(arranque.volar === true, 'mc.volar = ' + arranque.volar);
@@ -120,7 +119,6 @@ async function abrir(b, url) {
     assert(chrome.clase, 'no se ha puesto la clase body.mc-intro');
     assert(!chrome.hotbar, 'la hotbar (pickerbar) sale durante la intro');
     assert(!chrome.mira, 'la mira sale durante la intro');
-    assert(!chrome.codigo && !chrome.cerrar, 'los botones de la esquina salen durante la intro');
   });
 
   // El mundo NO se enseña a medias. `mundo-autoarranque` son 274 KB de snippet que bloquean el hilo
@@ -204,7 +202,8 @@ async function abrir(b, url) {
   const trasJugar = await vistos();
   test('§5 …y DEVUELVE los mandos: ahi si empieza la partida', () => {
     assert(!trasJugar.clase, 'la clase body.mc-intro sigue puesta despues de JUGAR');
-    assert(trasJugar.codigo && trasJugar.cerrar, 'los botones de la esquina no han vuelto');
+    assert(trasJugar.hotbar, 'la hotbar no ha vuelto despues de JUGAR');
+    assert(trasJugar.mira, 'la mira no ha vuelto despues de JUGAR');
   });
   test('§5 …y deja al jugador de pie sobre la superficie, no dentro de la roca ni en el aire', () => {
     assert(!jugando.dentroDeSolido, 'ha aterrizado DENTRO de un bloque: ' + JSON.stringify(jugando.pies));

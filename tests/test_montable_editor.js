@@ -192,6 +192,12 @@ const ok = (cond, txt, extra) => {
       // «no te veo», y sin ver a nadie un rig con `volver` (el defecto) regresa a su ancla y
       // deshace el paseo frame a frame. Aquí se prueba la CASILLA y el acarreo, no el seguimiento.
       rig.G.volver = false;
+      // ⚠️ REQ-AG17 · y por lo mismo, `quieto`. Aquí se plantan TRES bichos a 4 bloques uno de otro
+      // y los tres persiguen al jugador, o sea que los tres convergen en el mismo sitio. Desde que
+      // un agente no atraviesa a otro, eso los deja en fila y tocándose («bloqueada»), y el paseo a
+      // mano del de atrás se queda en 0,95 bloques en vez de los 2 que pide. Antes salía verde
+      // porque se atravesaban. Esto no es seguimiento: es la casilla y el acarreo.
+      rig.G.quieto = true;
       creados.push(rig);
       for (let i = 0; i < 60 && !rig.partes.some(P => P.s && P.s.model); i++) await frame();
       return rig;

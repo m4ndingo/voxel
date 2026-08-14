@@ -28,6 +28,7 @@ HTML/CSS/JS served as-is.
 | `/map/<name>` | A **world** — walk it, build in it, script it |
 | `/map/` | Index of every world on disk |
 | `/fotos` | Screenshots taken in-world (`Alt+F`) |
+| `/wiki` | The **manual** — scripting guide and API reference |
 
 ## Draw voxel assets
 
@@ -89,6 +90,9 @@ Block behaviours, agent brains, intro sequences, HUD screens and menus are all d
 snippets, not engine code. A menu screen is another world you drew; a button is a block
 with a note on it.
 
+The full guide — how snippets run, the four autostart hooks, and a reference for every
+call above — is at **`/wiki`** once the server is up.
+
 ## Performance
 
 The whole thing is hand-written WebGL with the slow paths measured and removed:
@@ -109,11 +113,11 @@ The whole thing is hand-written WebGL with the slow paths measured and removed:
 
 ## Tests
 
-117 test files under `tests/` — 104 drive a real Chromium through Playwright against a
-running server (so the GLSL actually compiles), 13 are pure Node.
+129 test files under `tests/` — 113 drive a real Chromium through Playwright against a
+running server (so the GLSL actually compiles), 16 are pure Node.
 
 ```bash
-npm i -D playwright@1.47.2 && npx playwright install chromium
+npm i && npx playwright install chromium   # playwright is pinned to 1.47.2 (1.48+ needs Node 20)
 
 node correr_tests.js --list           # catalogue
 node correr_tests.js --node           # Node-only tests
@@ -125,14 +129,27 @@ Run them from the repo root — they resolve `data/` and `assets/` relative to t
 ## Layout
 
 ```
-app.js            editor + world engine (no dependencies)
-server.py         static server + JSON API (stdlib only)
+server.py         static server + JSON API (stdlib only) — the only thing you run
+servidor/         what server.py imports: mundos.py (world index), voxfmt.py (.vox reader)
+web/              the site, served as-is: app.js (editor + world engine, no dependencies),
+                  index.html · mapas.html · fotos.html, style.css · scrollbars.css · iconos.js
 redstone/         redstone engine, published into snippets
 assets/           built-in voxel drawings
 data/             worlds, drawings, agents, snippets, photos
-docs/             the manual
-tests/            guardians
+docs/             the manual (docs/historico/ = superseded design notes)
+wiki/             the in-app manual served at /wiki
+images/           the icon-baking page served at /images
+tests/            guardians · correr_tests.js is the runner
+herramientas/     one-off generators and snippet patchers
+performance/      measurement probes, kept for their numbers
 ```
+
+Everything under `herramientas/` and `performance/` is run **from the repo root**
+(`node herramientas/make_zombie.js`) — same rule as the tests.
+
+URLs are unchanged by that layout: `server.py` picks the disk root from the first URL segment —
+`/assets`, `/data`, `/wiki` and `/images` come from the repo, everything else from `web/`. The
+source (`server.py`, `PLAN.md`, `tests/`) is not served over HTTP.
 
 ## License
 

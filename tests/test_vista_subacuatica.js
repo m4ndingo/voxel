@@ -117,6 +117,20 @@ function ok(cond, msg, extra) {
     pantalla();
     out.tunReset = { sky: Array.from(mcCieloEf), far: mcNieblaEf ? mcNieblaEf[1] : null, tinte: mcFogMin() };
 
+    // ── 6 · sigueCielo: el tinte de dentro puede seguir a game.cieloColor ───────────────────────────
+    // Con el interruptor APAGADO (defecto), cambiar el cielo NO toca el tinte de dentro. Encendido, sí.
+    mc.vistaFluido = 'WATER';
+    game.vistaAgua('reset');
+    game.cieloColor('#ff8844');
+    pantalla(); out.sigueOff = Array.from(mcCieloEf).map(x => +x.toFixed(3));   // sigueCielo=false: ignora el cielo
+    game.vistaAgua({ sigueCielo: true });
+    game.cieloColor('reset');
+    pantalla(); out.sigueOnCieloDef = Array.from(mcCieloEf).map(x => +x.toFixed(3));   // base intacta
+    game.cieloColor('#ff8844');
+    pantalla(); out.sigueOnCieloNaranja = Array.from(mcCieloEf).map(x => +x.toFixed(3));   // sigue al cielo
+    out.sigueTrasReset = (game.vistaAgua('reset'), game.vistaAgua().sigueCielo);
+    game.cieloColor('reset');
+
     // ── restaurar ───────────────────────────────────────────────────────────────────────────────
     mc.pos[0] = posPrev[0]; mc.pos[1] = posPrev[1]; mc.pos[2] = posPrev[2];
     mc.vistaFluido = vistaPrev;
@@ -177,6 +191,15 @@ function ok(cond, msg, extra) {
   ok(JSON.stringify(r.tunReset.sky) === JSON.stringify(r.tunAntes.sky) && r.tunReset.far === r.tunAntes.far,
     "'reset' devuelve el color y la distancia de fábrica",
     JSON.stringify(r.tunReset) + ' vs ' + JSON.stringify(r.tunAntes));
+
+  console.log('\n§5b · sigueCielo (game.vistaAgua({sigueCielo})): el tinte de dentro puede seguir al cielo');
+  ok(JSON.stringify(r.sigueOff) === JSON.stringify([0.1, 0.34, 0.6]),
+    'apagado (defecto): el cielo naranja NO toca el tinte de dentro', JSON.stringify(r.sigueOff));
+  ok(JSON.stringify(r.sigueOnCieloDef) === JSON.stringify([0.1, 0.34, 0.6]),
+    'encendido + cielo de fábrica: sale el mismo tinte de siempre (base intacta)', JSON.stringify(r.sigueOnCieloDef));
+  ok(r.sigueOnCieloNaranja[0] > r.sigueOff[0] && r.sigueOnCieloNaranja[2] < r.sigueOff[2],
+    'encendido + cielo naranja: el tinte se entibia (más rojo, menos azul)', JSON.stringify(r.sigueOnCieloNaranja));
+  ok(r.sigueTrasReset === false, "'reset' apaga el interruptor", String(r.sigueTrasReset));
 
   // ── §6 · el camino REAL, en un mapa que sí tiene fluidos ──────────────────────────────────────
   // /map/test no tiene agua en la paleta, así que la detección automática —que es justo lo que se

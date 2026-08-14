@@ -1,0 +1,25 @@
+{
+  "nombre": "Luciernaga",
+  "raiz": {
+    "nombre": "torso",
+    "pieza": "asset:assets/cubo-blanco-brillante.vox.json",
+    "rot": 0
+  },
+  "piezas": [],
+  "seguir": {
+    "ejes": "xyz",
+    "correa": 0,
+    "volver": false,
+    "deteccion": 0,
+    "distancia": 3,
+    "vision": 360,
+    "velocidad": 5
+  },
+  "escala": 0.1,
+  "id": "luciernaga",
+  "andar": {
+    "cadencia": 0
+  },
+  "fisica": false,
+  "savedAt": "2026-08-14T15:10:49"
+}

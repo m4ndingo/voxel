@@ -1,0 +1,67 @@
+{
+  "favicon": {
+    "dibujo": "hab:el-analista-de-espectro@0",
+    "modo": "iso",
+    "aa": true
+  },
+  "marca": {
+    "dibujo": "hab:alis-la-duplicadora@12",
+    "modo": "plano",
+    "aa": true
+  },
+  "t-pick": {
+    "dibujo": "hab:cuentagotas@15",
+    "modo": "iso",
+    "aa": true
+  },
+  "t-paint": {
+    "dibujo": "hab:pincel-de-texturizado@4",
+    "modo": "iso",
+    "aa": true
+  },
+  "t-build": {
+    "dibujo": "asset:assets/hierba.vox.json@0",
+    "modo": "iso",
+    "aa": true
+  },
+  "t-erase": {
+    "dibujo": "asset:assets/agua.vox.json@0",
+    "modo": "iso",
+    "aa": true
+  },
+  "t-fill": {
+    "dibujo": "asset:assets/cubo.vox.json@0",
+    "modo": "iso",
+    "aa": true
+  },
+  "t-select": {
+    "dibujo": "hab:varita-de-selecci-n@4",
+    "modo": "iso",
+    "aa": true
+  },
+  "t-pivot": {
+    "dibujo": "hab:antorcha@0",
+    "modo": "iso",
+    "aa": true
+  },
+  "t-caras": {
+    "dibujo": "asset:assets/cabeza-de-personaje.vox.json@16",
+    "modo": "iso",
+    "aa": true
+  },
+  "t-hand": {
+    "dibujo": "hab:mano-de-desplazamiento@0",
+    "modo": "plano",
+    "aa": true
+  },
+  "t-orbit": {
+    "dibujo": "asset:assets/flor-amarilla.vox.json@1",
+    "modo": "plano",
+    "aa": true
+  },
+  "t-extrude": {
+    "dibujo": "hab:piston@1",
+    "modo": "iso",
+    "aa": true
+  }
+}

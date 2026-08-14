@@ -1,16 +1,19 @@
 // @area: editor
 // @necesita: servidor, playwright
-// REQ-OSD1 · los dos botones de la esquina del Mundo (🧩 Código y ✕ Cerrar) nacen ocultos, para que no
-// salgan en las capturas, y se piden con game.showOSDbuttons(true).
+// REQ-OSD1 (2026-08-13) · los dos botones de la esquina del Mundo (🧩 Código y ✕ Cerrar) están QUITADOS.
 //
-// El riesgo de este ticket NO es esconderlos, es esconderlos DE MÁS: en táctil no hay teclado, así que
-// sin el botón de cerrar y sin Esc el Mundo se queda sin salida. Por eso «✕ Cerrar» es innegociable en
-// táctil, y eso es lo que más se guarda aquí. Se mira `game.touchControls` (mcTouchOn) y no la
-// constante MC_TOUCH, para que mande lo mismo que decide si salen los mandos táctiles.
+// Este guardián nació al revés: comprobaba que se podían esconder, y luego que estaban ocultos. Las
+// dos versiones daban verde con los botones DIBUJADOS en pantalla, porque preguntaban por el atributo
+// `hidden` —la intención del código— y `.btn{display:inline-flex}` se lo comía. Ahora se comprueba lo
+// único que no admite interpretación: que los elementos NO ESTÁN EN EL DOM, y que tampoco queda la
+// API que los encendía (`game.showOSDbuttons`) ni su rastro en `localStorage` (`vf_showOSD`), que era
+// lo que los resucitaba en el navegador del dueño en cada carga.
 //
-// Se prueba en DOS contextos de navegador, porque el defecto depende del dispositivo:
-//   1. escritorio (sin táctil): los dos ocultos de partida;
-//   2. táctil de 390 px: «✕ Cerrar» visible de partida, «🧩 Código» no.
+// Lo que de verdad hay que proteger aquí NO es esconderlos, es no dejar el Mundo sin salida:
+//   1. escritorio: ni un botón, y `Esc` cierra + `Alt+C` abre los snippets;
+//   2. táctil de 390 px: el ✕ de `#mc-touch` está, se ve y CIERRA;
+//   3. táctil CON un menú OSD puesto: ese ✕ sigue siendo pulsable — no basta con que se vea, porque
+//      la capa del menú (z-index 25) tapa la de mandos (7) y lo dejaría decorativo.
 // No persiste nada en el mundo: solo lee, y bloquea el POST por si la SPA autoguarda al abrirse.
 const { chromium } = require('playwright');
 
@@ -29,98 +32,90 @@ const BLOQUEA_POST = () => {
     return orig(u, o);
   };
 };
-const VE = () => ({ codigo: !document.querySelector('#mc-code-btn').hidden,
-                    cerrar: !document.querySelector('#mc-close').hidden });
+// «Se puede pulsar» ≠ «se ve»: se pregunta por el elemento que hay EN ESE PUNTO de la pantalla. Un
+// botón tapado por una capa a pantalla completa se ve perfectamente y no recibe ni un clic.
+const PULSABLE = sel => {
+  const e = document.querySelector(sel); if (!e) return 'no existe';
+  const r = e.getBoundingClientRect(); if (!r.width || !r.height) return 'no se ve';
+  const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return (e === top || e.contains(top)) ? true : 'tapado por ' + (top ? (top.id || top.className || top.tagName) : 'nada');
+};
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
   const errores = [];
 
-  const abre = async (ctx) => {
-    await ctx.addInitScript(BLOQUEA_POST);
-    const p = await ctx.newPage();
-    p.on('pageerror', e => errores.push(String(e)));
-    await p.goto(RAIZ + '/map/test', { waitUntil: 'load', timeout: 60000 });
-    await p.waitForFunction('typeof mc !== "undefined" && mc.prog && mc.active && mc.grid', { timeout: 120000 });
-    await p.waitForTimeout(1500);
-    return p;
-  };
+  console.log('\nEscritorio: los botones no existen, y el teclado sigue siendo la puerta');
+  const p = await b.newPage();
+  p.on('pageerror', e => errores.push(String(e)));
+  await p.addInitScript(BLOQUEA_POST);
+  await p.goto(RAIZ + '/map/test', { waitUntil: 'networkidle' });
+  await p.waitForFunction('typeof mc !== "undefined" && mc.prog && mc.active && mc.grid', null, { timeout: 120000 });
+  await p.waitForTimeout(1200);
 
-  // ── 1 · escritorio: los dos ocultos de partida ──────────────────────────────────────────────
-  console.log('\nEscritorio (sin táctil)');
-  const ctx1 = await b.newContext();
-  let p = await abre(ctx1);
-  const r1 = await p.evaluate((ve) => {
-    const f = new Function('return (' + ve + ')()');
-    const out = { tactil: game.touchControls, defecto: f() };
-    game.showOSDbuttons(true);  out.pedidos = f();
-    game.showOSDbuttons(false); out.quitados = f();
-    out.conmuta = (game.showOSDbuttons(), f());        // sin argumento = conmutar, como showFPS
-    out.valor = String(game.showOSDbuttons);
-    out.guardado = localStorage.getItem('vf_showOSD');
-    out.enDump = 'showOSDbuttons' in game.dumpVars();
-    return out;
-  }, VE.toString());
+  const r1 = await p.evaluate(() => ({
+    codigo: !!document.querySelector('#mc-code-btn'),
+    cerrar: !!document.querySelector('#mc-close'),
+    acciones: !!document.querySelector('.mc-actions'),
+    api: 'showOSDbuttons' in game,
+    enDump: 'showOSDbuttons' in game.dumpVars(),
+    guardado: localStorage.getItem('vf_showOSD'),
+    tactil: !!game.touchControls
+  }));
   ok('el navegador de prueba no es táctil', r1.tactil === false);
-  ok('de partida NO se ve ninguno de los dos', r1.defecto.codigo === false && r1.defecto.cerrar === false,
-     JSON.stringify(r1.defecto));
-  ok('showOSDbuttons(true) enseña los dos', r1.pedidos.codigo === true && r1.pedidos.cerrar === true,
-     JSON.stringify(r1.pedidos));
-  ok('…y (false) los vuelve a esconder', r1.quitados.codigo === false && r1.quitados.cerrar === false);
-  ok('sin argumento conmuta', r1.conmuta.codigo === true && r1.conmuta.cerrar === true, 'valor=' + r1.valor);
-  ok('se guarda en localStorage', r1.guardado === '1', 'vf_showOSD=' + r1.guardado);
-  ok('sale en game.dumpVars()', r1.enDump === true);
+  ok('«🧩 Código» no está en el DOM', r1.codigo === false);
+  ok('«✕ Cerrar» no está en el DOM', r1.cerrar === false);
+  ok('ni el contenedor .mc-actions', r1.acciones === false);
+  ok('game.showOSDbuttons ya no existe', r1.api === false);
+  ok('…ni sale en game.dumpVars()', r1.enDump === false);
+  ok('no se lee ni se escribe vf_showOSD', r1.guardado === null, 'vf_showOSD=' + r1.guardado);
 
-  // ── 2 · sobrevive a recargar, y con ellos ocultos Esc y Alt+C siguen valiendo ───────────────
-  console.log('\nSobrevive a recargar, y el teclado sigue siendo la salida');
-  await p.evaluate(() => { game.showOSDbuttons(false); });
-  await p.goto(RAIZ + '/map/test', { waitUntil: 'load', timeout: 60000 });
-  await p.waitForFunction('typeof mc !== "undefined" && mc.prog && mc.active && mc.grid', { timeout: 120000 });
-  await p.waitForTimeout(1500);
-  const r2 = await p.evaluate((ve) => new Function('return (' + ve + ')()')(), VE.toString());
-  ok('vuelven ocultos tras recargar', r2.codigo === false && r2.cerrar === false, JSON.stringify(r2));
-
-  await p.keyboard.press('Alt+KeyC');
-  await p.waitForTimeout(400);
-  const abrio = await p.evaluate(() => { const m = document.querySelector('#snip-modal'); return !!m && !m.hidden; });
-  ok('Alt+C sigue abriendo los snippets sin el botón', abrio === true);
-  await p.keyboard.press('Escape');
+  await p.keyboard.press('Alt+c');
   await p.waitForTimeout(300);
+  ok('Alt+C sigue abriendo los snippets', await p.evaluate(() => {
+    const m = document.querySelector('#snip-modal'); return !!m && !m.hidden;
+  }));
+  await p.keyboard.press('Escape'); await p.waitForTimeout(200);
+  await p.keyboard.press('Escape'); await p.waitForTimeout(400);
+  ok('Esc sigue cerrando el Mundo', await p.evaluate(() => !mc.active));
+  await p.close();
 
-  await p.keyboard.press('Escape');
-  await p.waitForTimeout(500);
-  const cerrado = await p.evaluate(() => mc.active === false);
-  ok('Esc sigue cerrando el Mundo sin el botón', cerrado === true);
-  await ctx1.close();
+  console.log('\nTáctil a 390 px: el ✕ de los mandos es la salida, y CIERRA');
+  const p3 = await b.newPage({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true });
+  p3.on('pageerror', e => errores.push(String(e)));
+  await p3.addInitScript(BLOQUEA_POST);
+  await p3.goto(RAIZ + '/map/test', { waitUntil: 'networkidle' });
+  await p3.waitForFunction('typeof mc !== "undefined" && mc.prog && mc.active && mc.grid', null, { timeout: 120000 });
+  await p3.waitForTimeout(1200);
 
-  // ── 3 · táctil: «Cerrar» es innegociable ────────────────────────────────────────────────────
-  console.log('\nTáctil a 390 px: no se puede quedar sin salida');
-  const ctx2 = await b.newContext({ viewport: { width: 390, height: 780 }, hasTouch: true, isMobile: true });
-  const p2 = await abre(ctx2);
-  const r3 = await p2.evaluate((ve) => {
-    const f = new Function('return (' + ve + ')()');
-    const out = { tactil: game.touchControls, defecto: f() };
-    game.showOSDbuttons(false); out.forzadoOff = f();       // aun pidiéndolo, Cerrar tiene que quedarse
-    game.showOSDbuttons(true);  out.pedidos = f();
-    game.showOSDbuttons(false);
-    game.touchControls = false; out.sinTactil = f();        // con teclado ya se puede esconder
-    game.touchControls = true;  out.otraVez = f();
-    return out;
-  }, VE.toString());
+  const r3 = await p3.evaluate(([pulsable]) => {
+    const f = new Function('sel', 'return (' + pulsable + ')(sel)');
+    return { tactil: !!game.touchControls, salir: f('#mc-tsalir'), esquina: !!document.querySelector('#mc-close') };
+  }, [PULSABLE.toString()]);
   ok('el contexto sí es táctil', r3.tactil === true);
-  ok('de partida se ve «Cerrar» y NO «Código»', r3.defecto.cerrar === true && r3.defecto.codigo === false,
-     JSON.stringify(r3.defecto));
-  ok('showOSDbuttons(false) NO puede esconder «Cerrar»', r3.forzadoOff.cerrar === true,
-     'sin esto el móvil se queda encerrado');
-  ok('…pero sí esconde «Código»', r3.forzadoOff.codigo === false);
-  ok('showOSDbuttons(true) enseña los dos igual', r3.pedidos.codigo === true && r3.pedidos.cerrar === true);
-  ok('quitando los mandos táctiles ya se puede esconder', r3.sinTactil.cerrar === false, JSON.stringify(r3.sinTactil));
-  ok('…y al devolverlos vuelve «Cerrar»', r3.otraVez.cerrar === true);
-  await ctx2.close();
+  ok('el ✕ de salir se puede pulsar', r3.salir === true, String(r3.salir));
+  ok('y sigue sin haber botón de esquina', r3.esquina === false);
 
+  console.log('\n…y con un menú OSD puesto tampoco se queda encerrado');
+  const r3b = await p3.evaluate(([pulsable]) => {
+    const f = new Function('sel', 'return (' + pulsable + ')(sel)');
+    game.osd.define('_prueba_salida', { html: '<div class="mc-osd-panel">sin botón de salir</div>' });
+    game.osd.abrir('_prueba_salida');
+    return { salir: f('#mc-tsalir'), hotbar: f('#mc-hotbar') };
+  }, [PULSABLE.toString()]);
+  ok('el ✕ sigue pulsable POR ENCIMA del menú', r3b.salir === true, String(r3b.salir));
+  ok('…y la hotbar sí desaparece con el menú', r3b.hotbar !== true, String(r3b.hotbar));
+
+  await p3.evaluate(() => game.osd.cerrar());
+  await p3.waitForTimeout(200);
+  await p3.tap('#mc-tsalir');
+  await p3.waitForTimeout(500);
+  ok('tocarlo cierra el Mundo de verdad', await p3.evaluate(() => !mc.active));
+  await p3.close();
+
+  console.log('');
   ok('sin errores de pagina', errores.length === 0, errores.join(' | '));
-
-  console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\ntodo ok');
   await b.close();
+  console.log(fallos ? `\n${fallos} fallos` : '\ntodo ok');
   process.exit(fallos ? 1 : 0);
 })();

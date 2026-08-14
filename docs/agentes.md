@@ -726,3 +726,88 @@ Tests: `node test_escala_estructura.js` (la sonda del motor: píxeles a ×1,4 y 
 apuntado, y que volver a ×1 deja la foto **idéntica**) · `node test_escala_agente.js` (el bicho
 entero: que no se desmonta, pivote, caja de choque, guardas, y que el **preview IGNORA la escala**
 mientras el Mundo sí la aplica).
+
+### 🚧 Un agente no se mete dentro de otro (REQ-AG17)
+
+Solo para **`game.esqueletos`** (lo acotó el dueño): `mc.agents` es otro cuerpo y otro sistema. Vive
+entero en `data/snippets/mundo-autoarranque.json`, en tres parches idempotentes por marca
+(`herramientas/parche_snp_ag17.py` → `ag17b.py` → `ag17c.py`, v1.32 → v1.35). **En `app.js` no hay
+nada de esto.**
+
+**La regla, en una línea:** antes de aceptar un paso se mira si la caja del cuerpo cae dentro de la de
+otro rig vivo; si cae, se intenta **empujarlo** el mismo delta (validado igual), y si el otro no puede
+moverse, el paso **no vale** y el que empuja se queda con `g.por = 3` («bloqueada»), que es el estado
+que ya sale en el diagnóstico de atasco. No hizo falta un quinto `POR_SIG`.
+
+**Un solo embudo, y por eso salió barato.** Todo movimiento de raíz pasa por `moverRaiz`: el paso
+andando (`movPaso`), el brinco del puñetazo (`empujarEsqueleto`) y el patinaje sobre hielo
+(`fisicaPaso`). Cambiar ahí `asentar` por `avanzar` (= `asentar` + «¿hay alguien?») los cubrió los
+tres de una vez.
+
+⚠️ **Tres trampas, las tres pagadas con un fallo real:**
+
+- **El perdón al que ya estorbaba tiene que ser CONDICIONAL.** La primera versión ignoraba al que ya
+  se solapaba antes del paso, para no dejar clavado de por vida a un par nacido embutido. Eso vuelve
+  al par **invisible el uno para el otro para siempre**, y ese par se consigue solo: dos agentes
+  persiguiéndote a la misma `distancia` van **al mismo punto** del anillo que te rodea. Ahora el paso
+  vale solo si **aleja los centros en planta** (`seAparta`) — «te perdono si te estás yendo».
+- **Hace falta un desatasco.** Si ya están dentro el uno del otro, ninguna validación de paso los
+  saca. `separarDeAgentes` los aparta 1,5 bloques/s **cada uno**, y cada empujoncito pasa por
+  `asentar` y por el jugador, así que nunca mete a nadie en la roca ni en un abismo. Con los centros
+  exactamente encima manda el `id`, para que se vayan a lados **opuestos** en vez de elegir el mismo.
+- **⚠️ Validar el destino NO es validar el camino.** `avanzar` mira **dónde se aterriza**. Mientras el
+  paso sea más corto que el cuerpo da igual, pero el puñetazo no anda: gasta la fuerza en
+  `mov.vx * dt`, o sea **0,67 bloques por fotograma a 60 fps** con fuerza 40 —ya rozando los 0,8 del
+  cuerpo— y **3 o 4 en un fotograma lento**. Medido: saltaba de x=34,4 a x=37,2 con el otro en 36,4,
+  sin solaparse **ni un fotograma**. Por eso `moverRaiz` parte el desplazamiento en **trozos de medio
+  cuerpo** (tope 32) y valida cada uno. No es una colisión nueva: es la de siempre, llamada las veces
+  que hagan falta.
+
+⚠️ **Y la lección de método:** «no solapan en ningún fotograma» **no demuestra** que no se atraviesen,
+si el paso puede medir más que el cuerpo. Hay que mirar el **tamaño del paso**. El guardián apunta
+`dzAlCruzar` justo por eso: si adelanta al de delante, tiene que ser apartado **al menos su propio
+ancho**. Y el pasillo de roca del caso G va en `ZC-2`/`ZC+1`, no en `ZC±1`: el cuerpo mide 0,8 y nace
+**centrado en `ZC`**, o sea que pisa las dos celdas — emparedarlo en `ZC±1` lo deja tocando la pared y
+no se mueve ni un milímetro.
+
+**Los montados siguen siendo la excepción** ([REQ-AG15](../PLAN_ARCHIVO.md#-req-ag15)): el jinete
+ocupa el espacio del montado a propósito, y `separarDeAgentes` no toca a quien tiene `g.montado`.
+
+### 🧗 `escalar`: cuánto trepa DE UNA VEZ al atascarse (REQ-AG18)
+
+Campo del documento, **dentro de la capacidad «anda»** (`def.andar.escalar`), acotado a **0..8**, por
+defecto **3**. `herramientas/parche_snp_ag18.py` (v1.31 → v1.32) + el campo en el panel.
+
+**No es la altura de escalón.** Andando se sube **siempre uno**, y eso no se toca. `escalar` es lo que
+se atreve a trepar **de una vez** cuando lleva un rato (`ATASCO_S`, 0,35 s) queriendo ir a algún sitio
+y **no avanza ni un milímetro** — o sea, en el fondo de un hoyo. Antes se teletransportaba hasta
+arriba sin importar lo hondo que hubiera caído, que es justo lo que el dueño pidió acotar.
+
+`escalar: 0` es **«no trepa»**: ni el escalón de andar, así que se queda donde lo dejen.
+
+## El planificador: presupuesto por frame repartido por turnos
+
+*(movido verbatim desde `CLAUDE.md` el 2026-08-13, tope de 15 KB)*
+
+**Planificador de agentes (`mcAgentsTick`, `app.js`)**: el presupuesto de CPU por frame
+(`MC_AGENT_FRAME_MS`, 8 ms) se reparte **por turnos rotatorios** — el frame siguiente empieza por el agente
+que se quedó sin turno, y ninguno puede pasarse de su rodaja (`presupuesto / nº de agentes vivos`). Antes se
+recorría el `Map` en orden fijo y el primero se comía el presupuesto entero: con `game.agentSpeed=10` se
+quedaban **a cero 4 de 6 agentes**, y a 100, 5 de 6 (medido). `game.agentSpeed` no tiene tope: el freno es el
+tiempo, no el número de pasos.
+
+## Un snippet no es un fichero: `mcSnippetInforme` (REQ-SNIP1)
+
+*(movido verbatim desde `CLAUDE.md` el 2026-08-13, tope de 15 KB)*
+
+Los snippets se ejecutan en ámbito global con `AsyncFunction`, así que **alcanzan los internos de
+`app.js`** (`mc`, `mcAgentMesh`, `mcSurfaceY`…) sin necesidad de modificarlo — y por lo mismo **no son
+un fichero**: el navegador los llama «VM2571» y da una línea corrida por el preámbulo. Eso lo traduce
+`mcSnippetInforme` (REQ-SNIP1), que imprime la línea **del panel** con su texto y lleva el cursor hasta
+ella; lo hereda todo lo que pase por `mcCorreSnippet` (Ejecutar, autoarranque, intro). `base-npc-skills.json`
+ya lo hace. Ejemplo de lo que se resuelve así: el cuerpo multi-celda de la serpiente son **agentes
+extra pausados** (`autostart:false` + `pause()`), porque `mcAgentsTick` salta lo que no está
+`'running'` pero `mcAgentsSmoothUpdate` solo salta `'stopped'` y el bucle de dibujo solo mira
+`vbo && count`. Especificación de comportamiento: **[`REGLAS_AGENTES.md`](REGLAS_AGENTES.md)**
+(bajó de la raíz el 2026-08-13; `PLAN.md`, `tests/test_informe.js` y los snippets lo citan por
+nombre y sección —«REGLAS_AGENTES.md §21»—, no por ruta, así que esas citas siguen valiendo).

@@ -1154,5 +1154,95 @@
     "count": 4096,
     "description": "Hormigón naranja mate 16³ con textura porosa fina.",
     "categoria": "construccion"
+  },
+  {
+    "id": "cabeza-de-agente",
+    "name": "Cabeza de Agente",
+    "role": "Pieza de agente · cabeza (15³, gira sobre el centro de su caja)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 15,
+      "y": 15,
+      "z": 15
+    },
+    "file": "assets/cabeza-de-agente.vox.json",
+    "savedAt": "2026-08-14T14:01:51",
+    "createdAt": "2026-08-13T15:31:28",
+    "count": 3367,
+    "description": "Pieza articulable del zombie. Generada por make_zombie.js."
+  },
+  {
+    "id": "torso-de-agente-matrix",
+    "name": "Torso de Agente Matrix",
+    "role": "Pieza de agente · raíz del esqueleto",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 12,
+      "y": 8,
+      "z": 14
+    },
+    "file": "assets/torso-de-agente-matrix.vox.json",
+    "savedAt": "2026-08-13T15:37:40",
+    "createdAt": "2026-08-13T15:37:40",
+    "count": 1344,
+    "description": "Torso de Agente estilo Matrix con traje negro, camisa blanca, corbata negra y clip metálico."
+  },
+  {
+    "id": "brazo-de-agente-matrix",
+    "name": "Brazo de Agente Matrix",
+    "role": "Pieza de agente · brazo (pivote 1 = hombro +X, 2 = hombro -X)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 5,
+      "y": 5,
+      "z": 14
+    },
+    "file": "assets/brazo-de-agente-matrix.vox.json",
+    "savedAt": "2026-08-14T14:01:27",
+    "createdAt": "2026-08-13T15:41:45",
+    "count": 350,
+    "description": "Brazo articulable para Agente estilo Matrix con traje negro elegante y mano descubierta."
+  },
+  {
+    "id": "pierna-de-agente-matrix",
+    "name": "Pierna de Agente Matrix",
+    "role": "Pieza de agente · pierna (pivote 1 = cadera +X, 2 = cadera -X)",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 5,
+      "y": 5,
+      "z": 12
+    },
+    "file": "assets/pierna-de-agente-matrix.vox.json",
+    "savedAt": "2026-08-13T15:44:02",
+    "createdAt": "2026-08-13T15:44:02",
+    "count": 300,
+    "description": "Pierna articulable para Agente estilo Matrix con pantalón de vestir negro y zapato de cuero elegante."
+  },
+  {
+    "id": "cubo-blanco-brillante",
+    "name": "Cubo Blanco Brillante",
+    "role": "Bloque básico 16³",
+    "icon": "🧱",
+    "type": "objeto",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/cubo-blanco-brillante.vox.json",
+    "savedAt": "2026-08-14T12:06:35",
+    "createdAt": "2026-08-14T12:02:20",
+    "count": 1352,
+    "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir."
   }
 ]

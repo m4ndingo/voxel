@@ -44,6 +44,15 @@ game.bloques.roce(0.08);        // lo que se sigue patinando UNA VEZ FUERA del b
 Todo vive en el snippet **`data/snippets/mundo-autoarranque.json`** (el JSON *es* la fuente; se edita
 con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del diseño:
 
+- **Lo que es de UN mapa va en `mundo-<mapa>`, no aquí** (REQ-ARR1). `mundo-autoarranque` es **uno
+  solo para todos los mapas**, así que un `define` que solo tiene sentido donde esa pieza está puesta
+  —`mirar`, que necesita una **estructura** viva con esa clave— se ejecutaba también en un mapa vacío
+  y llenaba la consola de avisos correctos pero inútiles. `mcAutoarranqueMapa` (`app.js`) corre
+  **`mundo-<mapa>`** (`mundo-default`, `mundo-lab`…) **justo después** del global y con las mismas
+  reglas: hereda todo lo que aquél dejó puesto y solo añade o pisa lo suyo. Que no exista es el caso
+  normal y **no se avisa**; que falle se avisa y es inocuo. ⚠️ **No confundir con `arranque-<mapa>`**,
+  que es la **intro** y solo la dispara `?intro=1` ([`osd-e-intro.md`](osd-e-intro.md)).
+
 - **Caché densa `id → cfg`** invalidada por `mc.blockKey.length` (mismo truco que `mcXnameCache`,
   `app.js:5429`) ⇒ la consulta por frame es un índice de array.
 - **Una sola costura**: envoltorio sobre `mcUpdate` (`app.js:5053`, única llamada en `app.js:6323`).

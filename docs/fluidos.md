@@ -198,3 +198,73 @@ Dos cosas que conviene saber antes de tocarlo:
 Válvula: `mc.sinFuentesInfinitas = true`. Guardián: `node test_fuentes_infinitas.js` (8 ok), con la
 bandeja partida en **cuatro compartimentos estancos**, uno por caso — con bandeja compartida el agua de
 un caso se cuela en el de al lado y el verde deja de significar nada.
+
+---
+
+## 🪞 La lámina de agua refleja el cielo (REQ-FLUID5)
+
+Fase 4 de REQ-FLUID4, sacada a ticket propio. Es lo que separa «un cristal azul tumbado» de «agua»:
+a rasante la superficie tira al color del cielo y se opaca; en picado transparenta y se ve el fondo.
+**Enfoque 1 del ticket** (Fresnel + color de cielo): sin pasada extra, sin FBO, sin doblar draw calls.
+Vive en el **shader de estructuras** (el que dibuja el agua) + una marca al mallar; **nada de esto
+cambia la simulación**, y **fuera del agua no toca un float**.
+
+### Cómo, sin atributo nuevo ni VBO aparte
+
+La clave es que la cara de arriba del agua **ya se distingue al mallar**: `mcMeshChunk` conoce el tipo
+de fluido de la celda (`mcTablaFluido()` → `'WATER'`) y la dirección de cada cara (`alphaFD`, `0` =
+`MC_FACES[0]` = +Y). Así que en `copia()` la **cara superior del agua** se hornea con **`emit = 2`**.
+El agua no es emisiva (su emit real es 0), así que ese 2 es una **bandera libre** en un canal que ya
+viaja al shader. El fragment la separa: `refl = step(1.5, vEmit)`, `em = vEmit - 2·refl` recupera el
+emit de verdad. **Ni un atributo nuevo, ni un VBO nuevo, ni una costura más en la caché de chunks** —
+que es justo donde REQ-FLUID4 se pinchó una vez.
+
+Como la bandera está **horneada** pero el reflejo se escala con el uniforme **`uReflejo`**, encender y
+apagar el efecto **no re-malla**: por eso el guardián puede medir ON/OFF sobre el mismo VBO.
+
+### Las tres condiciones, y por qué
+
+- **Solo agua.** La lava comparte la pasada translúcida pero **no** se marca (`copia` recibe
+  `agua = FT[id]==='WATER'`); su emit es 0/1, nunca dispara `refl`. La lava refleja distinto (es
+  emisiva) y el dueño la dejó fuera a propósito.
+- **Solo la cara de arriba.** Las caras laterales del agua no reflejan cielo; marcar solo `fd===0` las
+  excluye gratis.
+- **Solo desde arriba** (`uEye.y > vWorld.y`). Buceando, la cara de arriba se mira por el envés y un
+  reflejo de cielo ahí quedaría mal; además el reflejo se apaga entero si el ojo está sumergido
+  (`mcFluidoOjo()` en la subida del uniforme).
+
+El Fresnel es Schlick: `fr = pow(1 - clamp(dot(n, vista), 0, 1), curva) · uReflejo`, con la normal
+sacada de las **derivadas de la posición de mundo** (`cross(dFdx, dFdy)`), igual que `sunFactor` — o
+sea, tampoco cuesta un atributo. A rasante el agua además se **opaca** (`aOut = mix(vAlpha, 1, fr)`),
+que es lo que la vuelve espejo en el borde.
+
+### El playground: afinarlo en vivo desde F12
+
+Todo son uniformes ⇒ cambios **instantáneos, sin re-mallar**. Son solo estéticos y solo del agua.
+
+| función | qué mueve |
+|---|---|
+| `game.reflejoAgua(0.7)` | **fuerza** global (0 = apagado, la válvula; 1 = espejo a rasante). Defecto 0,5 |
+| `game.reflejoAgua({fuerza, curva, opacidad, color})` | varias de una vez |
+| `game.reflejoCurva(3)` | lo **cerrado** del ángulo: 1 refleja hasta casi de frente (espejo); subirla lo deja solo a rasante. Defecto 5 |
+| `game.reflejoOpacidad(0.8)` | cuánto se **opaca** el agua a rasante (0 = sigue transparente; 1 = tapa). Defecto 1 |
+| `game.reflejoColor([1,0.6,0.4])` | refleja **ese** color en vez del cielo (un atardecer). `game.reflejoColor('cielo')` vuelve a lo normal |
+| `game.cieloColor('#88ccff')` | el **color del cielo** (`MC_SKY`): cambia el fondo **y** lo que refleja el agua a la vez. Acepta `[r,g,b]` 0..1, `#rrggbb` o `'r,g,b'`; `'reset'` vuelve a MC_SKY |
+
+`game.reflejoAgua('reset')` devuelve fuerza/curva/opacidad/color a fábrica; `game.cieloColor('reset')`
+el cielo. (Bajo el agua el color de fondo manda `game.vistaAgua`, cosa aparte.)
+
+⚠️ **El cielo de arriba y el tinte de dentro son independientes a propósito.** `game.cieloColor` mueve
+`MC_SKY` (fuera del agua); bajo el agua el fondo lo fija `game.vistaAgua({sky})`, un color propio que
+por defecto **ignora** `MC_SKY` — bucear no debe dejarte ver el cielo nítido de fuera. El dueño lo notó
+(«cambio el color del cielo pero buceando lo sigo viendo azul») y la respuesta fue un interruptor, no
+atar los dos: **`game.vistaAgua({sigueCielo:true})`** hace que el tinte de dentro **module** su color
+base por lo que haya cambiado `MC_SKY` respecto a su azul de fábrica (`mcCieloEf[i] = sky[i]·MC_SKY[i]/
+MC_SKY_DEF[i]`, en `mcActualizaVista`). Con el cielo por defecto el ratio es 1 ⇒ **sale el mismo tinte
+de siempre**, así que encenderlo no rompe nada; un atardecer naranja lo entibia y oscurece. Defecto
+`false`. Guardián: `test_vista_subacuatica.js` §5b.
+
+**Guardián:** `node tests/test_reflejo_agua.js` (`@area: render`) — mide la **pantalla** (`readPixels`)
+sobre una charca en `/map/test`, ON vs OFF con la misma cámara: a rasante aclara y azula, en picado
+apenas cambia (prueba que es por ángulo), la lava no se inmuta (prueba que es solo agua), y
+`reflejoColor`/`cieloColor` tiñen el reflejo de rojo.

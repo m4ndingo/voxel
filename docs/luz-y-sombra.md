@@ -265,3 +265,94 @@ con `getBufferSubData` (el sombreado máximo va de 1,120 a 5,120 con el bit 2 y 
 lee el FBO del mapa del sol con `readPixels` para ver que la pieza marcada deja de escribir altura, y
 mide brillo de pantalla. ⚠️ Al elegir un id de prueba hay que **filtrarlo por `mcTablaFina()`**: si
 sale una pieza fina, su sombreado no está en `ch.vbo` y el test mide el búfer equivocado.
+
+---
+
+## Luz global (exposición) — `game.luz` (REQ-ENV3)
+
+Aparte del skylight y de la sombra del sol, hay una **exposición global** para oscurecer el mundo entero
+(noche, tormenta): `game.luz(0..1)`, 1 = pleno día. Es el uniforme **`uExpo`**, que multiplica el color
+de las superficies en los **tres programas de color** (`MC_FS`/`MC_FS_OPAQUE` terreno, `MC_STRUCT_FS`
+estructuras/agua, `MC_STEX_FS` estructuras con textura). Se sube en **un solo sitio**, al principio de
+`mcSunUniforms` (por donde pasan los tres programas, y antes del early-return de la sombra), leyendo
+`mc.luzGlobal`.
+
+- **Por defecto 1 ⇒ idéntico a hoy** (`col*1.0`, ni un float). No re-malla: es un uniforme.
+- ⚠️ **Las fuentes emisivas NO se atenúan.** En `MC_STRUCT_FS` la exposición multiplica solo la parte
+  sombreada: `mix(shaded*uExpo, vColor, em)`, así que una lámpara (`em=1`) sigue a pleno brillo.
+
+Test: `node test_luz_global.js` (mide la pantalla: `luz(0.3)` ≈ 1/3 de brillo, `luz(1)` restaura al
+pixel). Detalle y decisiones en `PLAN.md` (REQ-ENV3). El cielo se apaga aparte con `game.cieloColor`.
+
+### La luz de bloque RESISTE la exposición (REQ-ENV4)
+
+Para que `game.luz` (la noche) no apague también las antorchas al aire libre, la luz de bloque
+(`mc.blockLight`) va a una **textura 3D R8** (`mc.blkTex`, unidad 2) que sube `mcUploadBlkTex` cuando
+cambia (`mc._blkTexDirty` lo marca `mcComputeBlockLight`; el orden de `mcIdx` coincide con `texImage3D`,
+se sube tal cual). El helper GLSL **`blkLuz(w)`** (`MC_BLK_LIB`, en los 3 programas de color) lee la
+textura en la celda de **aire** que da a la cara (medio bloque hacia el ojo, normal de las derivadas) y
+la exposición pasa a `col *= mix(uExpo, 1.0, blkLuz)`: donde hay antorcha no se apaga. Solo WebGL2
+(`sampler3D`); en WebGL1 degrada a la exposición uniforme de REQ-ENV3.
+
+⚠️ **Dos trampas (una casi tira el render entero):**
+- Un **`sampler3D` va SIEMPRE a una unidad propia** (aquí la 2). Dejarlo caer en la 0 choca con el atlas
+  (`sampler2D`) y **WebGL invalida el draw** ⇒ no se ve NI UN BLOQUE. Se ata una textura 3D **dummy
+  1×1×1** a la unidad 2 aunque no haya antorchas, para que el sampler nunca esté incompleto.
+- **SwiftShader (el headless de los tests) TOLERA ese error; una GPU real NO.** Un guardián en verde no
+  garantiza que se vea en el navegador del dueño — lo destapó él probando, no el test.
+
+Test: `node test_luz_artificial.js` (de noche, el sitio con antorcha retiene el brillo y el lejano se
+oscurece). Detalle en `PLAN.md` (REQ-ENV4).
+
+### La luz de un agente le SIGUE al moverse — luz DINÁMICA (BUG-GLOW2 → BUG-GLOW3)
+
+Una antorcha (voxels autoiluminados) montada en una pieza de esqueleto se **dibuja** con la matriz de pose
+viva `s.model`, pero su luz salía de la celda **estampada** y se quedaba en el spawn. El primer intento
+(BUG-GLOW2) hizo que la **luz de bloque** siguiera al agente re-sembrándola por cada cruce de celda; funcionó
+pero es el mecanismo equivocado para una luz en marcha: la luz de bloque es **granular a 1 bloque** (saltos /
+trompicones) y cara de re-sembrar (BFS + remallado ⇒ caídas de fps). **BUG-GLOW3 lo sustituye por una luz
+DINÁMICA por-fragmento.**
+
+- **Emisor montado ≠ luz de bloque.** `mcEmisorSeguido(s)` (tiene `emitCells`, el seguimiento está on, y
+  `s.model` ≠ identidad) marca al emisor como *montado en un agente que se mueve*. `mcComputeBlockLight`
+  **lo salta** (no lo hornea). Un emisor **quieto** (`s.model` null/identidad) sí se hornea, como siempre.
+- **`mcDynSync()`** (una vez por frame en `mcTick`, tras `mcUpdate`) recolecta la posición **viva y continua**
+  de cada celda emisiva montada (las `MC_DYN_MAX=8` más cercanas al ojo) en `mc._dynArr` → uniform del shader.
+  Sin cuantizar a celda, sin BFS, sin remallado ⇒ **suave y sin retardo**. Solo cuando un emisor pasa de
+  montado↔quieto (cambia la *membresía*) re-siembra la luz de bloque **una** vez y re-malla su halo estampado
+  (al arrancar/parar, no por paso).
+- **Shader (`MC_DYNLIGHT_LIB`, en los 4 fragment shaders):** `dynLuz(vWorld)` da el mismo nivel `[0,1]` con el
+  **mismo desvanecido lineal (−1/bloque sobre `MC_MAXLIGHT`)** que la luz de bloque; se mezcla con `blkLuz` por
+  `max()` y resiste la exposición nocturna igual (`mix(uExpo,1,·)`). `dynLift(vShade,dyn)` repone el **brillo
+  horneado** que la luz de bloque daría (curva `pow(interiorDark, dyn)`, tope 1.12 = shade de cara pleno), para
+  que una cueva se encienda también de día. **No proyecta sombra** (como `blkLuz`); no usa `sampler3D` ⇒ vale en
+  WebGL1. Se comporta como la luz de bloque/voxels de siempre (orden del dueño).
+- **DIRECCIONAL, como la luz de bloque** (`siembra` es anisótropa: solo hemisferio delantero del haz + `glowFocus`).
+  Cada luz lleva su haz `uDynDir` = la **normal neta de la cara emisiva** (`s.emitDir`) **rotada por `s.model`**
+  (gira con la pieza), y `dynLuz` solo alumbra el hemisferio delantero (`dot((w−P), haz)>0`), estrechado con
+  `pow(c, 1+glowFocus·8)`. Así el brillo de unas gafas alumbra **hacia delante, no todo alrededor ni hacia atrás**.
+  Haz ≈ 0 (una antorcha que asoma por todas las caras) o `glowFocus`=0 ⇒ omnidireccional. Alcance/foco se ajustan
+  con `game.glowLevel` / `game.glowFocus` (los mismos que la luz de bloque).
+
+**Conmutable: `game.agentsLightTracking(true|false)`** (defecto on). `false` deja la luz en la celda estampada
+(comportamiento viejo, coste cero) para **medir** la diferencia de fps o apagarlo. ⚠️ Deuda: los NPC-cubo
+(`mc.agents`) siguen sin ser fuente de luz (ni block light ni dinámica). Test: `node test_agente_luz_sigue.js`
+(sigue continua + cero BFS por paso). Detalle en `PLAN.md` (BUG-GLOW2, BUG-GLOW3).
+
+### Mandos de la luz artificial (los 3, y en qué se diferencian)
+
+Valen igual para la luz de bloque (antorchas fijas) y para la dinámica (emisor montado en agente):
+
+- **`game.glowLevel`** (0..`MC_MAXLIGHT`, defecto 15) = **ALCANCE**: nivel de siembra; la luz pierde 1 por bloque
+  ⇒ radio ≈ glowLevel. `0` = sin luz artificial.
+- **`game.glowFocus`** (0..1, defecto 0.2) = **FOCO del haz**: `0` = omnidireccional (antorcha); →1 = haz fino en la
+  dirección de la cara emisiva (`emitDir`). Solo actúa si el emisor tiene haz (una cara emisiva neta); un cubo que
+  emite por las 6 caras es omnidireccional pase lo que pase.
+- **`game.glowGain`** (≥0, defecto 1) = **INTENSIDAD**: `1` = tope normal (a plena luz = brillo de pleno día); `>1`
+  **sobreexpone** (una antorcha/gafas brillan MÁS que el día, se «queman» a blanco). Es el techo del `mix` de
+  exposición (`uGlowGain`), **solo un uniforme** ⇒ cambio LIVE y baratísimo (ni re-siembra ni re-malla).
+  ⚠️ **`MC_MAXLIGHT` NO es la intensidad** — son los NIVELES de gradación/alcance; `lightLut` normaliza `/MC_MAXLIGHT`
+  ⇒ a tope siempre ×1. Subirlo no da más brillo (y encima des-normaliza las semillas): para más brillo, `glowGain`.
+
+`glowLevel` y `glowFocus` re-siembran + re-mallan al asignarlos (`mc._blEmiSig=null` fuerza el recálculo — **sin eso el
+cambio no se veía hasta editar un bloque**, que era el síntoma de BUG-GLOW1). `glowGain` no necesita nada, se ve al frame.

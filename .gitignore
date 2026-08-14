@@ -7,6 +7,12 @@ data/*
 # Las capturas que adjunta el dueño al abrir un ticket TAMBIÉN se versionan: un ticket se resuelve
 # semanas después, cuando el chat donde venían ya no existe. Las rescata guardar_imagenes_ticket.py.
 !data/tickets/
+# Los iconos de la aplicación (favicon, marca, botones de herramienta) SÍ se versionan, aunque sean
+# DERIVADOS: los HTML los piden por una URL fija y un clon recién hecho enseñaría la pestaña rota
+# hasta que alguien entrase en /images y publicase. Son unos KB. La fuente de verdad sigue siendo el
+# DIBUJO (assets/ o data/habitantes/) más la asignación de data/ui/ranuras.json: los .png se
+# rehornean enteros desde ahí y NO se editan a mano nunca.
+!data/ui/
 # La galería (data/habitantes/) es runtime: son los dibujos del dueño y pesa 5,7 MB. PERO las piezas
 # de redstone que viven ahí NO son runtime: las genera redstone/make_piezas.py, el código versionado
 # las nombra por clave (`hab:cable` y compañía, ~450 referencias) y los mundos guardados las tienen
@@ -48,11 +54,15 @@ data/habitantes_trash/
 data/worlds/
 *.log
 
-# Playwright: solo lo usa test_navegador.js (abre el Mundo en un Chromium de verdad para compilar el GLSL).
-# Se instala a mano: npm i -D playwright@1.47.2 && npx playwright install chromium   (la 1.48+ pide Node 20).
+# Playwright: lo usan los 112 tests de navegador (abren el Mundo en un Chromium de verdad, así que
+# compilan el GLSL). Pesa cientos de MB una vez instalado, pero el MANIFIESTO sí se versiona:
+# sin él, un clon recién hecho no puede hacer `npm i` y hay que teclear la versión a mano.
+# La versión va CLAVADA (sin `^`) a propósito: la 1.48+ exige Node 20.
+#   npm i && npx playwright install chromium
 node_modules/
-package.json
-package-lock.json
 
 # Bytecode de mundos.py (lo genera server.py al importarlo)
 __pycache__/
+
+# Backups del propio repo (zip/tgz). Todo lo que llevaban está en el historial de git.
+releases/

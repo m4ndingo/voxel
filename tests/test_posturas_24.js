@@ -17,7 +17,7 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const src = fs.readFileSync(__dirname + '/../app.js', 'utf8');
+const src = fs.readFileSync(__dirname + '/../web/app.js', 'utf8');
 // Cada funcion de nivel superior de app.js acaba con '}' en la columna 0.
 function extraer(nombre) {
   const ini = src.indexOf('\nfunction ' + nombre + '(');

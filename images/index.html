@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Assets gráficos · VoxelForge</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/scrollbars.css">   <!-- tema de las barras de scroll, común a todo el sitio -->
+<!--
+  Pantalla /images — los iconos de la aplicación (favicon, marca y las 11 herramientas) salen de
+  dibujos vóxel del catálogo. Esto es de verdad, no un mock:
+  · Rasteriza el NAVEGADOR (`pinta()`, las mismas fórmulas que drawIsoFaces) y «Publicar» hace un
+    POST /api/ui; server.py solo valida y escribe, igual que /api/fotos.
+  · La fuente de verdad es la ASIGNACIÓN, data/ui/ranuras.json; los data/ui/<ranura>-<px>.png son
+    su derivado y no se editan a mano nunca.
+  · Quien los consume es iconos.js (más /favicon.ico, que sirve server.py). Sin publicar nada, la
+    aplicación se ve exactamente como antes.
+  Manual: docs/iconos.md.
+-->
+<style>
+:root{
+  --bg:#0e1016; --panel:#161a24; --panel-2:#1d2230; --line:#2a3040; --ink:#e7ecf4;
+  --muted:#8a93a6; --accent:#e2a44a; --accent-2:#6bd3a0; --danger:#e2685a; --radius:10px;
+  --lateral:250px;
+  --font-game:'Pixeloid Sans', ui-monospace, monospace;
+  font-synthesis:none;
+}
+@font-face{ font-family:'Pixeloid Sans'; src:url('/assets/fonts/PixeloidSans.ttf') format('truetype'); font-weight:400; font-display:swap }
+*{box-sizing:border-box}
+body{margin:0; background:var(--bg); color:var(--ink);
+  font:14px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; display:flex; min-height:100vh}
+
+/* ---- panel lateral, igual que la wiki ---- */
+#lateral{width:var(--lateral); flex:0 0 var(--lateral); background:var(--panel); border-right:1px solid var(--line);
+  padding:18px 0; position:sticky; top:0; height:100vh; overflow:auto}
+.marca{font-family:var(--font-game); font-size:18px; padding:0 18px 4px; display:flex; gap:8px; align-items:center}
+.marca b{color:var(--accent); font-weight:400}
+.sub{color:var(--muted); font-size:12px; padding:0 18px 16px; border-bottom:1px solid var(--line); margin-bottom:12px}
+#nav a{display:block; padding:7px 18px; color:var(--ink); text-decoration:none; font-size:13px; border-left:2px solid transparent}
+#nav a:hover{background:var(--panel-2)}
+#nav a.on{border-left-color:var(--accent); color:var(--accent); background:var(--panel-2)}
+#nav .grupo{color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; padding:14px 18px 4px}
+.estado{margin:16px 14px 0; padding:12px; background:var(--panel-2); border:1px solid var(--line); border-radius:var(--radius)}
+.estado .barra{height:6px; background:#0b0d13; border-radius:99px; overflow:hidden; margin:8px 0 10px}
+.estado .barra i{display:block; height:100%; background:var(--accent-2)}
+.estado small{color:var(--muted); font-size:11px}
+
+/* ---- columna principal ---- */
+main{flex:1; padding:26px 30px 80px; max-width:1180px}
+h1{font-family:var(--font-game); font-size:27px; font-weight:400; margin:0 0 6px}
+.intro{color:var(--muted); max-width:70ch; margin:0 0 8px}
+.aviso{margin:16px 0 26px; padding:10px 14px; border-left:3px solid var(--accent);
+  background:rgba(226,164,74,.07); color:#f0d4a8; font-size:13px; border-radius:0 6px 6px 0}
+h2{font-family:var(--font-game); font-size:18px; font-weight:400; margin:34px 0 4px; scroll-margin-top:20px}
+h2 + p{color:var(--muted); margin:0 0 16px; font-size:13px; max-width:75ch}
+
+/* ---- tarjeta de ranura ---- */
+.ranuras{display:grid; gap:14px}
+.ranura{display:grid; grid-template-columns:auto 1fr auto; gap:18px; align-items:center;
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px}
+.ranura.vacia{border-style:dashed; background:transparent}
+.previa{display:flex; gap:10px; align-items:flex-end}
+/* El fondo de la previa es CSS y NO entra en el PNG, pero decide cómo se LEE el icono, así que
+   no puede ser el mismo para todos:
+   · Un dibujo OPACO sobre el tablero se ve lavado. Medido con «Alis la Duplicadora» a 32×32 iso:
+     el 15 % de los píxeles visibles (73 de 484) son borde con alfa parcial —a 16×16 son el 32 %—,
+     y sobre las casillas claras (#39404f) ese fleco se lee como neblina alrededor de todo el
+     bicho. Es lo que hacía que la misma imagen se viese peor en la tarjeta que en el sandbox:
+     el PNG es idéntico, el fondo no. Por eso el opaco va sobre el sólido del sandbox.
+   · Un dibujo TRANSLÚCIDO sí necesita el tablero: es lo único que distingue el agua (#3377ff66)
+     de un azul apagado opaco del mismo tono. La clase `trans` la pone quien pinta, mirando el
+     alfa real de los vóxeles. */
+/* ⚠️ `image-rendering` se queda en AUTO a propósito. La ampliación la hace `pintaPrevia` por un
+   factor ENTERO (ver su comentario), así que aquí al navegador solo le queda REDUCIR a la rejilla
+   de pantalla, y para reducir lo que se quiere es interpolación suave. Con `pixelated` y una
+   pantalla al 125 % se duplican unas filas sí y otras no y el icono sale torcido — que es
+   exactamente el bicho que arregla `pintaPrevia`. */
+.lienzo{background:#101319;
+  border:1px solid var(--line); border-radius:4px; display:block}
+.lienzo.trans{background:
+    linear-gradient(45deg,#39404f 25%,transparent 25%,transparent 75%,#39404f 75%),
+    linear-gradient(45deg,#39404f 25%,#232833 25%,#232833 75%,#39404f 75%);
+  background-size:8px 8px; background-position:0 0,4px 4px}
+.previa figure{margin:0; text-align:center}
+.previa figcaption{color:var(--muted); font-size:10px; margin-top:4px; font-variant-numeric:tabular-nums}
+.info h3{margin:0 0 3px; font-size:15px; font-weight:600}
+.chips{display:flex; gap:6px; flex-wrap:wrap; margin:6px 0}
+.chip{font-size:11px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); color:var(--muted)}
+.chip.px{color:var(--accent); border-color:rgba(226,164,74,.4)}
+.chip.modo{color:var(--accent-2); border-color:rgba(107,211,160,.4)}
+.origen{font-size:12px; color:var(--muted)}
+.origen code{background:var(--panel-2); padding:1px 6px; border-radius:4px; font-size:11px; color:#cbd5e6}
+.usos{font-size:11px; color:var(--muted); margin-top:5px}
+.ajustes{display:flex; gap:18px; flex-wrap:wrap; margin:8px 0 2px; align-items:center}
+.rot{display:flex; gap:4px; align-items:center}
+.rot b{font-size:11px; color:var(--muted); font-weight:600; margin-right:2px}
+.rot button{padding:3px 9px; font-size:11px}
+.rot button.on{background:var(--accent-2); color:#082016; border-color:var(--accent-2); font-weight:600}
+.rot code{font-size:11px; background:var(--panel-2); border-radius:4px; padding:2px 7px; min-width:34px;
+  text-align:center; color:var(--accent)}
+.acciones{display:flex; flex-direction:column; gap:6px; min-width:150px}
+button{font:inherit; font-size:12px; padding:6px 12px; border-radius:6px; cursor:pointer;
+  background:var(--panel-2); color:var(--ink); border:1px solid var(--line)}
+button:hover{border-color:var(--accent)}
+button.pri{background:var(--accent); color:#1a1206; border-color:var(--accent); font-weight:600}
+button.pel:hover{border-color:var(--danger); color:var(--danger)}
+
+/* ---- vista en contexto ---- */
+.contexto{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:14px}
+.marco{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+.marco > b{display:block; padding:9px 14px; font-size:12px; font-weight:600; color:var(--muted);
+  border-bottom:1px solid var(--line); background:var(--panel-2)}
+.marco .cuerpo{padding:14px}
+.pestana{display:flex; align-items:center; gap:8px; background:#20242f; border-radius:8px 8px 0 0;
+  padding:8px 12px; width:230px; font-size:12px}
+.pestana canvas{width:16px; height:16px; image-rendering:pixelated}
+.barraurl{background:#12151d; border-radius:0 8px 8px 8px; padding:7px 12px; font-size:11px; color:var(--muted)}
+.barraherr{display:flex; gap:4px; flex-wrap:wrap}
+.herr{width:56px; padding:6px 2px; text-align:center; background:var(--panel-2);
+  border:1px solid var(--line); border-radius:8px; font-size:20px; line-height:1.1}
+.herr.on{border-color:var(--accent)}
+.herr canvas{width:24px; height:24px; image-rendering:pixelated; display:block; margin:0 auto}
+.herr span{display:block; font-size:9px; color:var(--muted); margin-top:3px}
+
+/* ---- sandbox: exportar a imagen ---- */
+.sb{display:grid; grid-template-columns:320px 1fr; gap:18px; margin-top:14px; align-items:start}
+.sb-mandos{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px}
+.sb-mandos label{display:block; font-size:11px; color:var(--muted); text-transform:uppercase;
+  letter-spacing:.06em; margin:14px 0 5px}
+.sb-mandos label:first-child{margin-top:0}
+.sb-fila{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+.sb-fila input[type=number]{width:82px; background:#0b0d13; border:1px solid var(--line); color:var(--ink);
+  border-radius:6px; padding:5px 8px; font:inherit; font-size:12px}
+.sb-fila input[type=color]{width:34px; height:28px; padding:0; background:none; border:1px solid var(--line);
+  border-radius:6px; cursor:pointer}
+.sb-fila input[type=color]:disabled{opacity:.35; cursor:not-allowed}
+.sb-nombre{flex:1; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sb-nombre.puesto{color:var(--ink)}
+.sb-presets button{padding:3px 8px; font-size:11px}
+.sb-presets button.on{background:var(--accent-2); color:#082016; border-color:var(--accent-2); font-weight:600}
+.sb-check{display:flex !important; align-items:center; gap:5px; margin:0 !important; text-transform:none !important;
+  letter-spacing:0 !important; font-size:12px !important; color:var(--ink) !important}
+.sb-acciones{margin-top:18px}
+.sb-nota{font-size:11px; color:var(--muted); margin:10px 0 0; line-height:1.5}
+/* La previa se deja a tamaño real hasta que no cabe; entonces se encoge SOLO por CSS, nunca
+   rebajando el lienzo: el PNG que se descarga tiene que ser el que se pidió, no el que se ve. */
+.sb-previa{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px; text-align:center; overflow:auto}
+.sb-marco{display:inline-block; max-width:100%}
+/* Con AA la previa se muestra suavizada; sin AA, a pixelón. Si no, un lienzo de 1024 encogido para
+   caber en la pantalla enseñaría una escalera que NO está en el PNG que se descarga.
+   El `pixelated` va aquí y no en `.lienzo` porque en el sandbox lo pide el usuario con la casilla
+   («nítido» es una decisión suya), mientras que en las tarjetas es de la casa y estorba. */
+.sb-previa canvas{max-width:100%; height:auto; image-rendering:pixelated}
+.sb-previa canvas.suave{image-rendering:auto}
+.sb-previa figcaption{color:var(--muted); font-size:11px; margin-top:10px; font-variant-numeric:tabular-nums}
+
+/* ---- selector ---- */
+dialog{background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:12px;
+  padding:0; width:min(660px,92vw); max-height:80vh}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+.dlg-cab{padding:14px 18px; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:center}
+.dlg-cab b{font-family:var(--font-game); font-weight:400; font-size:16px; flex:1}
+.dlg-cab input{flex:0 0 200px; background:#0b0d13; border:1px solid var(--line); color:var(--ink);
+  border-radius:6px; padding:6px 10px; font:inherit; font-size:12px}
+.lista{overflow:auto; max-height:56vh; padding:8px}
+.lista button{display:flex; width:100%; gap:10px; align-items:center; text-align:left; margin-bottom:4px; padding:8px 10px}
+.lista .em{font-size:18px; width:26px; text-align:center}
+.lista .nm{flex:1}
+.lista .dim{color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; min-width:74px; text-align:right}
+.lista .dim.vox{min-width:62px; opacity:.7}
+.tag{font-size:10px; border-radius:99px; padding:1px 7px; white-space:nowrap}
+.tag.plano{color:var(--accent-2); border:1px solid rgba(107,211,160,.4)}
+.tag.estr {color:#8fb8ff; border:1px solid rgba(143,184,255,.4)}
+.tag.lleno{color:var(--muted); border:1px solid var(--line)}
+.tag.rec  {color:#1a1206; background:var(--accent); border:1px solid var(--accent); font-weight:600}
+.chips-fila{display:flex; gap:6px; flex-wrap:wrap; padding:10px 14px; border-bottom:1px solid var(--line)}
+.fchip{padding:3px 10px; font-size:11px; border-radius:99px}
+.fchip i{font-style:normal; opacity:.55; margin-left:3px; font-variant-numeric:tabular-nums}
+.fchip.on{background:var(--accent); color:#1a1206; border-color:var(--accent); font-weight:600}
+.pie{padding:10px 18px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center}
+.pie small{color:var(--muted); font-size:11px}
+
+/* ---- las 24 posturas: 6 caras (filas) × 4 giros (columnas) ---- */
+#dlgGiro{width:min(430px,94vw)}
+#rejilla{padding:12px 14px; overflow:auto; max-height:62vh}
+.fila-ori{display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:6px}
+.celda-ori{padding:5px 2px 3px; display:flex; flex-direction:column; align-items:center; gap:3px}
+.celda-ori.on{border-color:var(--accent); background:rgba(226,164,74,.1)}
+.celda-ori small{color:var(--muted); font-size:9px; font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+
+<aside id="lateral">
+  <div class="marca"><span style="color:var(--accent)">◧</span> <b>VOXELFORGE</b></div>
+  <div class="sub">Assets gráficos</div>
+  <nav id="nav">
+    <div class="grupo">Ranuras</div>
+    <a href="#favicon" class="on">Favicon</a>
+    <a href="#marca">Marca y logo</a>
+    <a href="#herramientas">Iconos de herramienta</a>
+    <div class="grupo">Ver</div>
+    <a href="#contexto">Cómo queda</a>
+    <div class="grupo">Herramientas</div>
+    <a href="#sandbox">Sandbox · exportar</a>
+  </nav>
+  <div class="estado">
+    <small><b id="eN">0</b> de <b id="eT">0</b> ranuras asignadas</small>
+    <div class="barra"><i id="eBarra" style="width:0"></i></div>
+    <button class="pri" style="width:100%" onclick="publicar()">Publicar los cambios</button>
+    <small style="display:block;margin-top:8px">Rehornea los PNG y los deja en <code>data/ui/</code>.</small>
+  </div>
+</aside>
+
+<main>
+  <h1>Assets gráficos de la aplicación</h1>
+  <p class="intro">Los iconos de VoxelForge se <b>dibujan en VoxelForge</b>. Cada ranura de esta
+  página es un sitio donde la aplicación enseña una imagen —la pestaña del navegador, la marca del
+  editor, un botón de herramienta— y a cada una se le asigna un dibujo del catálogo. Al publicar,
+  el dibujo se hornea al tamaño que pide la ranura y la aplicación pasa a usarlo.</p>
+
+  <div class="aviso"><b>Publicar escribe de verdad.</b> La asignación va a
+  <code>data/ui/ranuras.json</code> —esa es la fuente de verdad, y de ahí se rehornea todo— y los PNG
+  a <code>data/ui/</code>. Lo que se ve aquí a 16 px es exactamente el fichero que se guarda. Los PNG
+  son un <b>derivado</b>: no se editan a mano, se vuelve aquí y se publica.
+  <br>Una ranura que dejes vacía no rompe nada: ese sitio se queda con el icono de siempre.</div>
+
+  <h2 id="favicon">Favicon</h2>
+  <p>El icono de la pestaña del navegador. Lo piden las cuatro páginas del sitio
+  (<code>index.html</code>, <code>mapas.html</code>, <code>fotos.html</code> y <code>/wiki</code>), y
+  el servidor sirve <code>/favicon.ico</code> desde el PNG de 32 que publiques aquí. Sin publicar,
+  404 — que es lo que devolvía siempre, porque ese fichero nunca ha existido en disco.</p>
+  <div class="ranuras" id="g-favicon"></div>
+
+  <h2 id="marca">Marca y logo</h2>
+  <p>El rótulo de la esquina del editor. Sin nada publicado es el carácter <code>◧</code> escrito a
+  pelo en el HTML; con una ranura puesta, <code>iconos.js</code> lo sustituye al cargar la página.</p>
+  <div class="ranuras" id="g-marca"></div>
+
+  <h2 id="herramientas">Iconos de herramienta</h2>
+  <p>Los botones de la columna izquierda del editor. Sin publicar son emoji, y están escritos
+  <b>dos veces</b> (la barra fija y la flotante); publicando aquí cambian <b>las dos a la vez</b>,
+  porque <code>iconos.js</code> las busca por su <code>data-tool</code> y no por su posición.</p>
+  <div class="ranuras" id="g-herr"></div>
+
+  <h2 id="contexto">Cómo queda</h2>
+  <p>Lo mismo, puesto donde se va a ver de verdad. Un icono se juzga aquí, no en la ficha.</p>
+  <div class="contexto">
+    <div class="marco">
+      <b>Pestaña del navegador</b>
+      <div class="cuerpo">
+        <div class="pestana"><canvas id="ctxFav" width="16" height="16"></canvas> VoxelForge — Editor</div>
+        <div class="barraurl">voxelforge.local/</div>
+      </div>
+    </div>
+    <div class="marco">
+      <b>Barra de herramientas del editor</b>
+      <div class="cuerpo"><div class="barraherr" id="ctxHerr"></div></div>
+    </div>
+  </div>
+
+  <h2 id="sandbox">Sandbox · exportar a imagen</h2>
+  <p class="intro">Lo de arriba hornea iconos <b>para la aplicación</b>, con tamaños fijos porque los
+    pide el HTML. Esto es lo contrario: cualquier dibujo, <b>al tamaño y la postura que quieras</b>,
+    para llevártelo fuera. No toca <code>data/ui/</code> ni las ranuras — el PNG se descarga y ya.</p>
+
+  <div class="sb">
+    <div class="sb-mandos">
+      <label>Dibujo</label>
+      <div class="sb-fila">
+        <span id="sbNombre" class="sb-nombre">— nada elegido —</span>
+        <button class="pri" id="sbElegir">Elegir dibujo…</button>
+      </div>
+
+      <label>Modo</label>
+      <div class="rot" id="sbModo" role="group">
+        <button data-m="plano">plano</button><button data-m="iso" class="on">iso</button>
+      </div>
+
+      <label>Postura</label>
+      <div class="sb-fila">
+        <span class="chip" id="sbOri">@0</span>
+        <button id="sbGiro">Elegir entre las 24…</button>
+      </div>
+
+      <label>Tamaño en píxeles</label>
+      <div class="sb-fila">
+        <input type="number" id="sbW" min="1" max="4096" step="1" value="256"> ×
+        <input type="number" id="sbH" min="1" max="4096" step="1" value="256">
+      </div>
+      <div class="sb-fila sb-presets" id="sbPresets">
+        <button data-p="16">16</button><button data-p="32">32</button><button data-p="64">64</button>
+        <button data-p="128">128</button><button data-p="256">256</button><button data-p="512">512</button>
+        <button data-p="1024">1024</button>
+      </div>
+
+      <label>Calidad</label>
+      <div class="sb-fila">
+        <label class="sb-check"><input type="checkbox" id="sbAA" checked> antialiasing (×4)</label>
+      </div>
+
+      <label>Fondo</label>
+      <div class="sb-fila">
+        <label class="sb-check"><input type="checkbox" id="sbTrans" checked> transparente</label>
+        <input type="color" id="sbColor" value="#101319" disabled>
+      </div>
+
+      <div class="sb-fila sb-acciones">
+        <button class="pri" id="sbBajar">Descargar PNG</button>
+      </div>
+      <p class="sb-nota" id="sbNota"></p>
+    </div>
+
+    <div class="sb-previa">
+      <div class="sb-marco"><canvas id="sbLienzo" class="lienzo"></canvas></div>
+      <figcaption id="sbPie">—</figcaption>
+    </div>
+  </div>
+</main>
+
+<dialog id="dlgGiro">
+  <div class="dlg-cab"><b id="giroTit">Postura</b></div>
+  <div id="rejilla"></div>
+  <div class="pie">
+    <small>Una fila por cara (6), una columna por giro (4). El número es el <code>@n</code> de la clave.</small>
+    <button onclick="dlgGiro.close()">Cancelar</button>
+  </div>
+</dialog>
+
+<dialog id="picker">
+  <div class="dlg-cab">
+    <b>Elegir dibujo</b>
+    <input id="busca" placeholder="Buscar…" oninput="pintaLista()">
+  </div>
+  <div class="chips-fila" id="chips"></div>
+  <div class="lista" id="lista"></div>
+  <div class="pie">
+    <small id="pieTxt">Los <span class="plano">planos</span> (1 vóxel de fondo) se hornean vóxel = píxel.</small>
+    <button onclick="picker.close()">Cancelar</button>
+  </div>
+</dialog>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// LAS RANURAS. Es la tabla del CONSUMIDOR: la aplicación declara DÓNDE
+// enseña una imagen, con qué tamaños la necesita y a qué fichero hornea.
+// Lo que NO está aquí es qué dibujo va en cada una, ni en qué postura, ni si va
+// plano o en iso: eso son las tres cosas que elige el dueño y que se guardan en
+// data/ui/ranuras.json. La ranura no impone el modo — solo propone uno al asignar.
+// ─────────────────────────────────────────────────────────────────────────────
+const RANURAS = [
+  { id:'favicon',  grupo:'g-favicon', nombre:'Favicon del sitio', px:[16,32],
+    usos:'index.html · mapas.html · fotos.html · /wiki', archivo:'favicon' },
+  { id:'marca',    grupo:'g-marca',   nombre:'Marca del editor',  px:[64],
+    usos:'la esquina de index.html (hoy el carácter ◧)', archivo:'marca' },
+  // Las ONCE del editor, en el orden de la barra (index.html:111-121). No me las invento: cada
+  // `herr` es el `data-tool` del botón, que es lo que declaran los dibujos del dueño en
+  // `meta.herramienta`. La barra flotante (#tool-float) lleva las mismas once en otro orden, y
+  // por eso el icono va en UNA tabla y no escrito dos veces.
+  { id:'t-hand',    grupo:'g-herr', herr:'hand',    nombre:'Mano',      px:[32], emoji:'✋',  usos:'#tools · #tool-float', archivo:'tool-hand' },
+  { id:'t-orbit',   grupo:'g-herr', herr:'orbit',   nombre:'Giro',      px:[32], emoji:'🔄', usos:'#tools · #tool-float', archivo:'tool-orbit' },
+  { id:'t-pick',    grupo:'g-herr', herr:'pick',    nombre:'Color',     px:[32], emoji:'💧', usos:'#tools · #tool-float', archivo:'tool-pick' },
+  { id:'t-paint',   grupo:'g-herr', herr:'paint',   nombre:'Pincel',    px:[32], emoji:'✏️', usos:'#tools · #tool-float', archivo:'tool-paint' },
+  { id:'t-build',   grupo:'g-herr', herr:'build',   nombre:'Construir', px:[32], emoji:'🧱', usos:'#tools · #tool-float', archivo:'tool-build' },
+  { id:'t-erase',   grupo:'g-herr', herr:'erase',   nombre:'Borrar',    px:[32], emoji:'🩹', usos:'#tools · #tool-float', archivo:'tool-erase' },
+  { id:'t-fill',    grupo:'g-herr', herr:'fill',    nombre:'Relleno',   px:[32], emoji:'🪣', usos:'#tools · #tool-float', archivo:'tool-fill' },
+  { id:'t-select',  grupo:'g-herr', herr:'select',  nombre:'Selección', px:[32], emoji:'🔲', usos:'#tools · #tool-float', archivo:'tool-select' },
+  { id:'t-extrude', grupo:'g-herr', herr:'extrude', nombre:'Extruir',   px:[32], emoji:'⤢',  usos:'#tools · #tool-float', archivo:'tool-extrude' },
+  { id:'t-pivot',   grupo:'g-herr', herr:'pivot',   nombre:'Pivote',    px:[32], emoji:'📍', usos:'#tools · #tool-float', archivo:'tool-pivot' },
+  { id:'t-caras',   grupo:'g-herr', herr:'caras',   nombre:'Caras',     px:[32], emoji:'🃏', usos:'#tools · #tool-float', archivo:'tool-caras' },
+];
+// El nombre del PNG se DERIVA de la ranura y del tamaño, en un solo sitio: de aquí salen el
+// horneado, el texto de la tarjeta y lo que consumen los HTML (y `RE_UI_PNG` de server.py valida
+// justo esta forma). Escrito dos veces, se despega en cuanto se renombre una ranura.
+const nombrePng = (r, px) => r.archivo + '-' + px;
+const rutaPng   = (r, px) => '/data/ui/' + nombrePng(r, px) + '.png';
+
+const asignado = {};      // id de ranura → { clave, nombre, doc, modo, ori }
+let catalogo = [], destino = null, filtro = 'todos';
+
+// ── el catálogo son DOS almacenes, y hay que mirar los dos ───────────────────
+// `assets/` son los dibujos que vienen con el programa y `data/habitantes/` los que
+// ha dibujado el dueño. El mismo dibujo puede entrar por las dos puertas, así que la
+// clave lleva SIEMPRE su espacio de nombres (`asset:` / `hab:`): un id pelado no
+// identifica nada, y escribirlo a mano fue BUG-RS23 y BUG-FLUID3.
+// `size` viene unas veces como número (16 = 16³) y otras como {x,y,z} — se normaliza
+// aquí, que para eso app.js tiene normSize.
+const normSize = s => (s && typeof s === 'object')
+  ? { x:+s.x||0, y:+s.y||0, z:+s.z||0 }
+  : { x:+s||16, y:+s||16, z:+s||16 };
+
+function entrada(x, origen){
+  const s = normSize(x.size), caja = s.x * s.y * s.z;
+  return {
+    clave: origen === 'hab' ? 'hab:' + x.id : 'asset:' + x.file,
+    url:   origen === 'hab' ? '/api/habitantes/' + x.id : '/' + x.file,
+    nombre: x.name, icon: x.icon, origen, size: s, count: +x.count || 0,
+    plano: s.z === 1,
+    lleno: caja > 0 && x.count >= caja,              // el 16³ macizo: 4096 vóxeles
+    herramienta: x.categoria === 'herramienta' ? x.herramienta : null
+  };
+}
+Promise.all([
+  fetch('/assets/index.json').then(r => r.json()).catch(() => []),
+  fetch('/api/habitantes').then(r => r.json()).catch(() => [])
+]).then(([A, H]) => {
+  const lista = j => Array.isArray(j) ? j : (j.items || []);
+  catalogo = lista(A).map(x => entrada(x, 'asset'))
+    .concat(lista(H).map(x => entrada(x, 'hab')))
+    .sort((a,b) => a.nombre.localeCompare(b.nombre));
+  return restaurar();          // lo ya publicado se resuelve CONTRA el catálogo, así que va detrás
+});
+
+// ── las 24 posturas ──────────────────────────────────────────────────────────
+// 6 caras × 4 giros. Se DERIVAN enumerando roll/tilt/yaw y quedándose con las
+// combinaciones distintas, que es lo mismo que hace MC_ORI en app.js: una tabla
+// escrita a mano se desincroniza de la geometría (fue BUG-RS7 y BUG-ROT2). Como
+// el orden del bucle es el mismo, el índice de aquí es el `@n` del motor.
+const rot = (a,b,q) => q===0?[a,b] : q===1?[-b,a] : q===2?[-a,-b] : [b,-a];
+const T = (roll,tilt,yaw,x,y,z) => {
+  const p = rot(x,y,roll), t = rot(p[1],z,tilt), r = rot(p[0],t[1],yaw);
+  return [r[0], t[0], r[1]];
+};
+const MC_ORI = (() => {
+  const vistas = new Set(), tabla = [];
+  for(let roll=0;roll<4;roll++) for(let tilt=0;tilt<4;tilt++) for(let yaw=0;yaw<4;yaw++){
+    const f = [[1,0,0],[0,1,0],[0,0,1]].map(v => T(roll,tilt,yaw,v[0],v[1],v[2]).join(',')).join('|');
+    if(vistas.has(f)) continue;
+    vistas.add(f); tabla.push([roll,tilt,yaw]);
+  }
+  return tabla;   // 24
+})();
+// Aplica una postura y vuelve a pegar el dibujo al origen (si no, se sale del lienzo).
+function gira(doc, ori){
+  const o = MC_ORI[(ori|0) >= 0 && (ori|0) < MC_ORI.length ? (ori|0) : 0];   // nunca romper por un número
+  if(!doc) return null;
+  if(o[0] === 0 && o[1] === 0 && o[2] === 0) return doc;
+  const V = doc.voxels || {}, P = [];
+  let mnx=1e9,mny=1e9,mnz=1e9, mxx=-1e9,mxy=-1e9,mxz=-1e9;
+  for(const k in V){
+    const [x,y,z] = k.split(',').map(Number), q = T(o[0],o[1],o[2],x,y,z);
+    P.push([q, V[k]]);
+    mnx=Math.min(mnx,q[0]); mny=Math.min(mny,q[1]); mnz=Math.min(mnz,q[2]);
+    mxx=Math.max(mxx,q[0]); mxy=Math.max(mxy,q[1]); mxz=Math.max(mxz,q[2]);
+  }
+  const voxels = {};
+  for(const [q,c] of P) voxels[(q[0]-mnx)+','+(q[1]-mny)+','+(q[2]-mnz)] = c;
+  return { size:{x:mxx-mnx+1, y:mxy-mny+1, z:mxz-mnz+1}, voxels };
+}
+
+// ── el color de un vóxel tiene CUATRO formas, no una ─────────────────────────
+// Mismos ayudantes que app.js (isTex / isGlow / bareColor / hex6 / colorAlpha), porque
+// leerlo a pelo se paga: `#3377ff66` (el agua) interpretado como `#rrggbb` sale VERDE —
+// parseInt se come el par `aa` y desplaza los tres canales.
+//   #rrggbb      opaco
+//   #rrggbbaa    translúcido (agua, lava, cristal)
+//   *#rrggbb…    emisivo: el '*' delante NO es parte del color
+//   tex:<clave>  no es un color: es una referencia a OTRO dibujo, y se resuelve a su
+//                color medio, igual que hace texRepr/computeTexRepr en app.js
+const isTex  = c => typeof c === 'string' && c.slice(0,4) === 'tex:';
+const isGlow = c => typeof c === 'string' && c[0] === '*';
+const bareColor = c => isGlow(c) ? c.slice(1) : c;
+const hex6 = c => { c = bareColor(c); if(typeof c !== 'string' || c[0] !== '#') return '#888888';
+  let h = c.slice(1); if(h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2]; return '#' + h.slice(0,6); };
+const colorAlpha = c => { c = bareColor(c); if(typeof c !== 'string' || c[0] !== '#') return 1;
+  const h = c.slice(1); return h.length >= 8 ? parseInt(h.slice(6,8),16)/255 : 1; };
+
+// ¿El dibujo tiene algún vóxel translúcido? Decide si la previa va sobre tablero o sobre sólido
+// (ver el comentario de `.lienzo`). Se cachea en el propio documento porque esto se pregunta una
+// vez por lienzo y por repintado —8 lienzos × 13 ranuras— y un dibujo de 32³ son 32 768 vóxeles.
+function docTraslucido(doc){
+  if('_trans' in doc) return doc._trans;
+  let t = false;
+  for(const k in (doc.voxels || {})) if(colorAlpha(doc.voxels[k]) < 1){ t = true; break; }
+  return (doc._trans = t);
+}
+
+const TEXREPR = new Map();                       // clave del dibujo → su color medio
+const texKeyOf = c => c.slice(4);
+const voxFill  = c => isTex(c) ? (TEXREPR.get(texKeyOf(c)) || '#8a8f94') : bareColor(c);
+// Un `tex:` apunta a otro dibujo del catálogo, así que hay que ir a buscarlo. Son 8
+// referencias distintas en todo el repo y se cachean: no es un problema de coste.
+async function resuelveTex(doc){
+  const pend = new Set();
+  for(const k in (doc.voxels || {})){ const v = doc.voxels[k];
+    if(isTex(v) && !TEXREPR.has(texKeyOf(v))) pend.add(texKeyOf(v)); }
+  await Promise.all([...pend].map(async clave => {
+    const e = catalogo.find(a => a.clave === clave);
+    if(!e) return TEXREPR.set(clave, '#8a8f94');
+    try{
+      const d = await fetch(e.url).then(x => x.json());
+      let r=0, g=0, b=0, n=0;
+      for(const k in (d.voxels || {})){ const c = d.voxels[k];
+        if(isTex(c)) continue;
+        const h = parseInt(hex6(c).slice(1), 16);
+        r += h>>16 & 255; g += h>>8 & 255; b += h & 255; n++; }
+      TEXREPR.set(clave, n ? '#' + [r/n, g/n, b/n].map(v => (v|0).toString(16).padStart(2,'0')).join('') : '#8a8f94');
+    }catch{ TEXREPR.set(clave, '#8a8f94'); }
+  }));
+}
+
+// ── dibujo: dos modos de horneado ────────────────────────────────────────────
+// «plano»: el dibujo se copia VÓXEL = PÍXEL, aplastando la profundidad. Sin escalar,
+//   sin antialias, sin encuadre que adivinar. Un 16×16×1 da un favicon exacto.
+// «iso»: el dibujo se pinta en isométrica, como las miniaturas de la galería. Luce
+//   en una marca grande; a 16 px se convierte en puré.
+// El modo NO lo decide la ranura: lo elige quien asigna. Un dibujo plano puesto en iso
+// es una lámina de canto, y un volumen aplastado a plano es su silueta — las dos cosas
+// se ven aquí antes de hornear nada.
+// Antialiasing = SUPERSAMPLING ×4, la técnica de la miniatura de la hotbar (drawThumbRanura,
+// app.js:1873). No vale el antialias de `fill()` del canvas: es justo el que pintaba una costura
+// clara en cada junta entre caras y estropeaba el alpha del agua.
+//
+// Pero reducir la imagen entera a ×4 SUAVIZA TAMBIÉN EL INTERIOR, y en arte de vóxeles eso se lee
+// como pérdida de viveza: los colores no cambian de media (medido: saturación 52.3 igual, brillo
+// igual) pero cada frontera entre dos colores se promedia y el dibujo pierde punch. Así que el
+// supersampling se usa SOLO PARA LA SILUETA:
+//   · el COLOR sale de la pasada a tamaño real → cada píxel conserva su color exacto, sin mezclar;
+//   · el ALFA sale de la cobertura media del bloque ×4 → el contorno queda suave.
+// Un píxel de interior tiene cobertura llena, así que su alfa acaba siendo exactamente el del
+// vóxel (255 para lo opaco, 102 para el agua) y su color, el de siempre: interior IDÉNTICO al modo
+// nítido. Solo cambian los píxeles del borde, que es donde se quería el suavizado.
+const SS_AA = 4;
+function pinta(cv, doc0, modo, ori, aa){
+  if(aa !== false){
+    pinta(cv, doc0, modo, ori, false);                 // capa de color, nítida
+    const g = cv.getContext('2d'), W = cv.width, H = cv.height;
+    const base = g.getImageData(0, 0, W, H), bd = base.data;
+    const off = document.createElement('canvas');
+    off.width = W * SS_AA; off.height = H * SS_AA;
+    pinta(off, doc0, modo, ori, false);                // capa de cobertura, a ×4
+    const sd = off.getContext('2d').getImageData(0, 0, off.width, off.height).data;
+    const N = SS_AA * SS_AA;
+    for(let y = 0; y < H; y++) for(let x = 0; x < W; x++){
+      let sa = 0, sr = 0, sg = 0, sb = 0;
+      for(let j = 0; j < SS_AA; j++){
+        let k = (((y*SS_AA + j) * off.width) + x*SS_AA) * 4;
+        for(let i = 0; i < SS_AA; i++, k += 4){
+          const a = sd[k+3] / 255;
+          sa += a; sr += sd[k]*a; sg += sd[k+1]*a; sb += sd[k+2]*a;
+        }
+      }
+      const o = (y*W + x) * 4, habiaColor = bd[o+3] > 0;
+      bd[o+3] = Math.round(sa / N * 255);
+      // Si la pasada a tamaño real no pilló nada ahí (un detalle más fino que un píxel), el color
+      // lo pone el bloque ×4 promediado en premultiplicado. Si sí lo pilló, se respeta el nítido.
+      if(!habiaColor && sa > 0){
+        bd[o] = Math.round(sr/sa); bd[o+1] = Math.round(sg/sa); bd[o+2] = Math.round(sb/sa);
+      }
+    }
+    g.putImageData(base, 0, 0);
+    return;
+  }
+  const g = cv.getContext('2d'); g.clearRect(0,0,cv.width,cv.height);
+  const doc = gira(doc0, ori); if(!doc) return;
+  const S = normSize(doc.size), V = doc.voxels || {};    // `size` puede venir como 16 o como {x,y,z}
+  if(modo === 'plano'){
+    // El lienzo puede no ser cuadrado (el sandbox deja pedir 320×180), así que la escala la manda
+    // el lado que peor quepa y el dibujo se CENTRA. Antes se anclaba arriba-izquierda con
+    // `cv.width/max(S.x,S.y)`, y un dibujo no cuadrado salía descolgado a una esquina.
+    const e = Math.min(cv.width / S.x, cv.height / S.y);
+    const ox = (cv.width - S.x*e) / 2, oy = (cv.height - S.y*e) / 2;
+    const front = {};                                    // el vóxel de menor z gana: es la silueta vista de frente
+    for(const k in V){ const [x,y,z] = k.split(',').map(Number), c = x+','+y;
+      if(!(c in front) || z < front[c][0]) front[c] = [z, V[k]]; }
+    for(const c in front){ const [x,y] = c.split(',').map(Number);
+      g.fillStyle = voxFill(front[c][1]);   // el canvas sí traga '#rrggbbaa'; lo que no traga es '*' ni 'tex:'
+      g.fillRect(Math.round(ox + x*e), Math.round(oy + (S.y-1-y)*e), Math.ceil(e), Math.ceil(e)); }
+    return;
+  }
+  const ks = Object.keys(V); if(!ks.length) return;
+  const P = ks.map(k => { const [x,y,z] = k.split(',').map(Number); return {x,y,z,c:V[k]}; });
+  P.sort((a,b) => (a.x+a.y+a.z) - (b.x+b.y+b.z));
+  // Caras interiores FUERA, igual que el motor (drawIsoFaces, app.js:732-734): una cara solo se
+  // dibuja si la celda vecina en esa dirección está vacía. Con colores opacos daba igual —el
+  // pintor las tapaba—, pero con alpha se SUMABAN: el cubo de agua (4096 vóxeles × 3 caras) salía
+  // con alpha 254 de 255, o sea opaco, cuando su color es #3377ff66 (alpha 102). Culling: 102.
+  // El motor no mira si el vecino es translúcido, y aquí tampoco, para que el icono se vea como
+  // se ve la pieza en el juego.
+  const topVis   = p => !(p.x+','+p.y+','+(p.z+1) in V);
+  const leftVis  = p => !(p.x+','+(p.y+1)+','+p.z in V);
+  const rightVis = p => !((p.x+1)+','+p.y+','+p.z in V);
+  const u = cv.width / (Math.max(S.x,S.y,S.z) * 1.9);
+  const px = p => (p.x - p.y) * u, py = p => (p.x + p.y) * u * 0.5 - p.z * u * 0.82;
+  let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;
+  for(const p of P){ x0=Math.min(x0,px(p)-u); x1=Math.max(x1,px(p)+u);
+                     y0=Math.min(y0,py(p)-u); y1=Math.max(y1,py(p)+u); }
+  const s = Math.min(cv.width/(x1-x0), cv.height/(y1-y0)) * 0.92;
+  const tx = cv.width/2 - ((x0+x1)/2)*s, ty = cv.height/2 - ((y0+y1)/2)*s;
+  // Rasterizado como el motor (scanQuad, app.js:713): scanline half-open, SIN antialiasing, y cada
+  // cara REEMPLAZA los píxeles que cubre en vez de mezclarse con lo de detrás. Con el `fill()` del
+  // canvas las caras vecinas se antialiasaban contra su borde común y el agua salía con alpha 93 en
+  // cada costura en vez de sus 102 limpios: una rejilla de líneas por todo el icono. El alpha del
+  // PNG tiene que ser EXACTAMENTE el del color del vóxel, y half-open es lo que teja sin huecos.
+  const img = g.createImageData(cv.width, cv.height), buf = new Uint32Array(img.data.buffer);
+  const quad = (pts, col, f) => {
+    const c = col32(col, f), q = [];
+    for(const [X,Y] of pts) q.push(X*s+tx, Y*s+ty);
+    scanQuad(buf, cv.width, cv.height, c, q[0],q[1],q[2],q[3],q[4],q[5],q[6],q[7]);
+  };
+  // Los factores son los del motor (1.10 arriba / 0.72 izquierda / 0.55 derecha), no unos parecidos:
+  // el icono tiene que salir con el mismo relieve que la pieza dentro del juego.
+  for(const p of P){ const X=px(p), Y=py(p);
+    if(topVis(p))   quad([[X,Y-u*0.82],[X+u,Y-u*0.32],[X,Y+u*0.18],[X-u,Y-u*0.32]], p.c, 1.10);
+    if(leftVis(p))  quad([[X-u,Y-u*0.32],[X,Y+u*0.18],[X,Y+u*1.0],[X-u,Y+u*0.5]], p.c, 0.72);
+    if(rightVis(p)) quad([[X+u,Y-u*0.32],[X,Y+u*0.18],[X,Y+u*1.0],[X+u,Y+u*0.5]], p.c, 0.55); }
+  g.putImageData(img, 0, 0);
+}
+// col32 y scanQuad son los del motor (app.js:702 y app.js:713), copiados VERBATIM salvo el nombre:
+// el color va empaquetado en uint32 ABGR (little-endian) y el quad se rellena por scanline
+// half-open, que es lo que hace que dos caras vecinas tejan sin hueco y sin solaparse.
+// El sombreado multiplica el COLOR, nunca el alpha: si no, un vóxel de agua se volvería más
+// transparente por el lado en sombra. El clamp a 255 hace falta porque la cara de arriba va a 1.10.
+function col32(col, f){
+  const c = voxFill(col), n = parseInt(hex6(c).slice(1), 16), a = Math.round(colorAlpha(c) * 255);
+  const r = Math.min(255, Math.round((n>>16&255)*f)),
+        v = Math.min(255, Math.round((n>>8&255)*f)),
+        b = Math.min(255, Math.round((n&255)*f));
+  return ((a<<24) | (b<<16) | (v<<8) | r) >>> 0;
+}
+const _sx = new Float64Array(8);
+function scanQuad(buf, W, H, c, x0,y0,x1,y1,x2,y2,x3,y3){
+  const X=[x0,x1,x2,x3], Y=[y0,y1,y2,y3];
+  const yMin=Math.max(0, Math.ceil(Math.min(y0,y1,y2,y3)-0.5)), yMax=Math.min(H-1, Math.floor(Math.max(y0,y1,y2,y3)-0.5));
+  for(let py=yMin; py<=yMax; py++){
+    const yc=py+0.5; let n=0;
+    for(let i=0;i<4;i++){ const j=(i+1)&3, yi=Y[i], yj=Y[j];
+      if((yi<=yc && yc<yj)||(yj<=yc && yc<yi)) _sx[n++]=X[i]+(yc-yi)*(X[j]-X[i])/(yj-yi); }
+    if(n<2) continue;
+    let a=_sx[0], b2=_sx[1];
+    for(let i=2;i<n;i++){ if(_sx[i]<a) a=_sx[i]; else if(_sx[i]>b2) b2=_sx[i]; }
+    if(a>b2){ const t=a; a=b2; b2=t; }
+    const xA=Math.max(0, Math.ceil(a-0.5)), xB=Math.min(W-1, Math.ceil(b2-0.5)-1);
+    if(xA<=xB) buf.fill(c, py*W+xA, py*W+xB+1);
+  }
+}
+
+// ── pintar una PREVIA (≠ hornear el PNG) ─────────────────────────────────────
+// Hay DOS clases de lienzo en esta página y quieren cosas opuestas:
+//
+//   · **A tamaño natural** (32 px de dibujo a 32 px de CSS). Ese lienzo NO es una previa: es el PNG
+//     mismo, y el dueño lo copia y lo pega para comprobarlo. Así que el búfer se queda **1:1** —
+//     ampliarlo aunque sea por un entero hace que copiarlo dé un 64×64, que es justo lo que él
+//     reportó («no puedo copiar el 32x32 a esa resolución, muestra un tamaño mayor, parece x2»).
+//     Se pinta exactamente como el sandbox (`pintaSandbox`), que es la referencia que le gusta:
+//     búfer al tamaño exacto y `image-rendering:auto`, y que el navegador lo lleve a su rejilla.
+//
+//   · **Ampliado a propósito** (los `×2`/`×4` de la tarjeta, la rejilla de 24 posturas a 48 px).
+//     Aquí sí ampliamos NOSOTROS y por un ENTERO, y al navegador solo le queda reducir. El motivo
+//     es que `image-rendering:pixelated` con la pantalla al 125 % duplica unas filas sí y otras no
+//     y el icono sale torcido (reproducido en `performance/sonda_previa_dpr.js`: nítido a dpr 1 y
+//     2, deshecho a 1,25 y 1,5). El factor va con `ceil`, nunca `round`: por debajo de la rejilla
+//     de pantalla el navegador tiene que inventar píxeles y vuelve el moaré. Con dpr entero, k*px
+//     cae justo en la rejilla y no se reduce nada: sale idéntico a lo de siempre.
+function pintaPrevia(cv, doc, modo, ori, aa){
+  const px = +cv.dataset.px || cv.width;
+  const cssW = parseFloat(cv.style.width) || px;
+  const k = cssW <= px ? 1                          // tamaño natural: el búfer ES el PNG, no se toca
+    : Math.max(1, Math.ceil(cssW * (window.devicePixelRatio || 1) / px));
+  cv.width = cv.height = px * k;
+  // Misma regla que el sandbox: sin AA el dueño ha pedido pixelón y hay que respetárselo; con AA
+  // (y siempre que la ampliación la hayamos hecho ya nosotros) manda `auto`, que es lo que deja
+  // limpio el reescalado de pantalla a 1,25×.
+  cv.style.imageRendering = (k === 1 && !aa) ? 'pixelated' : 'auto';
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, cv.width, cv.height);
+  if(!doc) return;
+  if(k === 1){ pinta(cv, doc, modo, ori, aa); return; }
+  const off = document.createElement('canvas'); off.width = off.height = px;
+  pinta(off, doc, modo, ori, aa);
+  g.imageSmoothingEnabled = false;                 // ampliar es copiar píxeles, no inventarlos
+  g.drawImage(off, 0, 0, cv.width, cv.height);
+}
+
+// ── la tarjeta de una ranura ─────────────────────────────────────────────────
+function tarjeta(r){
+  const a = asignado[r.id];
+  const el = document.createElement('div');
+  el.className = 'ranura' + (a ? '' : ' vacia');
+  el.dataset.ranura = r.id;                        // asa para los guardianes; el CSS no la usa
+  const previas = r.px.map(p =>
+      '<figure><canvas class="lienzo" width="'+p+'" height="'+p+'" style="width:'+p+'px;height:'+p+'px"'
+    + ' data-px="'+p+'"></canvas><figcaption>'+p+'×'+p+'</figcaption></figure>'
+    + '<figure><canvas class="lienzo" width="'+p+'" height="'+p+'" style="width:64px;height:64px"'
+    + ' data-px="'+p+'"></canvas><figcaption>×'+(64/p|0)+'</figcaption></figure>').join('');
+  el.innerHTML =
+      '<div class="previa">' + previas + '</div>'
+    + '<div class="info"><h3>' + r.nombre + '</h3>'
+    +   '<div class="chips"><span class="chip px">' + r.px.map(p=>p+'×'+p).join(' · ') + '</span>'
+    +     (r.emoji ? '<span class="chip">hoy: ' + r.emoji + '</span>' : '') + '</div>'
+    +   '<div class="origen">' + (a
+          ? 'Dibujo: <b>' + a.nombre + '</b> <code>' + a.clave + (a.ori ? '@' + a.ori : '') + '</code>'
+          : '<i>Sin asignar — la aplicación usa lo de hoy.</i>') + '</div>'
+    +   (a ? '<div class="ajustes">'
+    +     '<span class="rot" role="group">'
+    +       '<b>Horneado:</b>'
+    +       '<button data-m="plano"' + (a.modo === 'plano' ? ' class="on"' : '') + '>plano</button>'
+    +       '<button data-m="iso"'   + (a.modo === 'iso'   ? ' class="on"' : '') + '>iso</button>'
+    +     '</span>'
+    +     '<span class="rot">'
+    +       '<b>Postura:</b>'
+    +       '<button data-o="-1" title="Postura anterior">◀</button>'
+    +       '<code data-a="ori">@' + (a.ori || 0) + '</code>'
+    +       '<button data-o="1" title="Postura siguiente">▶</button>'
+    +       '<button data-a="girar">Las 24…</button>'
+    +     '</span>'
+    +     '<span class="rot">'
+    +       '<b>Suavizado:</b>'
+    +       '<button data-aa="1"' + (a.aa === false ? '' : ' class="on"') + '>AA ×4</button>'
+    +       '<button data-aa="0"' + (a.aa === false ? ' class="on"' : '') + '>nítido</button>'
+    +     '</span></div>' : '')
+    +   '<div class="usos">Se ve en: ' + r.usos + '<br>Hornea: '
+    +       r.px.map(p => '<code>' + rutaPng(r, p) + '</code>').join(' · ') + '</div>'
+    + '</div>'
+    + '<div class="acciones">'
+    +   '<button class="pri" data-a="asignar">' + (a ? 'Cambiar dibujo…' : 'Asignar dibujo…') + '</button>'
+    +   (a ? '<button data-a="editar">Abrir en el editor</button>'
+          + '<button class="pel" data-a="quitar">Quitar</button>' : '')
+    + '</div>';
+  el.querySelector('[data-a=asignar]').onclick = () => abrePicker(r.id);
+  const q = el.querySelector('[data-a=quitar]'); if(q) q.onclick = () => { delete asignado[r.id]; pintaTodo(); };
+  const ed = el.querySelector('[data-a=editar]'); if(ed) ed.onclick = () => window.open('/', '_blank');
+  el.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { a.modo = b.dataset.m; pintaTodo(); });
+  el.querySelectorAll('[data-aa]').forEach(b => b.onclick = () => { a.aa = b.dataset.aa === '1'; pintaTodo(); });
+  el.querySelectorAll('[data-o]').forEach(b => b.onclick = () => {
+    a.ori = (((a.ori || 0) + (+b.dataset.o)) % 24 + 24) % 24; pintaTodo(); });
+  const gr = el.querySelector('[data-a=girar]'); if(gr) gr.onclick = () => abreGiro(r.id);
+  el.querySelectorAll('.previa canvas').forEach(c => {
+    pintaPrevia(c, a && a.doc, a && a.modo, a && a.ori, !a || a.aa !== false);
+    c.classList.toggle('trans', !!(a && a.doc && docTraslucido(a.doc)));
+  });
+  return el;
+}
+
+// ── el selector de postura: las 24, vivas y al tamaño de la ranura ───────────
+// Es el sitio donde se decide, no un número que se teclea a ciegas: a 16 px la
+// diferencia entre dos posturas vecinas es todo lo que hay.
+function abreGiro(id){
+  const r = ranura(id), a = id === 'sandbox' ? sb : asignado[id];
+  giroTit.innerHTML = 'Postura de <b>' + a.nombre + '</b> — ' + r.nombre;
+  rejilla.innerHTML = '';
+  for(let cara = 0; cara < 6; cara++){
+    const fila = document.createElement('div'); fila.className = 'fila-ori';
+    for(let giro = 0; giro < 4; giro++){
+      const ori = cara*4 + giro, p = r.px[0] || 64;   // el sandbox no declara tamaños: previa a 64
+      const b = document.createElement('button');
+      b.className = 'celda-ori' + (ori === (a.ori||0) ? ' on' : '');
+      b.innerHTML = '<canvas class="lienzo' + (docTraslucido(a.doc) ? ' trans' : '')
+                  + '" data-px="'+p+'" style="width:48px;height:48px"></canvas>'
+                  + '<small>@' + ori + '</small>';
+      // Por `pintaPrevia` y no por `pinta`: aquí se enseña un icono de 16 a 48 px, que es justo
+      // donde el reescalado de pantalla lo destroza (y a 16 px la diferencia entre dos posturas
+      // vecinas es todo lo que hay para elegir).
+      pintaPrevia(b.querySelector('canvas'), a.doc, a.modo, ori, a.aa !== false);
+      b.onclick = () => { a.ori = ori; dlgGiro.close(); id === 'sandbox' ? pintaSandbox() : pintaTodo(); };
+      fila.appendChild(b);
+    }
+    rejilla.appendChild(fila);
+  }
+  dlgGiro.showModal();
+}
+
+function pintaTodo(){
+  document.querySelectorAll('.ranuras').forEach(g => g.innerHTML = '');
+  RANURAS.forEach(r => document.getElementById(r.grupo).appendChild(tarjeta(r)));
+  const n = Object.keys(asignado).length, t = RANURAS.length;
+  eN.textContent = n; eT.textContent = t; eBarra.style.width = (n/t*100) + '%';
+  const f = asignado.favicon;
+  pinta(ctxFav, f && f.doc, f && f.modo, f && f.ori, !f || f.aa !== false);
+  ctxHerr.innerHTML = '';
+  RANURAS.filter(r => r.grupo === 'g-herr').forEach((r,i) => {
+    const a = asignado[r.id], d = document.createElement('div');
+    d.className = 'herr' + (i === 0 ? ' on' : '');
+    d.innerHTML = (a ? '<canvas width="32" height="32"></canvas>' : r.emoji) + '<span>' + r.nombre + '</span>';
+    if(a) pinta(d.querySelector('canvas'), a.doc, a.modo, a.ori, a.aa !== false);
+    ctxHerr.appendChild(d);
+  });
+}
+
+// ── selector de dibujo ───────────────────────────────────────────────────────
+const FILTROS = {
+  todos:       { txt:'Todos',       ok: () => true },
+  recomendado: { txt:'Para esta ranura', ok: (a,r) => r.herr && a.herramienta === r.herr },
+  estructura:  { txt:'Estructuras', ok: a => !a.lleno && !a.plano },
+  plano:       { txt:'Planos',      ok: a => a.plano },
+  lleno:       { txt:'Bloques macizos', ok: a => a.lleno },
+  hab:         { txt:'Mis dibujos', ok: a => a.origen === 'hab' },
+  asset:       { txt:'Del programa', ok: a => a.origen === 'asset' }
+};
+// El sandbox se comporta como una ranura más ante el selector y el diálogo de posturas, pero NO
+// está en RANURAS: no es un sitio donde la aplicación enseñe nada, así que no cuenta para «N de M
+// asignadas» ni se publica. Esta pseudo-ranura es lo que evita duplicar el selector entero.
+const SB = { id:'sandbox', nombre:'Sandbox', px:[] };
+const ranura = id => id === 'sandbox' ? SB : RANURAS.find(x => x.id === id);
+
+function abrePicker(id){
+  destino = id; busca.value = '';
+  const r = ranura(destino);
+  filtro = (r.herr && catalogo.some(a => a.herramienta === r.herr)) ? 'recomendado' : 'todos';
+  pintaChips(); pintaLista(); picker.showModal();
+}
+function pintaChips(){
+  const r = ranura(destino);
+  chips.innerHTML = '';
+  for(const k in FILTROS){
+    if(k === 'recomendado' && !r.herr) continue;
+    const n = catalogo.filter(a => FILTROS[k].ok(a, r)).length;
+    const b = document.createElement('button');
+    b.className = 'fchip' + (k === filtro ? ' on' : '');
+    b.innerHTML = FILTROS[k].txt + ' <i>' + n + '</i>';
+    b.onclick = () => { filtro = k; pintaChips(); pintaLista(); };
+    chips.appendChild(b);
+  }
+}
+function pintaLista(){
+  const r = ranura(destino);
+  const f = busca.value.trim().toLowerCase();
+  pieTxt.innerHTML = r.px.length
+    ? 'Para <b>' + r.nombre + '</b> (' + r.px.map(p=>p+'×'+p).join(' · ') + '). '
+      + 'El modo de horneado y la postura se ajustan luego en la tarjeta.'
+    : 'Para el <b>sandbox</b>: cualquier dibujo vale, y el tamaño lo eliges tú.';
+  lista.innerHTML = '';
+  catalogo.filter(a => FILTROS[filtro].ok(a, r) && (!f || a.nombre.toLowerCase().includes(f))).forEach(a => {
+    const caja = a.size.x + '×' + a.size.y + '×' + a.size.z;
+    const b = document.createElement('button');
+    b.innerHTML = '<span class="em">' + (a.icon || (a.origen === 'hab' ? '✎' : '▫')) + '</span>'
+      + '<span class="nm">' + a.nombre + '</span>'
+      + (a.herramienta === r.herr && r.herr ? '<span class="tag rec">para «' + r.herr + '»</span>' : '')
+      + (a.plano ? '<span class="tag plano">plano</span>'
+         : a.lleno ? '<span class="tag lleno">macizo</span>'
+                   : '<span class="tag estr">estructura</span>')
+      + '<span class="dim">' + caja + '</span>'
+      + '<span class="dim vox">' + a.count.toLocaleString('es') + ' vox</span>';
+    b.onclick = async () => {
+      picker.close();
+      const doc = await fetch(a.url).then(x => x.json());
+      await resuelveTex(doc);          // un `tex:` apunta a otro dibujo: hay que traerlo antes de pintar
+      // El giro va DENTRO de la clave (`…@7`), como en el motor, no en un campo al lado.
+      const elegido = { clave:a.clave, nombre:a.nombre, doc,
+        modo: a.plano ? 'plano' : 'iso',      // solo la propuesta: se cambia en la tarjeta
+        ori: 0 };
+      if(destino === 'sandbox'){ Object.assign(sb, elegido); pintaSandbox(); }
+      else { asignado[destino] = elegido; pintaTodo(); }
+    };
+    lista.appendChild(b);
+  });
+  if(!lista.children.length) lista.innerHTML = '<p style="color:var(--muted);padding:14px">Nada con ese nombre en este filtro.</p>';
+}
+
+// ── publicar: la asignación + los PNG ya horneados ───────────────────────────
+// Quien rasteriza es ESTA página, no el servidor: el rasterizador es `pinta`, y llevárselo a
+// Python sería mantener el mismo dibujo escrito dos veces en dos lenguajes. El servidor valida y
+// escribe (bytes mágicos de PNG, escritura atómica, papelera), igual que /api/fotos.
+function ranurasJson(){
+  return Object.fromEntries(Object.entries(asignado)
+    // La orientación va SIEMPRE, incluida la 0: la clave es la misma forma que usa el motor
+    // (`flor@7`) y omitir el `@0` deja dos escrituras para la misma cosa. Explícita se relee
+    // igual que se escribió y se puede comparar en crudo.
+    // `aa` va explícito por lo mismo: cambia el PNG horneado, así que quien lo relea tiene que
+    // poder rehacer el mismo fichero sin adivinar el valor por defecto.
+    .map(([k,v]) => [k, { dibujo: v.clave + '@' + (v.ori || 0), modo: v.modo, aa: v.aa !== false }]));
+}
+
+async function publicar(){
+  const n = Object.keys(asignado).length;
+  if(!n) return alert('No hay ninguna ranura asignada todavía.');
+  const png = {};
+  for(const r of RANURAS){
+    const a = asignado[r.id];
+    if(!a) continue;
+    for(const px of r.px){
+      const cv = document.createElement('canvas'); cv.width = cv.height = px;
+      pinta(cv, a.doc, a.modo, a.ori, a.aa !== false);
+      // `toDataURL` y no `toBlob`: aquí no hay gesto que preservar, pero sí un orden que sí
+      // importa —el lote se manda entero de una vez— y encadenar 13 promesas no aporta nada.
+      png[nombrePng(r, px)] = cv.toDataURL('image/png');
+    }
+  }
+  const btn = document.querySelector('.estado .pri'), txt = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Publicando…';
+  try{
+    const res = await fetch('/api/ui', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ranuras: ranurasJson(), png }) });
+    const d = await res.json();
+    if(!res.ok) throw new Error(d.error || res.status);
+    // Recargar la página que consume los iconos es cosa del dueño; aquí basta con decir qué se
+    // escribió. Los HTML piden los .png por URL fija, así que un refresco normal ya los coge.
+    alert('Publicado: ' + d.ranuras + ' ranura(s) y ' + d.png + ' PNG en data/ui/.\n\n'
+        + 'Recarga el editor (o la pestaña que estés mirando) para verlos.');
+  }catch(e){
+    alert('No se pudo publicar: ' + e.message);
+  }finally{
+    btn.disabled = false; btn.textContent = txt;
+  }
+}
+
+// ── al abrir: recuperar lo ya publicado ──────────────────────────────────────
+// Se reconstruye desde `ranuras.json`, no desde los PNG: el PNG es el derivado y no sabe de qué
+// dibujo salió. Una ranura cuyo dibujo ya no exista en el catálogo se DESCARTA con un aviso en
+// consola en vez de dejar una tarjeta a medias que al publicar volvería a hornear un hueco.
+async function restaurar(){
+  let d;
+  try{ d = await fetch('/api/ui').then(r => r.json()); }catch(e){ return; }
+  for(const [id, v] of Object.entries(d || {})){
+    const r = RANURAS.find(x => x.id === id);
+    if(!r || !v || typeof v.dibujo !== 'string'){ console.warn('/images: ranura desconocida', id); continue; }
+    const corte = v.dibujo.lastIndexOf('@');            // `lastIndexOf`: la clave puede llevar @ (no hoy, pero es gratis)
+    const clave = corte < 0 ? v.dibujo : v.dibujo.slice(0, corte);
+    const ori = corte < 0 ? 0 : (+v.dibujo.slice(corte + 1) || 0);
+    const a = catalogo.find(x => x.clave === clave);
+    if(!a){ console.warn('/images: el dibujo de la ranura', id, 'ya no está en el catálogo:', clave); continue; }
+    try{
+      const doc = await fetch(a.url).then(x => x.json());
+      await resuelveTex(doc);
+      asignado[id] = { clave:a.clave, url:a.url, nombre:a.nombre, doc,
+                       modo: v.modo === 'plano' ? 'plano' : 'iso', ori, aa: v.aa !== false };
+    }catch(e){ console.warn('/images: no se pudo cargar', clave, e); }
+  }
+  pintaTodo();
+}
+
+/* ---------- sandbox: cualquier dibujo → PNG del tamaño y la postura que se pidan ----------
+   Esto NO es una ranura: no se publica, no toca data/ui/ y no cuenta para «N de M asignadas».
+   Es la misma tubería de dibujo (`pinta`) apuntando a un lienzo que manda el usuario, y por eso
+   sale gratis: si el icono del favicon se ve bien, esto se ve bien.
+   El PNG se descarga con el alpha REAL del dibujo (el tablero de la previa es CSS y no entra),
+   que es lo que hace que sirva para llevárselo a otra aplicación. */
+const sb = { clave:null, nombre:null, doc:null, modo:'iso', ori:0, w:256, h:256,
+             trans:true, fondo:'#101319', aa:true };   // el AA viene puesto: es el que da calidad
+
+function pintaSandbox(){
+  sbNombre.textContent = sb.nombre || '— nada elegido —';
+  sbNombre.classList.toggle('puesto', !!sb.doc);
+  sbOri.textContent = '@' + sb.ori;
+  sbGiro.disabled = sbBajar.disabled = !sb.doc;
+  sbModo.querySelectorAll('[data-m]').forEach(b => b.classList.toggle('on', b.dataset.m === sb.modo));
+  sbPresets.querySelectorAll('[data-p]').forEach(b =>
+    b.classList.toggle('on', +b.dataset.p === sb.w && +b.dataset.p === sb.h));
+
+  sbLienzo.width = sb.w; sbLienzo.height = sb.h;
+  sbLienzo.style.width = sb.w + 'px'; sbLienzo.style.height = sb.h + 'px';
+  const g = sbLienzo.getContext('2d');
+  g.clearRect(0, 0, sb.w, sb.h);
+  if(sb.doc) pinta(sbLienzo, sb.doc, sb.modo, sb.ori, sb.aa);
+  // El fondo se pinta DESPUÉS y por debajo (`destination-over`), no antes: el rasterizador del iso
+  // REEMPLAZA los píxeles que cubre, así que un fondo pintado antes se lo llevaba por delante y el
+  // agua abría un agujero translúcido en él. Por debajo sí se mezcla, y un dibujo con alpha sobre
+  // fondo opaco sale opaco, que es lo que se pide al desmarcar «transparente».
+  if(!sb.trans){
+    g.save(); g.globalCompositeOperation = 'destination-over';
+    g.fillStyle = sb.fondo; g.fillRect(0, 0, sb.w, sb.h); g.restore();
+  }
+  // El tablero solo tiene sentido con fondo transparente, y aquí la transparencia es una decisión
+  // explícita del usuario (la casilla), no algo que haya que deducir del dibujo como en las
+  // tarjetas: con `trans` marcado el PNG sale con el hueco vacío aunque el bicho sea opaco.
+  sbLienzo.classList.toggle('trans', sb.trans);
+  sbLienzo.classList.toggle('suave', sb.aa);
+
+  const S = sb.doc ? normSize(sb.doc.size) : null;
+  sbPie.textContent = sb.doc
+    ? sb.w + '×' + sb.h + ' px · ' + sb.modo + ' @' + sb.ori + ' · dibujo ' + S.x+'×'+S.y+'×'+S.z
+    : '—';
+  sbNota.innerHTML = (sb.modo === 'plano'
+    ? 'En <b>plano</b> un vóxel es un píxel: sale nítido si el lado del lienzo es múltiplo del lado '
+      + 'del dibujo (16 → 16, 32, 64…). Con 20 px de un dibujo de 16 salen filas de distinto grosor.'
+    : 'En <b>iso</b> el dibujo se encaja entero en el lienzo con las tres caras sombreadas como en el '
+      + 'juego. El tamaño es libre: no hay rejilla que respetar.')
+    + (sb.aa
+      ? ' El <b>antialiasing</b> dibuja a ×4 y reduce: suaviza la silueta sin tocar el alpha de dentro.'
+      : ' <b>Sin antialiasing</b>: bordes en escalera, píxel exacto. Es lo que quieres para un icono '
+        + 'pequeño que deba verse crujiente.');
+}
+
+sbElegir.onclick = () => abrePicker('sandbox');
+sbGiro.onclick   = () => abreGiro('sandbox');
+sbModo.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { sb.modo = b.dataset.m; pintaSandbox(); });
+sbPresets.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
+  sb.w = sb.h = +b.dataset.p; sbW.value = sbH.value = sb.w; pintaSandbox(); });
+const lee = () => {
+  // Un lienzo de 0 px (o de 30000) tira la pestaña abajo: se recorta aquí, no en el `pinta`.
+  sb.w = Math.max(1, Math.min(4096, Math.round(+sbW.value || 1)));
+  sb.h = Math.max(1, Math.min(4096, Math.round(+sbH.value || 1)));
+  sbW.value = sb.w; sbH.value = sb.h; pintaSandbox();
+};
+sbW.onchange = sbH.onchange = lee;
+sbAA.onchange    = () => { sb.aa = sbAA.checked; pintaSandbox(); };
+sbTrans.onchange = () => { sb.trans = sbTrans.checked; sbColor.disabled = sb.trans; pintaSandbox(); };
+sbColor.oninput  = () => { sb.fondo = sbColor.value; pintaSandbox(); };
+sbBajar.onclick  = () => {
+  if(!sb.doc) return;
+  // El nombre lleva clave, postura y tamaño: dos exportaciones del mismo dibujo en posturas
+  // distintas no se pisan en la carpeta de descargas.
+  const base = sb.clave.replace(/^(asset:assets\/|hab:)/, '').replace(/\.vox\.json$/, '').replace(/[^\w.-]+/g, '_');
+  const a = document.createElement('a');
+  a.download = base + '_' + sb.modo + '@' + sb.ori + '_' + sb.w + 'x' + sb.h
+             + (sb.aa ? '' : '_sinaa') + '.png';   // así no se pisan la versión suavizada y la nítida
+  a.href = sbLienzo.toDataURL('image/png');
+  a.click();
+};
+
+// nav lateral
+document.querySelectorAll('#nav a').forEach(a => a.onclick = () => {
+  document.querySelectorAll('#nav a').forEach(x => x.classList.remove('on')); a.classList.add('on'); });
+
+pintaTodo();
+pintaSandbox();
+</script>
+</body>
+</html>

@@ -50,7 +50,8 @@ Guardián: `tests/test_vuelo.js` (`@area: fisica`).
 
 ## 🖥️ La capa OSD y `game.osd` — REQ-OSD2
 
-⚠️ **`game.osd` no es `game.showOSDbuttons`.** Lo segundo son los dos botones de la esquina (REQ-OSD1);
+⚠️ **`game.osd` no es `game.showOSDbuttons`.** Eso segundo eran los dos botones de la esquina (REQ-OSD1)
+y **ya no existe**: se quitaron el 2026-08-13, botones e interruptor;
 lo de aquí es una **pantalla** que se pone encima del juego entero.
 
 `<div id="mc-osd" hidden>` dentro de `#mc-modal`, `inset:0`, **z-index 25** (encima del canvas y de
@@ -135,6 +136,55 @@ game.osd — 1 pantalla(s), 2 acción(es). Abierta: intro
 
 Guardián: `tests/test_osd_capa.js` (`@area: render`). Su §1 es el que importa: **sin pantalla abierta el
 Mundo se comporta exactamente como antes del ticket**.
+
+### 📏 Cuánto ocupa el panel — REQ-OSD13
+
+*«el menú que sale con `game.osd.define` es excesivamente grande; está bien para algunos casos, pero me
+gustaría poder elegir menús más compactos, tal vez escalar su tamaño, definir el espacio entre los
+botones (padding), etc.»*
+
+Las medidas de serie son las de **una intro a pantalla completa**, que es para lo que nació el andamio.
+Un panel de ajustes en una esquina con esas mismas medidas tapa media ventana.
+
+```js
+game.osd.define('ajustes', {
+  sitio:'abajo-derecha',
+  escala:0.6, boton:18,                  // caja pequeña, letra igual de nítida
+  ancho:0,                               // ← lo que más encoge
+  hueco:6, relleno:[12,16], rellenoBoton:[6,12],
+  html:'<div class="mc-osd-panel fila">…</div>'
+});
+```
+
+| clave | qué es | de serie |
+|---|---|---|
+| `escala` | multiplica **todo** el panel | `1` |
+| `hueco` | píxeles entre botones (el `gap`) | `22` |
+| `relleno` | margen interior del panel; `12` o `[y,x]` | `[34,44]` |
+| `rellenoBoton` | lo mismo, dentro del botón | `[18,26]` |
+| `ancho` | anchura **mínima** de botón; **`0` = lo que mida su texto** | `260` |
+| `titulo` / `boton` | cuerpos de letra a mano; mandan sobre `escala` | `27` / `18` |
+
+- **Nada de esto vive en números dentro del CSS.** Las medidas son **variables** (`--osd-titulo`,
+  `--osd-hueco`, `--osd-boton-relleno`…) declaradas en `.mc-osd-html` con los valores de siempre, y
+  `mcOsdMedidas` las pisa en el `style` de ese nodo. Se **heredan** hacia dentro, así que el HTML que se
+  escriba a mano puede usarlas —`padding:var(--osd-boton-relleno)`— en vez de repetir números y quedarse
+  descolgado cuando cambie la escala. Y `<div class="mc-osd-panel fila">` pone los botones en fila.
+- ⚠️ **Los cuerpos de letra se pegan a la REJILLA DE 9.** La fuente del juego solo sale nítida en
+  múltiplos de 9 px (de ahí el 27 del título y el 18 del botón, § *Notas y fuente*). `escala` **redondea
+  al múltiplo de 9 más cercano** en vez de dejar un 18,9: un menú pequeño **y borroso** es peor que uno
+  grande, y la causa —una fuente de píxeles fuera de su rejilla— no se parece en nada al síntoma. El
+  espaciado no tiene rejilla y escala libre. Consecuencia visible: **el botón salta de 18 a 9 alrededor
+  de `escala:0.75`**; quien quiera el recuadro pequeño con la letra igual, fija `boton:18`.
+- Un cuerpo puesto a mano **se respeta** —quien lo escribe manda— pero **avisa** y propone el múltiplo de
+  9 más cercano. Una `escala` que no sea un número avisa y se queda en 1; nada revienta ni desaparece.
+- Se aplican **en los dos sitios que montan el panel**: `mcOsdAbrir` y `mcOsdHtml`. Si solo estuviera en
+  el primero, repintar un botón que cambia de estado (`VOLAR: ON/OFF`) devolvería el menú a su talla de
+  serie a mitad de partida.
+
+Guardián: `tests/test_osd_medidas.js` (`@area: render`, **29 ok**). Su §1 es el que importa: una pantalla
+que **no** pide medidas se ve exactamente como antes —el dueño tiene menús escritos y en marcha—. El §3
+recorre ocho escalas y comprueba que ningún cuerpo de letra se sale de la rejilla de 9.
 
 ---
 
@@ -320,20 +370,25 @@ hecho esto no se reproduce.
 
 ### Con un menú puesto, el HUD se aparta — REQ-OSD12
 
-Mientras hay una pantalla OSD abierta se esconden **hotbar, mira, mandos táctiles, CÓDIGO y ✕ CERRAR** —
-el mismo grupo que ya escondía la intro con `body.mc-intro`, y por la misma razón: el OSD suelta el puntero
-y `mcDoAction` sale pronto, así que la hotbar y la mira no hacen nada, y los botones de esquina compiten
-con los del propio menú. La clase es `body.mc-osd-puesto`, la pone `mcOsdAbrir` y la quita `mcOsdCerrar`.
+Mientras hay una pantalla OSD abierta se esconden **hotbar, mira y mandos táctiles** — el mismo grupo que
+ya escondía la intro con `body.mc-intro`, y por la misma razón: el OSD suelta el puntero y `mcDoAction`
+sale pronto, así que la hotbar y la mira no hacen nada. La clase es `body.mc-osd-puesto`, la pone
+`mcOsdAbrir` y la quita `mcOsdCerrar`.
 
 - **Por CSS y no con `hidden`**: `mcUpdateHotbar` la volvería a enseñar en el siguiente frame.
 - **`hud:true`** en el `define` lo deja puesto, para una pantalla que sea un panel sobre la partida viva.
-- ⚠️ **«✕ Cerrar» no se esconde en táctil** (`body.mc-osd-tactil`): allí no hay `Esc`, y esconderlo dejaría
-  al visitante encerrado en el menú si su pantalla no trae botón de salida. Es la misma excepción que hace
-  `updateOSDbuttons` desde REQ-OSD1.
+- ⚠️ **En táctil vuelve la capa de mandos, y de ella SOLO el ✕ de salir** (`body.mc-osd-tactil`): allí no
+  hay `Esc`, y una pantalla que no traiga botón de salida dejaría al visitante encerrado en el menú. Antes
+  esa excepción la sostenía «✕ Cerrar» de la esquina; desde que se quitó (REQ-OSD1), la salida táctil vive
+  **dentro de `#mc-touch`**, así que esconder la capa entera se la llevaba por delante.
+- ⚠️ Y esa excepción sube el `z-index` de `.mc-touch` de **7 a 30**, por encima de `.mc-osd` (25). Sin eso
+  el ✕ se ve pero no se puede pulsar: está debajo de una capa a pantalla completa. Un botón de salida
+  decorativo es peor que ninguno.
 
-**CÓDIGO y ✕ CERRAR ya vienen ocultos de fábrica** — `let _showOSD=false`, y solo salen si
-`localStorage.vf_showOSD === '1'`. Si aparecen, es que en ese navegador se llamó alguna vez a
-`game.showOSDbuttons(true)` y quedó recordado: `game.showOSDbuttons(false)` lo deshace, también para siempre.
+**Los botones «🧩 Código» y «✕ Cerrar» de la esquina ya no existen** (REQ-OSD1, quitados 2026-08-13), ni
+`game.showOSDbuttons`, ni su clave `localStorage.vf_showOSD`. Se va también la clave a propósito: era lo
+que los resucitaba en cada carga en un navegador que hubiera llamado alguna vez a `showOSDbuttons(true)`,
+y sin clave que leer nadie tiene que ir a limpiarla a mano.
 
 Guardián: `tests/test_osd_mapa.js` §12.
 
@@ -442,10 +497,9 @@ Lo que hace el snippet:
    vista es `[−sin(yaw)·cp, sin(pitch), −cos(yaw)·cp]`).
 3. `game.osd.define('intro', {html:…})` con **JUGAR** y **CONSTRUIR**, y `game.osd.abrir('intro')`.
 4. **`body.mc-intro`**: durante el sobrevuelo esto no es una partida todavía, es una postal, así que
-   fuera hotbar, mira y los botones «Código» y «Cerrar» de la esquina. Es la misma lista de selectores
-   que el escaparate (en `style.css`), pero la clase **la pone y la quita el snippet**, así que **JUGAR
-   lo devuelve todo** — y lo devuelve respetando `game.showOSDbuttons`, que es quien manda sobre los dos
-   botones de la esquina. Por clase y no por `hidden`: `mcUpdateHotbar` re-enseña la hotbar sola en
+   fuera hotbar, mira y mandos táctiles. Es la misma lista de selectores que el escaparate (en
+   `style.css`), pero la clase **la pone y la quita el snippet**, así que **JUGAR lo devuelve todo**.
+   Por clase y no por `hidden`: `mcUpdateHotbar` re-enseña la hotbar sola en
    cuanto el jugador se mueve.
 
 Reglas que cuestan caro romper:

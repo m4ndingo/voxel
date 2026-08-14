@@ -515,9 +515,14 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
   // ── §12 · REQ-OSD12 · con un menu puesto, el HUD del juego se aparta ──────────────────────────
   const hud = async () => p.evaluate(() => {
     const v = q => { const e = document.querySelector(q); return e ? (e.hidden ? 'oculto' : getComputedStyle(e).display) : 'no existe'; };
-    return { codigo: v('#mc-code-btn'), cerrar: v('#mc-close'), hotbar: v('.mc-hotbar'), mira: v('.mc-crosshair') };
+    // Solo hotbar y mira: este test corre en ESCRITORIO, donde `#mc-touch` lleva el atributo
+    // `hidden` puesto de siempre y valdria 'oculto' en las tres fotos — un valor que no distingue
+    // «el menu lo aparto» de «nunca estuvo», que es justo lo que §12 tiene que medir.
+    return { hotbar: v('.mc-hotbar'), mira: v('.mc-crosshair') };
   });
-  await p.evaluate(() => { game.showOSDbuttons(true); game.osd.cerrar(); });
+  // (Aqui se encendian «Codigo» y «Cerrar» de la esquina para verlos apartarse. Quitados en
+  //  REQ-OSD1 · 2026-08-13: el HUD que se aparta es la hotbar, la mira y los mandos tactiles.)
+  await p.evaluate(() => { game.osd.cerrar(); });
   const antes = await hud();
   await p.evaluate(() => {
     game.osd.define('hud0', { html: '<div class="mc-osd-panel"><button>X</button></div>' });
@@ -534,19 +539,19 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
   });
   await p.waitForTimeout(200);
   const conHud = await hud();
-  await p.evaluate(() => { game.osd.cerrar(); game.showOSDbuttons(false); });
+  await p.evaluate(() => { game.osd.cerrar(); });
 
   test('§12 el HUD esta puesto antes de abrir el menu (o el test no probaria nada)', () =>
-    assert(antes.hotbar !== 'none' && antes.codigo !== 'none' && antes.codigo !== 'oculto',
+    assert(antes.hotbar !== 'none' && antes.hotbar !== 'oculto',
       'el HUD ya venia escondido: ' + JSON.stringify(antes)));
-  test('§12 con el menu puesto se apartan hotbar, mira, CODIGO y CERRAR', () =>
+  test('§12 con el menu puesto se apartan la hotbar y la mira', () =>
     assert(Object.values(durante).every(v => v === 'none'),
       'algo del HUD sigue encima del menu: ' + JSON.stringify(durante)));
   test('§12 …y vuelven todos al cerrar el menu', () =>
     assert(JSON.stringify(despues) === JSON.stringify(antes),
       'el HUD no volvio igual: ' + JSON.stringify(antes) + ' → ' + JSON.stringify(despues)));
   test('§12 …y `hud:true` lo deja puesto (un panel sobre la partida viva)', () =>
-    assert(conHud.hotbar !== 'none' && conHud.codigo !== 'none',
+    assert(conHud.hotbar !== 'none',
       'hud:true escondio el HUD igual: ' + JSON.stringify(conHud)));
 
   // ── §13 · una pantalla-mapa se encuadra a TAMAÑO 1, herede lo que herede ──────────────────────

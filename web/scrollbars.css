@@ -1,0 +1,49 @@
+/* Tema de las BARRAS DE SCROLL, compartido por todas las páginas del sitio.
+   ────────────────────────────────────────────────────────────────────────────────────────────────
+   Está en un fichero propio y no dentro de `style.css` porque solo `index.html` usa `style.css`:
+   `/fotos`, `/map/` (mapas.html), `/images` y `/wiki` llevan su CSS aparte y comparten la MISMA
+   paleta. Escribir estas ocho reglas cinco veces es garantizar que dentro de un mes haya cinco
+   temas distintos. Se enlaza con <link rel="stylesheet" href="/scrollbars.css"> y por ruta
+   ABSOLUTA, porque hay páginas que no cuelgan de la raíz (`/images/`, `/wiki/`).
+
+   Sin esto no había NADA: se veían las barras del sistema, que sobre un fondo #0e1016 salen claras
+   y cantan mucho más que el contenido.
+
+   ⚠️ Hay dos mecanismos y solo manda uno. MEDIDO en el Chromium de Playwright
+   (`performance/sonda_scrollbars.js`): con `scrollbar-color`/`scrollbar-width` puestas, **ganan las
+   estándar y el bloque `::-webkit-` se ignora entero** — la barra mide los 10 px de `thin` y no los
+   12 que pide la regla -webkit-. O sea que el bloque de abajo NO es lo que ves en un Chrome de hoy:
+   es el respaldo para los que aún no entienden `scrollbar-color` (Chrome < 121, Safari < 18.2), y
+   por eso lleva los MISMOS colores. Si cambias un color, cambia los dos o el sitio se verá distinto
+   según con qué se abra. */
+:root{
+  /* El pulgar es lo que hay que VER: gris medio, ni el fondo ni el texto. Sobre la canaleta
+     (#1b202b) destaca claramente, y sigue quedando por debajo de --muted (#8a93a6) para no robarle
+     atención al contenido. */
+  --scroll-thumb:#525d70;
+  --scroll-thumb-hover:#68748c;
+  --scroll-track:#1b202b;
+  /* Que los controles nativos y cualquier barra que se escape de aquí salgan oscuros y no blancos. */
+  color-scheme:dark;
+}
+
+/* ── Estándar (Firefox, Safari 18+, Chrome 121+ si no hubiera reglas -webkit-) ── */
+html{ scrollbar-color:var(--scroll-thumb) var(--scroll-track); }
+*{ scrollbar-color:var(--scroll-thumb) var(--scroll-track); scrollbar-width:thin; }
+
+/* ── WebKit / Blink antiguos (respaldo; ver el aviso de arriba) ──
+   10 px para que coincida con lo que da `scrollbar-width:thin`, y así los dos caminos se ven igual. */
+::-webkit-scrollbar{ width:10px; height:10px; }
+::-webkit-scrollbar-track{ background:var(--scroll-track); }
+::-webkit-scrollbar-thumb{
+  background:var(--scroll-thumb);
+  border-radius:8px;
+  /* El borde transparente + `background-clip` deja aire a los lados: el pulgar se lee como una
+     pieza dentro de un carril y no como la barra entera pintada. */
+  border:2px solid transparent;
+  background-clip:padding-box;
+}
+::-webkit-scrollbar-thumb:hover{ background:var(--scroll-thumb-hover); background-clip:padding-box; }
+::-webkit-scrollbar-thumb:active{ background:var(--scroll-thumb-hover); background-clip:padding-box; }
+/* La esquina donde se cruzan la barra vertical y la horizontal: sin esto se queda blanca. */
+::-webkit-scrollbar-corner{ background:var(--scroll-track); }

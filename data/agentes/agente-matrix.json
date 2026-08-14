@@ -1,0 +1,135 @@
+{
+  "nombre": "Agente Matrix",
+  "descripcion": "Parado en su sitio hasta que te acercas 14 bloques. Entonces gira hacia ti y te persigue en línea recta: piernas en oposición, la cabeza siguiéndote con la mirada y los brazos levantados al frente, que vuelven a caer en cuanto te alejas.",
+  "notas": [
+    "Ejes del mundo [x, alto, z]: la z NEGATIVA es hacia DELANTE, a donde mira el agente, así que -x es su izquierda.",
+    "En `articula`, POSITIVO es hacia delante: 0 = colgando, 90 = horizontal apuntándote. Por eso los brazos en alto son base 85.",
+    "Alto total 2,5625 bloques (0,75 pierna + 0,875 torso + 0,9375 cabeza) contra los 1,8 del jugador: te saca la cabeza.",
+    "Con los brazos en alto mide 1,375 de ancho y no cabría por una puerta de 1: `cuerpo.ancho` es 0,8 y los brazos atraviesan los marcos. Es el trato.",
+    "Los brazos y las piernas NO tienen colisión (el rig gira y los envoltorios solo trasladan): choca por el torso.",
+    "La cabeza es 15³ a propósito: un asset de 1×1×1 con ≥4096 voxels macizos sería TERRENO y el terreno no se puede animar."
+  ],
+  "raiz": {
+    "nombre": "torso",
+    "pieza": "asset:assets/torso-de-agente-matrix.vox.json",
+    "rot": 0,
+    "articula": {
+      "pivote": 1,
+      "base": 0,
+      "reposo": 0,
+      "amplitud": 90,
+      "fase": 90,
+      "eje": "x"
+    }
+  },
+  "piezas": [
+    {
+      "nombre": "cabeza",
+      "pieza": "asset:assets/cabeza-de-agente.vox.json",
+      "en": [
+        -0.09375,
+        0.875,
+        -0.21875
+      ],
+      "mirar": {
+        "limites": {
+          "y": [
+            -70,
+            70
+          ]
+        },
+        "alcance": 12
+      },
+      "montable": true
+    },
+    {
+      "nombre": "brazo izq",
+      "pieza": "asset:assets/brazo-de-agente-matrix.vox.json",
+      "en": [
+        -0.3125,
+        0,
+        0.09375
+      ],
+      "articula": {
+        "pivote": 1,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": 20,
+        "fase": 0,
+        "eje": "x"
+      }
+    },
+    {
+      "nombre": "brazo der",
+      "pieza": "asset:assets/brazo-de-agente-matrix.vox.json",
+      "en": [
+        0.75,
+        0,
+        0.09375
+      ],
+      "articula": {
+        "pivote": 1,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": 20,
+        "fase": 90,
+        "eje": "x"
+      }
+    },
+    {
+      "nombre": "pierna izq",
+      "pieza": "asset:assets/pierna-de-agente-matrix.vox.json",
+      "en": [
+        0.0625,
+        -0.75,
+        0.09375
+      ],
+      "articula": {
+        "pivote": 1,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": 35,
+        "fase": 0
+      }
+    },
+    {
+      "nombre": "pierna der",
+      "pieza": "asset:assets/pierna-de-agente-matrix.vox.json",
+      "en": [
+        0.375,
+        -0.75,
+        0.09375
+      ],
+      "articula": {
+        "pivote": 2,
+        "base": 0,
+        "reposo": 0,
+        "amplitud": 35,
+        "fase": 180
+      },
+      "rot": 0
+    }
+  ],
+  "seguir": {
+    "deteccion": 14,
+    "distancia": 2,
+    "velocidad": 2.2,
+    "correa": 0,
+    "ejes": "xz",
+    "suavidad": 1
+  },
+  "cuerpo": {
+    "ancho": 0.8,
+    "alto": 2.5625
+  },
+  "andar": {
+    "cadencia": 0.3,
+    "suavidad": 1
+  },
+  "savedAt": "2026-08-13T15:46:30",
+  "empuje": {
+    "fuerza": 16
+  },
+  "cabalgable": true,
+  "id": "agente-matrix"
+}
