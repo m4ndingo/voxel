@@ -53,6 +53,11 @@ data/habitantes/*
 data/habitantes_trash/
 data/worlds/
 # recursos compartidos publicos
+!data/habitantes/pincel-de-texturizado.json
+!data/habitantes/varita-de-selecci-n.json
+!data/habitantes/pico-de-piedra.json
+!data/habitantes/cuentagotas.json
+!data/habitantes/mano-de-desplazamiento.json
 !data/habitantes/el-analista-de-espectro.json
 !data/worlds/voxelforge.*
 *.log
