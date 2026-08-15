@@ -1,0 +1,48 @@
+{
+  "format": "voxelworld-2",
+  "dim": {
+    "x": 96,
+    "y": 9,
+    "z": 96
+  },
+  "spawn": {
+    "x": 48,
+    "y": 8,
+    "z": 48
+  },
+  "palette": [
+    null,
+    "asset:assets/hierba.vox.json",
+    "asset:assets/agua.vox.json",
+    "asset:assets/hierba-l-tetris.vox.json@19",
+    "asset:assets/agua.vox.json-7",
+    "asset:assets/hierba-l-tetris.vox.json@17",
+    "asset:assets/agua.vox.json-6",
+    "asset:assets/agua.vox.json-5",
+    "hab:lampara-pegada@14",
+    "asset:assets/agua.vox.json-4",
+    "asset:assets/agua.vox.json-3",
+    "asset:assets/adoquin.vox.json",
+    "asset:assets/arena.vox.json",
+    "asset:assets/hierba-l-tetris.vox.json@1",
+    "asset:assets/agua.vox.json-2",
+    "asset:assets/lava.vox.json",
+    "asset:assets/flor-amarilla.vox.json@3",
+    "asset:assets/hierba-l-tetris.vox.json",
+    "asset:assets/agua.vox.json-1",
+    "asset:assets/flor-roja.vox.json@3",
+    "asset:assets/agua.vox.json@14",
+    "asset:assets/cubo-trans.vox.json@1",
+    "asset:assets/cubo-trans.vox.json"
+  ],
+  "structures": [
+    {
+      "key": "hab:el-analista-de-espectro",
+      "x": 58,
+      "y": 4,
+      "z": 57,
+      "rot": 1
+    }
+  ],
+  "notes": {}
+}

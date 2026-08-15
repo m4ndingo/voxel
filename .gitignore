@@ -52,6 +52,7 @@ data/habitantes/*
 !data/habitantes/repetidor-on.json
 data/habitantes_trash/
 data/worlds/
+!data/worlds/voxelforge.*
 *.log
 
 # Playwright: lo usan los 112 tests de navegador (abren el Mundo en un Chromium de verdad, así que
