@@ -2039,6 +2039,7 @@ const GAL_CATEGORIAS = [
 // lee la ranura 10. Añadir una entrada aquí sin implementarla en `mcDoAction` no crea una herramienta.
 const MC_HERRAMIENTAS = [
   ['build',  '⛏️ Construir'],
+  ['box',    '📦 Volumen'],
   ['paint',  '🖌️ Pintar'],
   ['select', '🪄 Seleccionar'],
   ['pick',   '💉 Cuentagotas'],
@@ -6802,6 +6803,7 @@ const mc={
   vel:[0,0,0], onGround:false, keys:{}, // física (F4)
   hotbar:[], sel:0,               // hotbar (F5): 9 ranuras (id de bloque, 0=vacía) y ranura activa
   fov:1.15, renderDist:8,         // tunables (game.fov / game.renderDist)
+  crosshair:'+',                  // punto de mira (game.crosshair / game.mira; admite '+', '🎯', '·', '🔴', etc.)
   renderScale:1,                  // escala de la resolución de render (game.renderScale; <1 = menos píxeles = más fps)
   sens:0.000625,                  // sensibilidad del ratón, rad/px (base 0.0025 × mouseSpeed 0.25 por defecto; game.mouseSpeed = múltiplo)
   reach:16,                       // alcance de romper/poner en bloques (game.reach)
@@ -6838,6 +6840,8 @@ const mc={
   previewBusy:null,               // memo en construcción (evita solapar builds asíncronos de la vista-previa)
   previewCara:0,                   // qué CARA de la pieza queda arriba al estampar (0..5; tecla R); persiste entre colocaciones
   previewGiro:0,                   // giro DENTRO de esa cara (0..3 = 0/90/180/270°; Shift+R); con previewCara sale la postura, ver mcPreviewOri
+  boxCara:0,                       // qué CARA del volumen queda arriba al estampar (0..5; tecla V); 6 caras
+  boxGiro:0,                       // giro DENTRO de esa cara del volumen (0..3 = 0/90/180/270°; Shift+V); 24 posturas del volumen, ver mcBoxOri
   stampCenter:false,              // modo de pegado en pared lateral: false = por CANTO (flush, def) · true = CENTRADO (hundido); tecla S alterna MIENTRAS se mantiene el clic derecho
   selA:null,                      // herramienta Seleccionar (tool='select'): 1ª esquina pendiente [x,y,z] tras el 1er clic, o null
   selBox:null,                    // selección confirmada {a:[x,y,z], b:[x,y,z]} (caja inclusiva de mundo) para resaltar y copiar (Ctrl+C)
@@ -7013,11 +7017,17 @@ function mcIsCellReplaceable(x,y,z){
 function mcSetBlock(x,y,z,id){
   if(mcInside(x,y,z)){
     const oldId = mc.grid[mcIdx(x,y,z)];
+    if(oldId === id) return;
     mc.grid[mcIdx(x,y,z)]=id;
-    // PERF-RS1: contador de topología. Solo cuenta cambios entre aire y sólido; los cambios de
-    // material sólido↔sólido (p. ej. un observador pulsando) NO tocan la propagación del BFS de
-    // luz de bloque, así que mcComputeBlockLight puede saltarse el trabajo si nada más cambió.
-    if((oldId===0) !== (id===0)) mc.gridGen = (mc.gridGen|0) + 1;
+    // PERF-RS1: contador de topología. Cuenta cambios entre aire y sólido, o cambios entre materiales
+    // con diferentes propiedades de luz/geometría fina/emisión para re-iluminar y re-mallar de inmediato.
+    const tOld = (oldId===0) || (mc.finoRejilla&&mc.finoRejilla[oldId]) || (mc.recorte&&mc.recorte[oldId]);
+    const tNew = (id===0) || (mc.finoRejilla&&mc.finoRejilla[id]) || (mc.recorte&&mc.recorte[id]);
+    const gOld = mc._glowIds && mc._glowIds[oldId];
+    const gNew = mc._glowIds && mc._glowIds[id];
+    if((oldId===0) !== (id===0) || tOld !== tNew || gOld !== gNew || (mc.finoRejilla && (mc.finoRejilla[oldId] || mc.finoRejilla[id]))){
+      mc.gridGen = (mc.gridGen|0) + 1;
+    }
     mcDirty(x,y,z);
     mcGlowTocada(x,y,z);
     if(typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function'){
@@ -7933,6 +7943,8 @@ function mcOriDims(w, h, d, rot){
 // R elige QUÉ CARA queda arriba (6) y Shift+R el giro DENTRO de esa cara (4). Encaja sin tabla intermedia
 // porque MC_ORI sale agrupada de cuatro en cuatro por cara: ori = cara*4 + giro.
 function mcPreviewOri(){ return ((mc.previewCara|0)%6)*4 + (mc.previewGiro&3); }
+// Orientación del volumen de bloques (tecla V para 6 caras, Shift+V para 4 giros = 24 posturas).
+function mcBoxOri(){ return ((mc.boxCara|0)%6)*4 + (mc.boxGiro&3); }
 // La geometría depende de rot ⇒ se cachea por (srcKey, rot) en mc.structs[srcKey].meshRot[rot].
 async function mcStructGeom(srcKey, rot){
   rot=mcOriNorm(rot);                   // una de las 24 posturas; mcOriMove la abre en los tres cuartos de vuelta
@@ -9727,8 +9739,8 @@ function mcMeshChunk(cx,cz){
 // se quedaría vieja sin que nadie la invalidara.
 // Un id por encima del final (paleta recién crecida) lee `undefined` = falsy = opaco: se queda corto, no revienta.
 function mcTablaLuz(){
-  const t=mc.traspasaLuz, r=mc.recorte;
-  const n=Math.max(256, (mc.blockKey?mc.blockKey.length:0)+1, t?t.length:0, r?r.length:0);
+  const t=mc.traspasaLuz, r=mc.recorte, f=mc.finoRejilla;
+  const n=Math.max(256, (mc.blockKey?mc.blockKey.length:0)+1, t?t.length:0, r?r.length:0, f?f.length:0);
   const P=new Uint8Array(n);
   // POR DEFECTO manda `mc.recorte`: si la textura del bloque tiene AGUJEROS, la luz pasa. Es el mismo criterio que
   // ya usa el shader para hacer `discard` y el mesher para no pelar caras — «si se ve a través, se ve a través» —,
@@ -9736,6 +9748,7 @@ function mcTablaLuz(){
   // siguen a oscuras). Ojo: lo mide la PROYECCIÓN a las 6 caras del cubo (buildTexFaces), no el nº de voxels; una
   // pieza dispersa cuya cáscara tapa las seis caras NO es de recorte y por tanto NO es permeable por defecto.
   if(r) for(let id=1, m=Math.min(r.length,n); id<m; id++) if(r[id]) P[id]=1;
+  if(f) for(let id=1, m=Math.min(f.length,n); id<m; id++) if(f[id]) P[id]=1;
   // …y encima, la excepción a mano del snippet: 1 = pasa, 2 = tapa (una vidriera de recorte que sí deba sombrear).
   if(t) for(let id=1, m=Math.min(t.length,n); id<m; id++){ if(t[id]===1) P[id]=1; else if(t[id]===2) P[id]=0; }
   P[0]=1;   // el aire pasa SIEMPRE, diga lo que diga nadie
@@ -9745,16 +9758,16 @@ function mcTablaLuz(){
 // `mcTablaLuz`: aquélla gobierna la DIFUSIÓN (por dónde se propaga la luz una vez sembrada) y ésta la SIEMBRA
 // (hasta dónde llega el cielo por la vertical). Por eso `luz:'pasa'` NO abre la columna y sigue sin abrirla: un
 // dosel de hojas tiene que dar sombra a lo que cubre, o un bosque dejaría de sombrear.
-// La única excepción es `proyectaSombra:false` (bit 2 de `mc.sinSombra`, REQ-SHADOW2), y es la mitad que le
-// faltaba a ese ticket: el material dice literalmente «yo no proyecto sombra», y el pegote oscuro que dejaba
-// debajo era ESTE, el del skylight, no el del mapa del sol. Una nube que no proyecta nada tiene que dejar pasar
-// el cielo entero. Con `mc.sinSombra` en null (lo normal) es la tabla de siempre: solo el aire.
-// Un id por encima del final lee `undefined` = falsy = corta: se queda corto, no revienta.
+// Las excepciones son:
+//   1) Geometría fina (mc.finoRejilla): piezas que no llenan su celda (flores, peces, antorchas). No cortan el cielo
+//      en bloque porque su sombra proyectada real ya la genera el mapa de sombra de la GPU (mcRenderShadow).
+//   2) `proyectaSombra:false` (bit 2 de `mc.sinSombra`, REQ-SHADOW2): nubes y materiales que no proyectan sombra.
 function mcTablaCielo(){
-  const s=mc.sinSombra;
-  const n=Math.max(256, (mc.blockKey?mc.blockKey.length:0)+1, s?s.length:0);
+  const s=mc.sinSombra, f=mc.finoRejilla;
+  const n=Math.max(256, (mc.blockKey?mc.blockKey.length:0)+1, s?s.length:0, f?f.length:0);
   const C=new Uint8Array(n);
   C[0]=1;   // el aire, siempre
+  if(f) for(let id=1, m=Math.min(f.length,n); id<m; id++) if(f[id]) C[id]=1;
   if(s) for(let id=1, m=Math.min(s.length,n); id<m; id++) if(s[id]&2) C[id]=1;
   return C;
 }
@@ -10995,6 +11008,7 @@ function mcRender(){
   }
   mcDrawNoteTexts(pj, view);      // el texto de cada nota, pegado en la tabla de su cartel (se desvanece de lejos)
   mcDrawPreview(pj, view);        // vista-previa translúcida de la habitación mientras se mantiene el clic derecho
+  mcDrawVolumeBlocks(pj, view);   // bloques reales texturados de la herramienta volumen
   mcDrawOverlays(pj, view);
   mc.quads=quads; game.voxels=Math.round(quads);
 }
@@ -11002,26 +11016,27 @@ function mcRender(){
 // (game.structGhostAlpha), siguiendo la mira antes de estampar. Dos pasadas idénticas al render de estructuras
 // (color por vértice + textura vía atlas de estructuras), con mezcla por alfa constante y sin escribir profundidad.
 function mcDrawPreview(pj, view){
-  const gl=mc.gl, s=mc.preview; if(!s || mc.structGhostAlpha<=0) return;
-  gl.enable(gl.BLEND); gl.blendColor(0,0,0,mc.structGhostAlpha); gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
-  gl.depthMask(false);
+  const gl=mc.gl, s=mc.preview; if(!s) return;
   mcStructGL(true);   // el fantasma se apoya en el suelo → su cara de abajo es coplanar con él (mismo empate que la pasada 3)
-  if(mc.structProg && (s.colCount || s.alphaCount)){                          // pasada 1 · color por vértice (#hex opaco+translúcido y tex: en modo plano)
+  if(mc.structProg && s.colCount){                          // pasada 1 · color por vértice (#hex opaco y tex: en modo plano)
     const SL=mc.structLoc, sstr=9*4;
     gl.useProgram(mc.structProg);
     gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
     gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
     gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
+    if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
     mcSunUniforms(SL, null);                                                    // el fantasma es una ayuda, no proyecta ni recibe sombra
     gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);                              // el fantasma nunca gira; sin esto hereda la matriz de la ultima instancia girada
-    mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);                // el blend del fantasma usa CONSTANT_ALPHA → ignora vAlpha (el vidrio se ve al alpha del fantasma)
-    if(s.colCount){ gl.bindBuffer(gl.ARRAY_BUFFER, s.colVbo); mcStructAttrib(SL, sstr); gl.drawArrays(gl.TRIANGLES,0,s.colCount); }
-    if(s.alphaCount){ gl.bindBuffer(gl.ARRAY_BUFFER, s.alphaVbo); mcStructAttrib(SL, sstr); gl.drawArrays(gl.TRIANGLES,0,s.alphaCount); }
+    mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, s.colVbo);
+    mcStructAttrib(SL, sstr);
+    gl.drawArrays(gl.TRIANGLES,0,s.colCount);
   }
   if(mc.structAtlasTex && mc.stexProg && s.texCount){                         // pasada 2 · textura completa (mc.stexProg + atlas de estructuras)
     const SL=mc.stexLoc, stride2=10*4;
     gl.useProgram(mc.stexProg);
     gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
+    if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
     gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
     gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.structAtlasTex); gl.uniform1i(SL.uTex,0);
@@ -11036,11 +11051,273 @@ function mcDrawPreview(pj, view){
     gl.drawArrays(gl.TRIANGLES,0,s.texCount);
     gl.bindTexture(gl.TEXTURE_2D, mc.atlasTex);                               // restaura el atlas del terreno
   }
+  if(mc.structProg && s.alphaCount){                                          // pasada 3 · voxeles translúcidos
+    const SL=mc.structLoc, sstr=9*4;
+    gl.useProgram(mc.structProg);
+    gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
+    gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
+    gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
+    if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
+    mcSunUniforms(SL, null);
+    gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
+    mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(false);
+    gl.bindBuffer(gl.ARRAY_BUFFER, s.alphaVbo);
+    mcStructAttrib(SL, sstr);
+    gl.drawArrays(gl.TRIANGLES,0,s.alphaCount);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+  }
   mcStructGL(false);
-  gl.disable(gl.BLEND); gl.depthMask(true);
+}
+// Renderiza los bloques reales con textura o geometría fina en la herramienta Volumen con cache y zero-alloc
+function mcDrawVolumeBlocks(pj, view){
+  if(mc.tool !== 'box' || mc.escaparate) return;
+  const near = mcRaycast(mcReach(), true);
+  let x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0, hasBox = false;
+  if(!mc.boxStep || mc.boxStep === 0){
+    if(near){
+      const n = near.normal;
+      x0 = near.cell[0] + n[0]; y0 = near.cell[1] + n[1]; z0 = near.cell[2] + n[2];
+      x1 = x0 + 1; y1 = y0 + 1; z1 = z0 + 1;
+      hasBox = true;
+    }
+  } else if(mc.boxStep === 1){
+    const a = mc.boxA;
+    if(a){
+      let bx = a[0], bz = a[2];
+      if(near){ bx = near.cell[0] + near.normal[0]; bz = near.cell[2] + near.normal[2]; }
+      x0 = Math.min(a[0], bx); x1 = Math.max(a[0], bx) + 1;
+      y0 = a[1]; y1 = a[1] + 1;
+      z0 = Math.min(a[2], bz); z1 = Math.max(a[2], bz) + 1;
+      hasBox = true;
+    }
+  } else if(mc.boxStep === 2){
+    const a = mc.boxA, b = mc.boxB;
+    if(a && b){
+      const y1Val = mcBoxCalcCurrentY1();
+      x0 = Math.min(a[0], b[0]); x1 = Math.max(a[0], b[0]) + 1;
+      y0 = Math.min(a[1], y1Val); y1 = Math.max(a[1], y1Val) + 1;
+      z0 = Math.min(a[2], b[2]); z1 = Math.max(a[2], b[2]) + 1;
+      hasBox = true;
+    }
+  } else if(mc.boxStep === 3 && mc.boxDims){
+    const [w, h, d] = mc.boxDims;
+    const boxRot = (typeof mcBoxOri === 'function') ? mcBoxOri() : 0;
+    const [rw, rh, rd] = mcOriDims(w, h, d, boxRot);
+    const T = mcOriMove(boxRot, w, h, d);
+    const ax = mc.boxAnchor ? mc.boxAnchor[0] : 0;
+    const ay = mc.boxAnchor ? mc.boxAnchor[1] : 0;
+    const az = mc.boxAnchor ? mc.boxAnchor[2] : 0;
+    const [rax, ray, raz] = T(ax, ay, az);
+    let basePos = mc.boxBasePos || null;
+    if(mc.boxCtrlHeld && mc.boxCtrlFreeze){
+      basePos = mc.boxCtrlFreeze;
+    } else {
+      const near = mcRaycast(mcReach(), true);
+      if(near && near.dist <= mcReach()){
+        basePos = [near.cell[0] + near.normal[0], near.cell[1] + near.normal[1], near.cell[2] + near.normal[2]];
+        mc.boxBasePos = basePos;
+      }
+    }
+    if(basePos){
+      x0 = basePos[0] - rax; y0 = basePos[1] - ray; z0 = basePos[2] - raz;
+      x1 = x0 + rw; y1 = y0 + rh; z1 = z0 + rd;
+      hasBox = true;
+    }
+  }
+  if(!hasBox){ mc._volCache = null; return; }
+
+  const sk = mc.slotStruct ? mc.slotStruct[mc.sel] : null;
+  let mat = mc.hotbar ? mc.hotbar[mc.sel] : null;
+  let key = sk || (mat && mc.blockKey ? mc.blockKey[mat] : null) || '';
+  if(!key && sk && typeof mcResolveMat === 'function'){
+    mat = mcResolveMat(sk);
+    key = (mc.blockKey && mc.blockKey[mat]) || sk;
+  }
+  if(!key && mat) key = (mc.blockKey && mc.blockKey[mat]) || '';
+
+  // 1) Geometría fina con rotación (R / Shift+R, 24 posturas: 6 caras × 4 giros)
+  const rot = mcPreviewOri();
+  const rotKey = (rot && key) ? mcClaveConOri(key, rot) : key;
+  const isFine = !!(sk || (mc.slotStruct && mc.slotStruct[mc.sel]) || (mc.finoGeom && (mc.finoGeom[rotKey] || mc.finoGeom[key])));
+  let g = (mc.finoGeom && (mc.finoGeom[rotKey] || mc.finoGeom[key])) ? (mc.finoGeom[rotKey] || mc.finoGeom[key]) : null;
+  if(!g && isFine && rotKey){
+    if(typeof mcCalientaFina === 'function') mcCalientaFina(rotKey);
+    if(typeof mcPrecargaGirada === 'function') mcPrecargaGirada(key, rot);
+    g = (mc.finoGeom && (mc.finoGeom[rotKey] || mc.finoGeom[key])) ? (mc.finoGeom[rotKey] || mc.finoGeom[key]) : null;
+  }
+
+  const gl = mc.gl;
+  const cacheKey = [x0, y0, z0, x1, y1, z1, key, rot, mat, g ? '1' : '0'].join(':');
+
+  if(g && (g.colCount || g.alphaCount)){
+    const SL = mc.structLoc, sstr = 9 * 4;
+    if(!mc.structProg || !SL) return;
+
+    if(!mc._volCache || mc._volCache.key !== cacheKey){
+      const numVox = (x1 - x0) * (y1 - y0) * (z1 - z0);
+      const cc = (g.colLocal && g.colCount) ? g.colCount : 0;
+      const ac = (g.alphaLocal && g.alphaCount) ? g.alphaCount : 0;
+
+      if(cc){
+        const totalFloats = numVox * cc * 9;
+        if(!mc._volFcol || mc._volFcol.length < totalFloats) mc._volFcol = new Float32Array(Math.max(totalFloats, 2048));
+        const out = mc._volFcol, cl = g.colLocal, len = cc * 9;
+        let ptr = 0;
+        for(let x = x0; x < x1; x++){
+          for(let y = y0; y < y1; y++){
+            for(let z = z0; z < z1; z++){
+              for(let i = 0; i < len; i += 9){
+                out[ptr++] = x + cl[i]; out[ptr++] = y + cl[i+1]; out[ptr++] = z + cl[i+2];
+                out[ptr++] = cl[i+3]; out[ptr++] = cl[i+4]; out[ptr++] = cl[i+5];
+                out[ptr++] = cl[i+6]; out[ptr++] = cl[i+7]; out[ptr++] = cl[i+8];
+              }
+            }
+          }
+        }
+        if(!mc.volFinoVbo) mc.volFinoVbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, mc.volFinoVbo);
+        gl.bufferData(gl.ARRAY_BUFFER, out.subarray(0, totalFloats), gl.DYNAMIC_DRAW);
+      }
+      if(ac){
+        const totalFloats = numVox * ac * 9;
+        if(!mc._volFalpha || mc._volFalpha.length < totalFloats) mc._volFalpha = new Float32Array(Math.max(totalFloats, 2048));
+        const out = mc._volFalpha, al = g.alphaLocal, len = ac * 9;
+        let ptr = 0;
+        for(let x = x0; x < x1; x++){
+          for(let y = y0; y < y1; y++){
+            for(let z = z0; z < z1; z++){
+              for(let i = 0; i < len; i += 9){
+                out[ptr++] = x + al[i]; out[ptr++] = y + al[i+1]; out[ptr++] = z + al[i+2];
+                out[ptr++] = al[i+3]; out[ptr++] = al[i+4]; out[ptr++] = al[i+5];
+                out[ptr++] = al[i+6]; out[ptr++] = al[i+7]; out[ptr++] = al[i+8];
+              }
+            }
+          }
+        }
+        if(!mc.volFinoAVbo) mc.volFinoAVbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, mc.volFinoAVbo);
+        gl.bufferData(gl.ARRAY_BUFFER, out.subarray(0, totalFloats), gl.DYNAMIC_DRAW);
+      }
+      mc._volCache = { key: cacheKey, isFino: true, colCount: numVox * cc, alphaCount: numVox * ac };
+    }
+
+    gl.useProgram(mc.structProg);
+    gl.uniformMatrix4fv(SL.uProj, false, pj.m);
+    gl.uniformMatrix4fv(SL.uView, false, view);
+    gl.uniformMatrix4fv(SL.uModel, false, MC_IDENT);
+    gl.uniform3f(SL.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
+    gl.uniform1f(SL.uFogMin, mcFogMin());
+    gl.uniform1f(SL.uFogNear, mcFogNear(pj.far));
+    gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
+    if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
+    mcSunUniforms(SL, null);
+    mcAttribs([SL.aPos, SL.aColor, SL.aShade, SL.aEmit, SL.aAlpha]);
+
+    mcStructGL(true);
+    if(mc._volCache.colCount && mc.volFinoVbo){
+      gl.bindBuffer(gl.ARRAY_BUFFER, mc.volFinoVbo);
+      mcStructAttrib(SL, sstr);
+      gl.drawArrays(gl.TRIANGLES, 0, mc._volCache.colCount);
+    }
+    if(mc._volCache.alphaCount && mc.volFinoAVbo){
+      gl.bindBuffer(gl.ARRAY_BUFFER, mc.volFinoAVbo);
+      mcStructAttrib(SL, sstr);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      gl.drawArrays(gl.TRIANGLES, 0, mc._volCache.alphaCount);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+    }
+    mcStructGL(false);
+    return;
+  }
+
+  // 2) Bloque de terreno estándar con textura
+  const rects = (mat && mc.palette) ? mc.palette[mat] : null;
+  if(!rects || !mc.atlasTex){ mc._volCache = null; return; }
+
+  if(!mc._volCache || mc._volCache.key !== cacheKey){
+    const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+    const numQuads = 2 * (dx * dy + dy * dz + dz * dx);
+    const totalFloats = numQuads * 36;
+    if(!mc._volBuf || mc._volBuf.length < totalFloats) mc._volBuf = new Float32Array(Math.max(totalFloats, 2048));
+    const out = mc._volBuf;
+    let ptr = 0;
+
+    const emitFace = (f, x, y, z) => {
+      const F = MC_FACES[f], r = rects[F.tex], C = F.corners;
+      const uv = [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]];
+      for(const k of [0, 1, 2, 0, 2, 3]){
+        const c = C[k];
+        out[ptr++] = x + c[0]; out[ptr++] = y + c[1]; out[ptr++] = z + c[2];
+        out[ptr++] = uv[k][0]; out[ptr++] = uv[k][1];
+        out[ptr++] = F.s;
+      }
+    };
+
+    for(let x = x0; x < x1; x++){
+      for(let y = y0; y < y1; y++){
+        for(let z = z0; z < z1; z++){
+          for(let f = 0; f < 6; f++){
+            const d = MC_FACES[f].dir;
+            const ax = x + d[0], ay = y + d[1], az = z + d[2];
+            if(ax >= x0 && ax < x1 && ay >= y0 && ay < y1 && az >= z0 && az < z1) continue; // cara interna cubierta por otro bloque del volumen
+            emitFace(f, x, y, z);
+          }
+        }
+      }
+    }
+
+    if(!mc.volVbo) mc.volVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, mc.volVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, out.subarray(0, ptr), gl.DYNAMIC_DRAW);
+    mc._volCache = { key: cacheKey, isFino: false, vertCount: ptr / 6 };
+  }
+
+  if(!mc._volCache || !mc._volCache.vertCount) return;
+
+  const opaque = !mc.atlasHasAlpha && mc.progOpaque;
+  const TP = opaque ? mc.progOpaque : mc.prog, L = opaque ? mc.locOpaque : mc.loc;
+  gl.useProgram(TP);
+  mcAttribs([L.aPos, L.aUV, L.aShade]);
+  if(L.uClipY) gl.uniform1f(L.uClipY, -1000.0);
+  gl.uniformMatrix4fv(L.uProj, false, pj.m);
+  gl.uniformMatrix4fv(L.uView, false, view);
+  gl.uniform3f(L.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
+  gl.uniform1f(L.uFogMin, mcFogMin());
+  gl.uniform1f(L.uFogNear, mcFogNear(pj.far));
+  gl.uniform1f(L.uFogFar, mcFogFar(pj.far));
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, mc.atlasTex);
+  gl.uniform1i(L.uTex, 0);
+  mcSunUniforms(L, null);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, mc.volVbo);
+  const stride = 6 * 4;
+  gl.vertexAttribPointer(L.aPos, 3, gl.FLOAT, false, stride, 0);
+  gl.vertexAttribPointer(L.aUV, 2, gl.FLOAT, false, stride, 12);
+  gl.vertexAttribPointer(L.aShade, 1, gl.FLOAT, false, stride, 20);
+
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+  gl.frontFace(gl.CW);
+  gl.enable(gl.CULL_FACE);
+  gl.cullFace(gl.BACK);
+  gl.enable(gl.POLYGON_OFFSET_FILL);
+  gl.polygonOffset(-1.0, -1.0);
+  gl.drawArrays(gl.TRIANGLES, 0, mc._volCache.vertCount);
+  gl.polygonOffset(0, 0);
+  gl.disable(gl.POLYGON_OFFSET_FILL);
+  gl.disable(gl.CULL_FACE);
+  gl.frontFace(gl.CCW);
 }
 // Libera la vista-previa de estructura (VBO) y olvida su memo. Se llama al soltar, al perder el foco o al cerrar.
-function mcClearPreview(){ if(mc.preview){ mcFreeStruct(mc.preview); mc.preview=null; } mc.previewKey=null; mc.previewBusy=null; mc.previewStructKey=null; }
+function mcClearPreview(){ if(mc.preview){ mcFreeStruct(mc.preview); mc.preview=null; } mc.previewKey=null; mc.previewBusy=null; mc.previewStructKey=null; mc._volCache=null; }
 // ¿la sala usa texturas `tex:` que aún NO están en el atlas de estructuras? (⇒ hay que recomponerlo para la vista-previa)
 async function mcRoomNeedsAtlas(sk){
   try{ const d=await getRoomData(sk); const vox=d.voxels||{};
@@ -11048,18 +11325,20 @@ async function mcRoomNeedsAtlas(sk){
   }catch(e){}
   return false;
 }
-// Mantiene mc.preview: mientras se MANTIENE el clic derecho con una ranura de estructura, construye (o reubica) la
+// Mantiene mc.preview: mientras se apunta con una ranura de estructura, construye (o reubica) la
 // malla real de la habitación en la celda apuntada + giro al jugador. Sólo re-malla si cambió el objetivo/giro
-// (memo) → no revienta fps al mirar quieto; al soltar/perder foco se limpia. Asíncrona (no bloquea el frame).
+// (memo) → no revienta fps al mirar quieto; al salir del foco se limpia. Asíncrona (no bloquea el frame).
 async function mcUpdatePreview(){
   const sk=mc.slotStruct[mc.sel];
-  const on = mc.active && mc.heldBtn===2 && sk && document.pointerLockElement===mc.canvas && mc.structGhostAlpha>0;
+  const on = mc.active && !mcToolPasiva() && sk && document.pointerLockElement===mc.canvas && mc.structGhostAlpha>0;
   if(!on){ if(mc.preview||mc.previewKey||mc.previewStructKey) mcClearPreview(); return; }
   const hit=mcRaycast(mcReach(), true); if(!hit){ if(mc.preview) mcClearPreview(); return; }   // el fantasma se ancla también a caras de estructura (lo que ves = lo que colocas)
-  const c=hit.cell, n=hit.normal, tx=c[0]+n[0], ty=c[1]+n[1], tz=c[2]+n[2];   // celda apuntada (centro de la base)
+  const isPaint = (mc.tool === 'paint');
+  const c=hit.cell, n=hit.normal;
+  const tx = isPaint ? c[0] : (c[0]+n[0]), ty = isPaint ? c[1] : (c[1]+n[1]), tz = isPaint ? c[2] : (c[2]+n[2]);   // construir = hueco adyacente; pintar = celda apuntada
   if(!mcInside(tx,ty,tz)){ if(mc.preview) mcClearPreview(); return; }
   await mcStructCells(sk);                                                    // asegura la huella para centrar bien
-  const rot=mcPreviewOri(), [ox,oy,oz]=mcStructOrigin(sk, tx,ty,tz, rot, n);    // orientación a mano (R giro / Shift+R vuelco); centro en suelo, canto en pared
+  const rot=mcPreviewOri(), [ox,oy,oz]=mcStructOrigin(sk, tx,ty,tz, rot, isPaint ? [0,1,0] : n);    // orientación a mano (R giro / Shift+R vuelco); centro en suelo, canto en pared
   const memo=sk+'|'+ox+'|'+oy+'|'+oz+'|'+rot;
   if(memo===mc.previewKey || memo===mc.previewBusy) return;      // ya dibujada o en construcción → nada que hacer
   mc.previewBusy=memo;
@@ -11078,10 +11357,89 @@ function mcPushBoxEdges(out, x0,y0,z0, x1,y1,z1, r,g,b){   // 12 aristas → gl.
   const E=[0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
   for(const i of E){ const p=P[i]; out.push(p[0],p[1],p[2], r,g,b, 1); }
 }
+function mcPushCornerBrackets(out, x0,y0,z0, x1,y1,z1, armLen, r,g,b){
+  const P=[[x0,y0,z0],[x1,y0,z0],[x1,y0,z1],[x0,y0,z1],[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]];
+  const L = armLen || 0.6;
+  const off = 0.02;
+  for(let i=0; i<8; i++){
+    const p = P[i];
+    const dx = (p[0] === x0 ? -off : off);
+    const dy = (p[1] === y0 ? -off : off);
+    const dz = (p[2] === z0 ? -off : off);
+    const ox = p[0] + dx, oy = p[1] + dy, oz = p[2] + dz;
+    const sx = (p[0] === x0 ? 1 : -1) * Math.min(L, Math.abs(x1 - x0) * 0.48);
+    const sy = (p[1] === y0 ? 1 : -1) * Math.min(L, Math.abs(y1 - y0) * 0.48);
+    const sz = (p[2] === z0 ? 1 : -1) * Math.min(L, Math.abs(z1 - z0) * 0.48);
+    // Brazos principales en verde brillante
+    mcPushLine(out, ox, oy, oz, ox + sx, oy, oz, r, g, b);
+    mcPushLine(out, ox, oy, oz, ox, oy + sy, oz, r, g, b);
+    mcPushLine(out, ox, oy, oz, ox, oy, oz + sz, r, g, b);
+    // Vértice en blanco puro
+    mcPushLine(out, ox, oy, oz, ox + sx*0.35, oy, oz, 1, 1, 1);
+    mcPushLine(out, ox, oy, oz, ox, oy + sy*0.35, oz, 1, 1, 1);
+    mcPushLine(out, ox, oy, oz, ox, oy, oz + sz*0.35, 1, 1, 1);
+  }
+}
 function mcPushBoxTris(out, x0,y0,z0, x1,y1,z1, r,g,b){    // 12 tris → gl.TRIANGLES (relleno)
   const P=[[x0,y0,z0],[x1,y0,z0],[x1,y0,z1],[x0,y0,z1],[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]];
   const F=[0,3,2,0,2,1, 4,5,6,4,6,7, 0,1,5,0,5,4, 2,3,7,2,7,6, 1,2,6,1,6,5, 3,0,4,3,4,7];
   for(const i of F){ const p=P[i]; out.push(p[0],p[1],p[2], r,g,b, 1); }
+}
+function mcPushGridDividers(out, x0,y0,z0, x1,y1,z1, r,g,b){
+  for(let x = x0 + 1; x < x1; x++){
+    mcPushLine(out, x, y0, z0, x, y1, z0, r, g, b);
+    mcPushLine(out, x, y0, z1, x, y1, z1, r, g, b);
+    mcPushLine(out, x, y0, z0, x, y0, z1, r, g, b);
+    mcPushLine(out, x, y1, z0, x, y1, z1, r, g, b);
+  }
+  for(let y = y0 + 1; y < y1; y++){
+    mcPushLine(out, x0, y, z0, x1, y, z0, r, g, b);
+    mcPushLine(out, x0, y, z1, x1, y, z1, r, g, b);
+    mcPushLine(out, x0, y, z0, x0, y, z1, r, g, b);
+    mcPushLine(out, x1, y, z0, x1, y, z1, r, g, b);
+  }
+  for(let z = z0 + 1; z < z1; z++){
+    mcPushLine(out, x0, y0, z, x1, y0, z, r, g, b);
+    mcPushLine(out, x0, y1, z, x1, y1, z, r, g, b);
+    mcPushLine(out, x0, y0, z, x0, y1, z, r, g, b);
+    mcPushLine(out, x1, y0, z, x1, y1, z, r, g, b);
+  }
+}
+function mcGetSelectedBlockRGB(){
+  const sk = mc.slotStruct ? mc.slotStruct[mc.sel] : null;
+  const mat = mc.hotbar ? mc.hotbar[mc.sel] : null;
+  let key = sk || (mat && mc.blockKey ? mc.blockKey[mat] : null) || '';
+  if(!key && sk && typeof mcResolveMat === 'function'){
+    const id = mcResolveMat(sk);
+    key = (mc.blockKey && mc.blockKey[id]) || sk;
+  }
+  if(!key && mat) key = String(mat);
+  if(typeof key === 'string'){
+    const k = key.toLowerCase();
+    if(k.startsWith('#') && k.length >= 7){
+      return [
+        parseInt(k.slice(1, 3), 16) / 255,
+        parseInt(k.slice(3, 5), 16) / 255,
+        parseInt(k.slice(5, 7), 16) / 255
+      ];
+    }
+    if(k.includes('hierba') || k.includes('grass')) return [0.38, 0.78, 0.25];
+    if(k.includes('tierra') || k.includes('dirt')) return [0.55, 0.38, 0.22];
+    if(k.includes('roca') || k.includes('stone') || k.includes('piedra') || k.includes('cobble')) return [0.62, 0.62, 0.62];
+    if(k.includes('arena') || k.includes('sand')) return [0.88, 0.82, 0.58];
+    if(k.includes('madera') || k.includes('wood') || k.includes('tabl') || k.includes('tronco') || k.includes('oak')) return [0.65, 0.45, 0.28];
+    if(k.includes('hojas') || k.includes('leaves') || k.includes('bush')) return [0.25, 0.65, 0.20];
+    if(k.includes('ladrillo') || k.includes('brick')) return [0.75, 0.32, 0.25];
+    if(k.includes('agua') || k.includes('water')) return [0.25, 0.58, 0.92];
+    if(k.includes('lava')) return [0.95, 0.42, 0.12];
+    if(k.includes('cristal') || k.includes('glass') || k.includes('trans')) return [0.65, 0.88, 0.98];
+    if(k.includes('oro') || k.includes('gold')) return [0.95, 0.85, 0.20];
+    if(k.includes('nieve') || k.includes('snow') || k.includes('blanco') || k.includes('white')) return [0.94, 0.95, 0.98];
+    if(k.includes('carbon') || k.includes('coal') || k.includes('negro') || k.includes('black') || k.includes('obsidian')) return [0.18, 0.18, 0.22];
+    if(k.includes('hierro') || k.includes('iron')) return [0.82, 0.82, 0.84];
+    if(k.includes('diamante') || k.includes('diamond')) return [0.35, 0.85, 0.92];
+  }
+  return [0.45, 0.78, 0.35];
 }
 function mcDrawArr(SL, arr, mode){   // sube arr (7 floats/vért) al VBO de overlays y dibuja
   if(!arr.length) return;
@@ -11199,10 +11557,29 @@ function mcDrawOverlays(pj, view){
   const gl=mc.gl, SL=mc.structLoc; if(!mc.structProg) return;
   const playing=(document.pointerLockElement===mc.canvas);
   const lines=[], structLines=[], xray=[];   // lines/structLines: fantasma de bloque (game.ghostAlpha) vs. huella de estructura (game.structGhostAlpha)
-  // 1) Fantasma de colocación / marcador «demasiado lejos» (solo mientras juegas y con algo que colocar).
+  const paintLines=[];                       // guías activas de la herramienta Pintar (opacas con corchetes en esquina)
+  // 1) Herramienta Pintar: guías sobre el bloque apuntado
   const sk=mc.slotStruct[mc.sel];
-  if(playing && (sk || mc.hotbar[mc.sel]) && mc.tool!=='paint' && mc.tool!=='pick'){   // el cuentagotas no coloca: enseñar el fantasma prometería un bloque que no va a salir
-    const near=mcRaycast(mcReach(), true);   // el fantasma de colocación también aparece sobre caras de estructura
+  if(playing && mc.tool==='paint' && (sk || mc.hotbar[mc.sel])){
+    const near=mcRaycast(mcReach(), true);
+    if(near && near.cell[1]>=0 && mcInside(near.cell[0],near.cell[1],near.cell[2])){
+      const c=near.cell, grn=[0.15, 0.98, 0.3], d=0.008;
+      if(sk){
+        const rec=mc.structs[sk]; if(!rec||rec.w==null) mcStructCells(sk);
+        const rot=mcPreviewOri();
+        const [w,h,dDim]=mcOriDims((rec&&rec.w)||1, (rec&&rec.h)||1, (rec&&rec.d)||1, rot);
+        const o=mcStructOrigin(sk, c[0],c[1],c[2], rot, [0,1,0]);
+        mcPushBoxEdges(paintLines, o[0]-d,o[1]-d,o[2]-d, o[0]+w+d,o[1]+h+d,o[2]+dDim+d, grn[0],grn[1],grn[2]);
+        mcPushCornerBrackets(paintLines, o[0],o[1],o[2], o[0]+w,o[1]+h,o[2]+dDim, 0.35, grn[0],grn[1],grn[2]);
+      } else {
+        mcPushBoxEdges(paintLines, c[0]-d,c[1]-d,c[2]-d, c[0]+1+d,c[1]+1+d,c[2]+1+d, grn[0],grn[1],grn[2]);
+        mcPushCornerBrackets(paintLines, c[0],c[1],c[2], c[0]+1,c[1]+1,c[2]+1, 0.35, grn[0],grn[1],grn[2]);
+      }
+    }
+  }
+  // 1b) Fantasma de colocación / marcador «demasiado lejos» en herramienta construir (game.ghostAlpha / game.structGhostAlpha).
+  if(playing && mc.tool==='build' && (sk || mc.hotbar[mc.sel])){
+    const near=mcRaycast(mcReach(), true);
     if(near){
       const n=near.normal, px=near.cell[0]+n[0], py=near.cell[1]+n[1], pz=near.cell[2]+n[2];
       if(sk){                                    // estructura: caja de su huella (mcStructCells cacheada)
@@ -11227,8 +11604,6 @@ function mcDrawOverlays(pj, view){
     mcPushVisionCones(xrayLines);
   }
   // 3) t1 · marcadores de nota: un post-it amarillo flotando sobre cada bloque anotado (dentro de la distancia de render).
-  // Solo para las notas que NO tienen cartel: con carteles encendidos el post-it sobraría encima de la
-  // tabla, y con ellos apagados (o pasado el tope de MC_NOTE_SIGN_MAX) sigue siendo la única marca.
   const notes=[]; const R=mc.renderDist*MC_CHUNK, p=mc.pos;
   const conCartel=new Set(); for(const s of mc.structures) if(s.nota) conCartel.add(s.nota);
   if(mc.noteAlpha>0) for(const k in mc.notes){ const q=k.split(','), x=+q[0], y=+q[1], z=+q[2];
@@ -11249,16 +11624,89 @@ function mcDrawOverlays(pj, view){
                                Math.max(a[0],c[0])+1,Math.max(a[1],c[1])+1,Math.max(a[2],c[2])+1, 1,0.85,0.2);
     }
   }
+  // 5) Herramienta Volumen (tool === 'box'): caja, rejilla y guías de esquina verdes/blancas
+  const boxLines=[];
+  if(mc.tool==='box' && !mc.escaparate){
+    const near=mcRaycast(mcReach(), true);
+    const grn=[0.15, 0.98, 0.3];
+    if(!mc.boxStep || mc.boxStep===0){
+      if(near){
+        const n=near.normal, px=near.cell[0]+n[0], py=near.cell[1]+n[1], pz=near.cell[2]+n[2];
+        mcPushBoxEdges(boxLines, px,py,pz, px+1,py+1,pz+1, grn[0],grn[1],grn[2]);
+        mcPushCornerBrackets(boxLines, px,py,pz, px+1,py+1,pz+1, 0.35, grn[0],grn[1],grn[2]);
+      }
+    } else if(mc.boxStep===1){
+      const a=mc.boxA;
+      if(a){
+        let bx=a[0], bz=a[2];
+        if(near){ bx=near.cell[0]+near.normal[0]; bz=near.cell[2]+near.normal[2]; }
+        const x0=Math.min(a[0],bx), x1=Math.max(a[0],bx);
+        const z0=Math.min(a[2],bz), z1=Math.max(a[2],bz);
+        const ay=a[1];
+        mcPushBoxEdges(boxLines, x0,ay,z0, x1+1,ay+1,z1+1, grn[0],grn[1],grn[2]);
+        mcPushGridDividers(boxLines, x0,ay,z0, x1+1,ay+1,z1+1, 0.25, 0.85, 0.4);
+        mcPushCornerBrackets(boxLines, x0,ay,z0, x1+1,ay+1,z1+1, 0.55, grn[0],grn[1],grn[2]);
+      }
+    } else if(mc.boxStep===2){
+      const a=mc.boxA, b=mc.boxB;
+      if(a && b){
+        const y1=mcBoxCalcCurrentY1();
+        const x0=Math.min(a[0],b[0]), x1=Math.max(a[0],b[0]);
+        const y0=Math.min(a[1],y1), y1Max=Math.max(a[1],y1);
+        const z0=Math.min(a[2],b[2]), z1=Math.max(a[2],b[2]);
+        mcPushBoxEdges(boxLines, x0,y0,z0, x1+1,y1Max+1,z1+1, grn[0],grn[1],grn[2]);
+        mcPushGridDividers(boxLines, x0,y0,z0, x1+1,y1Max+1,z1+1, 0.25, 0.85, 0.4);
+        mcPushCornerBrackets(boxLines, x0,y0,z0, x1+1,y1Max+1,z1+1, 0.55, grn[0],grn[1],grn[2]);
+      }
+    } else if(mc.boxStep===3 && mc.boxDims){
+      const [w,h,d] = mc.boxDims;
+      const boxRot = (typeof mcBoxOri === 'function') ? mcBoxOri() : 0;
+      const [rw, rh, rd] = mcOriDims(w, h, d, boxRot);
+      const T = mcOriMove(boxRot, w, h, d);
+      const ax = (mc.boxAnchor ? mc.boxAnchor[0] : 0);
+      const ay = (mc.boxAnchor ? mc.boxAnchor[1] : 0);
+      const az = (mc.boxAnchor ? mc.boxAnchor[2] : 0);
+      const [rax, ray, raz] = T(ax, ay, az);
+      let basePos = mc.boxBasePos || null;
+      if(mc.boxCtrlHeld && mc.boxCtrlFreeze){
+        basePos = mc.boxCtrlFreeze;
+      } else if(near && near.dist <= mcReach()){
+        const n = near.normal;
+        basePos = [near.cell[0] + n[0], near.cell[1] + n[1], near.cell[2] + n[2]];
+      }
+      if(basePos){
+        const ox = basePos[0] - rax, oy = basePos[1] - ray, oz = basePos[2] - raz;
+        mcPushBoxEdges(boxLines, ox,oy,oz, ox+rw,oy+rh,oz+rd, grn[0],grn[1],grn[2]);
+        mcPushGridDividers(boxLines, ox,oy,oz, ox+rw,oy+rh,oz+rd, 0.25, 0.85, 0.4);
+        mcPushCornerBrackets(boxLines, ox,oy,oz, ox+rw,oy+rh,oz+rd, 0.55, grn[0],grn[1],grn[2]);
+        if(mc.boxCtrlHeld){
+          const hover = mcBoxRaycastLocal(ox, oy, oz, rw, rh, rd);
+          if(hover) mc.boxAnchorHover = hover;
+          const hTarget = hover || mc.boxAnchorHover;
+          if(hTarget){
+            const [hx, hy, hz] = hTarget;
+            mcPushBoxEdges(boxLines, ox+hx, oy+hy, oz+hz, ox+hx+1, oy+hy+1, oz+hz+1, 1.0, 0.85, 0.1);
+            mcPushCornerBrackets(boxLines, ox+hx, oy+hy, oz+hz, ox+hx+1, oy+hy+1, oz+hz+1, 0.35, 1.0, 0.85, 0.1);
+          }
+        } else if(rax !== 0 || ray !== 0 || raz !== 0){
+          mcPushBoxEdges(boxLines, ox+rax, oy+ray, oz+raz, ox+rax+1, oy+ray+1, oz+raz+1, 0.2, 0.85, 0.95);
+        }
+      }
+    }
+  }
   const showGhost=lines.length && mc.ghostAlpha>0;
   const showStruct=structLines.length && mc.structGhostAlpha>0;
-  if(!showGhost && !showStruct && !xray.length && !xrayLines.length && !notes.length && !selLines.length) return;
+  if(!showGhost && !showStruct && !paintLines.length && !xray.length && !xrayLines.length && !notes.length && !selLines.length && !boxLines.length) return;
 
   gl.useProgram(mc.structProg);
   gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
   gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
   gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
   gl.uniform1f(SL.uFogMin, 0); gl.uniform1f(SL.uFogNear, pj.far*8); gl.uniform1f(SL.uFogFar, pj.far*10);   // sin niebla ni tinte sobre el overlay
+  mcSunUniforms(SL, null);   // asigna sampler units (uBlkTex a unidad 2) evitando colisiones con sampler2D en GPU
+  if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
   if(SL.aEmit >= 0) gl.vertexAttrib1f(SL.aEmit, 1.0);
+  if(SL.aAlpha >= 0) gl.vertexAttrib1f(SL.aAlpha, 1.0);
   mcAttribs([SL.aPos, SL.aColor, SL.aShade]);   // deja habilitados SOLO estos 3; ningún atributo huérfano con VBO nulo
   // Rayos-X: relleno translúcido (alpha constante vía blendColor) y SIN test de profundidad (atraviesa muros).
   if(xray.length){
@@ -11277,10 +11725,12 @@ function mcDrawOverlays(pj, view){
   // Fantasma de bloque suelto (verde) + marcador «demasiado lejos» (ámbar): game.ghostAlpha, y caja de huella de
   // estructura: game.structGhostAlpha. Ambos por mezcla de alfa constante, respetando la profundidad de la escena.
   gl.enable(gl.DEPTH_TEST); gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
-  if(showGhost){  gl.blendColor(0,0,0,mc.ghostAlpha);       mcDrawArr(SL, lines,       gl.LINES); }
-  if(showStruct){ gl.blendColor(0,0,0,mc.structGhostAlpha); mcDrawArr(SL, structLines, gl.LINES); }
-  if(notes.length){ gl.blendColor(0,0,0,mc.noteAlpha);      mcDrawArr(SL, notes, gl.TRIANGLES); }   // t1 · post-its (relleno, ocluidos por muros)
-  if(selLines.length){ gl.blendColor(0,0,0,0.9);            mcDrawArr(SL, selLines, gl.LINES); }    // herramienta Seleccionar: caja(s) de selección
+  if(showGhost){        gl.blendColor(0,0,0,mc.ghostAlpha);       mcDrawArr(SL, lines,       gl.LINES); }
+  if(showStruct){       gl.blendColor(0,0,0,mc.structGhostAlpha); mcDrawArr(SL, structLines, gl.LINES); }
+  if(paintLines.length){gl.blendColor(0,0,0,0.95);                mcDrawArr(SL, paintLines,  gl.LINES); }
+  if(notes.length){     gl.blendColor(0,0,0,mc.noteAlpha);        mcDrawArr(SL, notes,       gl.TRIANGLES); }   // t1 · post-its (relleno, ocluidos por muros)
+  if(selLines.length){  gl.blendColor(0,0,0,0.9);                 mcDrawArr(SL, selLines,    gl.LINES); }    // herramienta Seleccionar: caja(s) de selección
+  if(boxLines.length){  gl.blendColor(0,0,0,0.95);                mcDrawArr(SL, boxLines,    gl.LINES); }    // herramienta Volumen: caja y guías de esquina
   gl.disable(gl.BLEND);
   gl.depthMask(true); gl.enable(gl.DEPTH_TEST);   // restaura estado para el próximo frame
 }
@@ -11857,7 +12307,11 @@ async function mcHistTrasCarga(x,y,z,before){
   for(const p of [...mcPendCarga.values()]) await Promise.resolve(p).catch(()=>{});
   await new Promise(r=>setTimeout(r,0));
   const after=mc.grid[mcIdx(x,y,z)];
-  if(after!==before) mcPushHist({t:'b',x,y,z,before,after});
+  if(after!==before){
+    mcPushHist({t:'b',x,y,z,before,after});
+    mcRemeshAround(x,z);
+    mcScheduleSave();
+  }
 }
 function mcPonEnRejilla(x,y,z,key){
   const before=mc.grid[mcIdx(x,y,z)], pendientes=mcBuildN;   // ¿hay escrituras de script esperando su volcado?
@@ -11877,19 +12331,30 @@ function mcPonEnRejilla(x,y,z,key){
 // game.playerTool 'paint': repinta el bloque APUNTADO con el bloque seleccionado (no crea uno nuevo al lado).
 // Solo sobre terreno normal (las estructuras no son rejilla). No encajona: cambiar color no cambia el volumen.
 function mcPaint(){
-  const id=mc.hotbar[mc.sel]; if(!id) return;                 // pintar necesita un bloque normal en la ranura
-  const hit=mcRaycast(); if(!hit) return;
-  const c=hit.cell; if(c[1]<0 || !mcSolid(c[0],c[1],c[2])) return;
+  const sk=mc.slotStruct[mc.sel], id=mc.hotbar[mc.sel];
+  if(!id && !sk) return;
+  const hit=mcRaycast(mcReach(), true); if(!hit) return;
+  const c=hit.cell; if(c[1]<0) return;
+  if(sk){
+    const rot=mcPreviewOri();
+    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk))){
+      mcPonEnRejilla(c[0],c[1],c[2], mcClaveConOri(sk,rot)); return;
+    }
+    if(mcSolid(c[0],c[1],c[2])){ mcSetBlock(c[0],c[1],c[2],0); mcRemeshAround(c[0],c[2]); }
+    const o=mcStructOrigin(sk, c[0], c[1], c[2], rot, [0,1,0]);
+    mcStampStruct(sk, o[0], o[1], o[2], rot); return;
+  }
+  if(!mcSolid(c[0],c[1],c[2])) return;
   const before=mc.grid[mcIdx(c[0],c[1],c[2])];
   if(before===id) return;                                     // ya es ese bloque
   mcSetBlock(c[0],c[1],c[2],id); mcPushHist({t:'b',x:c[0],y:c[1],z:c[2],before,after:id}); mcRemeshAround(c[0],c[2]); mcScheduleSave();
 }
-// Clic derecho: 'paint' repinta el bloque apuntado; 'build' (o ranura de estructura) pone al lado / estampa.
-function mcUseRight(){ if(mc.tool==='paint' && !mc.slotStruct[mc.sel]) mcPaint(); else mcPlace(); }
-// Herramientas PASIVAS: no rompen, no colocan y no estampan. Las rutas de estructura (mantener clic
-// derecho → estampar al soltar) y la repetición al mantener pulsado tienen que preguntar por esto y no
+// Clic derecho: pone al lado / estampa estructura.
+function mcUseRight(){ if(mc.tool==='paint') mcPickBlock(); else mcPlace(); }
+// Herramientas PASIVAS: no rompen, no colocan y no estampan. Las rutas de estructura
+// y la repetición al mantener pulsado tienen que preguntar por esto y no
 // por `tool!=='select'`, o cada herramienta nueva vuelve a colocar bloques por la puerta de atrás.
-function mcToolPasiva(){ return mc.tool==='select' || mc.tool==='pick'; }
+function mcToolPasiva(){ return mc.tool==='select' || mc.tool==='pick' || mc.tool==='box'; }
 // Acción de un botón de ratón (para el clic inicial y la repetición al mantener pulsado).
 function mcDoAction(btn){
   // REQ-OSD4 · en una pantalla incrustada (?osd=1) el clic izquierdo PULSA el bloque, no lo rompe: un
@@ -11902,7 +12367,196 @@ function mcDoAction(btn){
   if(mc.osdAbierta) return;
   if(mc.tool==='select'){ if(btn===0) mcSelectClick(); else if(btn===2) mcSelectClear(); mcRevealHotbar(); return; }   // Seleccionar: izq marca esquinas, dcho limpia (NO rompe/pone)
   if(mc.tool==='pick'){ mcPickBlock(); mcRevealHotbar(); return; }   // Cuentagotas: los DOS botones pillan; ninguno rompe ni pone
+  if(mc.tool==='paint'){ if(btn===0) mcPaint(); else if(btn===2) mcPickBlock(); mcRevealHotbar(); return; } // Pintar: izq pinta, dcho cuentagotas
+  if(mc.tool==='box'){
+    if(mc.boxStep===3){ if(btn===2) mcBoxClick(); else if(btn===0) mcBoxClear(); }  // Paso 4: dcho planta, izq reinicia
+    else { if(btn===0) mcBoxClick(); else if(btn===2) mcBoxClear(); }               // Pasos 1,2,3: izq define base/altura, dcho cancela
+    mcRevealHotbar(); return;
+  }
   if(btn===0) mcBreak(); else if(btn===2) mcUseRight(); mcRevealHotbar();   // dibujar/romper trae la hotbar de vuelta
+}
+// ── Herramienta Volumen (tool='box') ────────────────────────────────────────────────────────────
+// Define un conjunto/caja de bloques:
+//   1) Inicio base: mousedown clic izquierdo en esquina A
+//   2) Fin base: arrastrar con clic izquierdo y soltar (mouseup) en esquina B (base w×d)
+//   3) Altura: mover mirada arriba/abajo y clic izquierdo para confirmar volumen (caja 3D w×h×d)
+//   4) Plantado: clics derechos plantan el conjunto completo en 1 solo clic sobre la superficie apuntada
+//   5) Reinicio: clic izquierdo resetea la herramienta para definir un nuevo volumen.
+function mcBoxClear(){
+  if(mc.boxStep || mc.boxA || mc.boxB || mc.boxDims || mc.boxAnchor || mc.boxCtrlHeld || mc.boxCara || mc.boxGiro){
+    mc.boxStep = 0;
+    mc.boxA = null;
+    mc.boxB = null;
+    mc.boxDims = null;
+    mc.boxAnchor = null;
+    mc.boxCara = 0;
+    mc.boxGiro = 0;
+    mc.boxCtrlHeld = false;
+    mc.boxCtrlFreeze = null;
+    mc.boxAnchorHover = null;
+    mc.boxBasePos = null;
+    mc._volCache = null;
+    toast('Volumen reiniciado');
+  }
+}
+function mcBoxRaycastLocal(ox, oy, oz, w, h, d){
+  const eyeX = mc.pos[0], eyeY = mc.pos[1] + MC_EYE * mc.scale, eyeZ = mc.pos[2];
+  const cp = Math.cos(mc.pitch);
+  const dx = -Math.sin(mc.yaw) * cp, dy = Math.sin(mc.pitch), dz = -Math.cos(mc.yaw) * cp;
+  const maxD = mcReach() * 2, step = 0.05;
+  for(let t = 0.1; t <= maxD; t += step){
+    const x = eyeX + dx * t, y = eyeY + dy * t, z = eyeZ + dz * t;
+    const lx = Math.floor(x - ox), ly = Math.floor(y - oy), lz = Math.floor(z - oz);
+    if(lx >= 0 && lx < w && ly >= 0 && ly < h && lz >= 0 && lz < d) return [lx, ly, lz];
+  }
+  return null;
+}
+function mcBoxCalcCurrentY1(){
+  const a = mc.boxA, b = mc.boxB;
+  if(!a) return 0;
+  const ay = a[1];
+  const centerX = b ? (a[0] + b[0]) * 0.5 + 0.5 : a[0] + 0.5;
+  const centerZ = b ? (a[2] + b[2]) * 0.5 + 0.5 : a[2] + 0.5;
+  const eyeX = mc.pos[0], eyeY = mc.pos[1] + MC_EYE * mc.scale, eyeZ = mc.pos[2];
+  const dist = Math.max(1.5, Math.hypot(centerX - eyeX, centerZ - eyeZ));
+  const pitch0 = (typeof mc.boxPitch0 === 'number') ? mc.boxPitch0 : mc.pitch;
+  const yProj0 = eyeY + dist * Math.tan(pitch0);
+  const yProj = eyeY + dist * Math.tan(mc.pitch);
+  const dy = yProj - yProj0;
+  let targetY;
+  if(dy >= 0){
+    targetY = ay + Math.floor(dy);
+  } else {
+    targetY = ay + Math.ceil(dy);
+  }
+  return Math.max(0, Math.min((mc.dim.y || 40) - 1, targetY));
+}
+function mcBoxClick(){
+  const near = mcRaycast(mcReach(), true);
+  if(!mc.boxStep || mc.boxStep === 0){
+    if(!near) return;
+    const n = near.normal;
+    const px = near.cell[0] + n[0], py = near.cell[1] + n[1], pz = near.cell[2] + n[2];
+    mc.boxA = [px, py, pz];
+    mc.boxStep = 1;
+    toast('Base: arrastra con clic izquierdo y suelta para fijar');
+    return;
+  }
+  if(mc.boxStep === 1){
+    const a = mc.boxA; if(!a){ mc.boxStep = 0; return; }
+    let bx = a[0], bz = a[2];
+    if(near){ bx = near.cell[0] + near.normal[0]; bz = near.cell[2] + near.normal[2]; }
+    mc.boxB = [bx, a[1], bz];
+    mc.boxPitch0 = mc.pitch;
+    mc.boxStep = 2;
+    const w = Math.abs(bx - a[0]) + 1, d = Math.abs(bz - a[2]) + 1;
+    toast('Base fijada (' + w + '×' + d + ') · Mueve la mirada arriba/abajo y clic izquierdo para altura');
+    return;
+  }
+  if(mc.boxStep === 2){
+    const a = mc.boxA, b = mc.boxB;
+    if(!a || !b){ mc.boxStep = 0; return; }
+    const y1 = mcBoxCalcCurrentY1();
+    const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
+    const y0 = Math.min(a[1], y1), y1Max = Math.max(a[1], y1);
+    const z0 = Math.min(a[2], b[2]), z1 = Math.max(a[2], b[2]);
+    const w = x1 - x0 + 1, h = y1Max - y0 + 1, d = z1 - z0 + 1;
+    mc.boxDims = [w, h, d];
+    // Agarre por la base (ay = 0) para que el volumen se apoye siempre sobre el suelo sin hundirse
+    const hitLocal = mcBoxRaycastLocal(x0, y0, z0, w, h, d);
+    let anchor = [0, 0, 0];
+    if(hitLocal){
+      anchor = [hitLocal[0], 0, hitLocal[2]];
+    } else if(near){
+      const n = near.normal;
+      const px = near.cell[0] + n[0], pz = near.cell[2] + n[2];
+      anchor = [
+        Math.max(0, Math.min(w - 1, px - x0)),
+        0,
+        Math.max(0, Math.min(d - 1, pz - z0))
+      ];
+    }
+    mc.boxAnchor = anchor;
+    mc.boxBasePos = [x0 + anchor[0], y0 + anchor[1], z0 + anchor[2]];
+    mc.boxStep = 3;
+    toast('Volumen (' + w + '×' + h + '×' + d + ') · Clic dcho planta · v/V gira volumen · Ctrl+ratón agarre · Clic izq reinicia');
+    return;
+  }
+  if(mc.boxStep === 3){
+    if(!mc.boxDims) return;
+    let basePos = mc.boxBasePos;
+    if(mc.boxCtrlHeld && mc.boxCtrlFreeze){
+      basePos = mc.boxCtrlFreeze;
+    } else if(near && near.dist <= mcReach()){
+      const n = near.normal;
+      basePos = [near.cell[0] + n[0], near.cell[1] + n[1], near.cell[2] + n[2]];
+    }
+    if(!basePos) return;
+    const [w, h, d] = mc.boxDims;
+    mcBoxStampVolume(basePos[0], basePos[1], basePos[2], w, h, d);
+    return;
+  }
+}
+function mcBoxMouseUp(){
+  if(mc.boxStep === 1 && mc.boxA){
+    const near = mcRaycast(mcReach(), true);
+    const a = mc.boxA;
+    let bx = a[0], bz = a[2];
+    if(near){ bx = near.cell[0] + near.normal[0]; bz = near.cell[2] + near.normal[2]; }
+    mc.boxB = [bx, a[1], bz];
+    mc.boxPitch0 = mc.pitch;
+    mc.boxStep = 2;
+    const w = Math.abs(bx - a[0]) + 1, d = Math.abs(bz - a[2]) + 1;
+    toast('Base fijada (' + w + '×' + d + ') · Mueve la mirada arriba/abajo y clic izquierdo para altura');
+  }
+}
+function mcBoxStampVolume(px, py, pz, w, h, d){
+  const mat = mc.hotbar[mc.sel];
+  const sk = mc.slotStruct[mc.sel];
+  if(!mat && !sk) return;
+  const rot = mcPreviewOri();
+  const rawKey = sk || (mat && mc.blockKey ? mc.blockKey[mat] : null) || '';
+  const finalKey = (rot && rawKey) ? mcClaveConOri(rawKey, rot) : (rawKey || mat);
+  const boxRot = (typeof mcBoxOri === 'function') ? mcBoxOri() : 0;
+  const T = mcOriMove(boxRot, w, h, d);
+  const ax = (mc.boxAnchor ? mc.boxAnchor[0] : 0);
+  const ay = (mc.boxAnchor ? mc.boxAnchor[1] : 0);
+  const az = (mc.boxAnchor ? mc.boxAnchor[2] : 0);
+  const [rax, ray, raz] = T(ax, ay, az);
+  const startX = px - rax, startY = py - ray, startZ = pz - raz;
+  const edits = [];
+  for(let dy=0; dy<h; dy++){
+    for(let dx=0; dx<w; dx++){
+      for(let dz=0; dz<d; dz++){
+        const [rx, ry, rz] = T(dx, dy, dz);
+        const wx = startX + rx, wy = startY + ry, wz = startZ + rz;
+        if(!mcInside(wx, wy, wz)) continue;
+        const before = mc.grid[mcIdx(wx, wy, wz)];
+        if(sk){
+          if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk))){
+            mcSetVoxel(wx, wy, wz, finalKey);
+          } else {
+            mcStampStruct(sk, wx, wy, wz, rot);
+          }
+        } else if(rawKey && mcEsFinaEnRejilla(rawKey)){
+          mcSetVoxel(wx, wy, wz, finalKey);
+        } else {
+          mcSetBlock(wx, wy, wz, mat);
+        }
+        const after = mc.grid[mcIdx(wx, wy, wz)];
+        if(before !== after) edits.push({ x:wx, y:wy, z:wz, before, after });
+      }
+    }
+  }
+  if(edits.length > 0 || sk){
+    if(edits.length > 0) mcPushHist({ t:'bb', edits });
+    if(mcBuildT){ clearTimeout(mcBuildT); mcBuildT=0; }
+    mcMeshAll();
+    mcRestampAll();
+    mcShadowDirty();
+    mcScheduleSave();
+    toast('Plantado volumen ' + w + '×' + h + '×' + d + ' (' + (edits.length || (w*h*d)) + ' bloques)');
+  }
 }
 // ── Herramienta Seleccionar (tool='select') ────────────────────────────────────────────────────────────
 // Marca una CAJA de bloques del mundo con dos clics (esquina A, esquina B), la resalta y la copia a `clipboard`
@@ -13437,20 +14091,20 @@ function mcSlotHerramienta(){
   slot.className='mc-slot mc-slot-tool';
   slot.id='mc-slot-tool';
   const cv=document.createElement('canvas'); cv.width=cv.height=MC_ICONO_PX; slot.appendChild(cv);
-  const key=document.createElement('span'); key.className='mc-slot-key'; key.textContent='P'; slot.appendChild(key);
-  // Mismo reparto que en las ranuras de bloque: izquierdo elige (aquí, rota a la siguiente, que es lo
-  // que hace la tecla P) y derecho abre la galería.
-  slot.onclick=()=>mcRotaHerramienta();
+  const key=document.createElement('span'); key.className='mc-slot-key'; key.textContent='E'; slot.appendChild(key);
+  // Mismo reparto que en las ranuras de bloque: izquierdo conmuta (e = construir↔volumen, shift+clic/E = pintar/seleccionar/cuentagotas)
+  // y derecho abre la galería.
+  slot.onclick=e=>mcRotaHerramienta(e.shiftKey ? 'secundarias' : 'principales');
   slot.oncontextmenu=e=>{ e.preventDefault(); mcOpenPickerHerramientas(); };
   mcPintaSlotHerramienta(slot);
   return slot;
 }
 // Repinta el icono y el rótulo con la herramienta activa. Se llama al construir la hotbar y cada vez
-// que cambia `mc.tool`, venga de `P`, de la galería o del setter de consola.
+// que cambia `mc.tool`, venga de `e`/`E`, de la galería o del setter de consola.
 function mcPintaSlotHerramienta(slot){
   slot=slot||$('#mc-slot-tool'); if(!slot) return;
   const etiqueta=mcEtiquetaHerramienta(mc.tool);
-  slot.title=etiqueta+' · clic (o P) rota · clic derecho (o alt+P) para elegir';
+  slot.title=etiqueta+' · clic (o e) Construir↔Volumen · shift+clic (o E) Pintar/Seleccionar/Cuentagotas · clic dcho elige';
   const cv=slot.querySelector('canvas'); if(!cv) return;
   // El catálogo se construye al abrir el picker, y al cargar el mundo todavía no existe. Se pide una
   // sola vez y en segundo plano —no se mete en la secuencia de carga, que ya es larga— y al llegar se
@@ -14546,6 +15200,7 @@ function mcShowLoading(txt){ if(mc.escaparate) return; const el=$('#mc-loading')
 function mcHideLoading(){ const el=$('#mc-loading'); if(el) el.hidden=true; }
 async function openWorld(){
   $('#mc-modal').hidden=false;
+  mcSetCrosshair(MC_HERRAMIENTA_MIRA[mc.tool] || '+');
   // REQ-EDIT1 · …y con el modal ya puesto se quita la tapa del arranque: en /map/<x> la página estuvo
   // tapada hasta aquí justo para que no se viera el editor de fondo mientras se pedía el índice de assets.
   // Va DESPUÉS del `hidden=false` y en la misma tarea: entre las dos líneas no hay ningún pintado.
@@ -14819,6 +15474,26 @@ Object.defineProperty(game,'hotbarHide',{ enumerable:true, get:()=>mc.hotbarHide
   set:v=>{ v=Math.max(0,Math.min(200,isFinite(+v)?+v:14)); mc.hotbarHide=v; try{localStorage.setItem('vf_mcHotbarHide',v);}catch(e){} if(v===0) mcRevealHotbar(); return v; } });
 Object.defineProperty(game,'reach',{ enumerable:true, get:()=>mc.reach,
   set:v=>{ v=Math.max(1,Math.min(64,+v||16)); mc.reach=v; try{localStorage.setItem('vf_mcReach',v);}catch(e){} return v; } });
+Object.defineProperty(game,'playerReach',{ enumerable:true, get:()=>mc.reach,
+  set:v=>{ v=Math.max(1,Math.min(64,+v||16)); mc.reach=v; try{localStorage.setItem('vf_mcReach',v);}catch(e){} return v; } });
+// game.crosshair / game.mira = cambia el punto de mira del modo mapa ('+', '⛶', '☉', '⌞⌝', '👁', '🎯', etc.).
+const MC_HERRAMIENTA_MIRA = { build:'+', box:'⛶', paint:'☉', select:'⌞⌝', pick:'👁' };
+mc.crosshair = MC_HERRAMIENTA_MIRA[mc.tool] || '+';
+function mcSetCrosshair(v){
+  const s = (v == null || v === '') ? (MC_HERRAMIENTA_MIRA[mc.tool] || '+') : String(v);
+  mc.crosshair = s;
+  try{ localStorage.setItem('vf_mcCrosshair', s); }catch(e){}
+  const el = document.getElementById('mc-crosshair');
+  if(el){
+    el.textContent = s;
+    const isEmoji = /\p{Extended_Pictographic}/u.test(s);
+    el.style.fontSize = isEmoji ? '20px' : (s.length > 1 ? '18px' : '22px');
+    el.style.letterSpacing = s === '⌞⌝' ? '1px' : 'normal';
+  }
+  return s;
+}
+Object.defineProperty(game,'crosshair',{ enumerable:true, get:()=>mc.crosshair, set:mcSetCrosshair });
+Object.defineProperty(game,'mira',{ enumerable:true, get:()=>mc.crosshair, set:mcSetCrosshair });
 try{ let a=parseFloat(localStorage.getItem('vf_mcGhostAlpha'));
      if(!isFinite(a)) a=parseFloat(localStorage.getItem('vf_mcTooFarAlpha'));   // migra el nombre viejo
      if(isFinite(a)) mc.ghostAlpha=Math.max(0,Math.min(1,a)); }catch(e){}
@@ -14999,19 +15674,27 @@ Object.defineProperty(game,'playerScale',{ enumerable:true, get:()=>mc.scale,
 // y volver con el pico habría parecido un fallo. Se arranca siempre igual y no hay nada que explicar.
 try{ localStorage.removeItem('vf_mcTool'); }catch(e){}   // limpia lo que dejaron las versiones anteriores
 function mcSetPlayerTool(v, announce){    // centraliza mc.tool (setter de consola + atajos B/P); persiste
-  v=(v==='paint'||v==='select'||v==='pick')?v:'build'; mc.tool=v;
+  v=(v==='box'||v==='paint'||v==='select'||v==='pick')?v:'build'; mc.tool=v;
   mcPintaSlotHerramienta();          // la ranura 10 se entera aquí, venga el cambio de P, de la galería o de consola
+  mcSetCrosshair(MC_HERRAMIENTA_MIRA[v] || '+');
   mc.selA=null;                                      // al cambiar de herramienta, olvida la esquina a medio marcar (la caja confirmada se conserva para Ctrl+C)
-  if(announce && mc.active) toast(v==='select' ? 'Seleccionar: clic marca 2 esquinas · Ctrl+C copia · clic dcho limpia'
+  if(v!=='box') mcBoxClear();
+  if(announce && mc.active) toast(v==='box' ? 'Volumen: arrastra base con clic izq · fija altura con clic izq · clic dcho planta · clic izq reinicia'
+                                : v==='select' ? 'Seleccionar: clic marca 2 esquinas · Ctrl+C copia · clic dcho limpia'
                                 : v==='pick' ? 'Cuentagotas: clic sobre un bloque y su material va a la ranura'
                                 : 'Clic derecho: '+(v==='paint'?'Pintar bloque':'Construir'));
   return v;
 }
-// La rotación de la herramienta, en UN sitio: la usan la tecla P y el clic izquierdo en su ranura, y si
-// cada uno llevara su propia tabla acabarían girando en orden distinto.
-function mcRotaHerramienta(){
-  const next={build:'paint',paint:'select',select:'pick',pick:'build'};
-  return mcSetPlayerTool(next[mc.tool]||'build', true);
+// Conmutación de herramientas:
+// 'principales' (tecla 'e'): conmuta únicamente Construir ↔ Volumen
+// 'secundarias' (tecla 'E' con mayúsculas / shift): conmuta Pintar → Seleccionar → Cuentagotas
+function mcRotaHerramienta(grupo){
+  if(grupo === 'secundarias' || grupo === 'sec' || grupo === true){
+    const nextSec = { paint:'select', select:'pick', pick:'paint' };
+    return mcSetPlayerTool(nextSec[mc.tool] || 'paint', true);
+  }
+  const nextPrinc = { build:'box', box:'build' };
+  return mcSetPlayerTool(nextPrinc[mc.tool] || 'build', true);
 }
 Object.defineProperty(game,'playerTool',{ enumerable:true, get:()=>mc.tool, set:v=>mcSetPlayerTool(v) });
 try{ const t=localStorage.getItem('vf_mcStructTex'); if(t!==null) mc.structTextures=(t!=='0'); }catch(e){}
@@ -15156,7 +15839,7 @@ game.toast=game.showToast=function(msg, secs){ toast(String(msg), secs); return 
 // como se muestra); showFPS/showVoxels se resuelven a su booleano (sus getters devuelven funciones invocables).
 game.dumpVars=function(){
   const keys=['nearClip','perspStrength','playFill','playZoom','playLift',   // edición 3D / modo jugar
-    'fov','renderDist','renderScale','mouseSpeed','yaw','pitch','hotbarHide','reach',   // Mundo (WebGL)
+    'fov','renderDist','renderScale','mouseSpeed','yaw','pitch','hotbarHide','reach','crosshair',   // Mundo (WebGL)
     'ghostAlpha','structGhostAlpha','noteAlpha','noteSigns','noteText','noteTextDist','noteFont','noteWidth','structBias','structCull','playerSpeed','playerScale','playerTool',
     'airControl','airAccel','airCap','autoUnstick',
     'structTextures','structGreedy','useOldStructBuildCall','interiorDark','sunShade','shadowSize','glowLevel','glowFocus','worldSize',
@@ -15217,7 +15900,7 @@ const mcUserKeys={};   // atajos de teclado definidos por el usuario vía game.o
 // ⚠️ Esta lista tiene que llevar TODA tecla que el handler de más abajo atienda ANTES de mirar
 // `mcUserKeys`, o ligarla se acepta sin rechistar y luego no hace nada: la rama del motor sale antes
 // con su `return`. La `f` faltaba desde REQ-FLY1 (pasó a ser volar) y era exactamente ese caso.
-const MC_RESERVED=new Set([...MC_KEYS,'p','b','x','u','n','r','z','f','escape','1','2','3','4','5','6','7','8','9']);
+const MC_RESERVED=new Set([...MC_KEYS,'e','p','b','x','u','n','r','z','f','escape','1','2','3','4','5','6','7','8','9']);
 // REQ-OSD4 · en una pantalla de menú (?osd=1) el clic PULSA el bloque, no captura la cámara: capturarla
 // escondería el cursor y dejaría el menú inservible. Se trabaja aquí, en el 'click', y no en el
 // 'mousedown' de más abajo, porque aquel exige tener el puntero capturado — que es justo lo que no hay.
@@ -15249,9 +15932,9 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   const k=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey) && k==='c'){ mcCopySelection(); e.preventDefault(); return; }   // Ctrl+C: copia la selección (tool=select) al portapapeles compatible con el editor
   if((e.ctrlKey||e.metaKey) && k==='v'){ mcPasteWorld(); e.preventDefault(); return; }        // Ctrl+V: pega el portapapeles EN EL MAPA, apoyado en la cara apuntada (el Mundo no se cierra)
-  if(k==='p'){                                                                                              // REQ-TOOL1: alt+P abre la galería de la ranura 10, igual que alt+<n> abre la de una ranura de bloque
+  if(k==='e' || k==='p'){                                                                                   // e = conmuta construir↔volumen · E = conmuta pintar→seleccionar→cuentagotas
     if(e.altKey){ mcOpenPickerHerramientas(); e.preventDefault(); return; }
-    mcRotaHerramienta(); e.preventDefault(); return; }   // P = rota la herramienta de clic derecho: Construir → Pintar → Seleccionar → Cuentagotas
+    mcRotaHerramienta(e.shiftKey || e.key === 'E'); e.preventDefault(); return; }
   if(k==='b'){ const st=1.15; game.playerScale=mc.scale*(e.shiftKey?1/st:st); toast('Tamaño ×'+(+mc.scale.toFixed(2))); e.preventDefault(); return; }   // b = más grande («big») · B (mayús) = más pequeño (paso fino ×1.15)
   if(k==='x'){ mc.xray=!mc.xray; toast('Rayos-X: '+(mc.xray?'ON':'OFF')); e.preventDefault(); return; }    // modo depuración: ver el volumen de colisión
   if(k==='u'){ mcForceUnstick(); toast('Desatascado'); e.preventDefault(); return; }                       // U = sácame de aquí (sube sobre lo que estorbe; si no, al spawn)
@@ -15264,11 +15947,23 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   if(k==='f' && !e.altKey){
     toast('Vuelo: '+(mcSetVolar(!mc.volar)?'ON':'OFF')+' — Espacio sube, Shift baja');
     e.preventDefault(); return; }
-  if(k==='r' && mc.slotStruct[mc.sel]){                                                                       // coloca la estructura en cualquiera de sus 24 posturas (mantén clic derecho para ver la vista-previa; suelta = estampa así)
+  if(k==='v' && mc.tool==='box' && mc.boxStep===3){
+    if(e.shiftKey || e.key==='V'){
+      mc.boxGiro = (mc.boxGiro + 1) & 3;
+      toast('Volumen giro: ' + (mc.boxGiro * 90) + '° (' + (mc.boxGiro + 1) + '/4)');
+    } else {
+      mc.boxCara = (mc.boxCara + 1) % 6;
+      toast('Volumen cara: ' + MC_ORI_CARA[mc.boxCara] + ' (' + (mc.boxCara + 1) + '/6)');
+    }
+    mc._volCache = null;
+    e.preventDefault(); return;
+  }
+  if(k==='r' && (mc.slotStruct[mc.sel] || mc.tool==='box')){                                                                       // coloca la estructura en cualquiera de sus 24 posturas (mantén clic derecho para ver la vista-previa; suelta = estampa así)
     // Dos pasos, que es como se piensa: primero QUÉ CARA queda arriba, y luego cómo está girada sobre ella.
     if(e.shiftKey){ mc.previewGiro=(mc.previewGiro+1)&3; toast('Giro: '+(mc.previewGiro*90)+'° sobre esa cara'); }   // Shift+R = los 4 giros dentro de la cara elegida
     else { mc.previewCara=(mc.previewCara+1)%6; toast('Cara arriba: '+MC_ORI_CARA[mc.previewCara]+' ('+(mc.previewCara+1)+'/6)'); }  // R = las 6 caras
-    mcPrecargaGirada(mc.slotStruct[mc.sel], mcPreviewOri());   // la pieza girada es otro material (mcClaveConOri): que esté listo ANTES del clic
+    const rawKey = mc.slotStruct[mc.sel] || (mc.hotbar[mc.sel] && mc.blockKey ? mc.blockKey[mc.hotbar[mc.sel]] : null);
+    if(rawKey) mcPrecargaGirada(rawKey, mcPreviewOri());   // la pieza girada es otro material (mcClaveConOri): que esté listo ANTES del clic
     e.preventDefault(); return; }
   if(k==='r' && mc.tool==='select' && mc.selBox){ mcRotateSelBox(); e.preventDefault(); return; }              // gira 90° (horizontal) los bloques de la caja seleccionada — p.ej. tras Ctrl+V pegar
   // S SOLO mientras se MANTIENE el clic derecho colocando una estructura: alterna pegado canto↔centrado (la
@@ -15277,13 +15972,36 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   if(k==='s' && !e.repeat && mc.heldBtn===2 && mc.slotStruct[mc.sel]){ mc.stampCenter=!mc.stampCenter; toast('Pegado: '+(mc.stampCenter?'centrado':'canto')); e.preventDefault(); return; }
   if(k==='z'){ if(e.shiftKey) mcRedo(); else mcUndo(); e.preventDefault(); return; }   // z = deshacer · Z (mayús) = rehacer (romper/poner/pintar/estampar/retirar)
   if(mcUserKeys[k]){ try{ mcUserKeys[k](e); }catch(err){ console.error('game.onKey("'+k+'"):', err); } e.preventDefault(); return; }   // atajos del usuario (game.onKey)
+  if(e.key==='Control' && !e.repeat && mc.tool==='box' && mc.boxStep===3 && !mc.boxCtrlHeld){
+    mc.boxCtrlHeld = true;
+    const near = mcRaycast(mcReach(), true);
+    if(near && near.cell[1] >= 0){
+      const n = near.normal;
+      mc.boxCtrlFreeze = [near.cell[0] + n[0], near.cell[1] + n[1], near.cell[2] + n[2]];
+    } else {
+      mc.boxCtrlFreeze = mc.pos.map(Math.floor);
+    }
+    mc.boxAnchorHover = (mc.boxAnchor ? mc.boxAnchor.slice() : [0, 0, 0]);
+    toast('Ajustando agarre: apunta al bloque del volumen · Suelta Control para fijar');
+  }
   if(MC_KEYS.includes(k)){
     mc.keys[k]=true; if(k!=='shift') e.preventDefault();
     // Si el ratón no está capturado, moverse con WASD/salto lo captura (como un clic) — keydown es gesto de usuario.
     if(document.pointerLockElement!==mc.canvas){ mcLockPointer(); }
   }
 });
-window.addEventListener('keyup',e=>{ if(!mc.active || !$('#snip-modal').hidden || !$('#ag-modal').hidden) return; mc.keys[e.key.toLowerCase()]=false; });
+window.addEventListener('keyup',e=>{
+  if(!mc.active || !$('#snip-modal').hidden || !$('#ag-modal').hidden) return;
+  const k = e.key.toLowerCase();
+  mc.keys[k]=false;
+  if(e.key==='Control' && mc.tool==='box' && mc.boxCtrlHeld){
+    mc.boxCtrlHeld = false;
+    if(mc.boxAnchorHover) mc.boxAnchor = mc.boxAnchorHover.slice();
+    mc.boxCtrlFreeze = null;
+    const [ax, ay, az] = mc.boxAnchor || [0, 0, 0];
+    toast('Punto de agarre fijado en [' + ax + ', ' + ay + ', ' + az + ']');
+  }
+});
 
 // --- F4b · controles táctiles: sin teclado no se puede andar por el Mundo ---
 // Una pantalla táctil no tiene ni pointer-lock ni WASD, así que desde un móvil el Mundo se veía pero
@@ -15969,14 +16687,11 @@ $('#mc-canvas').addEventListener('mousedown',e=>{
   if(!mc.active || document.pointerLockElement!==mc.canvas) return;
   if(e.button!==0 && e.button!==2) return;
   mc.heldBtn=e.button; mc.actAt=performance.now();
-  // Estructuras (clic derecho sobre una ranura-estructura): NO se colocan al pulsar; el fantasma sigue la mira y
-  // se estampa al SOLTAR (colocación precisa). R gira 90° la vista-previa. El resto de acciones actúan al pulsar.
-  if(!mcToolPasiva() && e.button===2 && mc.slotStruct[mc.sel]) toast('Mantén clic derecho · R gira · suelta coloca');
-  else mcDoAction(e.button);
+  mcDoAction(e.button);
 });
 window.addEventListener('mouseup',e=>{ if(!mc.active) return;
-  if(!mcToolPasiva() && mc.heldBtn===2 && mc.slotStruct[mc.sel] && document.pointerLockElement===mc.canvas) mcPlace();   // soltar = estampa la estructura donde apunta el fantasma
-  mc.heldBtn=-1; mcClearPreview(); });
+  if(mc.tool==='box' && mc.heldBtn===0 && mc.boxStep===1 && document.pointerLockElement===mc.canvas) mcBoxMouseUp();
+  mc.heldBtn=-1; });
 $('#mc-canvas').addEventListener('contextmenu',e=>{ if(mc.active) e.preventDefault(); });
 
 buildPalette();

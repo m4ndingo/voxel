@@ -72,8 +72,8 @@ const { chromium } = require('playwright');
   ok(slots === 10, 'la hotbar tiene 10 ranuras: las 9 de bloques y la de herramienta', slots);
   ok(await p.evaluate(() => { const s = document.querySelectorAll('#mc-hotbar .mc-slot'); return s[9] && s[9].id === 'mc-slot-tool'; }),
      'y la de herramienta es la ÚLTIMA (detrás de la 9, no en su sitio)');
-  ok(await p.evaluate(() => document.querySelector('#mc-slot-tool .mc-slot-key').textContent) === 'P',
-     'se etiqueta «P», no «10»');
+  ok(await p.evaluate(() => document.querySelector('#mc-slot-tool .mc-slot-key').textContent) === 'E',
+     'se etiqueta «E», no «10»');
 
   // El catálogo se pide en segundo plano al pintar la ranura; se espera a que resuelva el vínculo.
   await p.waitForFunction('mc.catalog && mc.catalog.length', null, { timeout: 60000 });
