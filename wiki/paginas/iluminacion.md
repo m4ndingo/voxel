@@ -23,30 +23,32 @@ game.cieloColor('reset');        // volver al azul de siempre
 Es el cielo **de arriba del agua**. Lo que ves buceando es otra cosa: eso lo manda `game.vistaAgua`
 (más abajo).
 
-## El agua refleja el cielo
+## El agua refleja el cielo y el entorno
 
-La superficie del agua refleja el color del cielo: mirándola **a ras** se aclara, se azula y se opaca
-—parece agua de verdad—; mirándola **desde arriba** transparenta y ves el fondo. Viene encendido por
-defecto, a media fuerza. Los mandos para jugar con él:
+La superficie del agua refleja tanto el color del cielo como los **objetos del entorno** (nubes, terreno, árboles, estructuras y agentes) mediante un pase especular planar y micro-ondulaciones animadas. Mirándola **a ras** se aclara, se azula, refleja el entorno y se opaca —parece agua de verdad—; mirándola **desde arriba** transparenta y ves el fondo. Viene encendido por defecto, a media fuerza. Los mandos para jugar con él:
 
 ```js
-game.reflejoAgua(0.8);     // más espejo (0 = apagado, 1 = espejo fuerte a rasante)
-game.reflejoCurva(1);      // reflejar incluso mirando de frente (súbelo y solo a rasante)
-game.reflejoOpacidad(0.4); // reflejar pero sin perder del todo el fondo
-game.reflejoColor([1, 0.6, 0.4]); // reflejar un color cálido aunque el cielo sea azul
-game.reflejoColor('cielo');       // volver a reflejar el cielo
-game.reflejoAgua('reset');        // todo a fábrica
+game.reflejoAgua(0.8);             // más espejo (0 = apagado, 1 = espejo fuerte a rasante)
+game.reflejoCurva(1);              // reflejar incluso mirando de frente (súbelo y solo a rasante)
+game.reflejoBase(0.15);            // reflectividad mínima en picado/frontal (F0 de Fresnel, 0..1)
+game.reflejoCausticas(1.5);        // fuerza de las cáusticas/refracción animada sobre el fondo sumergido
+game.reflejoOpacidad(0.4);         // reflejar pero sin perder del todo el fondo
+game.reflejoEntorno(true);         // reflejar objetos, terreno y nubes del entorno (false = solo color de cielo)
+game.reflejoOndas(1.5);            // fuerza del oleaje/micro-ondulaciones en la superficie
+game.reflejoPlanoY(14);            // altura Y del plano de agua ('auto' = autodetectada)
+game.reflejoColor([1, 0.6, 0.4]);  // forzar reflejar un color fijo en vez del entorno/cielo
+game.reflejoColor('cielo');        // volver a reflejar el entorno y cielo normal
+game.reflejoAgua('reset');         // todo a fábrica
 ```
 
-También puedes pasarle varios de una vez: `game.reflejoAgua({ fuerza: 0.7, curva: 3, opacidad: 0.8 })`.
+También puedes pasarle varios de una vez: `game.reflejoAgua({ fuerza: 0.7, curva: 2, base: 0.1, causticas: 1.2, opacidad: 0.8, entorno: true, ondas: 1.2 })`.
 
-Dos cosas que conviene saber:
+Cosas que conviene saber:
 
-- **No refleja las nubes ni el terreno**, solo el **color** del cielo. Es el efecto barato, sin una
-  segunda pasada de dibujado — a cambio no verás tu reflejo en el agua, solo el tono del cielo.
+- **Refleja el entorno real**: nubes de lana blanca, montañas, árboles, edificios y agentes cercanos sobre la lámina.
+- Si prefieres el modo ligero clásico sin pase extra de geometría, puedes desactivar el entorno con `game.reflejoEntorno(false)`.
 - Es **solo del agua**. La lava no refleja (es otra cosa: brilla, no espeja).
-- Si quieres que el reflejo y el fondo cambien **juntos**, mueve el cielo con `game.cieloColor` y deja
-  `game.reflejoColor` en `'cielo'`.
+- Si quieres que el reflejo y el fondo cambien **juntos**, mueve el cielo con `game.cieloColor` y deja `game.reflejoColor` en `'cielo'`.
 
 ## Niebla (días de niebla, tormenta)
 

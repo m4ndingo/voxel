@@ -40,7 +40,7 @@ const slug = (t) => t.replace(/^#+\s/, '').toLowerCase()
 
 const doc = {};
 for (const f of FICHEROS) {
-  const lineas = fs.readFileSync(path.join(RAIZ, f), 'utf8').split('\n');
+  const lineas = fs.readFileSync(path.join(RAIZ, f), 'utf8').replace(/\r/g, '').split('\n');
   const explicitas = [];
   const slugs = new Set();
   lineas.forEach((l) => {

@@ -1450,9 +1450,42 @@ function drawPivotes3d(){
   });
   e3ctx.restore();
 }
+let _colorBitSet=null;
+function countColorsFromRgba(rgba, len){
+  if(!rgba) return 0;
+  const n=len||rgba.length;
+  if(n<4) return 0;
+  if(!_colorBitSet) _colorBitSet=new Uint32Array(524288);
+  _colorBitSet.fill(0);
+  let count=0;
+  for(let i=0;i<n;i+=4){
+    const rgb=(rgba[i]<<16)|(rgba[i+1]<<8)|rgba[i+2];
+    const idx=rgb>>>5, bit=1<<(rgb&31);
+    if((_colorBitSet[idx]&bit)===0){ _colorBitSet[idx]|=bit; count++; }
+  }
+  return count;
+}
+function edit3dCountScreenColors(){
+  const cv=$('#edit3d');
+  if(!cv || cv.width<=0 || cv.height<=0 || mode!=='3d') return 0;
+  const ctx=e3ctx || cv.getContext('2d');
+  if(!ctx) return 0;
+  try{ const img=ctx.getImageData(0,0,cv.width,cv.height); return countColorsFromRgba(img.data); }catch(e){ return 0; }
+}
+function updateColorMeter(){
+  if(mode==='3d' && _showColors){
+    const now=performance.now();
+    if(state._sceneColT==null || now-state._sceneColT>400){
+      state._sceneColT=now;
+      game.colors=edit3dCountScreenColors();
+    }
+  }
+  const el=$('#e3-col'); if(el) el.textContent=(game.colors||0).toLocaleString('es-ES')+' col';
+}
 function updateVoxMeter(){
   const el=$('#e3-vox'); if(el) el.textContent=_voxDrawnLast+' vox';
   if(window.game) window.game.voxels=_voxDrawnLast;
+  updateColorMeter();
 }
 // BUG-P3D1: coalesce varios pointermove en UN repintado por frame (antes cada evento llamaba a
 // drawEdit3d síncrono => N renders/frame). El medidor #e3-fps pasa a contar frames reales.
@@ -2715,6 +2748,8 @@ function setMode(m){
   $('#rot-float').hidden=!is3;                 // rotar (abajo-dcha) solo en 3D
   $('#e3-fps').hidden=!(is3 && _showFPS);       // medidor de FPS: en 3D y si game.showFPS
   $('#e3-vox').hidden=!(is3 && _showVox);       // medidor de voxels: en 3D y si game.showVoxels
+  $('#e3-col').hidden=!(is3 && _showColors);    // medidor de colores: en 3D y si game.showColors
+  if(is3) updateColorMeter();
   if(window.game) window.game.mode=m;
   if(!is3){ _e3fpsWinT=0; _e3fpsCount=0; _e3fpsLastT=0; }   // reinicia la ventana al salir de 3D
   updateLayerFloat();                          // subir/bajar capa: en Capas o si "aislar" está activo
@@ -3986,7 +4021,7 @@ let _mcSnipDesfase = null;
 function mcSnippetDesfase(){
   if(_mcSnipDesfase !== null) return _mcSnipDesfase;
   _mcSnipDesfase = 2;
-  try{ new Function('throw new Error("sonda-vf")')(); }
+  try{ const AF = Object.getPrototypeOf(async function(){}).constructor; new AF('opts', 'args', 'throw new Error("sonda-vf")')(); }
   catch(e){
     const m = /<anonymous>:(\d+):\d+/.exec((e && e.stack) || '');
     if(m) _mcSnipDesfase = (+m[1]) - 1;          // la sonda está en la línea 1 del cuerpo
@@ -4001,7 +4036,7 @@ function mcSnippetLineaSintaxis(code){
   const lineas = String(code||'').split('\n');
   const seAcabo = /unexpected end of (input|script)|unexpected eof/i;
   for(let i=0;i<lineas.length;i++){
-    try{ new AF(lineas.slice(0,i+1).join('\n')); }
+    try{ new AF('opts', 'args', lineas.slice(0,i+1).join('\n')); }
     catch(e){ if(e instanceof SyntaxError && !seAcabo.test(e.message||'')) return i+1; }
   }
   return 0;                                       // no se ha podido acotar: mejor no señalar una línea al azar
@@ -4034,14 +4069,18 @@ function mcSnippetInforme(nombre, code, err){
   console.error(trozos.join('\n'), err);
   return linea;
 }
-async function mcCorreSnippet(nombre, code){
+async function mcCorreSnippet(nombre, code, ...args){
   const antes = (typeof mc!=='undefined') ? mc._snippetActual : undefined;
   if(typeof mc!=='undefined') mc._snippetActual = nombre || null;
   const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
   // `sourceURL` va al FINAL, así que no desplaza ni una línea, y a cambio la pila deja de decir «VM2571»
   // y dice el nombre del snippet — que es lo que se busca cuando el error sale tres capas más abajo.
   const conNombre = code + '\n//# sourceURL=vf-snippet/' + String(nombre||'anonimo').replace(/[^\w.-]/g,'_');
-  try{ return await (new AsyncFunction(conNombre))(); }
+  const opts = args.length > 0 ? args[0] : undefined;
+  try{
+    const fn = new AsyncFunction('opts', 'args', conNombre);
+    return await fn.call(this, opts, args.length > 1 ? args : (opts !== undefined ? opts : args), ...args);
+  }
   catch(err){
     // La línea viaja EN el error: quien lo recoja arriba (el panel) no tiene que volver a calcularla
     // ni adivinarla, y quien no la quiera no se entera de que está.
@@ -5265,9 +5304,8 @@ for(const k in ROOM_PROPS){ const p=ROOM_PROPS[k];
 window.room = room;
 
 // `game`: inspector global de consola. Teclear `game` a secas vuelca el diccionario con valores:
-// {fps, mode, room:{doorTrim,…}, showFPS}. El medidor de FPS se muestra/oculta con
-// `game.showFPS(false)` o `game.showFPS = false` (persistido). fps/mode/room se refrescan solos
-// (fps en cada frame de la vista 3D; room en cada carga/tick de partida y al tocar doorTrim).
+// {fps, voxels, colors, mode, room:{doorTrim,…}, showFPS, showVoxels, showColors}. Los medidores se muestran/ocultan con
+// `game.showFPS(false)`, `game.showVoxels(false)`, `game.showColors(false)` o por asignación (persistidos).
 let _showFPS=true; try{ _showFPS = localStorage.getItem('vf_showFPS')!=='0'; }catch(e){}
 function applyShowFPS(v){ _showFPS=!!v;
   try{ localStorage.setItem('vf_showFPS', _showFPS?'1':'0'); }catch(e){}
@@ -5282,21 +5320,58 @@ function applyShowVox(v){ _showVox=!!v;
   updatePlayMeters();                                                     // REQ-DBG1: y en el modo Play
   updateWorldMeters();                                                    // BUG-DBG2: y en el Mundo, sin esperar al frame
   return _showVox; }
+let _showColors=false; try{ _showColors = localStorage.getItem('vf_showColors')==='1'; }catch(e){}
+function applyShowColors(v){ _showColors=!!v;
+  try{ localStorage.setItem('vf_showColors', _showColors?'1':'0'); }catch(e){}
+  if(typeof state!=='undefined' && state) state._sceneColT=0;
+  if(typeof play!=='undefined' && play) play._sceneColT=0;
+  if(typeof mc!=='undefined' && mc) mc._sceneColT=0;
+  const el=$('#e3-col'); if(el){ el.hidden = !(_showColors && mode==='3d'); if(_showColors && typeof updateColorMeter==='function') updateColorMeter(); }
+  updatePlayMeters();
+  updateWorldMeters();
+  return _showColors; }
+function playCountScreenColors(){
+  const cv=$('#play-canvas');
+  if(!cv || cv.width<=0 || cv.height<=0) return 0;
+  const ctx=cv.getContext('2d');
+  if(!ctx) return 0;
+  try{ const img=ctx.getImageData(0,0,cv.width,cv.height); return countColorsFromRgba(img.data); }catch(e){ return 0; }
+}
 // REQ-DBG1: los mismos toggles de depuración F12 valen en Play. Los medidores viven sobre
 // #play-stage y se refrescan desde playTick (FPS real de pantalla) y playLoadRoom (voxels de sala).
 function updatePlayMeters(){
   const on=!!(play && play.active);
   const ef=$('#play-fps'); if(ef){ ef.hidden=!(_showFPS && on); ef.textContent=Math.round(game.fps)+' fps'; }
   const ev=$('#play-vox'); if(ev){ ev.hidden=!(_showVox && on); ev.textContent=game.voxels+' vox'; }
+  const ec=$('#play-col'); if(ec){
+    if(on && _showColors){
+      const now=performance.now();
+      if(play._sceneColT==null || now-play._sceneColT>400){
+        play._sceneColT=now;
+        game.colors=playCountScreenColors();
+      }
+    }
+    ec.hidden=!(_showColors && on);
+    ec.textContent=(game.colors||0).toLocaleString('es-ES')+' col';
+  }
 }
 function roomSnapshot(){ const o={}; for(const k in ROOM_PROPS){ try{ o[k]=ROOM_PROPS[k].get(); }catch(e){ o[k]=null; } } return o; }
-const game = { fps:0, voxels:0, mode:mode, room:roomSnapshot() };
+const game = { fps:0, voxels:0, colors:0, mode:mode, room:roomSnapshot() };
 Object.defineProperty(game, 'showFPS', { enumerable:true,   // callable `game.showFPS(false)` y asignable `game.showFPS=false`
   get(){ const f=v=>applyShowFPS(v===undefined?!_showFPS:v); f.valueOf=()=>_showFPS; f.toString=()=>String(_showFPS); return f; },
   set(v){ applyShowFPS(v); } });
+Object.defineProperty(game, 'showFps', { enumerable:false,
+  get(){ return game.showFPS; }, set(v){ game.showFPS=v; } });
 Object.defineProperty(game, 'showVoxels', { enumerable:true,   // muestra/oculta el nº de voxels dibujados
   get(){ const f=v=>applyShowVox(v===undefined?!_showVox:v); f.valueOf=()=>_showVox; f.toString=()=>String(_showVox); return f; },
   set(v){ applyShowVox(v); } });
+Object.defineProperty(game, 'showVox', { enumerable:false,
+  get(){ return game.showVoxels; }, set(v){ game.showVoxels=v; } });
+Object.defineProperty(game, 'showColors', { enumerable:true,   // muestra/oculta el nº de colores presentes en escena
+  get(){ const f=v=>applyShowColors(v===undefined?!_showColors:v); f.valueOf=()=>_showColors; f.toString=()=>String(_showColors); return f; },
+  set(v){ applyShowColors(v); } });
+Object.defineProperty(game, 'showColor', { enumerable:false,
+  get(){ return game.showColors; }, set(v){ game.showColors=v; } });
 // REQ-OSD1 · aquí vivían `game.showOSDbuttons` y los dos botones de la esquina del Mundo (🧩 Código y
 // ✕ Cerrar). QUITADOS 2026-08-13 por decisión del dueño («ya llegamos de otras formas»): al Mundo se
 // entra y se sale con teclado —`Esc` cierra, `Alt+C` abre los snippets— y los botones salían en cada
@@ -6010,7 +6085,9 @@ async function playLoadRoom(cellKey, spawn){
   const base=document.createElement('canvas'); base.width=PLAY_W; base.height=PLAY_H;
   renderFree3d(base.getContext('2d'), PLAY_W, PLAY_H, PLAY_VIEW, false);
   play.g=project3d(PLAY_W, PLAY_H, PLAY_VIEW); state.voxels=saved; state.caras=savedCaras; play.base=base;
-  game.voxels=_voxDrawnLast; updatePlayMeters();                  // REQ-DBG1: voxels dibujados de la sala (tras culling)
+  game.voxels=_voxDrawnLast;
+  if(roomVox){ const cs=new Set(); for(const v of Object.values(roomVox)) if(v) cs.add(bareColor(v)); game.colors=cs.size; }
+  updatePlayMeters();                  // REQ-DBG1: voxels dibujados de la sala (tras culling)
   // Oclusión POR PÍXEL: imagen base + buffer de profundidad de la superficie visible
   // (raster en orden pintor => por píxel queda la profundidad de lo más CERCANO). Sin AA.
   play.baseImg=base.getContext('2d').getImageData(0,0,PLAY_W,PLAY_H);
@@ -6413,9 +6490,11 @@ game.vistaLava = _mcTunableFluido('LAVA', { sky: MC_VISTA_FLUIDO.LAVA.sky.slice(
 //   game.reflejoOpacidad(0.8)      → cuánto se OPACA el agua a rasante (0 = sigue transparente; 1 = tapa)
 //   game.reflejoColor([1,0.6,0.4]) → refleja ESE color en vez del cielo (un atardecer, p.ej.)
 //   game.reflejoColor('cielo')     → vuelve a reflejar el cielo (lo normal)
-const MC_AGUA_REFLEJO_DEF = 0.5, MC_REFL_CURVA_DEF = 5, MC_REFL_OPAC_DEF = 1;
+const MC_AGUA_REFLEJO_DEF = 0.65, MC_REFL_CURVA_DEF = 3.0, MC_REFL_OPAC_DEF = 0.95, MC_REFL_ENTORNO_DEF = 0.7, MC_REFL_ONDAS_DEF = 1.0, MC_REFL_BASE_DEF = 0.2, MC_REFL_CAUSTICAS_DEF = 0.05, MC_REFL_SUBACUATICO_DEF = 0.5, MC_REFL_ABSORCION_DEF = 1.0;
 let mcAguaReflejo = MC_AGUA_REFLEJO_DEF, mcReflCurva = MC_REFL_CURVA_DEF, mcReflOpac = MC_REFL_OPAC_DEF;
-let mcReflColor = null;   // null = refleja el cielo; [r,g,b] (0..1) = color forzado
+let mcReflEntorno = MC_REFL_ENTORNO_DEF, mcReflOndas = MC_REFL_ONDAS_DEF, mcReflPlanoY = null;
+let mcReflBase = MC_REFL_BASE_DEF, mcReflCausticas = MC_REFL_CAUSTICAS_DEF, mcReflSubacuatico = MC_REFL_SUBACUATICO_DEF, mcReflAbsorcion = MC_REFL_ABSORCION_DEF;
+let mcReflColor = null;   // null = refleja el cielo/entorno; [r,g,b] (0..1) = color forzado
 const _clamp01 = (x) => Math.max(0, Math.min(1, x));
 function _mcColorArr(v){   // acepta [r,g,b] 0..1, '#rrggbb' o 'r,g,b'; devuelve [r,g,b] o null
   if(Array.isArray(v) && v.length >= 3) return [_clamp01(+v[0]), _clamp01(+v[1]), _clamp01(+v[2])];
@@ -6427,20 +6506,65 @@ function _mcColorArr(v){   // acepta [r,g,b] 0..1, '#rrggbb' o 'r,g,b'; devuelve
   return null;
 }
 game.reflejoAgua = function(v){
-  if(v === 'reset'){ mcAguaReflejo = MC_AGUA_REFLEJO_DEF; mcReflCurva = MC_REFL_CURVA_DEF; mcReflOpac = MC_REFL_OPAC_DEF; mcReflColor = null; }
+  if(v === 'reset'){
+    mcAguaReflejo = MC_AGUA_REFLEJO_DEF; mcReflCurva = MC_REFL_CURVA_DEF; mcReflOpac = MC_REFL_OPAC_DEF;
+    mcReflColor = null; mcReflEntorno = MC_REFL_ENTORNO_DEF; mcReflOndas = MC_REFL_ONDAS_DEF; mcReflPlanoY = null;
+    mcReflBase = MC_REFL_BASE_DEF; mcReflCausticas = MC_REFL_CAUSTICAS_DEF; mcReflSubacuatico = MC_REFL_SUBACUATICO_DEF; mcReflAbsorcion = MC_REFL_ABSORCION_DEF;
+  }
   else if(typeof v === 'number') mcAguaReflejo = _clamp01(v);
   else if(v && typeof v === 'object'){
     if(typeof v.fuerza === 'number')   mcAguaReflejo = _clamp01(v.fuerza);
     if(typeof v.curva === 'number')    mcReflCurva  = Math.max(0.2, Math.min(20, v.curva));
     if(typeof v.opacidad === 'number') mcReflOpac   = _clamp01(v.opacidad);
+    if(typeof v.entorno === 'number' || typeof v.entorno === 'boolean') mcReflEntorno = typeof v.entorno === 'boolean' ? (v.entorno ? 1 : 0) : _clamp01(v.entorno);
+    if(typeof v.ondas === 'number')    mcReflOndas  = Math.max(0, Math.min(100, v.ondas));
+    if(typeof v.base === 'number')     mcReflBase   = _clamp01(v.base);
+    if(typeof v.causticas === 'number')mcReflCausticas = Math.max(0, Math.min(10, v.causticas));
+    if(typeof v.subacuatico === 'number' || typeof v.subacuatico === 'boolean') mcReflSubacuatico = typeof v.subacuatico === 'boolean' ? (v.subacuatico ? 1 : 0) : Math.max(0, Math.min(10, v.subacuatico));
+    if(typeof v.absorcion === 'number' || typeof v.absorcion === 'boolean') mcReflAbsorcion = typeof v.absorcion === 'boolean' ? (v.absorcion ? 1 : 0) : Math.max(0, Math.min(10, v.absorcion));
+    if('planoY' in v) mcReflPlanoY = (typeof v.planoY === 'number') ? v.planoY : null;
     if('color' in v) mcReflColor = (v.color==null || v.color==='cielo') ? null : _mcColorArr(v.color);
   }
   console.log('[agua] reflejo = ' + mcAguaReflejo + (mcAguaReflejo ? '' : ' (apagado)') +
-    ' · curva ' + mcReflCurva + ' · opacidad ' + mcReflOpac + ' · color ' + (mcReflColor ? JSON.stringify(mcReflColor.map(x=>+x.toFixed(2))) : 'cielo'));
-  return { fuerza: mcAguaReflejo, curva: mcReflCurva, opacidad: mcReflOpac, color: mcReflColor ? mcReflColor.slice() : 'cielo' };
+    ' · curva ' + mcReflCurva + ' · opacidad ' + mcReflOpac + ' · base ' + mcReflBase + ' · entorno ' + mcReflEntorno + ' · ondas ' + mcReflOndas + ' · causticas ' + mcReflCausticas + ' · subacuatico ' + mcReflSubacuatico + ' · absorcion ' + mcReflAbsorcion +
+    ' · color ' + (mcReflColor ? JSON.stringify(mcReflColor.map(x=>+x.toFixed(2))) : 'cielo'));
+  return { fuerza: mcAguaReflejo, curva: mcReflCurva, opacidad: mcReflOpac, base: mcReflBase, entorno: mcReflEntorno, ondas: mcReflOndas, causticas: mcReflCausticas, subacuatico: mcReflSubacuatico, absorcion: mcReflAbsorcion, color: mcReflColor ? mcReflColor.slice() : 'cielo' };
 };
 game.reflejoCurva    = function(n){ if(typeof n === 'number') mcReflCurva = Math.max(0.2, Math.min(20, n)); console.log('[agua] curva del reflejo = ' + mcReflCurva); return mcReflCurva; };
 game.reflejoOpacidad = function(o){ if(typeof o === 'number') mcReflOpac = _clamp01(o); console.log('[agua] opacidad a rasante = ' + mcReflOpac); return mcReflOpac; };
+game.reflejoBase     = function(b){ if(typeof b === 'number') mcReflBase = _clamp01(b); console.log('[agua] reflectividad base (F0) = ' + mcReflBase); return mcReflBase; };
+game.reflejoCausticas= function(c){ if(typeof c === 'number') mcReflCausticas = Math.max(0, Math.min(10, c)); console.log('[agua] causticas/refraccion = ' + mcReflCausticas); return mcReflCausticas; };
+game.reflejoSubacuatico= function(s){
+  if(typeof s === 'boolean') mcReflSubacuatico = s ? 1 : 0;
+  else if(typeof s === 'number') mcReflSubacuatico = Math.max(0, Math.min(10, s));
+  else if(s === 'reset') mcReflSubacuatico = MC_REFL_SUBACUATICO_DEF;
+  console.log('[agua] reflejo subacuatico (enves / Snell) = ' + mcReflSubacuatico);
+  return mcReflSubacuatico;
+};
+game.reflejoAbsorcion= function(a){
+  if(typeof a === 'boolean') mcReflAbsorcion = a ? 1 : 0;
+  else if(typeof a === 'number') mcReflAbsorcion = Math.max(0, Math.min(10, a));
+  else if(a === 'reset') mcReflAbsorcion = MC_REFL_ABSORCION_DEF;
+  console.log('[agua] absorcion de luz / profundidad = ' + mcReflAbsorcion);
+  return mcReflAbsorcion;
+};
+game.reflejoEntorno  = function(e){
+  if(typeof e === 'boolean') mcReflEntorno = e ? 1 : 0;
+  else if(typeof e === 'number') mcReflEntorno = _clamp01(e);
+  console.log('[agua] reflejo de entorno = ' + mcReflEntorno);
+  return mcReflEntorno;
+};
+game.reflejoOndas    = function(w){
+  if(typeof w === 'number') mcReflOndas = Math.max(0, Math.min(100, w));
+  console.log('[agua] ondas del reflejo = ' + mcReflOndas);
+  return mcReflOndas;
+};
+game.reflejoPlanoY   = function(y){
+  if(typeof y === 'number') mcReflPlanoY = y;
+  else if(y === 'auto' || y == null) mcReflPlanoY = null;
+  console.log('[agua] plano Y de reflejo = ' + (mcReflPlanoY != null ? mcReflPlanoY : 'auto'));
+  return mcReflPlanoY;
+};
 game.reflejoColor    = function(c){
   if(c === 'reset' || c === 'cielo' || c == null) mcReflColor = null;
   else { const a = _mcColorArr(c); if(a) mcReflColor = a; else { console.warn('game.reflejoColor: no entiendo ' + JSON.stringify(c) + ' (usa [r,g,b] 0..1, "#rrggbb" o "cielo")'); } }
@@ -6453,11 +6577,58 @@ game.reflejoColor    = function(c){
 //   game.cieloColor('reset')
 // Es MC_SKY: mcActualizaVista lo copia a mcCieloEf cada fotograma cuando NO estás bajo el agua, así que
 // el fondo y el reflejo del agua cambian juntos al instante. (Bajo el agua manda game.vistaAgua.)
+const MC_CIELO_DEF = {
+  horizonte: [0.65, 0.82, 0.98],
+  medio:     [0.35, 0.65, 0.95],
+  cenit:     [0.15, 0.42, 0.85],
+  suelo:     [0.45, 0.60, 0.70]
+};
+let mcCieloConfig = {
+  horizonte: MC_CIELO_DEF.horizonte.slice(),
+  medio:     MC_CIELO_DEF.medio.slice(),
+  cenit:     MC_CIELO_DEF.cenit.slice(),
+  suelo:     MC_CIELO_DEF.suelo.slice()
+};
 const MC_SKY_DEF = MC_SKY.slice();
+
+game.cielo = function(cfg){
+  if(arguments.length === 0){
+    return {
+      horizonte: mcCieloConfig.horizonte.slice(),
+      medio:     mcCieloConfig.medio.slice(),
+      cenit:     mcCieloConfig.cenit.slice(),
+      suelo:     mcCieloConfig.suelo.slice()
+    };
+  }
+  if(cfg === 'reset' || cfg == null){
+    mcCieloConfig = {
+      horizonte: MC_CIELO_DEF.horizonte.slice(),
+      medio:     MC_CIELO_DEF.medio.slice(),
+      cenit:     MC_CIELO_DEF.cenit.slice(),
+      suelo:     MC_CIELO_DEF.suelo.slice()
+    };
+    MC_SKY[0] = mcCieloConfig.medio[0]; MC_SKY[1] = mcCieloConfig.medio[1]; MC_SKY[2] = mcCieloConfig.medio[2];
+  } else if(typeof cfg === 'object'){
+    const h = _mcColorArr(cfg.horizonte || cfg.horizon); if(h) mcCieloConfig.horizonte = h;
+    const m = _mcColorArr(cfg.medio || cfg.mid || cfg.cielo || cfg.color); if(m) { mcCieloConfig.medio = m; MC_SKY[0] = m[0]; MC_SKY[1] = m[1]; MC_SKY[2] = m[2]; }
+    const z = _mcColorArr(cfg.cenit || cfg.zenith); if(z) mcCieloConfig.cenit = z;
+    const s = _mcColorArr(cfg.suelo || cfg.ground); if(s) mcCieloConfig.suelo = s;
+  }
+  return game.cielo();
+};
+
 game.cieloColor = function(c){
-  if(c === 'reset'){ MC_SKY[0]=MC_SKY_DEF[0]; MC_SKY[1]=MC_SKY_DEF[1]; MC_SKY[2]=MC_SKY_DEF[2]; }
-  else if(c != null){ const a = _mcColorArr(c); if(a){ MC_SKY[0]=a[0]; MC_SKY[1]=a[1]; MC_SKY[2]=a[2]; } else { console.warn('game.cieloColor: no entiendo ' + JSON.stringify(c)); } }
-  console.log('[cielo] color = ' + JSON.stringify(MC_SKY.map(x=>+x.toFixed(3))));
+  if(c === 'reset'){ game.cielo('reset'); }
+  else if(c != null){
+    const a = _mcColorArr(c);
+    if(a){
+      MC_SKY[0]=a[0]; MC_SKY[1]=a[1]; MC_SKY[2]=a[2];
+      mcCieloConfig.medio = a.slice();
+      mcCieloConfig.horizonte = a.map(x => Math.min(1, x * 1.25));
+      mcCieloConfig.cenit = a.map(x => x * 0.75);
+      mcCieloConfig.suelo = a.map(x => x * 0.70);
+    } else { console.warn('game.cieloColor: no entiendo ' + JSON.stringify(c)); }
+  }
   return MC_SKY.slice();
 };
 // ── REQ-ENV2 · niebla atmosférica de fuera del agua ──────────────────────────────────────────────────
@@ -7327,7 +7498,7 @@ function glProgram(gl,vs,fs){ const p=gl.createProgram();
 
 function mcInitGL(){
   const cv=$('#mc-canvas'); mc.canvas=cv;
-  const gl=cv.getContext('webgl2')||cv.getContext('webgl');
+  const gl=cv.getContext('webgl2',{preserveDrawingBuffer:true})||cv.getContext('webgl',{preserveDrawingBuffer:true})||cv.getContext('webgl2')||cv.getContext('webgl');
   if(!gl){ toast('Tu navegador no soporta WebGL — el Mundo necesita GPU'); return null; }
   mc.gl=gl;
   // El mapa de sombra necesita dFdx/dFdy para sacar la normal de la cara. En WebGL2 son núcleo incluso en shaders
@@ -7347,12 +7518,58 @@ function mcResize(){
   if(cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; }
   gl.viewport(0,0,cv.width,cv.height);   // el canvas queda con image-rendering:pixelated (CSS) → ampliar mantiene el pixel-art
 }
-// Medidor propio del Mundo (#mc-fps/#mc-vox), gemelo de updatePlayMeters. Cada medidor cuelga de SU
-// interruptor: #mc-fps de game.showFPS y #mc-vox de game.showVoxels. Los dos iban con _showFPS
-// (BUG-DBG2), así que el contador de vox se encendía con el de fps y game.showVoxels() no hacía nada.
+let _mcPixelBuf=null, _mcPbo=null, _mcPboSize=0, _mcPboSync=null, _mcPboPending=false;
+function mcCountScreenColors(now){
+  if(!mc.active || !mc.gl || !mc.canvas) return;
+  const gl=mc.gl, cv=mc.canvas, w=cv.width, h=cv.height;
+  if(w<=0 || h<=0) return;
+  const need=w*h*4;
+  if(mc.gl2){
+    if(_mcPboPending && _mcPboSync){
+      const status=gl.clientWaitSync(_mcPboSync, 0, 0);
+      if(status===gl.ALREADY_SIGNALED || status===gl.CONDITION_SATISFIED){
+        gl.deleteSync(_mcPboSync); _mcPboSync=null;
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, _mcPbo);
+        if(!_mcPixelBuf || _mcPixelBuf.length!==_mcPboSize) _mcPixelBuf=new Uint8Array(_mcPboSize);
+        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, _mcPixelBuf);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        _mcPboPending=false;
+        game.colors=countColorsFromRgba(_mcPixelBuf, _mcPboSize);
+      }
+    }
+    if(!_mcPboPending && (mc._sceneColT==null || now-mc._sceneColT>600)){
+      mc._sceneColT=now;
+      if(!_mcPbo || _mcPboSize!==need){
+        if(_mcPbo) gl.deleteBuffer(_mcPbo);
+        _mcPbo=gl.createBuffer();
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, _mcPbo);
+        gl.bufferData(gl.PIXEL_PACK_BUFFER, need, gl.STREAM_READ);
+        _mcPboSize=need;
+      } else {
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, _mcPbo);
+      }
+      gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,0); // PBO offset 0: no CPU stall, instant async DMA
+      _mcPboSync=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      _mcPboPending=true;
+    }
+  } else {
+    if(mc._sceneColT==null || now-mc._sceneColT>600){
+      mc._sceneColT=now;
+      if(!_mcPixelBuf || _mcPixelBuf.length!==need) _mcPixelBuf=new Uint8Array(need);
+      gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,_mcPixelBuf);
+      game.colors=countColorsFromRgba(_mcPixelBuf, need);
+    }
+  }
+}
 function updateWorldMeters(){
   const ef=$('#mc-fps'); if(ef){ ef.hidden=!(_showFPS && mc.active); ef.textContent=Math.round(mc.fps)+' fps'; }
   const ev=$('#mc-vox'); if(ev){ ev.hidden=!(_showVox && mc.active); ev.textContent=(game.voxels||0)+' vox'; }
+  const ec=$('#mc-col'); if(ec){
+    if(mc.active && _showColors) mcCountScreenColors(performance.now());
+    ec.hidden=!(_showColors && mc.active);
+    ec.textContent=(game.colors||0).toLocaleString('es-ES')+' col';
+  }
 }
 const MC_EYE=1.62;   // altura del ojo sobre los pies del jugador
 
@@ -7751,6 +7968,7 @@ async function mcStructGeom(srcKey, rot){
   const solid=new Set(); const raw=[]; let mx=0,my=0,mz=0;
   const emitCells=new Set();   // celdas-de-bloque locales (floor(fine/16)) con ≥1 voxel emisivo (Parte B: siembra de luz de bloque)
   const emitDir=new Map();     // celda-bloque local → [dx,dy,dz]: suma de normales de sus caras emisivas EXPUESTAS = dirección del HAZ (Parte B foco)
+  const emitCol=new Map();     // celda-bloque local → [sumR, sumG, sumB, count] color de los voxeles emisivos
   const maskAt=new Map();      // voxel fino local → máscara de caras (TODOS, si el documento trae `caras`)
   const mueve=mcOriMove(rot, bx, by, bz);   // los tres cuartos de vuelta de la postura, en su único sitio
   const facePerm=carasDoc ? mcFacePerm(mueve) : null;   // la misma rotación, aplicada a las normales
@@ -7762,14 +7980,15 @@ async function mcStructGeom(srcKey, rot){
     if(isGlow(v)) emitCells.add(Math.floor(fx/MC_TILE)+','+Math.floor(fy/MC_TILE)+','+Math.floor(fz/MC_TILE));
     if(fx+1>mx)mx=fx+1; if(fy+1>my)my=fy+1; if(fz+1>mz)mz=fz+1;
   }
-  // Dirección del haz por celda emisiva: suma de las normales de las caras emisivas EXPUESTAS (vecino fino NO sólido).
-  // Con `solid` ya completo. Un culo que asoma a un lado → la suma apunta hacia fuera (haz). Un voxel emisivo por todas
-  // sus caras (antorcha) → las normales se cancelan (≈0) → mcComputeBlockLight lo trata como omnidireccional a pleno.
-  for(const r of raw){ if(!isGlow(r[3])) continue; const fx=r[0], fy=r[1], fz=r[2];
+  // Dirección del haz y color por celda emisiva: suma de las normales de las caras emisivas EXPUESTAS y promedio de color RGB.
+  for(const r of raw){ if(!isGlow(r[3])) continue; const fx=r[0], fy=r[1], fz=r[2], v=r[3];
     const ck=Math.floor(fx/MC_TILE)+','+Math.floor(fy/MC_TILE)+','+Math.floor(fz/MC_TILE);
     let acc=emitDir.get(ck); if(!acc){ acc=[0,0,0]; emitDir.set(ck,acc); }
     for(let f=0;f<6;f++){ const d=MC_FACES[f].dir;
       if(!solid.has((fx+d[0])+','+(fy+d[1])+','+(fz+d[2]))){ acc[0]+=d[0]; acc[1]+=d[1]; acc[2]+=d[2]; } }
+    const rgb=mcHexRGB(bareColor(v));
+    let cAcc=emitCol.get(ck); if(!cAcc){ cAcc=[0,0,0,0]; emitCol.set(ck,cAcc); }
+    cAcc[0]+=rgb[0]; cAcc[1]+=rgb[1]; cAcc[2]+=rgb[2]; cAcc[3]++;
   }
   const useTex=mc.structTextures!==false;    // texturar de verdad (detalle del editor) vs. color plano por cara
   const greedy=mc.structGreedy!==false;      // fusionar caras coplanares de la misma textura/color (game.structGreedy)
@@ -7907,9 +8126,15 @@ async function mcStructGeom(srcKey, rot){
   // null no haría la mata atravesable — la borraría también del apuntado y ya no se podría ni romper.
   const bits = doc.atravesable ? new Uint8Array(mx*my*mz) : bitsAim;
   // emitCells del Set → Int16Array plano [cx,cy,cz,…] (celdas-de-bloque locales con voxel emisivo) para sembrar luz de bloque.
-  const emitArr=new Int16Array(emitCells.size*3), emitDirArr=new Int16Array(emitCells.size*3);
-  { let i=0; for(const k of emitCells){ const p=k.split(','), dd=emitDir.get(k)||[0,0,0];
-      emitArr[i]=+p[0]; emitDirArr[i]=dd[0]; i++; emitArr[i]=+p[1]; emitDirArr[i]=dd[1]; i++; emitArr[i]=+p[2]; emitDirArr[i]=dd[2]; i++; } }
+  const emitArr=new Int16Array(emitCells.size*3), emitDirArr=new Int16Array(emitCells.size*3), emitColArr=new Uint8Array(emitCells.size*3);
+  { let i=0, j=0; for(const k of emitCells){ const p=k.split(','), dd=emitDir.get(k)||[0,0,0], cc=emitCol.get(k)||[1,1,1,1];
+      emitArr[i]=+p[0]; emitDirArr[i]=dd[0]; i++; emitArr[i]=+p[1]; emitDirArr[i]=dd[1]; i++; emitArr[i]=+p[2]; emitDirArr[i]=dd[2]; i++;
+      const cnt=cc[3]||1;
+      emitColArr[j]=Math.min(255, Math.round((cc[0]/cnt)*255));
+      emitColArr[j+1]=Math.min(255, Math.round((cc[1]/cnt)*255));
+      emitColArr[j+2]=Math.min(255, Math.round((cc[2]/cnt)*255));
+      j+=3;
+  } }
   const mesh={ colLocal:new Float32Array(col), colCount:col.length/9,          // opaco: x,y,z, r,g,b, shade, emit, alpha (9)
                alphaLocal:new Float32Array(alpha), alphaCount:alpha.length/9,  // translúcido: mismo layout, pasada con blend
                texLocal:new Float32Array(tex), texCount:tex.length/10,
@@ -7917,6 +8142,7 @@ async function mcStructGeom(srcKey, rot){
                colFD:new Uint8Array(colFD), alphaFD:new Uint8Array(alphaFD), texFD:new Uint8Array(texFD), // dirección de la cara, 0..5 si está en la piel y 6 si no (REQ-FLUID4)
                emitCells:emitArr,                                              // celdas-de-bloque locales con ≥1 voxel emisivo (Parte B)
                emitDir:emitDirArr,                                             // dirección del haz por celda emisiva (normal neta de caras expuestas)
+               emitCol:emitColArr,                                             // color RGB de los voxeles emisivos por celda
                ext:{x:mx*S, y:my*S, z:mz*S}, bits, bitsAim, fdim:[mx,my,mz] };
   const rec=(mc.structs[srcKey]=mc.structs[srcKey]||{}); (rec.meshRot=rec.meshRot||{})[rot]=mesh;
   // Copia de solo-colisión: {bits,fdim} y nada de vértices, para no retener los Float32Array de la malla vieja.
@@ -7944,7 +8170,7 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc){
   const faceFactor=(sc,fi)=>{
     if(!lightLut) return 1;                                    // interiorDark>=1: la luz de bloque no puede sobre-iluminar → sin efecto
     const wx=Math.floor(ox+sc[fi*3]*E), wy=Math.floor(oy+sc[fi*3+1]*E), wz=Math.floor(oz+sc[fi*3+2]*E);  // celda de bloque de mundo del lado aire (la escala también mueve la muestra)
-    const lv = mcInside(wx,wy,wz) ? Math.max(L?L[mcIdx(wx,wy,wz)]:0, BL?BL[mcIdx(wx,wy,wz)]:0) : MC_MAXLIGHT;  // fuera de rejilla = cielo
+    const lv = mcInside(wx,wy,wz) ? (L?L[mcIdx(wx,wy,wz)]:0) : MC_MAXLIGHT;  // fuera de rejilla = cielo
     return lightLut[lv];
   };
   // Desplaza un array por vértice (stride s, pos en 0..2) a coords de mundo, hornea shade (offset shOff) por CARA
@@ -7966,7 +8192,7 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc){
   const aabb=[ox,oy,oz, ox+geom.ext.x*E, oy+geom.ext.y*E, oz+geom.ext.z*E];
   // sinProyectar viaja en la instancia (siempre, también en false: se aplica con Object.assign al re-mallar y
   // tiene que poder volver a proyectar). mcRenderShadow se salta la pieza entera en vez de recortar sus vértices.
-  return {key:srcKey, ox,oy,oz, rot, esc:E, colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitCells:geom.emitCells, emitDir:geom.emitDir, sinProyectar:!!(ss&2)};
+  return {key:srcKey, ox,oy,oz, rot, esc:E, colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitCells:geom.emitCells, emitDir:geom.emitDir, emitCol:geom.emitCol, sinProyectar:!!(ss&2)};
 }
 // Atlas de TEXTURAS de estructuras (gemelo de mcBuildPalette/mcUploadAtlas): compone las 6 caras de cada
 // CLAVE `tex:` distinta usada por las estructuras vivas (6 cols × Nclaves filas, NEAREST, medio téxel de
@@ -8225,6 +8451,23 @@ async function mcAddBlock(key, name){
 const MC_SUN_LIB=`
 uniform sampler2D uSunMap; uniform vec3 uSunOrg; uniform vec3 uSunDim; uniform float uSunShade; uniform vec3 uEye;
 uniform float uSunProbe;   // cuánto se sale la sonda de la propia cara (game.sunProbe)
+uniform vec3 uHorizonColor;
+uniform vec3 uZenithColor;
+uniform vec3 uGroundColor;
+
+vec3 mcFogSky(vec3 w){
+  vec3 dir = normalize(w - uEye);
+  float h = dir.y;
+  if(h >= 0.0){
+    float t1 = smoothstep(0.0, 0.22, h);
+    float t2 = smoothstep(0.22, 0.85, h);
+    return mix(mix(uHorizonColor, uSky, t1), uZenithColor, t2);
+  } else {
+    float tg = smoothstep(0.0, -0.35, h);
+    return mix(uHorizonColor, uGroundColor, tg);
+  }
+}
+
 float sunFactor(vec3 w){
 #ifndef SUN_DERIV
   return 1.0;                                                // sin dFdx/dFdy no hay normal ⇒ sin sombra (el shader ni la compila)
@@ -8247,15 +8490,15 @@ float sunFactor(vec3 w){
 const MC_BLK_LIB=`
 #ifdef BLK3D
 uniform highp sampler3D uBlkTex; uniform vec3 uBlkDim; uniform float uBlkOn;
-float blkLuz(vec3 w){
-  if(uBlkOn < 0.5) return 0.0;                               // sin emisivos vivos: no hay nada que leer
+vec4 blkLuz(vec3 w){
+  if(uBlkOn < 0.5) return vec4(0.0);                               // sin emisivos vivos: no hay nada que leer
   vec3 n=normalize(cross(dFdx(w),dFdy(w)));
   if(dot(n,uEye-w)<0.0) n=-n;                                // hacia el ojo = hacia el aire
   vec3 pc=(w + n*0.5)/uBlkDim;                               // medio bloque hacia el aire: la celda vecina
-  return clamp(texture(uBlkTex,pc).r * ${(255/MC_MAXLIGHT).toFixed(4)}, 0.0, 1.0);
+  return clamp(texture(uBlkTex,pc) * ${(255/MC_MAXLIGHT).toFixed(4)}, 0.0, 1.0);
 }
 #else
-float blkLuz(vec3 w){ return 0.0; }
+vec4 blkLuz(vec3 w){ return vec4(0.0); }
 #endif`;
 // BUG-GLOW3 · Luz DINÁMICA de agente. Los emisores montados en un agente que se mueve (voxels autoiluminados en sus
 // piezas) no se hornean en la luz de bloque —serían granulares a 1 bloque (trompicones) y caros de re-sembrar (BFS +
@@ -8290,30 +8533,27 @@ float dynLuz(vec3 w){
 }
 float dynLift(float shade, float dyn){
   if(uDynDark>=1.0 || dyn<=0.0) return shade;               // interiores no se oscurecen ⇒ nada que reponer
-  return min(shade / pow(uDynDark, dyn), 1.12);             // pow(dark,dyn)<1 ⇒ /· sube; tope = shade de cara pleno (MC_FACES)
+  return min(shade / pow(max(uDynDark, 0.001), clamp(dyn, 0.0, 1.0)), 1.12); // restaura el sombreado continuo
+}
+vec3 mcLitGlow(vec3 baseCol, vec4 blk, float dyn, float expo, float gain){
+  float b = max(blk.a, dyn);
+  float lz = mix(expo, gain, b) + b * 0.45 * gain;
+  vec3 rgbCol = (blk.a > 0.01) ? (blk.rgb / max(0.01, blk.a)) : vec3(1.15, 0.98, 0.75);
+  vec3 tint = mix(vec3(1.0), rgbCol, b * 0.75);
+  return baseCol * lz * tint;
 }`;
 // REQ-SHADOW2 · Las dos banderas de sombra viajan SUMADAS encima de aShade, sin atributo nuevo: el sombreado propio
 // de la cara vale como mucho 1.12 (MC_FACES) y nunca llega a 2, así que la parte entera/2 queda libre para dos bits.
-//   aShade = sombreado + 2·bits   con   bits: 1 = no recibe sombra, 2 = no proyecta sombra
-// Los tres formatos de vértice del Mundo (terreno pos+uv+shade, estructura pos+color+shade+emit+alpha, y la
-// texturizada pos+tile+rect+shade) tienen su float de sombreado, así que el mismo truco vale para los tres y el
-// mapa de sombra puede leerlo con un solo atributo extra. Se descodifica en el VERTEX shader: al fragmento le
-// llegan ya separados (vShade limpio y vSol 0/1), que además evita cualquier duda de precisión en el varying.
+// Extrae el sombreado [0,1.12] y el bit 1 (recibe sol). Bit 2 (proyecta sombra) no se lee aquí: viaja al mapa del sol.
 const MC_SHADE_LIB=`
-float mcShade(float s){ return s-2.0*floor(s*0.5); }                       // el sombreado sin las banderas
-float mcRecibeSol(float s){ return step(mod(floor(s*0.5),2.0),0.5); }      // 1 = sí recibe, 0 = a luz plena`;
-// Los shaders se escriben UNA vez en ESSL 1.00 y se traducen aquí, porque dFdx/dFdy no están en los dos sitios:
-//   · WebGL1 → hay que pedir `OES_standard_derivatives` y la directiva debe ser la PRIMERA línea del fuente.
-//   · WebGL2 → la extensión NO existe para shaders ESSL 1.00 (ANGLE contesta literalmente "extension is not
-//     supported" y luego "'dFdx' : no matching overloaded function found"). Las derivadas son núcleo solo desde
-//     ESSL 3.00, así que en WebGL2 se sube el fuente a `#version 300 es` con estas cuatro sustituciones.
-// Si al final no hay derivadas (WebGL1 viejo sin la extensión), sin `SUN_DERIV` el `sunFactor` compila a `return 1.0`
-// y el Mundo se ve como siempre, sin sombra de sol, en vez de quedarse en negro por un shader que no compila.
+float mcShade(float s){ return s - 2.0*floor(s*0.5); }
+float mcRecibeSol(float s){ return 1.0 - floor(mod(floor(s*0.5), 2.0)); }`;
+
 function mcGLSL(src, esVS){
   if(!mc.gl2) return ((mc.deriv && !esVS) ? '#extension GL_OES_standard_derivatives : enable\n' : '')
                    + (mc.deriv ? '#define SUN_DERIV 1\n' : '') + src;
   return '#version 300 es\n#define SUN_DERIV 1\n#define BLK3D 1\n'   // BLK3D: hay sampler3D (luz de bloque, REQ-ENV4) solo en WebGL2
-       + (esVS ? '' : 'precision mediump float;\nprecision highp sampler3D;\nout highp vec4 fragColor;\n')   // highp: el mapa de sombra escribe 16 bits repartidos entre R y G
+       + (esVS ? '' : 'precision mediump float;\nprecision highp sampler3D;\nout highp vec4 fragColor;\n')
        + src.replace(/\battribute\b/g,'in')
             .replace(/\bvarying\b/g, esVS ? 'out' : 'in')
             .replace(/\btexture2D\b/g,'texture')
@@ -8332,21 +8572,31 @@ const MC_FS=`
 precision mediump float;
 varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
 uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar; uniform float uFogMin; uniform float uExpo;
+uniform float uClipY;
 ${MC_SUN_LIB}${MC_BLK_LIB}${MC_DYNLIGHT_LIB}
-void main(){ vec4 t=texture2D(uTex,vUV); if(t.a<0.5) discard;
-  vec3 col=t.rgb*dynLift(vShade,dynLuz(vWorld))*mix(1.0,sunFactor(vWorld),vSol)*mix(uExpo,uGlowGain,max(blkLuz(vWorld),dynLuz(vWorld))); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);   // uExpo = luz global (REQ-ENV3); una antorcha (REQ-ENV4) la resiste, 1 = pleno día
+void main(){ if(uClipY > -999.0 && vWorld.y < uClipY) discard;
+  vec4 t=texture2D(uTex,vUV); if(t.a<0.5) discard;
+  vec4 blk=blkLuz(vWorld); float dyn=dynLuz(vWorld);
+  vec3 base=t.rgb*dynLift(vShade, max(blk.a, dyn))*mix(1.0,sunFactor(vWorld),vSol);
+  vec3 col=mcLitGlow(base, blk, dyn, uExpo, uGlowGain);
+  float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
   f=uFogMin+(1.0-uFogMin)*f;   // REQ-FLUID4 · suelo de tinte (0 fuera del agua = sin efecto)
-  gl_FragColor=vec4(mix(col,uSky,f),1.0); }`;
+  gl_FragColor=vec4(mix(col,mcFogSky(vWorld),f),1.0); }`;
 // Gemelo SIN `discard`: cuando el atlas del terreno es 100% opaco (mc.atlasHasAlpha=false), este shader deja al
 // hardware rechazar por early-z los fragmentos ocultos antes de correr → menos overdraw (la otra mitad del fill-rate).
 const MC_FS_OPAQUE=`
 precision mediump float;
 varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
 uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar; uniform float uFogMin; uniform float uExpo;
+uniform float uClipY;
 ${MC_SUN_LIB}${MC_BLK_LIB}${MC_DYNLIGHT_LIB}
-void main(){ vec3 col=texture2D(uTex,vUV).rgb*dynLift(vShade,dynLuz(vWorld))*mix(1.0,sunFactor(vWorld),vSol)*mix(uExpo,uGlowGain,max(blkLuz(vWorld),dynLuz(vWorld))); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);   // uExpo (REQ-ENV3) · una antorcha lo resiste (REQ-ENV4)
+void main(){ if(uClipY > -999.0 && vWorld.y < uClipY) discard;
+  vec4 blk=blkLuz(vWorld); float dyn=dynLuz(vWorld);
+  vec3 base=texture2D(uTex,vUV).rgb*dynLift(vShade, max(blk.a, dyn))*mix(1.0,sunFactor(vWorld),vSol);
+  vec3 col=mcLitGlow(base, blk, dyn, uExpo, uGlowGain);
+  float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
   f=uFogMin+(1.0-uFogMin)*f;   // REQ-FLUID4 · suelo de tinte (0 fuera del agua = sin efecto)
-  gl_FragColor=vec4(mix(col,uSky,f),1.0); }`;
+  gl_FragColor=vec4(mix(col,mcFogSky(vWorld),f),1.0); }`;
 // Fija EXACTAMENTE los arrays de atributos activos: deshabilita 0..N y habilita solo los de `list`. Necesario
 // porque en WebGL un atributo habilitado SIN buffer (p.ej. tras liberar su VBO al re-mallar, o un pase que
 // habilita y no dibuja porque todo quedó culleado) hace fallar TODOS los drawArrays con INVALID_OPERATION.
@@ -8384,8 +8634,9 @@ function mcLocOf(p){ const gl=mc.gl; return {
   aPos:gl.getAttribLocation(p,'aPos'), aUV:gl.getAttribLocation(p,'aUV'), aShade:gl.getAttribLocation(p,'aShade'),
   uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'),
   uTex:gl.getUniformLocation(p,'uTex'), uSky:gl.getUniformLocation(p,'uSky'),
+  uHorizonColor:gl.getUniformLocation(p,'uHorizonColor'), uZenithColor:gl.getUniformLocation(p,'uZenithColor'), uGroundColor:gl.getUniformLocation(p,'uGroundColor'),
   uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
-  uExpo:gl.getUniformLocation(p,'uExpo'),
+  uExpo:gl.getUniformLocation(p,'uExpo'), uClipY:gl.getUniformLocation(p,'uClipY'),
   uBlkTex:gl.getUniformLocation(p,'uBlkTex'), uBlkDim:gl.getUniformLocation(p,'uBlkDim'), uBlkOn:gl.getUniformLocation(p,'uBlkOn'),
     uDynN:gl.getUniformLocation(p,'uDynN'), uDynPos:gl.getUniformLocation(p,'uDynPos'), uDynDir:gl.getUniformLocation(p,'uDynDir'), uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · luz dinámica de agente
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
@@ -8409,45 +8660,105 @@ const MC_STRUCT_FS=`
 precision mediump float;
 varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld; varying float vSol;
 uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar; uniform float uFogMin; uniform float uExpo;
+uniform float uClipY;
 uniform float uReflejo; uniform float uReflCurva; uniform vec3 uReflColor; uniform float uReflOpac;
+uniform float uReflBase; uniform float uReflCausticas; uniform float uReflSubacuatico; uniform float uReflAbsorcion;
+uniform sampler2D uReflTex; uniform float uReflEntorno; uniform vec2 uScreenSize; uniform float uReflOndas; uniform float uTime;
 ${MC_SUN_LIB}${MC_BLK_LIB}${MC_DYNLIGHT_LIB}
 void main(){
-  // REQ-FLUID5 · La cara SUPERIOR del agua viene con emit horneado a 2 (mcMeshChunk): es la bandera de «refleja el
-  // cielo», que no cuesta un atributo nuevo porque el agua no es emisiva (su emit real es 0). Se separa aquí: refl=1
-  // para esa cara, y em recupera el emit de verdad (0 en el agua, 0/1 en lo demás, que nunca llega a 1.5).
   float refl = step(1.5, vEmit);
+  if(uClipY > -999.0 && (vWorld.y < uClipY || refl > 0.5)) discard;
   float em = vEmit - 2.0*refl;
-  vec3 lit=mix(vColor*dynLift(vShade,dynLuz(vWorld))*mix(1.0,sunFactor(vWorld),vSol)*mix(uExpo,uGlowGain,max(blkLuz(vWorld),dynLuz(vWorld))), vColor, em);   // uExpo (REQ-ENV3) apaga lo NO emisivo; una antorcha cercana (REQ-ENV4) lo resiste; una lámpara (em=1) nunca se apaga
+  vec4 blk=blkLuz(vWorld); float dyn=dynLuz(vWorld);
+  vec3 base=vColor*dynLift(vShade, max(blk.a, dyn))*mix(1.0,sunFactor(vWorld),vSol);
+  vec3 lit=mix(mcLitGlow(base, blk, dyn, uExpo, uGlowGain), vColor, em);
   float aOut = vAlpha;
 #ifdef SUN_DERIV
-  // Reflejo de cielo por Fresnel (enfoque 1 del ticket): a rasante la lámina tira al color del cielo y se vuelve
-  // opaca —lo que separa «cristal azul tumbado» de «agua»—; en picado transparenta y se ve el fondo. La normal sale
-  // de las derivadas de la posición de mundo, igual que sunFactor, así que tampoco cuesta un atributo. Solo desde
-  // ARRIBA (uEye.y>vWorld.y): buceando, la cara de arriba se mira por el envés y ahí un reflejo de cielo quedaría mal.
-  if(refl > 0.5 && uReflejo > 0.0 && uEye.y > vWorld.y){
-    vec3 n = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
-    if(dot(n, uEye-vWorld) < 0.0) n = -n;
+  if(refl > 0.5 && uReflejo > 0.0){
+    vec3 n0 = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+    if(dot(n0, uEye-vWorld) < 0.0) n0 = -n0;
+
+    // Ondas en la superficie del agua: modulan la normal física, las cáusticas de refracción y el reflejo del entorno
+    float wPhase1 = vWorld.x * 2.0 + vWorld.z * 1.6 + uTime * 2.5;
+    float wPhase2 = vWorld.x * 2.6 - vWorld.z * 2.0 - uTime * 2.0;
+    vec2 dWave = vec2(
+      cos(wPhase1) * 0.06 + cos(wPhase2) * 0.05,
+      sin(wPhase1) * 0.06 - sin(wPhase2) * 0.05
+    ) * uReflOndas;
+
+    vec3 n = normalize(n0 + vec3(dWave.x, 0.0, dWave.y));
     vec3 vd = normalize(uEye - vWorld);
-    float fr = pow(1.0 - clamp(dot(n, vd), 0.0, 1.0), uReflCurva) * uReflejo;   // Schlick; uReflCurva = lo cerrado del ángulo
-    vec3 rc = (uReflColor.r < 0.0) ? uSky : uReflColor;                          // por defecto refleja el cielo; se puede forzar un color
-    lit = mix(lit, rc, fr);
-    aOut = mix(vAlpha, 1.0, fr*uReflOpac);                                       // a rasante el agua se opaca (uReflOpac = cuánto)
+    float cosT = clamp(dot(n, vd), 0.0, 1.0);
+    float fr = mix(uReflBase, 1.0, pow(1.0 - cosT, uReflCurva)) * uReflejo;   // Schlick con base física y normal ondulada
+
+    if(uEye.y > vWorld.y){
+      // ── Vista DESDE ARRIBA (Reflejo especular planar de estructuras + nubes + terreno + cielo) ──
+      vec3 reflDir = reflect(-vd, n);
+      vec3 skyRefl = (uReflColor.r < 0.0) ? mcFogSky(vWorld + reflDir * 100.0) : uReflColor;
+      vec3 rc = skyRefl;
+      if(uReflEntorno > 0.0){
+        vec2 suv = gl_FragCoord.xy / max(uScreenSize, vec2(1.0, 1.0));
+        vec2 rUv = clamp(vec2(suv.x + dWave.x * 0.12, 1.0 - suv.y + dWave.y * 0.12), 0.001, 0.999);
+        vec4 rCol = texture2D(uReflTex, rUv);
+        rc = mix(skyRefl, rCol.rgb, uReflEntorno * rCol.a);
+      }
+
+      // Cáusticas superficiales
+      float cAbove1 = sin(vWorld.x * 4.0 + uTime * 2.5) * cos(vWorld.z * 4.0 - uTime * 2.0);
+      float cAbove2 = sin(vWorld.x * 7.5 - vWorld.z * 6.5 + uTime * 3.2) * 0.5;
+      float causticAbove = pow(abs(cAbove1 + cAbove2), 2.5) * 1.5;
+      vec3 causticLight = mix(vec3(1.0), rc, 0.6) * (causticAbove * uReflCausticas * uReflOndas * 0.4);
+      lit += causticLight;
+
+      lit = mix(lit, rc, fr);
+
+      float reflWeight = mix(uReflBase, 1.0, pow(1.0 - cosT, max(0.001, uReflCurva)));
+      aOut = mix(vAlpha, 1.0, clamp(reflWeight * uReflOpac, 0.0, 1.0));
+    } else {
+      // ── Vista SUBACUÁTICA (Ventana de Snell + Reflexión Interna Total + Red de Ondas y Cáusticas) ──
+      float sin2T = max(0.0, 1.0 - cosT * cosT);
+      float tir = smoothstep(0.48, 0.62, sin2T);
+
+      float c1 = sin(vWorld.x * 5.0 + uTime * 2.5) * cos(vWorld.z * 5.0 - uTime * 2.0);
+      float c2 = sin(vWorld.x * 8.5 - vWorld.z * 7.5 + uTime * 3.2) * 0.5;
+      float c3 = cos(vWorld.x * 13.0 + vWorld.z * 11.0 - uTime * 4.0) * 0.25;
+      float causticMesh = abs(c1 + c2 + c3);
+      float filament = pow(causticMesh, 3.0) * (2.2 * uReflCausticas) * uReflOndas * uReflSubacuatico;
+
+      float snellRing = smoothstep(0.45, 0.53, sin2T) * (1.0 - smoothstep(0.57, 0.65, sin2T));
+      vec3 skyRefl = (uReflColor.r < 0.0) ? mcFogSky(vWorld + vec3(0.0, 100.0, 0.0)) : uReflColor;
+      vec3 snellSky = mix(skyRefl, vec3(1.0), 0.15);
+      vec3 tirColor = uSky * 0.45;
+      vec3 underSurface = mix(snellSky, tirColor, tir);
+
+      vec3 crestHighlight = mix(vec3(1.0), skyRefl, 0.4) * filament + skyRefl * (snellRing * uReflSubacuatico * uReflCausticas);
+      underSurface += crestHighlight;
+
+      lit = mix(lit, underSurface, clamp(0.70 * uReflejo * uReflSubacuatico, 0.0, 1.0));
+      aOut = mix(0.40, 0.90, clamp((tir * 0.65 + filament * 0.35 + snellRing * 0.35 * uReflCausticas) * uReflejo * uReflSubacuatico, 0.0, 1.0));
+    }
   }
 #endif
-  float f=(uFogMin+(1.0-uFogMin)*clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0))*(1.0-em);        // ni niebla: el emisivo brilla a través
-  gl_FragColor=vec4(mix(lit,uSky,f), aOut); }`;
+  float f=(uFogMin+(1.0-uFogMin)*clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0))*(1.0-em);
+  gl_FragColor=vec4(mix(lit,mcFogSky(vWorld),f), aOut); }`;
 function mcBuildStructProgram(){
   const gl=mc.gl, p=glProgram(gl,mcVS(MC_STRUCT_VS),mcFS(MC_STRUCT_FS)); mc.structProg=p;
   mc.structLoc={ aPos:gl.getAttribLocation(p,'aPos'), aColor:gl.getAttribLocation(p,'aColor'), aShade:gl.getAttribLocation(p,'aShade'),
     aEmit:gl.getAttribLocation(p,'aEmit'), aAlpha:gl.getAttribLocation(p,'aAlpha'),
     uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'), uModel:gl.getUniformLocation(p,'uModel'),
-    uSky:gl.getUniformLocation(p,'uSky'), uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
-    uExpo:gl.getUniformLocation(p,'uExpo'),
+    uSky:gl.getUniformLocation(p,'uSky'),
+    uHorizonColor:gl.getUniformLocation(p,'uHorizonColor'), uZenithColor:gl.getUniformLocation(p,'uZenithColor'), uGroundColor:gl.getUniformLocation(p,'uGroundColor'),
+    uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
+    uExpo:gl.getUniformLocation(p,'uExpo'), uClipY:gl.getUniformLocation(p,'uClipY'),
     uBlkTex:gl.getUniformLocation(p,'uBlkTex'), uBlkDim:gl.getUniformLocation(p,'uBlkDim'), uBlkOn:gl.getUniformLocation(p,'uBlkOn'),
     uDynN:gl.getUniformLocation(p,'uDynN'), uDynPos:gl.getUniformLocation(p,'uDynPos'), uDynDir:gl.getUniformLocation(p,'uDynDir'), uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · luz dinámica de agente
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
     uReflejo:gl.getUniformLocation(p,'uReflejo'), uReflCurva:gl.getUniformLocation(p,'uReflCurva'),
     uReflColor:gl.getUniformLocation(p,'uReflColor'), uReflOpac:gl.getUniformLocation(p,'uReflOpac'),
+    uReflBase:gl.getUniformLocation(p,'uReflBase'), uReflCausticas:gl.getUniformLocation(p,'uReflCausticas'),
+    uReflSubacuatico:gl.getUniformLocation(p,'uReflSubacuatico'), uReflAbsorcion:gl.getUniformLocation(p,'uReflAbsorcion'),
+    uReflTex:gl.getUniformLocation(p,'uReflTex'), uReflEntorno:gl.getUniformLocation(p,'uReflEntorno'),
+    uScreenSize:gl.getUniformLocation(p,'uScreenSize'), uReflOndas:gl.getUniformLocation(p,'uReflOndas'), uTime:gl.getUniformLocation(p,'uTime'),
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
     uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
@@ -8467,17 +8778,23 @@ const MC_STEX_FS=`
 precision highp float;
 varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
 uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float uFogFar; uniform float uFogMin; uniform float uExpo;
+uniform float uClipY;
 ${MC_SUN_LIB}${MC_BLK_LIB}${MC_DYNLIGHT_LIB}
-void main(){ vec2 uv=vRect.xy+(vRect.zw-vRect.xy)*fract(vTile); vec4 t=texture2D(uTex,uv); if(t.a<0.5) discard;
-  vec3 col=t.rgb*dynLift(vShade,dynLuz(vWorld))*mix(1.0,sunFactor(vWorld),vSol)*mix(uExpo,uGlowGain,max(blkLuz(vWorld),dynLuz(vWorld))); float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);   // uExpo (REQ-ENV3) · antorcha lo resiste (REQ-ENV4)
+void main(){ if(uClipY > -999.0 && vWorld.y < uClipY) discard;
+  vec2 uv=vRect.xy+(vRect.zw-vRect.xy)*fract(vTile); vec4 t=texture2D(uTex,uv); if(t.a<0.5) discard;
+  vec3 base=t.rgb*dynLift(vShade,dynLuz(vWorld))*mix(1.0,sunFactor(vWorld),vSol);
+  vec3 col=mcLitGlow(base, blkLuz(vWorld), dynLuz(vWorld), uExpo, uGlowGain);
+  float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
   f=uFogMin+(1.0-uFogMin)*f;   // REQ-FLUID4 · suelo de tinte (0 fuera del agua = sin efecto)
-  gl_FragColor=vec4(mix(col,uSky,f),1.0); }`;
+  gl_FragColor=vec4(mix(col,mcFogSky(vWorld),f),1.0); }`;
 function mcBuildStructTexProgram(){
   const gl=mc.gl, p=glProgram(gl,mcVS(MC_STEX_VS),mcFS(MC_STEX_FS)); mc.stexProg=p;
   mc.stexLoc={ aPos:gl.getAttribLocation(p,'aPos'), aTile:gl.getAttribLocation(p,'aTile'), aRect:gl.getAttribLocation(p,'aRect'), aShade:gl.getAttribLocation(p,'aShade'),
     uProj:gl.getUniformLocation(p,'uProj'), uView:gl.getUniformLocation(p,'uView'), uModel:gl.getUniformLocation(p,'uModel'), uTex:gl.getUniformLocation(p,'uTex'),
-    uSky:gl.getUniformLocation(p,'uSky'), uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
-    uExpo:gl.getUniformLocation(p,'uExpo'),
+    uSky:gl.getUniformLocation(p,'uSky'),
+    uHorizonColor:gl.getUniformLocation(p,'uHorizonColor'), uZenithColor:gl.getUniformLocation(p,'uZenithColor'), uGroundColor:gl.getUniformLocation(p,'uGroundColor'),
+    uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
+    uExpo:gl.getUniformLocation(p,'uExpo'), uClipY:gl.getUniformLocation(p,'uClipY'),
     uBlkTex:gl.getUniformLocation(p,'uBlkTex'), uBlkDim:gl.getUniformLocation(p,'uBlkDim'), uBlkOn:gl.getUniformLocation(p,'uBlkOn'),
     uDynN:gl.getUniformLocation(p,'uDynN'), uDynPos:gl.getUniformLocation(p,'uDynPos'), uDynDir:gl.getUniformLocation(p,'uDynDir'), uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · luz dinámica de agente
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
@@ -8675,12 +8992,253 @@ function mcBlkTexDummy(){
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, 1, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array([0]));
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA8, 1, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,0]));
   gl.activeTexture(gl.TEXTURE0);
+}
+// ── REQ-ENV5 · Reflejo planar del entorno sobre superficies de fluidos (agua) ─────────────────────────
+function mcInitRefl(){
+  const gl=mc.gl; if(!gl || !mc.deriv) return null;
+  const size = Math.max(256, Math.min(1024, (mc.reflSize || 512)|0));
+  if(mc.refl && mc.refl.size === size) return mc.refl;
+  mcFreeRefl();
+  const R = { size, fbo:gl.createFramebuffer(), tex:gl.createTexture(), depth:gl.createRenderbuffer() };
+  gl.bindTexture(gl.TEXTURE_2D, R.tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindRenderbuffer(gl.RENDERBUFFER, R.depth);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, size, size);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, R.tex, 0);
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, R.depth);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  mc.refl = R;
+  return R;
+}
+function mcFreeRefl(){
+  const gl=mc.gl; if(!gl || !mc.refl) return;
+  if(mc.refl.fbo) gl.deleteFramebuffer(mc.refl.fbo);
+  if(mc.refl.tex) gl.deleteTexture(mc.refl.tex);
+  if(mc.refl.depth) gl.deleteRenderbuffer(mc.refl.depth);
+  mc.refl = null;
+}
+function mcReflTexDummy(){
+  const gl = mc.gl; if(!gl) return;
+  if(!mc._reflDummyTex){
+    mc._reflDummyTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, mc._reflDummyTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+  }
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, mc._reflDummyTex);
+  gl.activeTexture(gl.TEXTURE0);
+}
+function mcDetectWaterY(){
+  if(typeof mcReflPlanoY === 'number') return mcReflPlanoY;
+  const px = Math.floor(mc.pos[0]), pz = Math.floor(mc.pos[2]), py = Math.floor(mc.pos[1]);
+  const FT = mcTablaFluido();
+  if(!FT) return typeof mc._lastWaterY === 'number' ? mc._lastWaterY : py;
+  let nearestY = -1, minDist = Infinity;
+  const R = 32;
+  for(let dy = -16; dy <= 8; dy++){
+    const y = py + dy;
+    if(y < 0 || y >= mc.dim.y) continue;
+    for(let dx = -R; dx <= R; dx += 2){
+      for(let dz = -R; dz <= R; dz += 2){
+        const x = px + dx, z = pz + dz;
+        if(!mcInside(x, y, z)) continue;
+        const id = mc.grid[mcIdx(x, y, z)];
+        if(id && FT[id] === 'WATER'){
+          const aboveId = (y + 1 < mc.dim.y) ? mc.grid[mcIdx(x, y + 1, z)] : 0;
+          if(!aboveId || FT[aboveId] !== 'WATER'){
+            const d = Math.abs(dx) + Math.abs(dz) + Math.abs(dy);
+            if(d < minDist){ minDist = d; nearestY = y + 1; }
+          }
+        }
+      }
+    }
+  }
+  if(nearestY > 0) mc._lastWaterY = nearestY;
+  return typeof mc._lastWaterY === 'number' ? mc._lastWaterY : (py > 0 ? py : 8);
+}
+function mcRenderRefl(waterY, vis, TP, L, SM, pj, view){
+  const gl = mc.gl;
+  if(!gl || !mcReflEntorno || mcFluidoOjo()) return null;
+  const R = mcInitRefl();
+  if(!R) return null;
+
+  // REQ-ENV5: desvincular R.tex de TEXTURE3 para evitar feedback loop (GL_INVALID_OPERATION 1282) al dibujar en R.fbo
+  mcReflTexDummy();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo);
+  gl.viewport(0, 0, R.size, R.size);
+  mcClearFondo(gl);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  const eyeY = mc.pos[1] + MC_EYE * mc.scale;
+  const mirrEyeY = 2 * waterY - eyeY;
+  const mirrPitch = -mc.pitch;
+  const viewRefl = mat4.mul(mat4.rotX(-mirrPitch), mat4.mul(mat4.rotY(-mc.yaw), mat4.translate(-mc.pos[0], -mirrEyeY, -mc.pos[2])));
+
+  gl.frontFace(gl.CW);
+
+  // 1) Terreno opaco
+  gl.useProgram(TP);
+  mcAttribs([L.aPos, L.aUV, L.aShade]);
+  gl.uniformMatrix4fv(L.uProj, false, pj.m);
+  gl.uniformMatrix4fv(L.uView, false, viewRefl);
+  if(L.uClipY) gl.uniform1f(L.uClipY, waterY - 0.05);
+  gl.uniform3f(L.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
+  gl.uniform1f(L.uFogMin, mcFogMin());
+  gl.uniform1f(L.uFogNear, mcFogNear(pj.far));
+  gl.uniform1f(L.uFogFar, mcFogFar(pj.far));
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, mc.atlasTex);
+  gl.uniform1i(L.uTex, 0);
+  mcSunUniforms(L, SM);
+
+  const stride = 6 * 4;
+  for(const ch of vis){
+    if(!ch.count) continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
+    gl.enableVertexAttribArray(L.aPos);   gl.vertexAttribPointer(L.aPos, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(L.aUV);    gl.vertexAttribPointer(L.aUV, 2, gl.FLOAT, false, stride, 12);
+    gl.enableVertexAttribArray(L.aShade); gl.vertexAttribPointer(L.aShade, 1, gl.FLOAT, false, stride, 20);
+    gl.drawArrays(gl.TRIANGLES, 0, ch.count);
+  }
+
+  // 2) Agentes
+  for(const a of mc.agents.values()){
+    if(!a.vbo || !a.count) continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER, a.vbo);
+    gl.enableVertexAttribArray(L.aPos);   gl.vertexAttribPointer(L.aPos, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(L.aUV);    gl.vertexAttribPointer(L.aUV, 2, gl.FLOAT, false, stride, 12);
+    gl.enableVertexAttribArray(L.aShade); gl.vertexAttribPointer(L.aShade, 1, gl.FLOAT, false, stride, 20);
+    gl.drawArrays(gl.TRIANGLES, 0, a.count);
+  }
+
+  // 3) Estructuras y celdas finas (nubes, edificios, antorchas, vallas, cristal sobre el agua)
+  let finoOp = 0, finoAl = 0; for(const ch of vis){ finoOp += ch.finoCount | 0; finoAl += ch.finoACount | 0; }
+  if(mc.structures.length || finoOp || finoAl){
+    if(mc.structBias){ gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(mc.structBias, mc.structBias); }
+    gl.disable(gl.CULL_FACE); // la cámara invertida en Y invierte el enrollado: sin culling para no descartar caras frontales
+
+    // 1) Color por vértice opaco (bloques sólidos finos, antorchas, nubes)
+    if(mc.structProg && (mc.structures.length || finoOp)){
+      const SL = mc.structLoc, sstr = 9 * 4;
+      gl.useProgram(mc.structProg);
+      gl.uniformMatrix4fv(SL.uProj, false, pj.m);
+      gl.uniformMatrix4fv(SL.uView, false, viewRefl);
+      if(SL.uClipY) gl.uniform1f(SL.uClipY, waterY - 0.05);
+      gl.uniform3f(SL.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
+      gl.uniform1f(SL.uFogMin, mcFogMin());
+      gl.uniform1f(SL.uFogNear, mcFogNear(pj.far));
+      gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
+      gl.uniform1f(SL.uReflejo, 0);
+      gl.uniform1f(SL.uReflEntorno, 0);
+      mcSunUniforms(SL, SM);
+      mcAttribs([SL.aPos, SL.aColor, SL.aShade, SL.aEmit, SL.aAlpha]);
+      for(const s of mc.structures){
+        if(!s.colCount) continue;
+        gl.uniformMatrix4fv(SL.uModel, false, mcModelOf(s));
+        gl.bindBuffer(gl.ARRAY_BUFFER, s.colVbo);
+        mcStructAttrib(SL, sstr);
+        gl.drawArrays(gl.TRIANGLES, 0, s.colCount);
+      }
+      if(finoOp){
+        gl.uniformMatrix4fv(SL.uModel, false, MC_IDENT);
+        for(const ch of vis){
+          if(!ch.finoCount) continue;
+          gl.bindBuffer(gl.ARRAY_BUFFER, ch.finoVbo);
+          mcStructAttrib(SL, sstr);
+          gl.drawArrays(gl.TRIANGLES, 0, ch.finoCount);
+        }
+      }
+    }
+    // 2) Texturas de estructuras
+    if(mc.structAtlasTex && mc.stexProg && mc.structures.length){
+      const stride2 = 10 * 4, SL = mc.stexLoc;
+      gl.useProgram(mc.stexProg);
+      gl.uniformMatrix4fv(SL.uProj, false, pj.m);
+      gl.uniformMatrix4fv(SL.uView, false, viewRefl);
+      if(SL.uClipY) gl.uniform1f(SL.uClipY, waterY - 0.05);
+      gl.uniform3f(SL.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
+      gl.uniform1f(SL.uFogMin, mcFogMin());
+      gl.uniform1f(SL.uFogNear, mcFogNear(pj.far));
+      gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, mc.structAtlasTex);
+      gl.uniform1i(SL.uTex, 0);
+      mcSunUniforms(SL, SM);
+      mcAttribs([SL.aPos, SL.aTile, SL.aRect, SL.aShade]);
+      for(const s of mc.structures){
+        if(!s.texCount) continue;
+        gl.uniformMatrix4fv(SL.uModel, false, mcModelOf(s));
+        gl.bindBuffer(gl.ARRAY_BUFFER, s.texVbo);
+        gl.enableVertexAttribArray(SL.aPos);   gl.vertexAttribPointer(SL.aPos, 3, gl.FLOAT, false, stride2, 0);
+        gl.enableVertexAttribArray(SL.aTile);  gl.vertexAttribPointer(SL.aTile, 2, gl.FLOAT, false, stride2, 12);
+        gl.enableVertexAttribArray(SL.aRect);  gl.vertexAttribPointer(SL.aRect, 4, gl.FLOAT, false, stride2, 20);
+        gl.enableVertexAttribArray(SL.aShade); gl.vertexAttribPointer(SL.aShade, 1, gl.FLOAT, false, stride2, 36);
+        gl.drawArrays(gl.TRIANGLES, 0, s.texCount);
+      }
+    }
+    // 3) Translúcido (cristal, ventanas, etc. sobre el agua — el agua se auto-descarta por refl > 0.5)
+    if(mc.structProg && (mc.structures.length || finoAl)){
+      let any = !!finoAl; for(const s of mc.structures){ if(s.alphaCount){ any=true; break; } }
+      if(any){
+        const SL = mc.structLoc, sstr = 9 * 4;
+        gl.useProgram(mc.structProg);
+        gl.uniformMatrix4fv(SL.uProj, false, pj.m);
+        gl.uniformMatrix4fv(SL.uView, false, viewRefl);
+        if(SL.uClipY) gl.uniform1f(SL.uClipY, waterY - 0.05);
+        gl.uniform3f(SL.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
+        gl.uniform1f(SL.uFogMin, mcFogMin());
+        gl.uniform1f(SL.uFogNear, mcFogNear(pj.far));
+        gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
+        gl.uniform1f(SL.uReflejo, 0);
+        gl.uniform1f(SL.uReflEntorno, 0);
+        mcSunUniforms(SL, SM);
+        mcAttribs([SL.aPos, SL.aColor, SL.aShade, SL.aEmit, SL.aAlpha]);
+        gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+        for(const s of mc.structures){
+          if(!s.alphaCount) continue;
+          gl.uniformMatrix4fv(SL.uModel, false, mcModelOf(s));
+          gl.bindBuffer(gl.ARRAY_BUFFER, s.alphaVbo);
+          mcStructAttrib(SL, sstr);
+          gl.drawArrays(gl.TRIANGLES, 0, s.alphaCount);
+        }
+        if(finoAl){
+          gl.uniformMatrix4fv(SL.uModel, false, MC_IDENT);
+          for(const ch of vis){
+            if(!ch.finoACount) continue;
+            gl.bindBuffer(gl.ARRAY_BUFFER, ch.finoAVbo);
+            mcStructAttrib(SL, sstr);
+            gl.drawArrays(gl.TRIANGLES, 0, ch.finoACount);
+          }
+        }
+        gl.depthMask(true); gl.disable(gl.BLEND);
+      }
+    }
+    if(mc.structBias) gl.disable(gl.POLYGON_OFFSET_FILL);
+  }
+
+  // 4) Renderizar el domo de cielo en el reflejo
+  mcRenderSky(gl, pj.m, viewRefl);
+
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, R.tex);
+  gl.activeTexture(gl.TEXTURE0);
+
+  gl.frontFace(gl.CCW);
+  return R;
 }
 function mcUploadBlkTex(){
   const gl=mc.gl; if(!gl || !mc.gl2 || !mc.blockLight) return;
-  const D=mc.dim, need=D.x*D.y*D.z;
+  const D=mc.dim, need=D.x*D.y*D.z*4;
   if(mc.blockLight.length < need){ mc._blkTexDirty=false; return; }   // aún no cuadra (mundo cambiando): se reintenta
   if(!mc.blkTex) mc.blkTex=gl.createTexture();
   gl.activeTexture(gl.TEXTURE2);
@@ -8691,7 +9249,7 @@ function mcUploadBlkTex(){
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
   const al=gl.getParameter(gl.UNPACK_ALIGNMENT); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, D.x, D.y, D.z, 0, gl.RED, gl.UNSIGNED_BYTE, mc.blockLight.subarray(0, need));
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA8, D.x, D.y, D.z, 0, gl.RGBA, gl.UNSIGNED_BYTE, mc.blockLight.subarray(0, need));
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, al);
   gl.activeTexture(gl.TEXTURE0);
   mc._blkTexDirty=false;
@@ -8722,13 +9280,122 @@ function mcSunUniforms(L, S){
     if(L.uDynDark) gl.uniform1f(L.uDynDark, mc.interiorDark!=null?mc.interiorDark:1);
   }
   if(L.uGlowGain!==undefined && L.uGlowGain!==null) gl.uniform1f(L.uGlowGain, mc.glowGain!=null?mc.glowGain:1);   // intensidad de la luz artificial
+  if(L.uEye) gl.uniform3f(L.uEye, mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]);
+  if(L.uHorizonColor){
+    if(mcFluidoOjo()){
+      gl.uniform3fv(L.uHorizonColor, mcCieloEf);
+      gl.uniform3fv(L.uZenithColor, mcCieloEf);
+      gl.uniform3fv(L.uGroundColor, mcCieloEf);
+    } else {
+      gl.uniform3fv(L.uHorizonColor, mcCieloConfig.horizonte);
+      gl.uniform3fv(L.uZenithColor, mcCieloConfig.cenit);
+      gl.uniform3fv(L.uGroundColor, mcCieloConfig.suelo);
+    }
+  }
   if(L.uSunShade===undefined || L.uSunShade===null) return;
   if(!S){ gl.uniform1f(L.uSunShade, 1); return; }
   gl.uniform1f(L.uSunShade, mc.sunShade);
   mcSunFrustum(L);
-  gl.uniform3f(L.uEye, mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]);
   gl.uniform1f(L.uSunProbe, mc.sunProbe);
-  gl.uniform1i(L.uSunMap, 1);                                       // unidad 1 (la 0 es el atlas)
+  gl.uniform1i(L.uSunMap, 1);
+}
+
+const MC_SKY_VS = `
+attribute vec3 aPos;
+uniform mat4 uProj;
+uniform mat4 uView;
+varying vec3 vWorldDir;
+
+void main() {
+  vWorldDir = aPos;
+  // Extrae únicamente la rotación de la cámara (sin traslación) para fijar el cielo al infinito
+  mat4 rotView = mat4(mat3(uView));
+  vec4 p = uProj * rotView * vec4(aPos, 1.0);
+  // Z / W = 1.0 (profundidad máxima en el plano lejano)
+  gl_Position = p.xyww;
+}`;
+
+const MC_SKY_FS = `
+precision mediump float;
+varying vec3 vWorldDir;
+
+uniform vec3 uHorizonColor;
+uniform vec3 uMidSkyColor;
+uniform vec3 uZenithColor;
+uniform vec3 uGroundColor;
+
+void main() {
+  vec3 dir = normalize(vWorldDir);
+  float h = dir.y; // Altura angular normalizada (-1.0 a +1.0)
+  
+  vec3 col;
+  if (h >= 0.0) {
+    float t1 = smoothstep(0.0, 0.22, h);
+    float t2 = smoothstep(0.22, 0.85, h);
+    col = mix(mix(uHorizonColor, uMidSkyColor, t1), uZenithColor, t2);
+  } else {
+    float tg = smoothstep(0.0, -0.35, h);
+    col = mix(uHorizonColor, uGroundColor, tg);
+  }
+  
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const MC_SKY_CUBE = new Float32Array([
+  -1,  1, -1,  -1, -1, -1,   1, -1, -1,   1, -1, -1,   1,  1, -1,  -1,  1, -1,
+  -1, -1,  1,  -1, -1, -1,  -1,  1, -1,  -1,  1, -1,  -1,  1,  1,  -1, -1,  1,
+   1, -1, -1,   1, -1,  1,   1,  1,  1,   1,  1,  1,   1,  1, -1,   1, -1, -1,
+  -1, -1,  1,  -1,  1,  1,   1,  1,  1,   1,  1,  1,   1, -1,  1,  -1, -1,  1,
+  -1,  1, -1,   1,  1, -1,   1,  1,  1,   1,  1,  1,  -1,  1,  1,  -1,  1, -1,
+  -1, -1, -1,  -1, -1,  1,   1, -1, -1,   1, -1, -1,  -1, -1,  1,   1, -1,  1
+]);
+
+function mcInitSky(gl) {
+  if (mc.skyProg) return;
+  const p = glProgram(gl, mcVS(MC_SKY_VS), mcFS(MC_SKY_FS));
+  mc.skyProg = p;
+  mc.skyLoc = {
+    aPos: gl.getAttribLocation(p, 'aPos'),
+    uProj: gl.getUniformLocation(p, 'uProj'),
+    uView: gl.getUniformLocation(p, 'uView'),
+    uHorizonColor: gl.getUniformLocation(p, 'uHorizonColor'),
+    uMidSkyColor: gl.getUniformLocation(p, 'uMidSkyColor'),
+    uZenithColor: gl.getUniformLocation(p, 'uZenithColor'),
+    uGroundColor: gl.getUniformLocation(p, 'uGroundColor')
+  };
+  mc.skyVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, mc.skyVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, MC_SKY_CUBE, gl.STATIC_DRAW);
+}
+
+function mcRenderSky(gl, projMat, viewMat) {
+  if (mcFluidoOjo()) return;
+  if (!mc.skyProg) mcInitSky(gl);
+  const p = mc.skyProg, L = mc.skyLoc;
+  if (!p) return;
+
+  gl.useProgram(p);
+  gl.depthFunc(gl.LEQUAL);
+  gl.depthMask(false);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.BLEND);
+
+  gl.uniformMatrix4fv(L.uProj, false, projMat);
+  gl.uniformMatrix4fv(L.uView, false, viewMat);
+
+  gl.uniform3fv(L.uHorizonColor, mcCieloConfig.horizonte);
+  gl.uniform3fv(L.uMidSkyColor, mcCieloConfig.medio);
+  gl.uniform3fv(L.uZenithColor, mcCieloConfig.cenit);
+  gl.uniform3fv(L.uGroundColor, mcCieloConfig.suelo);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, mc.skyVbo);
+  gl.enableVertexAttribArray(L.aPos);
+  gl.vertexAttribPointer(L.aPos, 3, gl.FLOAT, false, 0, 0);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 36);
+
+  gl.depthMask(true);
+  gl.depthFunc(gl.LESS);
 }
 
 function mcGetFluidHeight(x, y, z) {
@@ -8907,7 +9574,7 @@ function mcMeshChunk(cx,cz){
       let s=F.s;
       // «No recibe» se salta el skylight aquí mismo, que es la sombra HORNEADA; la del sol es por fragmento y va
       // en la bandera. El sombreado propio de la cara (F.s) se respeta: eso es el relieve del cubo, no una sombra.
-      if(lightLut && !(ss&1)){ let lv=MC_MAXLIGHT; if(mcInside(ax,ay,az)){ const li=mcIdx(ax,ay,az); lv=Math.max(L[li], BL?BL[li]:0); } s*=lightLut[lv]; }   // fuera de la rejilla = cielo abierto; max(skylight, luz de bloque)
+      if(lightLut && !(ss&1)){ let lv=MC_MAXLIGHT; if(mcInside(ax,ay,az)){ const li=mcIdx(ax,ay,az); lv=L?L[li]:MC_MAXLIGHT; } s*=lightLut[lv]; }   // fuera de la rejilla = cielo abierto
       s+=2*ss;                   // las dos banderas viajan sumadas al sombreado (MC_SHADE_LIB)
       const uv=[[r.u0,r.v0],[r.u1,r.v0],[r.u1,r.v1],[r.u0,r.v1]];
       for(const k of [0,1,2,0,2,3]){
@@ -8955,7 +9622,7 @@ function mcMeshChunk(cx,cz){
         let k=1;
         if(lightLut && sc && !(ss&1)){
           const wx=ox+sc[f*3], wy=oy+sc[f*3+1], wz=oz+sc[f*3+2];
-          if(mcInside(wx,wy,wz)){ const li=mcIdx(wx,wy,wz); k=lightLut[Math.max(L[li], BL?BL[li]:0)]; }   // fuera de rejilla = cielo (k=1)
+          if(mcInside(wx,wy,wz)){ const li=mcIdx(wx,wy,wz); k=lightLut[L?L[li]:MC_MAXLIGHT]; }   // fuera de rejilla = cielo (k=1)
         }
         const B=out.buf; let p=out.n;
         for(let v=0;v<6;v++){ const b=(f*6+v)*9;
@@ -9205,9 +9872,9 @@ function mcEmisorSeguido(s){ const m=s.model;
     (m[12]||m[13]||m[14] || m[0]!==1||m[5]!==1||m[10]!==1 || m[1]||m[2]||m[4]||m[6]||m[8]||m[9])); }
 function mcComputeBlockLight(){
   mc._blkTexDirty=true;   // REQ-ENV4 · la luz de bloque va a cambiar ⇒ re-subir la textura 3D antes del próximo frame
-  const dim=mc.dim, g=mc.grid, NX=dim.x, NY=dim.y, NZ=dim.z, sxy=NX*NY, N=NX*NY*NZ;
-  const nueva=!(mc.blockLight&&mc.blockLight.length===N);
-  const BL=nueva? (mc.blockLight=new Uint8Array(N)) : mc.blockLight;
+  const dim=mc.dim, g=mc.grid, NX=dim.x, NY=dim.y, NZ=dim.z, sxy=NX*NY, N=NX*NY*NZ, need4=N*4;
+  const nueva=!(mc.blockLight&&mc.blockLight.length===need4);
+  const BL=nueva? (mc.blockLight=new Uint8Array(need4)) : mc.blockLight;
   if(nueva) mc._blCero=true;          // recién creada: los typed arrays nacen a cero
   // REQ-PERF2: modo 'fast' apaga el BFS de luz de bloque. Devuelve BL a cero y sale.
   if(mc._skipBlockLight){
@@ -9250,60 +9917,106 @@ function mcComputeBlockLight(){
   // delante y se apaga pronto de costado (cono estrecho, no diamante). Sin haz (BD=0) el paso cuesta 1 (isótropo).
   const BD=(mc.blockLightDir&&mc.blockLightDir.length===N*3)?mc.blockLightDir:(mc.blockLightDir=new Int8Array(N*3));
   BD.fill(0);
+  const PASA=mcTablaLuz();
   const buckets=[]; for(let i=0;i<=MC_MAXLIGHT;i++) buckets.push([]);
-  const seedFull=i=>{ if(g[i]===0 && BL[i]<lv0){ BL[i]=lv0; buckets[lv0].push(i); } };   // siembra plena (omnidireccional): escapa solo por aire
+  const seedFull=(i, r, gCol, b, lvl)=>{
+    if(PASA[g[i]]){
+      const idx=i*4;
+      if(BL[idx+3]<lvl){
+        BL[idx]=Math.max(BL[idx], r);
+        BL[idx+1]=Math.max(BL[idx+1], gCol);
+        BL[idx+2]=Math.max(BL[idx+2], b);
+        BL[idx+3]=lvl;
+        buckets[lvl].push(i);
+      }
+    }
+  };
   // Siembra: por cada estructura viva, cada emitCell (celda de bloque local → mundo). La celda emisiva SÓLIDA se marca
   // a lv0 como MUESTRA para caras a ras (sin propagar). Con foco y haz definido (normal neta de caras emisivas expuestas
   // ≠ 0) se siembran solo los vecinos de aire del HEMISFERIO delantero, con su dirección de haz → cono. Si el haz es ≈0
   // (antorcha: emite igual por todas las caras) o focus=0 → omnidireccional a pleno (comportamiento clásico).
-  // Una celda emisiva de mundo con su haz (ed[k..k+2], o ed=null). El cuerpo es el de siempre; se saca a función
-  // porque ahora tiene DOS fuentes: las estructuras estampadas y las piezas puestas en la rejilla.
-  const siembra=(cx,cy,cz, ed,k)=>{
+  const siembra=(cx,cy,cz, ed,k, col)=>{
     if(!mcInside(cx,cy,cz)) return; const i=cx+cy*NX+cz*sxy;
     let nx=0,ny=0,nz=0,nl=0; if(ed){ nx=ed[k]; ny=ed[k+1]; nz=ed[k+2]; nl=Math.sqrt(nx*nx+ny*ny+nz*nz); }
     const directional = focus>0 && nl>0.5;
-    if(g[i]!==0 && BL[i]<lv0) BL[i]=lv0;   // muestra sólida a ras (celda emisiva sólida), sin propagar
+    const cr = col ? Math.min(15, Math.max(1, Math.round((col[k] / 255) * lv0))) : lv0;
+    const cg = col ? Math.min(15, Math.max(1, Math.round((col[k+1] / 255) * lv0))) : Math.round(lv0 * 0.85);
+    const cb = col ? Math.min(15, Math.max(1, Math.round((col[k+2] / 255) * lv0))) : Math.round(lv0 * 0.50);
+    const maxC = Math.max(1, cr, cg, cb);
+    const idx = i * 4;
+    if(!PASA[g[i]] && BL[idx+3]<maxC){
+      BL[idx]=Math.max(BL[idx], cr);
+      BL[idx+1]=Math.max(BL[idx+1], cg);
+      BL[idx+2]=Math.max(BL[idx+2], cb);
+      BL[idx+3]=maxC;
+    }
     if(!directional){
-      seedFull(i);
-      if(cx>0)    seedFull(i-1);   if(cx<NX-1) seedFull(i+1);
-      if(cy>0)    seedFull(i-NX);  if(cy<NY-1) seedFull(i+NX);
-      if(cz>0)    seedFull(i-sxy); if(cz<NZ-1) seedFull(i+sxy);
+      seedFull(i, cr, cg, cb, maxC);
+      if(cx>0)    seedFull(i-1, cr, cg, cb, maxC);
+      if(cx<NX-1) seedFull(i+1, cr, cg, cb, maxC);
+      if(cy>0)    seedFull(i-NX, cr, cg, cb, maxC);
+      if(cy<NY-1) seedFull(i+NX, cr, cg, cb, maxC);
+      if(cz>0)    seedFull(i-sxy, cr, cg, cb, maxC);
+      if(cz<NZ-1) seedFull(i+sxy, cr, cg, cb, maxC);
     } else {
       const inv=1/nl; nx*=inv; ny*=inv; nz*=inv;
       const qx=Math.round(nx*100), qy=Math.round(ny*100), qz=Math.round(nz*100);   // haz cuantizado a Int8 (−100..100)
-      // Fuente fijada a lv0 SIN empujar al BFS: muestra a ras Y bloquea que el vecino delantero relaye luz por detrás.
-      if(BL[i]<lv0) BL[i]=lv0;
-      // Siembra solo el hemisferio delantero (d·n>0) a lv0, con la dirección del haz → el BFS anisótropo lo estrecha.
-      const nb=(j,dx,dy,dz)=>{ if(g[j]!==0) return; if(dx*nx+dy*ny+dz*nz<=0.01) return;
-        if(BL[j]<lv0){ BL[j]=lv0; BD[j*3]=qx; BD[j*3+1]=qy; BD[j*3+2]=qz; buckets[lv0].push(j); } };
+      if(BL[idx+3]<maxC){
+        BL[idx]=Math.max(BL[idx], cr);
+        BL[idx+1]=Math.max(BL[idx+1], cg);
+        BL[idx+2]=Math.max(BL[idx+2], cb);
+        BL[idx+3]=maxC;
+      }
+      const nb=(j,dx,dy,dz)=>{
+        if(!PASA[g[j]]) return;
+        if(dx*nx+dy*ny+dz*nz<=0.01) return;
+        const jdx=j*4;
+        if(BL[jdx+3]<maxC){
+          BL[jdx]=Math.max(BL[jdx], cr);
+          BL[jdx+1]=Math.max(BL[jdx+1], cg);
+          BL[jdx+2]=Math.max(BL[jdx+2], cb);
+          BL[jdx+3]=maxC;
+          BD[j*3]=qx; BD[j*3+1]=qy; BD[j*3+2]=qz;
+          buckets[maxC].push(j);
+        }
+      };
       if(cx>0)    nb(i-1,-1,0,0);   if(cx<NX-1) nb(i+1,1,0,0);
       if(cy>0)    nb(i-NX,0,-1,0);  if(cy<NY-1) nb(i+NX,0,1,0);
       if(cz>0)    nb(i-sxy,0,0,-1); if(cz<NZ-1) nb(i+sxy,0,0,1);
     }
   };
-  for(const s of mc.structures){ const ec=s.emitCells; if(!ec||!ec.length) continue; const ed=s.emitDir;
+  for(const s of mc.structures){ const ec=s.emitCells; if(!ec||!ec.length) continue; const ed=s.emitDir, col=s.emitCol;
     // BUG-GLOW3 · un emisor MONTADO en un agente movido NO se hornea aquí: lo pinta la luz dinámica del shader (mcDynSync),
     // suave y sin BFS. La luz de bloque se queda solo para emisores QUIETOS (antorchas fijas), donde es correcta y barata.
     if(mcEmisorSeguido(s)) continue;
-    for(let k=0;k<ec.length;k+=3) siembra(s.ox+ec[k], s.oy+ec[k+1], s.oz+ec[k+2], ed, k); }
+    for(let k=0;k<ec.length;k+=3) siembra(s.ox+ec[k], s.oy+ec[k+1], s.oz+ec[k+2], ed, k, col); }
   // …y lo MISMO desde la rejilla: una pieza que cabe en su celda (una antorcha puesta con setVoxel) trae los
   // mismos emitCells/emitDir horneados en su geometría fina; lo único que cambia es de dónde sale el origen.
   for(const ci of GE){ const geo=mc._glowIds && mc._glowIds[g[ci]]; if(!geo) continue;
-    const ec=geo.emitCells, ed=geo.emitDir, cx=ci%NX, cy=((ci/NX)|0)%NY, cz=(ci/sxy)|0;
-    for(let k=0;k<ec.length;k+=3) siembra(cx+ec[k], cy+ec[k+1], cz+ec[k+2], ed, k); }
+    const ec=geo.emitCells, ed=geo.emitDir, col=geo.emitCol, cx=ci%NX, cy=((ci/NX)|0)%NY, cz=(ci/sxy)|0;
+    for(let k=0;k<ec.length;k+=3) siembra(cx+ec[k], cy+ec[k+1], cz+ec[k+2], ed, k, col); }
   // BFS por buckets con COSTE VARIABLE (≥1) según alineación del paso con el haz de la celda origen; lleva el haz al vecino.
   // Coste entero ≥1 ⇒ el nivel destino siempre baja ⇒ cae en un bucket inferior (procesado después): relajación válida.
   const relax=(i,j,dx,dy,dz)=>{
-    if(g[j]!==0) return; const bx=BD[i*3], by=BD[i*3+1], bz=BD[i*3+2];
+    if(!PASA[g[j]]) return; const bx=BD[i*3], by=BD[i*3+1], bz=BD[i*3+2];
     let cost=1;
     if(bx||by||bz){ const dot=(dx*bx+dy*by+dz*bz)/100; cost=1+Math.round(NARROW*(1-Math.max(0,Math.min(1,dot)))); }
-    const nl=BL[i]-cost; if(nl<1 || BL[j]>=nl) return;
-    BL[j]=nl; if(bx||by||bz){ BD[j*3]=bx; BD[j*3+1]=by; BD[j*3+2]=bz; } buckets[nl].push(j);
+    const idx=i*4, jdx=j*4;
+    const curLvl=BL[idx+3];
+    const nl=curLvl-cost; if(nl<1 || BL[jdx+3]>=nl) return;
+    const r=Math.max(0, Math.round(BL[idx]*(nl/curLvl)));
+    const gCol=Math.max(0, Math.round(BL[idx+1]*(nl/curLvl)));
+    const b=Math.max(0, Math.round(BL[idx+2]*(nl/curLvl)));
+    BL[jdx]=Math.max(BL[jdx], r);
+    BL[jdx+1]=Math.max(BL[jdx+1], gCol);
+    BL[jdx+2]=Math.max(BL[jdx+2], b);
+    BL[jdx+3]=nl;
+    if(bx||by||bz){ BD[j*3]=bx; BD[j*3+1]=by; BD[j*3+2]=bz; } buckets[nl].push(j);
   };
   for(let lvl=lv0; lvl>=1; lvl--){
     const b=buckets[lvl];
     for(let bi=0;bi<b.length;bi++){
-      const i=b[bi]; if(BL[i]!==lvl) continue;
+      const i=b[bi]; if(BL[i*4+3]!==lvl) continue;
       const x=i%NX, y=((i/NX)|0)%NY, z=(i/sxy)|0;
       if(x>0)    relax(i,i-1,-1,0,0);   if(x<NX-1) relax(i,i+1,1,0,0);
       if(y>0)    relax(i,i-NX,0,-1,0);  if(y<NY-1) relax(i,i+NX,0,1,0);
@@ -10105,6 +10818,7 @@ function mcRender(){
   const TP=opaque?mc.progOpaque:mc.prog, L=opaque?mc.locOpaque:mc.loc;
   gl.useProgram(TP);
   mcAttribs([L.aPos,L.aUV,L.aShade]);   // limpia cualquier atributo suelto (p.ej. aTile/aRect de estructuras) que haría fallar el draw
+  if(L.uClipY) gl.uniform1f(L.uClipY, -1000.0);
   gl.uniformMatrix4fv(L.uProj,false,pj.m);
   gl.uniformMatrix4fv(L.uView,false,view);
   gl.uniform3f(L.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
@@ -10150,6 +10864,16 @@ function mcRender(){
   // Por aquí salen TAMBIÉN los lotes finos del chunk (las flores de mc.grid): mismo formato y mismo estado de
   // GL que una estructura —sesgo y culling de traseras incluidos—, pero uno por chunk en vez de uno por celda.
   let finoOp=0, finoAl=0; for(const ch of vis){ finoOp+=ch.finoCount|0; finoAl+=ch.finoACount|0; }
+  // REQ-ENV5 · Pasada de reflejo planar del entorno sobre la lámina de agua (solo si hay agua visible y no está sumergido)
+  const waterY = mcDetectWaterY();
+  const RM = (finoAl && mcAguaReflejo > 0 && mcReflEntorno > 0 && !mcFluidoOjo()) ? mcRenderRefl(waterY, vis, TP, L, SM, pj, view) : null;
+  if(RM){
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, mc.canvas.width, mc.canvas.height);
+  } else {
+    mcReflTexDummy();
+  }
+
   if(mc.structures.length || finoOp || finoAl){
     mcStructGL(true);
     // 1) Color por vértice (voxeles #hex, y tex: cuando game.structTextures=false) — programa de estructuras.
@@ -10157,6 +10881,7 @@ function mcRender(){
       const SL=mc.structLoc, sstr=9*4;
       gl.useProgram(mc.structProg);
       gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
+      if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
       gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
       gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
       gl.uniform1f(SL.uReflejo, 0);   // REQ-FLUID5: la pasada opaca no refleja (el agua es translúcida, va en la 3)
@@ -10189,6 +10914,8 @@ function mcRender(){
       const stride2=10*4, SL=mc.stexLoc;   // alpha-test en el FS (el atlas de estructuras tiene huecos)
       gl.useProgram(mc.stexProg);
       gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
+      if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
+      if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
       gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
       gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.structAtlasTex); gl.uniform1i(SL.uTex,0);
@@ -10206,6 +10933,8 @@ function mcRender(){
         quads+=s.texCount/6;
       }
     }
+    mcRenderSky(gl, pj.m, view);
+
     // 3) Translúcido (voxeles #rrggbbaa) — pasada con blend SIN escribir profundidad (sin ordenar: pixel-art,
     //    order-independent, barato). Va después de TODO lo opaco (terreno + estructuras) para mezclarse encima.
     if(mc.structProg){
@@ -10221,8 +10950,18 @@ function mcRender(){
         // Buceando (mcFluidoOjo) el reflejo se apaga: bajo el agua la lámina se mira por el envés y quedaría raro.
         gl.uniform1f(SL.uReflejo, mcFluidoOjo() ? 0 : mcAguaReflejo);
         gl.uniform1f(SL.uReflCurva, mcReflCurva); gl.uniform1f(SL.uReflOpac, mcReflOpac);
+        if(SL.uReflBase) gl.uniform1f(SL.uReflBase, mcReflBase);
+        if(SL.uReflCausticas) gl.uniform1f(SL.uReflCausticas, mcReflCausticas);
+        if(SL.uReflSubacuatico) gl.uniform1f(SL.uReflSubacuatico, mcReflSubacuatico);
+        if(SL.uReflAbsorcion) gl.uniform1f(SL.uReflAbsorcion, mcReflAbsorcion);
+        if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
         if(mcReflColor) gl.uniform3f(SL.uReflColor, mcReflColor[0], mcReflColor[1], mcReflColor[2]);
-        else gl.uniform3f(SL.uReflColor, -1, -1, -1);   // r<0 = refleja el cielo (uSky)
+        else gl.uniform3f(SL.uReflColor, -1, -1, -1);   // r<0 = refleja el cielo (uSky) o el entorno (uReflTex)
+        gl.uniform1i(SL.uReflTex, 3);
+        gl.uniform1f(SL.uReflEntorno, (mcReflEntorno && RM && !mcFluidoOjo()) ? mcReflEntorno : 0.0);
+        gl.uniform2f(SL.uScreenSize, mc.canvas.width, mc.canvas.height);
+        gl.uniform1f(SL.uReflOndas, mcReflOndas);
+        gl.uniform1f(SL.uTime, (performance.now() * 0.001) % 10000);
         // uEye lo sube mcSunUniforms, pero SOLO si hay mapa de sol; el reflejo lo necesita siempre, así que se
         // fija aquí (misma cuenta que en mcSunUniforms) para no depender de que la sombra esté encendida.
         gl.uniform3f(SL.uEye, mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]);
@@ -10925,7 +11664,7 @@ async function mcRestampAll(){
   // da hasGlow=false → mcComputeBlockLight sale en 0 → las estructuras se horneaban a oscuras y solo se iluminaban
   // al re-estamparlas a mano (mcStampStruct forzaba hasGlow=true). mcStructGeom cachea en meshRot[rot], así que el
   // mcBuildStructMesh de abajo reutiliza el greedy (sin doble coste).
-  for(const s of insts){ const g=await mcStructGeom(s.key, mcOriNorm(s.rot)); s.emitCells=g.emitCells; s.emitDir=g.emitDir; }
+  for(const s of insts){ const g=await mcStructGeom(s.key, mcOriNorm(s.rot)); s.emitCells=g.emitCells; s.emitDir=g.emitDir; s.emitCol=g.emitCol; }
   // Luz de bloque FRESCA antes de reconstruir → mcBuildStructMesh hornea la luz correcta por cara (corrige luz
   // estructura-sobre-estructura y post-edición). El terreno se re-malla al final SOLO si el brillo cambió respecto
   // al que tienen HORNEADO los chunks (mc.blockLightMeshed, que pone mcMeshAll): las mallas del terreno dependen de
@@ -14422,7 +15161,7 @@ game.dumpVars=function(){
     'airControl','airAccel','airCap','autoUnstick',
     'structTextures','structGreedy','useOldStructBuildCall','interiorDark','sunShade','shadowSize','glowLevel','glowFocus','worldSize',
     'agentSpeed','agentSaveMs'];
-  const V={ showFPS:_showFPS, showVoxels:_showVox, carasMarcadas:carasMarcar }; // callables → su booleano subyacente
+  const V={ showFPS:_showFPS, showVoxels:_showVox, showColors:_showColors, carasMarcadas:carasMarcar }; // callables → su booleano subyacente
   for(const k of keys) V[k]=game[k];
   try{ console.table(V); }catch(e){}
   console.log(JSON.stringify(V,null,2));                                      // copiable como literal
@@ -14435,6 +15174,7 @@ function closeWorld(){
   mcPauseAgents();   // los agentes se pausan al salir al editor: retienen memoria y coords hasta reabrir el Mundo
   mcCloseNote(); { const nv=$('#mc-noteview'); if(nv) nv.hidden=true; }   // t1 · cierra el editor/visor de notas al salir
   mcFreeNoteTexts();   // los rótulos horneados de los carteles: al volver se re-hornean con el texto de entonces
+  mcFreeRefl();        // REQ-ENV5 · libera el framebuffer de reflejo planar
   if(mc.grid){ clearTimeout(mcSaveT); mcSaveWorld(); }   // vuelca cualquier edición pendiente al salir
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
   if(mc.raf){ cancelAnimationFrame(mc.raf); mc.raf=0; }
@@ -14665,18 +15405,19 @@ game.onKey=function(tecla, fn){
 // game.keys() · lista las teclas que has ligado con game.onKey
 game.keys=function(){ const ks=Object.keys(mcUserKeys); console.log(ks.length?('teclas ligadas: '+ks.join(', ')):'sin teclas ligadas (game.onKey)'); return ks; };
 
-// game.snippet('mi-menu') · corre OTRO snippet desde el tuyo. El argumento es el ID del documento (el de
-// la URL /api/snippets/<id>), no el nombre bonito del panel Código. Devuelve lo que el invitado retorne,
+// game.snippet('mi-menu', opts) · corre OTRO snippet desde el tuyo. El argumento es el ID del documento (el de
+// la URL /api/snippets/<id>), no el nombre bonito del panel Código. Los argumentos opcionales que pases detrás
+// se entregan al snippet como variables `opts` (el primero) y `args` (o arguments). Devuelve lo que el invitado retorne,
 // así que también vale de librería: `const util = await game.snippet('mis-utiles');` con un `return {…}`
 // al final del otro. Es await-able sin envolver nada porque un snippet ya es el cuerpo de un AsyncFunction.
 // Va por mcCorreSnippet y NO por eval a propósito: así lo que el invitado registre —una acción de OSD, un
 // comportamiento de bloque— sigue sabiendo de qué documento salió (`mc._snippetActual`), que es lo único
 // que contesta «¿y esto dónde lo cambio?» cuando el código no está en ningún fichero del repo.
 // No hay guardia contra ciclos: si A llama a B y B a A, se cuelga la pestaña.
-game.snippet=async function(id){
+game.snippet=async function(id, ...args){
   const s=await mcPideSnippet(String(id==null?'':id).trim());
   if(!s || !s.code) throw new Error('game.snippet("'+id+'"): no existe ese snippet (el argumento es el ID, mira el panel Código)');
-  return mcCorreSnippet(s.id||id, s.code);
+  return mcCorreSnippet(s.id||id, s.code, ...args);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────

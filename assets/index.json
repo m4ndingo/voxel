@@ -1244,5 +1244,29 @@
     "createdAt": "2026-08-14T12:02:20",
     "count": 1352,
     "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir."
+  },
+  {
+    "id": "oro",
+    "name": "Bloque de oro",
+    "role": "Bloque · oro mineral",
+    "type": "textura",
+    "icon": "🟡",
+    "size": 16,
+    "file": "assets/oro.vox.json",
+    "savedAt": "2026-08-15T09:55:00",
+    "createdAt": "2026-08-15T09:55:00",
+    "count": 4096
+  },
+  {
+    "id": "nieve",
+    "name": "Nieve",
+    "role": "Bloque · nieve suave",
+    "type": "textura",
+    "icon": "❄️",
+    "size": 16,
+    "file": "assets/nieve.vox.json",
+    "savedAt": "2026-08-15T09:55:00",
+    "createdAt": "2026-08-15T09:55:00",
+    "count": 4096
   }
 ]

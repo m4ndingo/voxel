@@ -6,15 +6,5 @@ El dueño dirá cuándo hay que ponerse a actualizarla; entonces se vacía esta 
 
 Formato: `- [ ] <ticket> · <qué cambió> → <dónde tocaría>`
 
-- [ ] limpieza de la raíz (2026-08-13) · el motor se mudó a `web/app.js` → los 36 campos `fuente`
-      de `wiki/api.json` dicen `app.js · <símbolo>`; el símbolo sigue siendo correcto (que es lo que
-      comprueba `tests/test_wiki.js`), solo envejeció el nombre del fichero.
-- [ ] BUG-GLOW2 (2026-08-14) · nuevo mando público `game.agentsLightTracking(bool)` — la luz de un
-      emisor montado en un agente le sigue al moverse; conmutable para medir fps o desactivarlo
-      (defecto on) → nueva entrada en `wiki/api.json` (fuente: `app.js · game.agentsLightTracking`).
-- [ ] BUG-GLOW3/BUG-GLOW1 (2026-08-14) · nuevo mando `game.glowGain` (INTENSIDAD de la luz artificial, >1
-      sobreexpone) → nueva entrada en `wiki/api.json`. Aclarar en la doc de `game.glowLevel` que es ALCANCE
-      (no intensidad) y que `MC_MAXLIGHT` no se toca para brillar.
+*(Sincronización completada el 2026-08-15: incorporados mandos de REQ-ENV5 `game.reflejoEntorno`, `game.reflejoOndas`, `game.reflejoPlanoY` en `wiki/api.json` e `iluminacion.md`, así como `game.agentsLightTracking` y `game.glowGain`.)*
 
-*(la última sincronización se hizo el 2026-08-13: REQ-ICON1 se cerró con la página
-`wiki/paginas/iconos.md`, y de paso se escribió `wiki/paginas/atajos.md`.)*

@@ -268,3 +268,35 @@ de siempre**, así que encenderlo no rompe nada; un atardecer naranja lo entibia
 sobre una charca en `/map/test`, ON vs OFF con la misma cámara: a rasante aclara y azula, en picado
 apenas cambia (prueba que es por ángulo), la lava no se inmuta (prueba que es solo agua), y
 `reflejoColor`/`cieloColor` tiñen el reflejo de rojo.
+
+---
+
+## 🏞️ Reflejo realista del entorno en el agua (REQ-ENV5)
+
+Ampliación directa de REQ-FLUID5. El agua no solo refleja el cielo plano sino los **objetos del entorno**:
+terreno cercano, nubes de lana, montañas, construcciones, estructuras y agentes.
+
+### Técnica: Cámara especular planar (FBO) + Micro-ondulaciones
+
+1. **Pase especular invertido**: Cuando hay agua visible y `mcReflEntorno > 0`, se renderiza una pasada
+   previa a un framebuffer 2D (`mc.refl.fbo`, 512×512) reflejando la posición y cabeceo de la cámara respecto
+   al plano de agua ($Y = y_{agua}$, autodetectado o fijado con `game.reflejoPlanoY`).
+2. **Inversión de winding**: La reflexión en Y invierte el orden de los triángulos; el pase activa `gl.frontFace(gl.CW)`
+   y restaura `gl.frontFace(gl.CCW)`.
+3. **Mapeo proyectivo**: La superficie del agua en el fragment shader proyecta las coordenadas de pantalla
+   al framebuffer de reflexión (`1.0 - suv.y`), incorporando una sutil perturbación sinusoidal animada
+   (`uReflOndas`, modulable con `game.reflejoOndas`).
+4. **Textura unidad 3**: La textura de reflexión planar viaja en `TEXTURE3` (`sampler2D uReflTex`), conviviendo
+   limpiamente con atlas (`TEXTURE0`), sombra (`TEXTURE1`) y luz de bloque 3D (`TEXTURE2`).
+
+| función | qué mueve |
+|---|---|
+| `game.reflejoEntorno(true/false)` | activa o desactiva el reflejo de objetos del entorno (defecto 1 / true) |
+| `game.reflejoOndas(1.5)` | fuerza de las ondas y ondulaciones superficiales del agua (defecto 1) |
+| `game.reflejoPlanoY(14)` | fija la altura $Y$ del plano de agua para la reflexión (`'auto'` o `null` = autodetectada) |
+| `game.reflejoSubacuatico(1.5)` | intensidad de la superficie del agua vista desde abajo: Ventana de Snell, refracción, TIR y cáusticas (defecto 0.7; 0 = apagado; `'reset'`) |
+| `game.reflejoAbsorcion(1.0)` | absorción espectral y profundidad del agua (Beer-Lambert): amarillo en orilla → turquesa/esmeralda → azul marino (defecto 1; 0 = apagado; `'reset'`) |
+
+**Guardián:** `node tests/test_req_env5_reflejo_entorno.js` (`@area: render`).
+
+

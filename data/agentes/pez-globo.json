@@ -1,0 +1,24 @@
+{
+  "nombre": "Pez globo",
+  "raiz": {
+    "nombre": "torso",
+    "pieza": "hab:pez-globo",
+    "rot": 0
+  },
+  "piezas": [],
+  "seguir": {
+    "ejes": "xz",
+    "correa": 5,
+    "volver": true,
+    "deteccion": 0,
+    "distancia": 3,
+    "vision": 360,
+    "velocidad": 2
+  },
+  "andar": {
+    "cadencia": 0
+  },
+  "fisica": false,
+  "savedAt": "2026-08-15T21:36:04",
+  "id": "pez-globo"
+}

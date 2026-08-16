@@ -1,6 +1,6 @@
 // @area: general
 // @necesita: servidor, playwright
-// Los dos interruptores de depuracion de F12 —game.showFPS y game.showVoxels— y sus medidores.
+// Los tres interruptores de depuracion de F12 —game.showFPS, game.showVoxels y game.showColors— y sus medidores.
 //
 // El principio que fija REQ-DBG1 es que un toggle de depuracion vale IGUAL en los tres modos
 // (editor 3D, Play y Mundo). BUG-DBG2 fue justo lo contrario y ademas de la peor manera: en el Mundo
@@ -10,8 +10,8 @@
 // Lo que se guarda aqui:
 //   1. cada medidor obedece SOLO a su interruptor, en el Mundo y en el editor 3D;
 //   2. el cambio se ve SIN esperar al siguiente frame (applyShow* refresca los tres modos);
-//   3. los dos sobreviven a recargar (localStorage vf_showFPS / vf_showVox);
-//   4. el defecto es fps si, voxels no.
+//   3. los tres sobreviven a recargar (localStorage vf_showFPS / vf_showVox / vf_showColors);
+//   4. el defecto es fps si, voxels no, colores no.
 // No persiste nada en el mundo: solo lee, y bloquea el POST por si la SPA autoguarda al abrirse.
 const { chromium } = require('playwright');
 
@@ -47,38 +47,47 @@ const RAIZ = 'http://localhost:8500';
   const r1 = await p.evaluate(() => {
     const out = {};
     const ve = () => ({ fps: !document.querySelector('#mc-fps').hidden,
-                        vox: !document.querySelector('#mc-vox').hidden });
-    // Defecto de fabrica: fps si, voxels no. Se fuerza para no depender de lo que haya en localStorage.
-    game.showFPS(true); game.showVoxels(false);
+                        vox: !document.querySelector('#mc-vox').hidden,
+                        col: !document.querySelector('#mc-col').hidden });
+    // Defecto de fabrica: fps si, voxels no, colors no. Se fuerza para no depender de lo que haya en localStorage.
+    game.showFPS(true); game.showVoxels(false); game.showColors(false);
     out.defecto = ve();
-    // El toggle de fps NO puede tocar el contador de voxels: ese era el bug.
+    // El toggle de fps NO puede tocar el contador de voxels ni colores
     game.showFPS(false);
     out.sinFps = ve();
     game.showFPS(true);
-    // Y el de voxels tiene que hacer algo, que era la otra mitad del reporte.
+    // Y el de voxels tiene que hacer algo
     game.showVoxels(true);
     out.conVox = ve();
     game.showVoxels(false);
     out.sinVox = ve();
-    // Los cuatro cruces, sin dejar pasar un frame: applyShow* refresca el Mundo, no mcTick.
-    game.showFPS(false); game.showVoxels(true);
+    // Y el de colores tiene que encender solo colores
+    game.showColors(true);
+    out.conCol = ve();
+    game.showColors(false);
+    out.sinCol = ve();
+    // Los cruces, sin dejar pasar un frame: applyShow* refresca el Mundo, no mcTick.
+    game.showFPS(false); game.showVoxels(true); game.showColors(true);
     out.cruzado = ve();
-    game.showFPS(true); game.showVoxels(true);
-    out.ambos = ve();
-    out.guardado = { fps: localStorage.getItem('vf_showFPS'), vox: localStorage.getItem('vf_showVox') };
+    game.showFPS(true); game.showVoxels(true); game.showColors(true);
+    out.todos = ve();
+    out.guardado = { fps: localStorage.getItem('vf_showFPS'), vox: localStorage.getItem('vf_showVox'), col: localStorage.getItem('vf_showColors') };
     return out;
   });
-  ok('de partida se ven los fps y no los voxels', r1.defecto.fps === true && r1.defecto.vox === false,
+  ok('de partida se ven los fps y no los voxels ni colores', r1.defecto.fps === true && r1.defecto.vox === false && r1.defecto.col === false,
      JSON.stringify(r1.defecto));
   ok('showFPS(false) apaga los fps', r1.sinFps.fps === false);
-  ok('…y NO toca el contador de voxels', r1.sinFps.vox === false, 'BUG-DBG2: aqui se apagaban los dos');
-  ok('showVoxels(true) enciende el contador de voxels', r1.conVox.vox === true, 'antes no hacia nada');
+  ok('…y NO toca el contador de voxels ni colores', r1.sinFps.vox === false && r1.sinFps.col === false);
+  ok('showVoxels(true) enciende el contador de voxels', r1.conVox.vox === true);
   ok('showVoxels(false) lo apaga', r1.sinVox.vox === false);
-  ok('…y NO toca los fps', r1.sinVox.fps === true);
-  ok('se pueden cruzar: vox si, fps no', r1.cruzado.fps === false && r1.cruzado.vox === true,
+  ok('…y NO toca los fps ni colores', r1.sinVox.fps === true && r1.sinVox.col === false);
+  ok('showColors(true) enciende el contador de colores', r1.conCol.col === true);
+  ok('showColors(false) lo apaga', r1.sinCol.col === false);
+  ok('…y NO toca los fps ni voxels', r1.sinCol.fps === true && r1.sinCol.vox === false);
+  ok('se pueden cruzar: vox+col si, fps no', r1.cruzado.fps === false && r1.cruzado.vox === true && r1.cruzado.col === true,
      JSON.stringify(r1.cruzado));
-  ok('y los dos a la vez', r1.ambos.fps === true && r1.ambos.vox === true);
-  ok('los dos se guardan en localStorage', r1.guardado.fps === '1' && r1.guardado.vox === '1',
+  ok('y los tres a la vez', r1.todos.fps === true && r1.todos.vox === true && r1.todos.col === true);
+  ok('los tres se guardan en localStorage', r1.guardado.fps === '1' && r1.guardado.vox === '1' && r1.guardado.col === '1',
      JSON.stringify(r1.guardado));
 
   // ── 2 · sobreviven a recargar ───────────────────────────────────────────────────────────────
@@ -89,15 +98,16 @@ const RAIZ = 'http://localhost:8500';
   const r2 = await p.evaluate(() => ({
     fps: !document.querySelector('#mc-fps').hidden,
     vox: !document.querySelector('#mc-vox').hidden,
-    valores: { fps: String(game.showFPS), vox: String(game.showVoxels) },
+    col: !document.querySelector('#mc-col').hidden,
+    valores: { fps: String(game.showFPS), vox: String(game.showVoxels), col: String(game.showColors) },
   }));
-  ok('vuelven encendidos los dos', r2.fps === true && r2.vox === true, JSON.stringify(r2.valores));
+  ok('vuelven encendidos los tres', r2.fps === true && r2.vox === true && r2.col === true, JSON.stringify(r2.valores));
 
-  // Se deja el contador de voxels como estaba de fabrica, que es apagado.
-  await p.evaluate(() => { game.showVoxels(false); });
+  // Se dejan voxels y colores como estaban de fabrica (apagados).
+  await p.evaluate(() => { game.showVoxels(false); game.showColors(false); });
 
   // ── 3 · el mismo interruptor en el editor 3D ────────────────────────────────────────────────
-  console.log('\nEl editor 3D obedece los mismos dos');
+  console.log('\nEl editor 3D obedece los mismos tres');
   // ?noauto=1 = el editor a pelo: sin el snippet 'editor-autoarranque' del dueño, que puede navegar a otro mapa.
   await p.goto(RAIZ + '/?noauto=1', { waitUntil: 'load', timeout: 60000 });
   await p.waitForFunction('typeof setMode === "function" && typeof game !== "undefined"', { timeout: 120000 });
@@ -105,15 +115,18 @@ const RAIZ = 'http://localhost:8500';
   const r3 = await p.evaluate(() => {
     setMode('3d');
     const ve = () => ({ fps: !document.querySelector('#e3-fps').hidden,
-                        vox: !document.querySelector('#e3-vox').hidden });
+                        vox: !document.querySelector('#e3-vox').hidden,
+                        col: !document.querySelector('#e3-col').hidden });
     const out = {};
-    game.showFPS(true); game.showVoxels(false); out.soloFps = ve();
-    game.showFPS(false); game.showVoxels(true); out.soloVox = ve();
-    game.showFPS(true); game.showVoxels(false);
+    game.showFPS(true); game.showVoxels(false); game.showColors(false); out.soloFps = ve();
+    game.showFPS(false); game.showVoxels(true); game.showColors(false); out.soloVox = ve();
+    game.showFPS(false); game.showVoxels(false); game.showColors(true); out.soloCol = ve();
+    game.showFPS(true); game.showVoxels(false); game.showColors(false);
     return out;
   });
-  ok('solo fps => solo #e3-fps', r3.soloFps.fps === true && r3.soloFps.vox === false, JSON.stringify(r3.soloFps));
-  ok('solo voxels => solo #e3-vox', r3.soloVox.fps === false && r3.soloVox.vox === true, JSON.stringify(r3.soloVox));
+  ok('solo fps => solo #e3-fps', r3.soloFps.fps === true && r3.soloFps.vox === false && r3.soloFps.col === false, JSON.stringify(r3.soloFps));
+  ok('solo voxels => solo #e3-vox', r3.soloVox.fps === false && r3.soloVox.vox === true && r3.soloVox.col === false, JSON.stringify(r3.soloVox));
+  ok('solo colors => solo #e3-col', r3.soloCol.fps === false && r3.soloCol.vox === false && r3.soloCol.col === true, JSON.stringify(r3.soloCol));
 
   ok('sin errores de pagina', errores.length === 0, errores.join(' | '));
 

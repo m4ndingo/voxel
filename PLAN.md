@@ -79,20 +79,11 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y quitarlo de esta tabla.
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
 | [BUG-RS10](#-bug-rs10) | el pistón **no empuja estructuras** (sí bloques, sí jugador, sí agentes) | 🟡 abierto 2026-08-07 | **el caso de la captura ya no ocurre** (era [BUG-STR1](#-bug-str1)): el pistón empuja `mc.grid` y no mira `mc.structures`, y eso está escrito como límite conocido de la v1. Preguntar al dueño si aún le molesta antes de tocar nada |
-| [REQ-AG17](#-req-ag17) | un agente **no debe meterse en el espacio de otro**: lo empuja como mucho, y **se detiene** si el otro no le deja pasar | ✅ resuelto 2026-08-13 | solo `game.esqueletos` (lo acotó el dueño), **todo en el snippet**, cero `app.js`: `parche_snp_ag17.py` → `ag17b.py` → `ag17c.py` (v1.32→v1.35). Un solo embudo, `moverRaiz`, cubre andar + puñetazo + hielo. Pararse sale como `g.por = 3` «bloqueada», que ya estaba en el diagnóstico. Hicieron falta **tres pasadas**: el perdón al que ya estorbaba tenía que ser **condicional**, faltaba **desatasco**, y validar el destino **no es** validar el camino (el golpe da pasos de 0,67 con un cuerpo de 0,8 → atravesaba). `test_agentes_empujan_y_trepan.js` A/B/C/F/G |
-| [REQ-AG18](#-req-ag18) | **límite de escalada** del agente, editable en el panel dentro de la capacidad **«anda»** (dueño: «max escalar bloques: 3») | ✅ resuelto 2026-08-13 | medido primero: hoy **se teletransporta hasta arriba** sin importar lo hondo que cayó. La ambigüedad se deshizo al medir — es lo que trepa **de una vez al atascarse**, `def.andar.escalar` **0..8, por defecto 3**; el escalón de andar sigue siendo **uno** y no se toca. `parche_snp_ag18.py` (v1.31→v1.32) + campo en el panel. `test_agentes_empujan_y_trepan.js` D/E |
-| [REQ-FLY2](#-req-fly2) | en **modo vuelo**, subir/bajar debería ir proporcional a `playerSpeed` y va **mucho más lento** | ✅ resuelto 2026-08-13 | la vertical pasa a `playerSpeed·√scale·volarVel`, como la horizontal; `game.volarVel` es ahora un **multiplicador** (defecto 1, acotado 0,1..10) en vez de u/s absolutos. `test_vuelo.js` §3 mide que subir `playerSpeed` acelera la vertical en la misma proporción (×4 con speed 5→20) |
 | [BUG-IMP1](#-bug-imp1) | **crash al importar objetos**: `TypeError: hex.slice is not a function` en `shade` → el editor no pinta el modelo importado | 🟡 en curso 2026-08-13 | el color venía como **entero empaquetado**, no `'#rrggbb'`. **Arreglado el crash** en `hex6`/`shade`: un entero se recupera como su hex (`0xff8844`→`#ff8844`), y cualquier otro tipo raro → magenta de error sin tumbar el editor. `test_importar_color.js`. **Pendiente:** que el dueño confirme que los colores importados salen BIEN (si el entero no fuera `0xRRGGBB` sino otro empaquetado, saldría mal; entonces mande el fichero) |
-| [BUG-GLOW1](#-bug-glow1) | **revisar si `game.glowLevel` y `game.glowFocus` funcionan bien** | ✅ resuelto 2026-08-14 | la sonda «15 y 5 idénticos» era el **setter que no refrescaba**: llamaba a `mcComputeBlockLight` pero éste se saltaba por su firma `_blEmiSig` (que no incluye glowLevel/glowFocus) ⇒ el cambio no se veía hasta editar un bloque. Arreglado (`mc._blEmiSig=null` en ambos setters). Verificado en vivo: glowLevel 3/6/15 → luz 88/601/4383 (escala), y glowFocus 0→0.9 estrecha el haz (perpendicular 176→0). El dueño lo confirma |
-| [BUG-GLOW2](#-bug-glow2) | la **luz emisiva de un agente NO le sigue al moverse** (seguir al jugador): se queda en la celda del spawn | ✅ resuelto 2026-08-14 | la siembra de `mcComputeBlockLight` ahora transforma cada `emitCell` por la pose viva `s.model` (misma fórmula col-major que `mcStructVisible`) cuando el emisor va montado en un agente; `mcTrackAgentLights()` (en `mcTick`, tras `mcUpdate`) detecta el cambio de celda y re-siembra + re-malla SOLO el halo viejo∪nuevo. **Conmutable**: `game.agentsLightTracking(true/false)` (defecto on) para medir el coste o desactivarlo. Guardián `tests/test_agente_luz_sigue.js`. Colateral (NPC-cubo `mc.agents` sin luz) queda fuera, anotado en la sección |
-| [BUG-GLOW3](#-bug-glow3) | la luz del agente que SÍ le sigue (BUG-GLOW2) **hunde los fps** y va **a trompicones** (salta de celda en celda con retardo, no avanza suave con él) | ✅ resuelto 2026-08-14 | sustituido el seguimiento por luz de bloque (granular + BFS por paso) por una **luz DINÁMICA por-fragmento** (`MC_DYNLIGHT_LIB` en los 4 shaders; `mcDynSync` recolecta las 8 celdas emisivas vivas más cercanas al ojo → uniform, sin cuantizar). `mcComputeBlockLight` salta a los emisores montados; solo re-siembra al pasar montado↔quieto. Se comporta como la luz de bloque (resiste noche + `dynLift` repone el brillo horneado; sin sombra). Guardián `tests/test_agente_luz_sigue.js`: sigue **continua** (err 1e-6) y **cero** BFS por paso. `game.agentsLightTracking(true/false)` |
 | [REQ-GAL3](#-req-gal3) | poder **cambiar el espacio de nombres de una pieza desde la galería** (mover `asset:` ↔ `hab:`) | 🔴 abierto 2026-08-10 | idea del dueño al hilo de BUG-FLUID3. No es el arreglo de los importados (el motor ya no depende del espacio), sino la herramienta para **colocar** una pieza donde la quieres. Redactado, sin investigar |
-| [REQ-FLUID4](#-req-fluid4) | **«ilusión de agua»**: un lago se ve como cubos transparentes con caras internas, no como una masa continua | 🟡 en curso 2026-08-11 | **fases 1-2 (culling en el camino fino) y 3 (vista subacuática) hechas** — `test_caras_fluido.js` + `test_vista_subacuatica.js`. Queda la **fase 4 (reflejos)**, aplazada por el dueño ⇒ [REQ-FLUID5](#-req-fluid5) |
-| [REQ-FLUID5](#-req-fluid5) | **reflejos de cielo en la superficie del agua** — la fase 4 de REQ-FLUID4, sacada a ticket propio | ✅ resuelto 2026-08-13 | **enfoque 1** (Fresnel hacia el color de cielo), sin pasada extra ni FBO — nubes/terreno (enfoque 3) no, con PERF-RS1 encima no se doblan draw calls sin medir. Cambio de shader + **una bandera horneada en el canal `emit`** de la cara de arriba del agua: cero atributos/VBO/costuras de caché nuevos, y el uniforme la escala sin re-mallar. Solo agua, solo desde arriba. Playground F12: `game.reflejoAgua/Curva/Opacidad/Color` + `game.cieloColor`. `test_reflejo_agua.js` |
-| [REQ-ENV1](#-req-env1) | **ambientes realistas**: presets de iluminación (amanecer, mediodía, atardecer, noche, niebla, tormenta, invierno, verano) aplicables con un mando, `game.entorno(nombre)` | 🟡 en curso 2026-08-13 | hecho como **snippet** (`data/snippets/ambientes.json`, `game.entorno`), no `app.js`: compone los mandos que ya existen (`cieloColor` + `reflejoAgua` + `vistaAgua` + `sunShade`) con transición suave. Los 8 presets aplican y transicionan. Fase de **probar y afinar** con el dueño; lo que la iteración destape sale a [REQ-ENV2](#-req-env2)/[REQ-ENV3](#-req-env3) |
-| [REQ-ENV2](#-req-env2) | **niebla atmosférica sobre el agua** (fuera del agua), para que NIEBLA/NUBLADO/TORMENTA de [REQ-ENV1](#-req-env1) se vean de verdad | ✅ resuelto 2026-08-13 | `game.niebla({near,far,tinte})`, reusa los uniformes de niebla que ya estaban (`uFog*`): near/far en bloques, tiñe hacia el cielo. Por defecto apagada ⇒ fuera del agua no cambia nada. Cableado en los 8 presets de [REQ-ENV1](#-req-env1). `test_niebla_mundo.js` |
-| [REQ-ENV4](#-req-env4) | **la luz artificial (antorchas) debe alumbrar de noche también «en la calle»** — `game.luz` oscurecía todo por igual y las fuentes no destacaban al aire libre | ✅ resuelto 2026-08-13 | la luz de bloque va en una **textura 3D** (`mc.blockLight` → `sampler3D`) que el shader lee por posición; la exposición de noche la RESISTE: `mix(uExpo,1,luzDeBloque)`. Se eligió textura (no vértice) para **no tocar formatos de malla** ni sus guardianes. ⚠️ Casi rompe TODO (un `sampler3D` en la unidad 0 choca con el atlas `sampler2D`): siempre a la unidad 2 + 3D dummy. `test_luz_artificial.js` |
-| [REQ-ENV3](#-req-env3) | **oscurecer el mundo de noche / nivel de luz global**, para que NOCHE y TORMENTA de [REQ-ENV1](#-req-env1) no salgan con el terreno a plena luz | ✅ resuelto 2026-08-13 | `game.luz(factor)` = **exposición** en el shader (multiplica el color de las superficies), instantánea y **sin re-mallar**; 1 = pleno día (idéntico a hoy), 0 = negro. Las FUENTES emisivas no se apagan (una lámpara sigue de noche). Un uniforme `uExpo` en los 3 programas de color, subido por `mcSunUniforms`. Cableado en los 8 presets. `test_luz_global.js` |
+| [REQ-FLUID4](#-req-fluid4) | **«ilusión de agua»**: un lago se ve como cubos transparentes con caras internas, no como una masa continua | 🟡 en curso 2026-08-11 | **fases 1-2 (culling en el camino fino) y 3 (vista subacuática) hechas** — `test_caras_fluido.js` + `test_vista_subacuatica.js`. Queda la **fase 4 (reflejos)**, aplazada por el dueño ⇒ [REQ-FLUID5](PLAN_ARCHIVO.md#-req-fluid5) |
+| [REQ-ENV1](#-req-env1) | **ambientes realistas**: presets de iluminación (amanecer, mediodía, atardecer, noche, niebla, tormenta, invierno, verano) aplicables con un mando, `game.entorno(nombre)` | 🟡 en curso 2026-08-13 | hecho como **snippet** (`data/snippets/ambientes.json`, `game.entorno`), no `app.js`: compone los mandos que ya existen (`cieloColor` + `reflejoAgua` + `vistaAgua` + `sunShade`) con transición suave. Los 8 presets aplican y transicionan. Fase de **probar y afinar** con el dueño; lo que la iteración destape sale a [REQ-ENV2](PLAN_ARCHIVO.md#-req-env2)/[REQ-ENV3](PLAN_ARCHIVO.md#-req-env3) |
+| [REQ-ENV5](#-req-env5) | **reflejos realistas en fluidos**: reflejar objetos del entorno, nubes y terreno en la superficie del agua (no solo el color del cielo) | 🟢 resuelto 2026-08-15 | amplía [REQ-FLUID5](PLAN_ARCHIVO.md#-req-fluid5). Implementado vía **pase especular planar (FBO + cámara invertida en Y + inversión de winding)** y **micro-ondulaciones animadas** en fragment shader (`MC_STRUCT_FS`). Mandos `game.reflejoEntorno`, `game.reflejoOndas`, `game.reflejoPlanoY`. Guardián `tests/test_req_env5_reflejo_entorno.js` |
 | [BUG-SNP4](#-bug-snp4) | los cambios hechos en el **editor de código del Mundo se revierten** al volver al mapa y reabrirlo | 🔴 abierto 2026-08-11 | **Redactado, sin investigar.** Sospecha (sin comprobar): el snippet tiene **dos copias vivas** y al reabrir el editor se relee la que se cargó al abrir el Mundo, no la editada. Ojo: el dueño dice **Ctrl+C**, `CLAUDE.md` documenta **Alt+C** |
 | [BUG-FLUID5](#-bug-fluid5) | `test_nadar.js` (4 fallos) y `test_hundirse.js` (4 fallos) **miden el fondo del pozo, no el fluido**: son guardianes viejos frente a las constantes **retuneadas** por el dueño | 🔴 abierto 2026-08-11 | **Investigado, sin decidir.** No es una regresión: A/B revirtiendo REQ-FLUID9 sobre `app.js` da el **mismo resultado exacto**. Los dos se escribieron para `gravedad 1/16, empuje 8` y hoy el motor lleva `WATER {0.5, 0.22, 3}` / `LAVA {1, 0.11, 2}` ⇒ con **8× la gravedad de dentro** sus tramos de 120/240 frames cruzan enteros un pozo de 9 y leen `vy = 0`. **Falta que el dueño diga qué manda**: los tests codifican sus decisiones de REQ-FLUID6/7 y las constantes también son suyas. `CLAUDE.md` §🏊 cita las cifras viejas |
 | [PERF-RS1](#-perf-rs1) | los observadores **bajan mucho los fps** cuando se encadenan varios; y también con **1 solo botón + 1 observador** | 🟡 reabierto 2026-08-10 (v4) | 4 pasadas hechas — `mcRemeshAround` optimizado (coalescencia por rAF, saltos de `mcComputeBlockLight`, `mcRelightBox`, `mcRebakeStructsNear`, firma en `mcMeshChunk`, tunable `game.redstone.pulsoVisible`). Con la sonda Playwright bajo SwiftShader mejora del 33%, pero el dueño sigue reportando caídas en GPU real. Espera medida en su hardware, ver [REQ-PERF1](#-req-perf1) |
@@ -116,7 +107,17 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
-| ~~[BUG-SNP3](PLAN_ARCHIVO.md#-bug-snp3)~~ | ~~**`game.bloques.quitar()` está roto**: lanza `ReferenceError: g is not defined` siempre, por ~12 líneas de física pegadas por error en medio de la función~~ | ✅ resuelto 2026-08-13 | las 12 líneas eran un **borrador que nunca se enchufó** en `asentar()` (no se movieron de allí: nacen ya mal puestas en `4fcab25`), así que se borran y ya. Quitarlas **destapa 25 fallos preexistentes** de `test_bloques_comportamiento.js` que el `throw` escondía: son la física de esqueletos de [REQ-AG17](#-req-ag17) |
+| ~~[BUG-GLOW1](PLAN_ARCHIVO.md#-bug-glow1)~~ | ~~**revisar si `game.glowLevel` y `game.glowFocus` funcionan bien**~~ | ✅ resuelto 2026-08-14 | la sonda «15 y 5 idénticos» era el **setter que no refrescaba**: llamaba a `mcComputeBlockLight` pero éste se saltaba por su firma `_blEmiSig` (que no incluye glowLevel/glowFocus) ⇒ el cambio no se veía hasta editar un bloque. Arreglado (`mc._blEmiSig=null` en ambos setters). Verificado en vivo: glowLevel 3/6/15 → luz 88/601/4383 (escala), y glowFocus 0→0.9 estrecha el haz (perpendicular 176→0). El dueño lo confirma |
+| ~~[BUG-GLOW2](PLAN_ARCHIVO.md#-bug-glow2)~~ | ~~la **luz emisiva de un agente NO le sigue al moverse** (seguir al jugador): se queda en la celda del spawn~~ | ✅ resuelto 2026-08-14 | la siembra de `mcComputeBlockLight` ahora transforma cada `emitCell` por la pose viva `s.model` (misma fórmula col-major que `mcStructVisible`) cuando el emisor va montado en un agente; `mcTrackAgentLights()` (en `mcTick`, tras `mcUpdate`) detecta el cambio de celda y re-siembra + re-malla SOLO el halo viejo∪nuevo. **Conmutable**: `game.agentsLightTracking(true/false)` (defecto on) para medir el coste o desactivarlo. Guardián `tests/test_agente_luz_sigue.js`. Colateral (NPC-cubo `mc.agents` sin luz) queda fuera, anotado en la sección |
+| ~~[BUG-GLOW3](PLAN_ARCHIVO.md#-bug-glow3)~~ | ~~la luz del agente que SÍ le sigue (BUG-GLOW2) **hunde los fps** y va **a trompicones** (salta de celda en celda con retardo, no avanza suave con él)~~ | ✅ resuelto 2026-08-14 | sustituido el seguimiento por luz de bloque (granular + BFS por paso) por una **luz DINÁMICA por-fragmento** (`MC_DYNLIGHT_LIB` en los 4 shaders; `mcDynSync` recolecta las 8 celdas emisivas vivas más cercanas al ojo → uniform, sin cuantizar). `mcComputeBlockLight` salta a los emisores montados; solo re-siembra al pasar montado↔quieto. Se comporta como la luz de bloque (resiste noche + `dynLift` repone el brillo horneado; sin sombra). Guardián `tests/test_agente_luz_sigue.js`: sigue **continua** (err 1e-6) y **cero** BFS por paso. `game.agentsLightTracking(true/false)` |
+| ~~[REQ-AG17](PLAN_ARCHIVO.md#-req-ag17)~~ | ~~un agente **no debe meterse en el espacio de otro**: lo empuja como mucho, y **se detiene** si el otro no le deja pasar~~ | ✅ resuelto 2026-08-13 | solo `game.esqueletos` (lo acotó el dueño), **todo en el snippet**, cero `app.js`: `parche_snp_ag17.py` → `ag17b.py` → `ag17c.py` (v1.32→v1.35). Un solo embudo, `moverRaiz`, cubre andar + puñetazo + hielo. Pararse sale como `g.por = 3` «bloqueada», que ya estaba en el diagnóstico. Hicieron falta **tres pasadas**: el perdón al que ya estorbaba tenía que ser **condicional**, faltaba **desatasco**, y validar el destino **no es** validar el camino (el golpe da pasos de 0,67 con un cuerpo de 0,8 → atravesaba). `test_agentes_empujan_y_trepan.js` A/B/C/F/G |
+| ~~[REQ-AG18](PLAN_ARCHIVO.md#-req-ag18)~~ | ~~**límite de escalada** del agente, editable en el panel dentro de la capacidad **«anda»** (dueño: «max escalar bloques: 3»)~~ | ✅ resuelto 2026-08-13 | medido primero: hoy **se teletransporta hasta arriba** sin importar lo hondo que cayó. La ambigüedad se deshizo al medir — es lo que trepa **de una vez al atascarse**, `def.andar.escalar` **0..8, por defecto 3**; el escalón de andar sigue siendo **uno** y no se toca. `parche_snp_ag18.py` (v1.31→v1.32) + campo en el panel. `test_agentes_empujan_y_trepan.js` D/E |
+| ~~[REQ-FLY2](PLAN_ARCHIVO.md#-req-fly2)~~ | ~~en **modo vuelo**, subir/bajar debería ir proporcional a `playerSpeed` y va **mucho más lento**~~ | ✅ resuelto 2026-08-13 | la vertical pasa a `playerSpeed·√scale·volarVel`, como la horizontal; `game.volarVel` es ahora un **multiplicador** (defecto 1, acotado 0,1..10) en vez de u/s absolutos. `test_vuelo.js` §3 mide que subir `playerSpeed` acelera la vertical en la misma proporción (×4 con speed 5→20) |
+| ~~[REQ-FLUID5](PLAN_ARCHIVO.md#-req-fluid5)~~ | ~~**reflejos de cielo en la superficie del agua** — la fase 4 de REQ-FLUID4, sacada a ticket propio~~ | ✅ resuelto 2026-08-13 | **enfoque 1** (Fresnel hacia el color de cielo), sin pasada extra ni FBO — nubes/terreno (enfoque 3) no, con PERF-RS1 encima no se doblan draw calls sin medir. Cambio de shader + **una bandera horneada en el canal `emit`** de la cara de arriba del agua: cero atributos/VBO/costuras de caché nuevos, y el uniforme la escala sin re-mallar. Solo agua, solo desde arriba. Playground F12: `game.reflejoAgua/Curva/Opacidad/Color` + `game.cieloColor`. `test_reflejo_agua.js` |
+| ~~[REQ-ENV2](PLAN_ARCHIVO.md#-req-env2)~~ | ~~**niebla atmosférica sobre el agua** (fuera del agua), para que NIEBLA/NUBLADO/TORMENTA de [REQ-ENV1](#-req-env1) se vean de verdad~~ | ✅ resuelto 2026-08-13 | `game.niebla({near,far,tinte})`, reusa los uniformes de niebla que ya estaban (`uFog*`): near/far en bloques, tiñe hacia el cielo. Por defecto apagada ⇒ fuera del agua no cambia nada. Cableado en los 8 presets de [REQ-ENV1](#-req-env1). `test_niebla_mundo.js` |
+| ~~[REQ-ENV3](PLAN_ARCHIVO.md#-req-env3)~~ | ~~**oscurecer el mundo de noche / nivel de luz global**, para que NOCHE y TORMENTA de [REQ-ENV1](#-req-env1) no salgan con el terreno a plena luz~~ | ✅ resuelto 2026-08-13 | `game.luz(factor)` = **exposición** en el shader (multiplica el color de las superficies), instantánea y **sin re-mallar**; 1 = pleno día (idéntico a hoy), 0 = negro. Las FUENTES emisivas no se apagan (una lámpara sigue de noche). Un uniforme `uExpo` en los 3 programas de color, subido por `mcSunUniforms`. Cableado en los 8 presets. `test_luz_global.js` |
+| ~~[REQ-ENV4](PLAN_ARCHIVO.md#-req-env4)~~ | ~~**la luz artificial (antorchas) debe alumbrar de noche también «en la calle»** — `game.luz` oscurecía todo por igual y las fuentes no destacaban al aire libre~~ | ✅ resuelto 2026-08-13 | la luz de bloque va en una **textura 3D** (`mc.blockLight` → `sampler3D`) que el shader lee por posición; la exposición de noche la RESISTE: `mix(uExpo,1,luzDeBloque)`. Se eligió textura (no vértice) para **no tocar formatos de malla** ni sus guardianes. ⚠️ Casi rompe TODO (un `sampler3D` en la unidad 0 choca con el atlas `sampler2D`): siempre a la unidad 2 + 3D dummy. `test_luz_artificial.js` |
+| ~~[BUG-SNP3](PLAN_ARCHIVO.md#-bug-snp3)~~ | ~~**`game.bloques.quitar()` está roto**: lanza `ReferenceError: g is not defined` siempre, por ~12 líneas de física pegadas por error en medio de la función~~ | ✅ resuelto 2026-08-13 | las 12 líneas eran un **borrador que nunca se enchufó** en `asentar()` (no se movieron de allí: nacen ya mal puestas en `4fcab25`), así que se borran y ya. Quitarlas **destapa 25 fallos preexistentes** de `test_bloques_comportamiento.js` que el `throw` escondía: son la física de esqueletos de [REQ-AG17](PLAN_ARCHIVO.md#-req-ag17) |
 | ~~[REQ-ICON1](PLAN_ARCHIVO.md#-req-icon1)~~ | ~~**`/images`**: que los iconos de la aplicación (favicon, marca, las 11 herramientas) salgan de dibujos vóxel del catálogo, con un sandbox para exportar cualquier dibujo al tamaño y postura que se quiera~~ | ✅ resuelto 2026-08-13 | **rasteriza el navegador** (`pinta()`, las mismas fórmulas que `drawIsoFaces`) y el servidor solo valida y escribe, como `/api/fotos`: llevarse el rasterizador a Python sería el mismo dibujo escrito dos veces. La fuente de verdad es `data/ui/ranuras.json` (asignación); los `.png` son derivados y se **versionan igual**, o un clon recién hecho enseñaría la pestaña rota. **Cero `<img>` a mano en los HTML**: `/favicon.ico` lo sirve `server.py` desde el PNG horneado y `iconos.js` hace el cambiazo de marca y herramientas — **sin publicar, todo se ve exactamente como antes**. `tests/test_images_ui.js` · `tests/test_images_consumo.js` |
 | ~~[REQ-OSD13](PLAN_ARCHIVO.md#-req-osd13)~~ | ~~el panel de `game.osd.define({html:…})` es **excesivamente grande**: poder escalarlo, apretar el hueco entre botones y los rellenos~~ | ✅ resuelto 2026-08-13 | las medidas salen a **variables CSS** (`--osd-*`) que el panel consume, y `cfg` solo las escribe: quien no pide nada se ve **byte a byte como antes** (§1 del guardián, que el dueño ya tiene menús en marcha). El espaciado escala continuo, pero **los cuerpos de letra se pegan a la rejilla de 9** de Pixeloid — un menú pequeño y borroso es peor que uno grande. Se aplica en **los dos** sitios de montaje (`mcOsdAbrir` y `mcOsdHtml`), o repintar un botón le cambiaría la talla. `tests/test_osd_medidas.js` |
 | ~~[REQ-WIKI1](PLAN_ARCHIVO.md#-req-wiki1)~~ | ~~la **wiki** de `/wiki`: manual de scripting con panel lateral, aspecto wiki y **referencia de API consultable** desde cada ejemplo~~ | ✅ resuelto 2026-08-13 | enrutado por **hash** ⇒ cero rutas nuevas en `server.py` (el estático ya redirige `/wiki` → `/wiki/`). El contenido son `.md` y `api.json` servidos crudos: sin compilación, se editan y se recarga. El enlazado de API es **automático** sobre los `<code>`, así que documentar es añadir la ficha a `api.json` y nada más. `fuente` lleva **símbolo, no línea**, y el guardián lo comprueba contra `app.js`. `tests/test_wiki.js` |
@@ -745,8 +746,6 @@ equivalente —un botón—; encaja con REQ-OSD1, que está decidiendo justo qu�
 - El listado sale de `/api/mundos` (mismas miniaturas y estadísticas que `/map/`), sin recargar la SPA.
 - Abrir y cerrar el overlay 20 veces no cambia `game.fps` ni deja peticiones colgando.
 - Elegir otro mapa guarda el actual antes de irse.
-
----
 
 ---
 
@@ -1682,7 +1681,7 @@ O sea: **el pilar 1 del análisis es el problema real, pero vive en el camino fi
    `assets/lava.vox.json` son ya 16×16×16 = 4096 voxels de un color con alpha.
 3. ✅ **Vista subacuática — HECHA (2026-08-11).** Ver abajo.
 4. **Reflejos de cielo y nubes** — aplazado por el dueño ⇒ sale de aquí y vive en
-   **[REQ-FLUID5](#-req-fluid5)** (2026-08-11). Este ticket queda **cerrado en lo suyo**.
+   **[REQ-FLUID5](PLAN_ARCHIVO.md#-req-fluid5)** (2026-08-11). Este ticket queda **cerrado en lo suyo**.
 
 ⚠️ Del análisis original de la otra IA, lo que **sigue sin comprobar** (y no hace falta para 1-3):
 
@@ -1801,95 +1800,6 @@ quitan la cuadrícula vista **desde fuera**. El agua y la lava ya son 16³ de 40
 
 ---
 
-<a id="-req-fluid5"></a>
-
-### ✅ REQ-FLUID5 · Reflejos de cielo en la superficie del agua — ✅ resuelto 2026-08-13
-
-**De dónde sale.** Era la **fase 4 de [REQ-FLUID4](#-req-fluid4)**. Al acotar aquel ticket el dueño la
-dejó fuera con un «más adelante», y al cerrar las fases 1-3 pidió sacarla a ticket propio. Aquí está.
-
-**Qué se pide.** Que la lámina de agua **refleje el cielo y las nubes**, que es lo que separa «un
-cristal azul tumbado» de «agua». Hoy la superficie es plana y opaca al mundo de arriba: se ve el
-color del asset y nada más.
-
-**Por qué ahora tiene sentido y antes no.** Las fases 1-2 dejaron el lago como **una sola lámina** de
-caras (una charca de 9×9×3 pasó de 1458 caras a 81). Un reflejo pintado sobre dieciocho planos
-apilados se habría sumado dieciocho veces; sobre uno solo, se pinta una vez. **Esto es un cambio de
-shader, no de mallado** — el trabajo de geometría ya está hecho.
-
-**Lo que se sabe del terreno** (sin volver a investigar, todo de lo aprendido en REQ-FLUID4):
-
-- La superficie del agua sale por la pasada **`finoAVbo`** del chunk (BLEND, `stride 9`), no por el
-  atlas del terreno — que se hornea **sin alpha** y recorta en vez de mezclar.
-- Cada cara translúcida ya lleva su **dirección** (`alphaFD`, byte por quad, `0..5` = índice de
-  `MC_FACES`, `6` = no está en la piel). O sea: **el shader ya puede saber cuáles son las caras de
-  arriba**, que son las únicas que reflejan. Eso no había que inventarlo, se hizo en la fase 1.
-- El color del cielo ya está centralizado en `mcCieloEf()` desde la fase 3, y `uSky` es uniforme.
-- Las nubes son geometría del mundo (`white-wool` con `recibeSombra:false` / `proyectaSombra:false`,
-  [REQ-SHADOW2](PLAN_ARCHIVO.md#-req-shadow2)), **no** una textura de cielo. Eso condiciona el enfoque: un reflejo
-  «de nubes» de verdad implicaría verlas, y verlas implica una pasada extra.
-
-**Enfoques posibles, sin decidir** (por coste creciente; hay que medir antes de elegir):
-
-1. **Fresnel + color de cielo.** Mezclar hacia `uSky` según el ángulo de visión: rasante refleja,
-   picado transparenta. Barato, sin pasada extra, y es el 80 % de la sensación. **No refleja nubes**,
-   solo el color del cielo.
-2. **Lo anterior + normales onduladas** (ruido animado). Rompe el espejo plano, que es lo que delata
-   una superficie falsa. Sigue sin pasada extra.
-3. **Reflexión planar de verdad**: segunda pasada del mundo con la cámara espejada por el plano del
-   agua, a un FBO. Es lo único que refleja nubes y terreno **de verdad**, y es también lo que dobla
-   los draw calls. ⚠️ Con **PERF-RS1** (el mundo ya se estrangula por draw calls) esto no se decide
-   sin medir. Y el agua no está siempre a la misma altura: un plano único no vale para dos lagos a
-   cotas distintas.
-
-**⚠️ Lo que NO se ha verificado** (esto es un ticket redactado, no una investigación):
-
-- Si el shader translúcido tiene hoy a mano la **normal** y la **dirección a cámara** que un Fresnel
-  necesita, o hay que subirlas.
-- Cómo interactúa un reflejo con **`uFogMin`** (el suelo de tinte de la fase 3): visto desde dentro
-  del agua, la cara de arriba es la que se mira al bucear, y ahí un reflejo puede quedar mal.
-- Si la **lava** entra en este ticket. Refleja distinto (es emisiva, casi opaca) y puede que lo suyo
-  sea brillo, no reflejo. **Preguntar al dueño.**
-- Si hay ya alguna palanca de reflejo en el motor. Se asume que no.
-
-**Herencia de REQ-FLUID4 que aplica aquí igual:** la válvula por consola (`game.vistaAgua(...)` es el
-precedente — valores estéticos van a **tunables de F12, no a UI**), y el guardián debe medir la
-**pantalla** (`readPixels`) o la **malla**, nunca una variable.
-
-#### ✅ Resuelto — enfoque 1 (Fresnel + color de cielo), sin pasada extra
-
-De los tres enfoques del enunciado se hizo el **1** (el barato): mezclar hacia el color del cielo según
-el ángulo de visión. **No refleja nubes ni terreno** —eso era el enfoque 3, con FBO y draw calls
-doblados, que con [PERF-RS1](#-perf-rs1) no se toca sin medir—, pero es «el 80 % de la sensación» y es
-lo que separa cristal de agua. Detalle largo en [`docs/fluidos.md`](docs/fluidos.md).
-
-**Se contestaron solas las tres dudas que el ticket dejó sin verificar:**
-- **¿Tiene el shader la normal y la dirección a cámara?** Sí, gratis: `MC_SUN_LIB` ya trae `uEye` y saca
-  la normal de `cross(dFdx, dFdy)` (lo mismo que `sunFactor`). No hizo falta subir nada nuevo.
-- **¿Cómo interactúa con `uFogMin` / la vista subacuática?** Se zanja geométricamente: el reflejo solo
-  actúa **desde arriba** (`uEye.y > vWorld.y`) y se apaga entero con el ojo sumergido (`mcFluidoOjo`).
-- **¿Entra la lava?** **No** (decisión del dueño heredada del ticket): refleja distinto. La marca es
-  solo del agua.
-
-**Lo que salió elegante y conviene recordar:** la cara superior del agua **ya se distingue al mallar**
-(tipo de fluido + `alphaFD`), así que se hornea una **bandera en el canal `emit`** (`emit = 2`; el agua
-no es emisiva) — **cero atributos nuevos, cero VBO nuevo, cero costuras en la caché de chunks**, que es
-donde REQ-FLUID4 se pinchó. Y como el reflejo lo escala el uniforme `uReflejo`, encender/apagar **no
-re-malla**.
-
-**Playground que pidió el dueño** (F12, en vivo, sin re-mallar): `game.reflejoAgua(f)` /
-`game.reflejoAgua({fuerza,curva,opacidad,color})`, `game.reflejoCurva(n)`, `game.reflejoOpacidad(o)`,
-`game.reflejoColor([r,g,b]|'cielo')` y `game.cieloColor('#rrggbb')` — este último cambia el color del
-cielo (`MC_SKY`), o sea el fondo **y** lo que refleja el agua a la vez.
-
-**Guardián:** `tests/test_reflejo_agua.js` (`@area: render`) — mide la **pantalla** (`readPixels`), no
-una variable: a rasante aclara y azula, en picado apenas cambia (por ángulo, no un velo), la lava no se
-inmuta (solo agua), y `reflejoColor`/`cieloColor` tiñen el reflejo. **TODO OK.** Fallos ajenos que
-siguen igual que en HEAD (no son de esto): `test_cubo_translucido` §6, `test_luz_en_rejilla`,
-`test_vista_subacuatica` §3 (el dueño bajó el `tinte` de lava a 0,10 y el test aún lo espera mayor —
-[BUG-FLUID5](#-bug-fluid5)), `test_shadow_map`/`test_sombra_movil` (artefactos de la mudanza a `web/`).
-
----
 
 <a id="-req-env1"></a>
 
@@ -1920,9 +1830,9 @@ página.
 NIEBLA/TORMENTA/NOCHE se quedan a medias). No se inventan aquí: salen a ticket propio para no meter
 efectos a medio hacer en el snippet.
 
-- **Niebla atmosférica sobre el agua** → ✅ [REQ-ENV2](#-req-env2), hecho: `game.niebla({near,far,tinte})`,
+- **Niebla atmosférica sobre el agua** → ✅ [REQ-ENV2](PLAN_ARCHIVO.md#-req-env2), hecho: `game.niebla({near,far,tinte})`,
   ya cableada en los presets (NIEBLA sale espesa de verdad).
-- **Oscurecer el mundo de noche** → ✅ [REQ-ENV3](#-req-env3), hecho: `game.luz(factor)` (exposición),
+- **Oscurecer el mundo de noche** → ✅ [REQ-ENV3](PLAN_ARCHIVO.md#-req-env3), hecho: `game.luz(factor)` (exposición),
   ya cableada en los presets (NOCHE sale oscura de verdad, las lámparas siguen encendidas).
 
 **Estado:** el snippet está y aplica; queda la **ronda de probar y afinar** los números con el dueño
@@ -1931,73 +1841,41 @@ uno de `@area: render` que mida la **pantalla** con un preset frente a otro, com
 
 ---
 
-<a id="-req-env4"></a>
 
-### ✅ REQ-ENV4 · La luz artificial alumbra de noche también al aire libre — ✅ resuelto 2026-08-13
+<a id="-req-env5"></a>
 
-**Reporte del dueño, literal:** «el modo noche es muy bonito, pero no funciona la iluminación con
-objetos; solo funciona en interiores (con `game.interiorDark` bajo se nota perfectamente) pero no
-funciona la iluminación "artificial" "en la calle"».
+### 🟢 REQ-ENV5 · Reflejos realistas en fluidos: reflejar entorno, nubes y terreno — 🟢 resuelto 2026-08-15
 
-#### ✅ Resuelto — la luz de bloque en una textura 3D que la exposición RESISTE
+> **Resuelto (2026-08-15).** Implementado mediante **pase especular planar (FBO + cámara invertida en Y + inversión de winding)** y **micro-ondulaciones animadas** en fragment shader (`MC_STRUCT_FS`). El agua refleja ahora de forma continua la geometría real del entorno (terreno, nubes de lana blanca, montañas, estructuras, agentes) con atenuación Fresnel y deformación sinusoidal superficial. Mandos expuestos en `game` (`reflejoEntorno`, `reflejoOndas`, `reflejoPlanoY`, `reflejoAgua`). Guardián: `tests/test_req_env5_reflejo_entorno.js`.
 
-Contra lo redactado abajo (que proponía hornear `aBlk` **por vértice**), se hizo con una **textura 3D**,
-que resultó bastante mejor: la luz de bloque por vértice obligaba a cambiar el **formato de malla** del
-terreno **y** de los NPC-cubo (comparten shader) **y** del fino/estructuras, moviendo offsets que leen
-varios guardianes de luz (`test_sin_sombra` y compañía). La textura no toca **ningún** formato:
+**Enunciado del dueño, literal:**
 
-- `mcUploadBlkTex` sube `mc.blockLight` (0..MC_MAXLIGHT por celda) a un **`sampler3D` R8**. El orden de
-  `mcIdx` (`x + y·W + z·W·H`) es EXACTAMENTE el de `texImage3D`, así que se sube tal cual. Se re-sube solo
-  cuando cambia la luz de bloque (`mc._blkTexDirty` en `mcComputeBlockLight`), no cada frame.
-- El shader (helper `blkLuz` en los 3 programas de color) lee la textura en la celda de **aire** que da a
-  la cara (medio bloque hacia el ojo, con la normal de las derivadas, como el horneado del skylight) y la
-  exposición pasa a ser **`col *= mix(uExpo, 1.0, blkLuz)`**: donde hay antorcha (`blkLuz≈1`) no se apaga.
-- Solo WebGL2 (`sampler3D`); en WebGL1 degrada a la exposición uniforme de REQ-ENV3.
+> «las superficies de fluidos como agua reflejan el cielo actualmente, pero han de comportarse de forma mas realista, han de reflejar tambien los objetos del entorno, ya sean cercanos, nubes, etc. como hace el agua en la realidad en su superficie»
 
-Medido (`test_luz_artificial`): de noche (`game.luz(0.2)`) el sitio pegado a la antorcha **retiene el 82 %**
-del brillo mientras la calle lejana cae al **20 %**, y acaba **más brillante** que ella. Justo lo pedido.
+**Área:** shader de fluidos / render de agua y entorno / composición visual.
 
-⚠️ **La cagada que casi tira todo, para no repetirla:** el `sampler3D` nuevo, al no asignarle unidad,
-caía por defecto en la **unidad 0** — la misma que el atlas del terreno (`sampler2D`). **WebGL prohíbe dos
-samplers de distinto tipo en la misma unidad** ⇒ invalida el draw ⇒ **no se ve NI UN BLOQUE**. SwiftShader
-(el banco de pruebas headless) lo **tolera**, así que los guardianes pasaban en verde mientras en una GPU
-real el dueño no veía nada. Lección doble: (1) un `sampler3D` va **siempre a una unidad propia** (aquí la
-2), con una textura 3D dummy 1×1×1 atada aunque no haya antorchas para que nunca esté incompleto; (2)
-**SwiftShader no valida como una GPU real** — que un guardián pase no garantiza que se vea en el navegador
-del dueño. Lo cazó él probando, no el test.
+**De dónde sale y qué amplía:**
+- En [REQ-FLUID5](PLAN_ARCHIVO.md#-req-fluid5) se implementó la **fase 1 (Fresnel hacia el color del cielo `uSky`)**, que fue una solución económica y sin draw calls extra (uniforme `uReflejo` sobre caras superiores con marca `emit=2`).
+- Con REQ-ENV5 el comportamiento se extiende para reflejar la **geometría real del entorno**: nubes (bloques de lana blanca), orillas del terreno, árboles, edificios o estructuras cercanas.
 
-**Lo de abajo queda como el análisis original** (el modelo de luz, que sigue siendo correcto); solo cambió
-el **cómo** (textura en vez de vértice).
-
-**Investigado (no es un misterio, es cómo está montado el modelo de luz):**
-
-- La luz se hornea por celda en `mc.light` (SKYLIGHT, difundido del cielo) y `mc.blockLight` (luz de
-  antorcha/emisivo). El mallado hornea en `vShade` el factor `interiorDark^((MAX-lv)/MAX)` con
-  **`lv = max(skylight, blockLight)`** (por defecto `interiorDark = 0.1`).
-- **En interiores funciona** porque el skylight es bajo: la antorcha sube `lv` en su celda y esa zona
-  se aclara sobre el fondo oscuro. **Al aire libre NO**, porque el skylight ya está al **máximo**
-  (`lv = MAX`), así que la antorcha no puede subir nada y su luz no se ve.
-- Y `game.luz` (REQ-ENV3) es una **exposición uniforme**: multiplica TODO el color por igual, antorcha
-  incluida, así que de noche la calle se oscurece pero las fuentes no destacan.
-
-**El arreglo bueno: que la luz de bloque RESISTA la exposición.** Hornear la luz de bloque por vértice
-(`aBlk = blockLight/MAX`) y que la exposición sea `col *= mix(uExpo, 1.0, aBlk)` en vez de `col*uExpo`:
-donde hay antorcha (`aBlk≈1`) no se apaga, el resto sí. Así de noche la calle se oscurece **pero las
-antorchas siguen alumbrando su redonda** — que es justo lo que se pide, y sin perder la transición
-suave (sigue siendo un uniforme, no re-malla).
-
-⚠️ **Por qué NO lo hago sin preguntar:** es un cambio del **formato de malla** (un float más por
-vértice en el terreno `x,y,z,u,v,shade`, y en estructuras) + los VS/FS de los 3 programas de color, y
-**mueve los offsets que leen los guardianes de luz** (`test_sin_sombra` lee `vShade` en posiciones
-exactas, y hay `test_luz_en_rejilla`/`test_luz_traspasa`/`test_luz_incremental`). Es hacer bien, pero
-toca terreno delicado y varios tests: conviene acordar el enfoque antes.
-
-**Alternativa más barata, por si se prefiere** (con su pero): que la **noche baje el skylight** (un
-tope de skylight nocturno antes del `lightLut`), reusando la maquinaria de `interiorDark`. Funciona y
-no toca shaders, pero **re-malla** al cambiar la hora ⇒ **no** hay transición suave (choca con las
-transiciones de [REQ-ENV1](#-req-env1)). Por eso la recomendación es la del shader.
+**Implementación técnica:**
+1. **Pase especular planar (FBO + cámara invertida):**
+   - Cuando hay agua visible y `mcReflEntorno > 0` (y no sumergido), se ejecuta un pase preliminar a `mc.refl.fbo` (512×512) reflejando la cámara respecto a la cota del agua ($Y = y_{agua}$, autodetectado mediante `mcDetectWaterY` o fijado con `game.reflejoPlanoY`).
+   - La matriz de vista reflejada invierte $pitch \to -pitch$ y traslada el ojo a $2 y_w - eye_y$.
+   - Se invierte el front face a `gl.CW` durante el pase para respetar el orden de los triángulos reflejados.
+2. **Textura unidad 3:**
+   - La textura de reflexión 2D se enlaza a `TEXTURE3` (`uReflTex`), conviviendo limpiamente con atlas (`TEXTURE0`), sombra (`TEXTURE1`) y luz 3D (`TEXTURE2`).
+3. **Mapeo proyectivo y micro-ondulaciones en `MC_STRUCT_FS`:**
+   - En el fragment shader, `gl_FragCoord.xy / uScreenSize` con coordenada Y invertida (`1.0 - suv.y`) mapea con precisión matemática 1:1 el rayo reflejado.
+   - Se aplican ondas animadas `uReflOndas` dependientes de `vWorld.xz` y `uTime`.
+4. **Mandos de consola (`game`):**
+   - `game.reflejoEntorno(true / false)`: activa o desactiva la pasada y el reflejo de objetos del entorno (defecto activo, 1).
+   - `game.reflejoOndas(factor)`: modula la intensidad de las micro-ondulaciones en la lámina de agua.
+   - `game.reflejoPlanoY(y / 'auto')`: fija manualmente la altura del plano de agua o auto-detecta la masa más cercana.
+   - `game.reflejoAgua('reset')`: restaura todas las propiedades a sus valores de fábrica.
 
 ---
+
 
 <a id="-bug-imp1"></a>
 
@@ -2043,366 +1921,6 @@ número empaquetado, un objeto, `null`…). Falta:
 
 ---
 
-<a id="-req-fly2"></a>
-
-### ✅ REQ-FLY2 · En modo vuelo, subir/bajar no es proporcional a `playerSpeed` — ✅ resuelto 2026-08-13
-
-**Resuelto:** la vertical de vuelo pasa de `sube·mc.volarVel·√scale` (con `volarVel=6` FIJO) a
-**`sube·spf·mc.volarVel`** donde `spf = mc.speed·√scale` (= la misma base que la horizontal). `game.volarVel`
-deja de ser u/s absolutos y pasa a **multiplicador** (defecto **1** = igual que ir de frente; acotado
-0,1..10). Guardián `test_vuelo.js` §3: con `playerSpeed` 5→20 la vertical se acelera ×4 (misma proporción
-que la horizontal). Se eligió el multiplicador (opción **b**) para no perder el mando.
-
-
-
-**Reporte del dueño:** «la velocidad de subir y bajar en modo vuelo debería ser proporcional a
-`playerSpeed`, pero parece que no lo es, subir y bajar van mucho más lentos».
-
-**Confirmado en el código** (rama de vuelo de `mcUpdate`, REQ-FLY1):
-
-- **Horizontal** → `const spf = mc.speed * √scale; mc.vel[0]=hx*spf; mc.vel[2]=hz*spf;` — o sea
-  proporcional a `playerSpeed` (`mc.speed`).
-- **Vertical** → `mc.vel[1] = sube * mc.volarVel * √scale;` con **`mc.volarVel = 6` FIJO**. No mira
-  `playerSpeed`.
-
-Así que con `playerSpeed > 6` el horizontal corre y el vertical se queda a 6 u/s: exactamente «subir y
-bajar van mucho más lento». (Con el defecto `playerSpeed=5` el vertical hasta iría un pelín más rápido,
-por eso solo se nota al subir la velocidad.)
-
-**Fix a decidir con el dueño — qué papel juega `game.volarVel`:**
-- **(a)** vertical = horizontal: `mc.vel[1] = sube*spf`. Simple; `game.volarVel` se retira o pasa a ser
-  un multiplicador (defecto 1).
-- **(b)** `game.volarVel` se queda como **multiplicador** sobre `playerSpeed`: `mc.vel[1] =
-  sube*mc.speed*volarVel*√scale` con `volarVel` re-tuneado (p.ej. 1). Mantiene el mando, cambia su
-  significado (de u/s absolutos a factor).
-
-Recomiendo **(b)** para no perder el mando. Guardián: en `/map/test`, `game.volar(true)`, subir
-`playerSpeed` y comprobar que la `y` sube/baja a un ritmo **proporcional** (misma razón que el
-horizontal), no clavado en 6.
-
----
-
-<a id="-bug-glow1"></a>
-
-### ✅ BUG-GLOW1 · Revisar si `game.glowLevel` y `game.glowFocus` funcionan bien — ✅ resuelto 2026-08-14
-
-**Petición del dueño:** revisar si `game.glowLevel` (alcance de la luz de bloque emisiva, 0..15) y
-`game.glowFocus` (estrechez del haz, 0..1) funcionan correctamente.
-
-**RESUELTO (2026-08-14).** La sonda que veía «15 y 5 idénticos» NO era que el nivel no escalara: era que el
-**setter no refrescaba**. `game.glowLevel`/`glowFocus` llamaban a `mcComputeBlockLight`, pero éste se salta por
-su firma `_blEmiSig` (que se calcula con las `emitCells`/posiciones, **no** con glowLevel/glowFocus) ⇒ early-return
-⇒ la luz NO se re-sembraba con el nivel nuevo, y no se veía el cambio hasta que un edit cambiaba `gridGen` (romper
-un bloque). Arreglado añadiendo `mc._blEmiSig=null` antes del recálculo en **ambos** setters. Verificado en vivo
-con escenario limpio (un cubo emisivo estampado en `/map/agents`, ya trivial de plantar):
-- **glowLevel** 3 / 6 / 15 → suma de luz de bloque 88 / 601 / 4383 (**escala**, ya no idénticos).
-- **glowFocus** con un emisor direccional (haz `emitDir` detectado por el motor): 0 = la luz llega a las franjas
-  perpendiculares (176); 0.9 = el haz se estrecha y esas franjas caen a 0 (**el foco actúa**).
-
-El dueño lo confirma («sí funciona todo ahora»). De paso se documentaron los 3 mandos y se añadió el de
-**intensidad** que faltaba (`game.glowGain`, ver [BUG-GLOW3](#-bug-glow3)); `MC_MAXLIGHT` no es intensidad.
-
-**Investigación preliminar (no concluyente, pero con señales):**
-
-- ✅ **Los setters están bien conectados**: `game.glowLevel`/`game.glowFocus` recalculan la luz de
-  bloque, re-mallan (`mcMeshAll`) y re-hornean estructuras (`mcRestampAll`) al cambiar. O sea, el efecto
-  debería verse sin editar nada.
-- ⚠️ **Pero una sonda rápida en `/map/test` dio `glowLevel = 15` y `= 5` con luz de bloque IDÉNTICA**
-  (total 13115 y radio 41 en ambos), y `= 0` la apaga. Que 15 y 5 den lo mismo huele a que **el nivel no
-  escala el alcance** — o a que el escenario estaba sucio (ver abajo). Hay que confirmarlo limpio.
-- ⚠️ **Plantar una antorcha para probar no es trivial:** `game.setVoxel(x,y,z,'antorcha')` y
-  `'*#ffcc44'` acaban en **roca** (la celda queda `asset:assets/roca.vox.json`), así que la sonda no
-  medía una antorcha suya sino el brillo ambiente del mapa. **Parte de la revisión es encontrar la vía
-  correcta de plantar un emisivo** (pintar con emit en el editor, o estampar `hab:antorcha`), porque si
-  `setVoxel` no coloca emisivos eso ya es un hallazgo.
-
-**Lo que pide el ticket:** un escenario **limpio** con **una sola** antorcha y sin brillo ambiente, y
-medir sobre `mc.blockLight`: (1) que `glowLevel` N da un alcance ~N (−1/paso), (2) que `glowFocus` 0 es
-omnidireccional y 1 estrecha el haz hacia la normal neta. Guardián que mida la **rejilla** (`mc.blockLight`)
-o la **pantalla**, nunca una variable. Ojo REQ-ENV4: la luz de bloque ahora también va a la textura 3D, así
-que si algo de esto estaba roto, el modo noche lo hará más visible.
-
----
-
-<a id="-bug-glow2"></a>
-
-### ✅ BUG-GLOW2 · La luz emisiva de un agente NO le sigue al moverse — ✅ resuelto 2026-08-14
-
-**Reporte del dueño:** «los agentes no iluminan el entorno cuando se mueven por él, por ejemplo al
-seguir al jugador. Se mantiene la iluminación donde empezaron inicialmente.»
-
-**RESUELTO (2026-08-14).** El arreglo está en el MOTOR (`app.js`), como exigía la nota de abajo, no en el
-snippet del esqueleto. Tres piezas + un mando:
-
-1. **La siembra sigue a la pose.** En `mcComputeBlockLight`, si un emisor va montado en un agente movido
-   (`mcEmisorSeguido`: tiene `emitCells`, el seguimiento está on, y su `s.model` no es la identidad), cada
-   `emitCell` se siembra en su celda VIVA = el centro de la celda estampada transformado por `s.model` con
-   la **misma fórmula col-major que `mcStructVisible`** (la que ya usa la GPU con el vértice). El haz
-   direccional (`emitDir`) también gira con la pieza. Una pieza en reposo (`s.model` null/identidad) se
-   siembra en su celda estampada, **exactamente como antes** ⇒ cero cambio para todo lo que no es un agente
-   en marcha (lo comprueba que `test_luz_artificial` / `test_luz_al_estampar` siguen verdes).
-2. **Se dispara cuando toca.** `mcTrackAgentLights()` corre una vez por frame en `mcTick`, **después** de
-   que `mcUpdate` haya escrito `s.model`. Barre solo las estructuras emisoras (poquísimas), calcula la
-   huella de celdas viva de cada una y, si alguna cambió de celda desde el frame anterior, fuerza el
-   recálculo (`mc._blEmiSig=null`) y re-malla **solo** los chunks del halo (±`MC_MAXLIGHT`) de la huella
-   **vieja ∪ nueva** — apagar donde estaba, encender donde llega. No toca skylight ni el mapa del sol: la
-   topología no cambió.
-3. **Por qué hay que re-mallar y no basta la textura 3D.** La luz de bloque tiene dos consumidores: el
-   `blkLuz` de la textura 3D (REQ-ENV4), que solo pinta cuando hay exposición baja (de noche), y el
-   **shade horneado `max(L,BL)`** en el vértice del chunk, que es lo que ilumina de día / en cueva. Mover
-   solo la textura dejaría la luz clavada de día; por eso se re-mallan los chunks del halo.
-4. **Conmutable — `game.agentsLightTracking(true|false)`** (defecto **on**). `false` = la luz se queda en
-   la celda estampada (comportamiento viejo, coste cero) ⇒ sirve para MEDIR la diferencia de fps del
-   seguimiento o desactivarlo si no interesa. Al conmutar, la luz SALTA (recálculo + `mcMeshAll`, barato
-   para una acción manual y puntual).
-
-**Guardián:** `tests/test_agente_luz_sigue.js` (Playwright) — estampa un emisor, le pone una traslación en
-`s.model` como hace la librería de esqueletos, y comprueba que `mc.blockLight` **manda en el destino** tras
-mover (tan brillante como estaba el spawn) y **vuelve al spawn** al apagar el seguimiento. 11 ok.
-
-⚠️ **Colateral NO resuelto (queda como deuda):** los NPC-cubo (`mc.agents`, `game.defineAgent`) siguen sin
-ser fuente de luz alguna — `mcComputeBlockLight` solo lee `mc.structures` y `mc.grid`, nunca `mc.agents`.
-Un cubo emisivo no ilumina nada. Este ticket cubre los agentes articulados (los que siguen al jugador y
-llevan antorcha); si el dueño quiere que un NPC-cubo también alumbre, es un ticket propio.
-
----
-
-<details><summary>Investigación original (antes del arreglo)</summary>
-
-**Investigado (código, no de oídas). La causa está localizada:**
-
-- Un agente articulado (`game.esqueletos`) **estampa cada pieza como una estructura** de `mc.structures`
-  (vía `mcStampStruct`, **una sola vez** en `esqueletos.crear`). Si una pieza es emisiva —p. ej. la
-  antorcha `hab:antorcha` de `data/agentes/personaje-1.json`— trae sus `emitCells`, así que al plantarse
-  **sí siembra luz de bloque** alrededor de la **celda del spawn**. De ahí «la iluminación donde empezaron».
-- **Al moverse, la pieza NO se re-estampa: se re-posa con una matriz viva `s.model`** que la librería
-  reescribe cada frame (traslación + giro para seguir al jugador). La malla la dibuja `app.js` con esa
-  matriz (`draw(st.colVbo, …, st.model)`, `web/app.js:8582`), así que **lo que se ve** sí acompaña al
-  agente.
-- **Pero `mcComputeBlockLight` siembra desde `s.ox/oy/oz + emitCells`** (el origen ESTAMPADO en bloques),
-  e **ignora por completo `s.model`**. Como `ox/oy/oz` quedan fijos en el spawn, la luz emitida se queda
-  clavada allí aunque el cuerpo se aleje. Ese es el bug: **la malla sigue a la matriz de pose, la luz sigue
-  a la celda estampada, y las dos dejaron de coincidir.**
-- **Colateral (mismo motor):** los NPC-cubo (`mc.agents`, `game.defineAgent`) **no son fuente de luz en
-  absoluto** — `mcComputeBlockLight` solo lee `mc.structures` y `mc.grid` (`mcGlowCeldas`), nunca
-  `mc.agents`. Un agente-cubo emisivo no ilumina **nada** del entorno, ni siquiera en el spawn. Decidir si
-  entra en este ticket o en uno propio.
-
-**Por qué NO es trivial (leer antes de tocar):**
-
-- La luz de bloque es un **BFS** que hoy se recalcula **muy de tarde en tarde**, protegido por firmas
-  (`mc._blEmiSig` sobre `emitCells`/`ox·oy·oz`, `mc._blGridGen` sobre la topología): un cambio de `s.model`
-  **no altera ninguna**, por eso ni se dispara. Hacer que el emisor derive de `s.model` es la mitad;
-  la otra es una **cadencia de recálculo barata**, porque rehacer el BFS cada frame por cada agente con
-  antorcha es justo lo que [PERF-RS1](#-perf-rs1)/[BUG-PERF3](#-bug-perf3) intentan evitar (`mcRelightBox`
-  incremental es la herramienta candidata: relumbrar solo la caja vieja + la nueva por paso).
-- ⛔ **Es un problema del MOTOR, no de comportamiento de agente** ⇒ la corrección va en `app.js`
-  (`mcComputeBlockLight`/siembra), **no** en el snippet del esqueleto. El snippet ya expone la posición
-  viva en `s.model`; falta que la siembra la consulte y que el motor decida cuándo relumbrar.
-- Relacionado con [BUG-GLOW1](#-bug-glow1) (medir bien el alcance/foco de la luz emisiva): conviene tener
-  ese guardián de medición limpio **antes**, porque el arreglo de aquí se verifica igual —midiendo
-  `mc.blockLight` alrededor del agente **después** de moverlo, no una variable.
-
-**Verifica (cuando se aborde):** planto un agente con antorcha en `/map/test`, lo hago seguir/moverse, y
-`mc.blockLight` alrededor de su posición NUEVA sube (y baja en la vieja); hoy es al revés. En modo noche
-(`game.luz(0.2)`, REQ-ENV4) el síntoma se ve a simple vista: el halo se queda atrás.
-
-</details>
-
----
-
-<a id="-bug-glow3"></a>
-
-### ✅ BUG-GLOW3 · La luz que sigue al agente hunde los fps y va a trompicones — ✅ resuelto 2026-08-14
-
-**Reporte del dueño** (secuela de [BUG-GLOW2](#-bug-glow2)): «el agente que ilumina el terreno provoca caídas
-de fps, además la iluminación no es suave, va a trompicones. Es decir, ilumina una zona, sigue andando y la
-iluminación no avanza con él, entonces se vuelve a iluminar donde está él. La luz debería seguir al agente
-sin ningún tipo de retardo.»
-
-**RESUELTO (2026-08-14) — luz DINÁMICA por-fragmento.** Se retiró el seguimiento por luz de bloque de
-BUG-GLOW2 (era el mecanismo equivocado para una luz en marcha, como confirmó el dueño) y se sustituyó por una
-luz dinámica en el shader. Decisiones del dueño: las fuentes son los **voxels autoiluminados** de las piezas
-(pueden ser varias, donde él las ponga); debe **comportarse como la luz de bloque/voxels de ahora** (resiste la
-noche, sin foco extra) y **sin sombras**.
-
-1. **Emisor montado ≠ luz de bloque.** `mcEmisorSeguido(s)` marca al emisor *montado en un agente que se mueve*
-   (`emitCells` + seguimiento on + `s.model` ≠ identidad). `mcComputeBlockLight` **lo salta** (no lo hornea);
-   un emisor **quieto** se hornea como siempre. Cada mecanismo para lo suyo.
-2. **`mcDynSync()`** (1×/frame en `mcTick`, tras `mcUpdate`) recolecta la posición **viva y continua** de cada
-   celda emisiva montada —las `MC_DYN_MAX=8` más cercanas al ojo— en `mc._dynArr` (uniform). Sin cuantizar a
-   celda, **sin BFS ni remallado** ⇒ suave y sin retardo. Solo re-siembra la luz de bloque **una** vez cuando un
-   emisor pasa de montado↔quieto (cambia la *membresía*), y re-malla su halo estampado. Al arrancar/parar, no
-   por paso ⇒ **cero hipos por movimiento**.
-3. **Shader `MC_DYNLIGHT_LIB`** (en los 4 fragment shaders, `web/app.js`): `dynLuz(vWorld)` da el nivel `[0,1]`
-   con el **mismo desvanecido lineal (−1/bloque sobre `MC_MAXLIGHT`)** que la luz de bloque, se mezcla con
-   `blkLuz` por `max()` y resiste la exposición nocturna igual (`mix(uExpo,1,·)`). `dynLift(vShade,dyn)` repone
-   el **brillo horneado** que daría `lightLut` (curva `pow(interiorDark,dyn)`, tope 1.12) para que una cueva se
-   encienda también de día. **No proyecta sombra** (como `blkLuz`); no usa `sampler3D` ⇒ vale en WebGL1.
-4. **Conmutable — `game.agentsLightTracking(true|false)`** (defecto on). `false` = la luz se queda en la celda
-   estampada, coste cero, para medir fps o desactivar.
-
-**Refinamiento DIRECCIONAL (2026-08-14, feedback del dueño):** la 1ª versión de la luz dinámica era
-**omnidireccional** ⇒ un voxel emisivo (p. ej. el brillo de unas gafas) «ilumina de noche todo su alrededor,
-además hacia atrás». La luz de bloque real NO hace eso: `siembra` es **anisótropa** (solo el hemisferio
-delantero del haz `emitDir` = normal neta de la cara emisiva, estrechado por `glowFocus`). Se replicó por
-fragmento: cada luz lleva su haz `uDynDir` = `s.emitDir` **rotado por `s.model`** (gira con la pieza), y `dynLuz`
-solo alumbra `dot((w−P),haz)>0`, con `pow(c, 1+glowFocus·8)`. Ahora las gafas alumbran **hacia delante, no todo
-alrededor ni hacia atrás**. Haz ≈ 0 (antorcha por todas las caras) o `glowFocus`=0 ⇒ omnidireccional. Guardián
-ampliado (fase E: delante ilumina, detrás no). Alcance/foco con `game.glowLevel`/`game.glowFocus`.
-
-**Mando de INTENSIDAD `game.glowGain` (2026-08-14, feedback del dueño):** el dueño quería «más brillo» y subió
-`MC_MAXLIGHT` (15→60), pero eso NO da más luz: `MC_MAXLIGHT` son NIVELES de gradación/alcance y `lightLut`
-normaliza `/MC_MAXLIGHT` ⇒ a tope siempre ×1 (peor: con glowLevel fijo en 15, subir MC_MAXLIGHT **oscurece**, por
-eso «60 se veía igual/menos que 30»). Se revirtió `MC_MAXLIGHT` a 15 y se añadió **`game.glowGain`** (defecto 1):
-sube el techo del `mix` de exposición (`mix(uExpo, uGlowGain, luz)` en los 4 shaders) ⇒ `>1` **sobreexpone** la luz
-artificial (antorcha/gafas brillan más que el día). Es **solo un uniforme** ⇒ LIVE, ni re-siembra ni re-malla.
-Verificado: suelo de noche gain 1/4/10 → brillo 38/147/237. Vale para luz de bloque y dinámica por igual.
-
-**Guardián:** `tests/test_agente_luz_sigue.js` reescrito al nuevo modelo — al moverse en pasos fraccionarios la
-luz dinámica sigue la posición **continua** (err 1×10⁻⁶, prueba que no hay trompicones) con **cero** recálculos
-de luz de bloque (prueba que no hay caídas de fps); toggle on/off correcto. 12 ok. Verificado además a mano que
-la luz **llega a los píxeles** de noche (readback del framebuffer: más brillo con la luz que sin ella).
-
-⚠️ **Sigue en deuda** (heredado de BUG-GLOW2): los NPC-cubo (`mc.agents`) no son fuente de luz de ningún tipo.
-
-**Diagnóstico (honesto): el mecanismo de BUG-GLOW2 es la herramienta EQUIVOCADA para una luz que se mueve.**
-BUG-GLOW2 hizo que la luz de un emisor montado siguiera al agente re-sembrando la **luz de bloque** (el
-`Uint8Array` por celda + el shade horneado `max(L,BL)` en el vértice del chunk). Eso arregla la posición,
-pero arrastra dos defectos insalvables **por diseño** de ese camino:
-
-- **Trompicones + retardo.** La luz de bloque es **granular a 1 bloque**: solo cambia cuando el agente cruza
-  una frontera de celda entera (`mcTrackAgentLights` compara la huella de celdas). Entre cruce y cruce la luz
-  se queda quieta mientras el cuerpo avanza suave; al cruzar, **salta** a la celda nueva. Eso es exactamente
-  lo que ve el dueño: «ilumina una zona, sigue andando… se vuelve a iluminar donde está». Nunca será suave
-  por este camino.
-- **Caídas de fps.** Cada cruce de celda dispara un **BFS global** (`mcComputeBlockLight`, con su `BL.fill(0)`
-  O(N) sobre todo el mundo) **+ remallado** de los chunks del halo. A velocidad de paseo se cruza una celda
-  cada ~1 s (más rápido corriendo), así que son hipos repetidos.
-
-**Solución correcta (propuesta, sin implementar): luz dinámica de punto en el FRAGMENT shader.** Desacoplar
-la luz del agente de la rejilla de luz de bloque y pintarla **por-fragmento**, como una linterna:
-
-- Los tres shaders del Mundo (terreno `MC_FS`, terreno-opaco `MC_FS_OPAQUE`, estructura) ya tienen la
-  posición de mundo por-fragmento `vWorld` y comparten `MC_SUN_LIB`/`MC_BLK_LIB` (`web/app.js:8216-8305`).
-  Se añade un `MC_DYNLIGHT_LIB`: uniforms con la posición VIVA del emisor (del `s.model`, **continua, no
-  cuantizada a celda**), radio y color/intensidad; atenuación por-fragmento `max(0, 1 - d/r)`; se pliega en
-  el mismo `mix(uExpo, 1.0, …)` que resiste la exposición (REQ-ENV4) más, si hace falta, un término aditivo.
-- El uniforme se refresca **cada frame** desde la posición exacta del agente ⇒ **suave y sin retardo**, y
-  **sin BFS ni remallado** ⇒ el coste es un puñado de uniforms + unas ALU por fragmento. Es el patrón
-  estándar de luz en tiempo real.
-- Con esto, la rama de emisor-MOVIDO de BUG-GLOW2 (`mcEmisorSeguido` + `mcTrackAgentLights` + siembra por
-  `s.model`) se **retira**: `game.agentsLightTracking` pasaría a alimentar la luz dinámica del shader. La luz
-  de bloque horneada se queda **solo para emisores QUIETOS** (antorchas fijas), donde es correcta y barata
-  (no se re-ejecuta). Cada mecanismo para lo suyo.
-
-**Preguntas de diseño para el dueño (antes de implementar):**
-
-1. **¿Cuántas luces de agente simultáneas?** Un array fijo de uniforms (p. ej. las 4–8 más cercanas al ojo)
-   es lo típico; más que eso pide otra técnica (light culling). ¿Con 4–8 vale?
-2. **¿Día y noche igual?** ¿La luz del agente solo «resiste» el oscurecimiento nocturno (como `blkLuz`), o
-   además **suma** brillo aditivo también de día (se notaría como un foco)?
-3. **¿Proyecta sombra?** Lo barato y lo que ya hace `blkLuz` es **no** proyectar sombra (solo ilumina). ¿OK?
-
-**Mitigación inmediata mientras tanto:** `game.agentsLightTracking(false)` apaga el seguimiento por BFS y con
-él las caídas de fps (la luz vuelve a quedarse en la celda estampada). Si el dueño quiere, se puede poner el
-**defecto en off** hasta que aterrice la versión suave.
-
----
-
-<a id="-req-env2"></a>
-
-### ✅ REQ-ENV2 · Niebla atmosférica sobre el agua — ✅ resuelto 2026-08-13
-
-Sale de [REQ-ENV1](#-req-env1): NIEBLA/NUBLADO/TORMENTA piden que el mundo se **difumine hacia el color
-del cielo con la distancia**, y hoy no se podía pedir. La niebla **bajo** el agua ya existía
-(`game.vistaAgua`, uniformes `uFogMin`/`uFogNear`/`uFogFar`, en bloques absolutos); **fuera** del agua
-iba atada a `renderDist` (`mcFogNear/mcFogFar = far*0.55..0.98`) y no había mando.
-
-**La causa exacta era pequeña:** `mcActualizaVista` **borra la niebla cada fotograma** cuando el ojo no
-está en un fluido (`mcNieblaEf=null; mcTinteEf=0`), así que no había dónde meter una niebla de mundo —
-cualquier valor puesto desde un snippet se perdía al frame siguiente.
-
-**Arreglo — `game.niebla({near, far, tinte})`**, reusando **los mismos uniformes** que la de dentro:
-un estado `mc.nieblaMundo` que, si está puesto, `mcActualizaVista` respeta en la rama de fuera del agua
-(`mcNieblaEf=[near·k, far·k]`, `mcTinteEf=tinte`). `near`/`far` en bloques, `tinte` = suelo de bruma
-hasta de cerca. La niebla tira hacia `uSky` = el color del cielo, así que un cielo gris da niebla gris.
-
-⚠️ **Las trampas se respetaron:** por defecto `mc.nieblaMundo` es null ⇒ `far*0.55` ⇒ **fuera del agua
-no cambia ni un float**; `far>near` se fuerza en el setter (o la rampa divide por cero); el séptimo
-sitio de niebla (el overlay) no se toca. Sobre `renderDist`: la niebla espesa (far ≈ 20) tapa mucho
-antes del borde de chunks, así que no hace falta bajarlo; el que quiera lo baja aparte.
-
-Cableado en los 8 presets de [REQ-ENV1](#-req-env1) (NIEBLA `near:3,far:20`; los días claros `false`).
-**Guardián:** `tests/test_niebla_mundo.js` (`@area: render`) — mide la **pantalla**: con niebla el
-terreno lejano tira al color del cielo (Δ grande), apagada vuelve **exacta** (Δ=0), y `far<=near` se
-corrige. TODO OK.
-
----
-
-<a id="-req-env3"></a>
-
-### ✅ REQ-ENV3 · Oscurecer el mundo de noche (nivel de luz global) — ✅ resuelto 2026-08-13
-
-Sale de [REQ-ENV1](#-req-env1): en NOCHE y TORMENTA el cielo se apagaba con `cieloColor`, pero el
-**terreno** seguía a plena luz porque el skylight no baja — «de día con el cielo negro».
-
-**Por qué no bastaba lo que había:** `game.interiorDark` apaga solo lo que **no** ve el cielo
-(interiores) y **re-malla** al cambiarlo (fatal para una transición por fotograma); `game.sunShade` es
-solo la sombra proyectada. Ninguno baja la luz de una pradera a cielo abierto.
-
-**Arreglo — `game.luz(factor)` = exposición en el shader.** Un uniforme `uExpo` que **multiplica el
-color de las superficies**: instantáneo, **no toca la malla** ni la luz horneada, e interpolable. Vive
-en los **tres programas de color** (terreno `MC_FS`/`MC_FS_OPAQUE`, estructuras/agua `MC_STRUCT_FS`,
-estructuras con textura `MC_STEX_FS`) y se sube en **un solo sitio**, arriba de `mcSunUniforms` (por
-donde pasan los tres, antes del early-return de la sombra). Medido: `game.luz(0.3)` deja el suelo al
-**31%**; `game.luz(1)` lo devuelve **al pixel** (Δ=0).
-
-⚠️ **Las dos disciplinas se respetaron:** por defecto **1 = idéntico a hoy**, ni un float (`col*1.0`); y
-**las fuentes emisivas NO se apagan** — en `MC_STRUCT_FS` la exposición multiplica solo la parte
-**sombreada** (`mix(shaded*uExpo, vColor, em)`), así que una lámpara (em=1) sigue a pleno brillo de
-noche, que es lo que la hace útil.
-
-⚠️ **Lo que NO cubre (a propósito, y anotado para no confundirlo con un bug):** en el **terreno** la luz
-de bloque (antorchas) va **horneada en `vShade`** y no se puede separar del skylight, así que una zona
-iluminada por antorcha también se atenúa un poco de noche. Separar skylight de luz de bloque en el
-terreno sería otro ticket (y más gordo); para ambientes, la atenuación uniforme es lo que se pidió.
-
-Cableado en los 8 presets de [REQ-ENV1](#-req-env1) (NOCHE 0.28, TORMENTA 0.5, día 1.0). **Guardián:**
-`tests/test_luz_global.js` (`@area: render`) — mide la **pantalla** a plomo al suelo: `luz(0.3)` ≈ 1/3
-de brillo, `luz(1)` restaura exacto, clamps. TODO OK.
-
----
-
-### ⚠️ Nota común a REQ-FLUID6 y REQ-FLUID7 · las cifras son RELATIVAS
-
-El dueño aporta números de **Minecraft**, en **bloques/tick**. Nuestro motor **no funciona en ticks**
-(la física del jugador va en bloques por segundo) y, sobre todo, **la instrucción es explícita**:
-
-> «las velocidades tenerlas en cuenta como **relativas**, usar **fuera** del líquido las que están
-> ahora mismo»
-
-O sea: **fuera del agua no cambia ni un float** — se queda tal cual está hoy. Lo que se implementa es
-la **proporción** entre dentro y fuera, sacada de las cifras que él da:
-
-| magnitud | fuera (MC) | dentro (MC) | **razón a implementar** |
-|---|---|---|---|
-| aceleración de gravedad | 0,08 b/tick² | 0,005 b/tick² | **×1/16** (0,0625) |
-| velocidad terminal | ≈3,92 b/tick | — (no la da) | ver REQ-FLUID6 |
-| subir manteniendo salto | — (es impulso) | ≈0,04 | **8× la gravedad de dentro**, o **½ la de fuera** |
-
-Ese último renglón es el que hace que se pueda nadar: con la tecla pulsada, dentro del agua el neto
-es **+0,035 hacia arriba** = **7× la gravedad de dentro**, subiendo. Al soltarla, vuelve a hundirse a
-1/16 de gravedad. Anclar así los valores es lo que hace que la sensación se conserve aunque nuestros
-números de fuera no sean los de Minecraft.
-
-⚠️ **Dos incoherencias de unidades en el enunciado**, que hay que resolver antes de codificar y que no
-invento yo — están en el texto tal cual llegó: el impulso de salto viene en **m/s** (`0,42 m/s`)
-cuando el resto va en bloques/tick, y el empuje de dentro viene en **bloques/tick** cuando una
-**aceleración** debería ser bloques/**tick²**. En Minecraft ambos son 0,42 y 0,04 en unidades de tick;
-lo tomo así, pero queda anotado.
-
----
 
 <a id="-bug-fluid5"></a>
 
@@ -3192,188 +2710,17 @@ Con esto el próximo volcado del dueño debería mostrar las 17 ms faltantes, y 
 
 ---
 
-<a id="-req-ag17"></a>
-
-### ✅ REQ-AG17 · Un agente no se mete en el espacio de otro: lo empuja, y se detiene si no le dejan — ✅ resuelto 2026-08-13
-
-**Enunciado del dueño, literal:**
-
-> «un agente no deberia meterse en el espacio de otro, deberia empujarlo como mucho procurando
-> detenerse cuando el otro agente no le deje pasar»
-
-**Área:** colisión y movimiento entre agentes. **Redactado, sin investigar.**
-
-Son **dos reglas encadenadas**, y conviene no confundirlas porque la segunda es la difícil:
-
-1. **No solaparse** — hoy dos agentes pueden acabar en la misma celda / interpenetrados.
-2. **Empujar, no atravesar** — el que llega desplaza al que estorba…
-3. **…y rendirse** — si el empujado no puede moverse (pared detrás, otro agente detrás, borde), el
-   que empuja **se detiene** en vez de forzar el paso.
-
-**Lo que hay que decidir con el dueño antes de tocar nada:**
-
-- **¿Aplica a los dos sistemas o solo a uno?** `mc.agents` (NPC-cubo 1×1×1) y `game.esqueletos` (rigs
-  articulados) son **cosas distintas** y no comparten cuerpo: el rig ni siquiera aparece en `npcs[]`
-  del diagnóstico de atasco. Un zombie es lo segundo. Si la regla vale para ambos, son dos
-  implementaciones, no una.
-- **¿El jugador cuenta?** El enunciado dice «otro agente». Hoy el pistón sí empuja agentes y al
-  jugador; si un agente debe también empujar (o frenar ante) el jugador, hay que decirlo.
-- **¿Y los montados?** Un agente **cabalgable** con jinete encima es un caso con dueño previo
-  ([BUG-AG14](PLAN_ARCHIVO.md#-bug-ag14), [REQ-AG15](PLAN_ARCHIVO.md#-req-ag15)): el jinete ocupa el
-  espacio del montado a propósito. Esa excepción **no puede romperse** al añadir la regla.
-
-**Trampas ya conocidas de esta zona** (para no tropezar, no son conclusiones):
-
-- ⚠️ **`app.js` es agnóstico a los agentes**: esto se implementa en la librería
-  `data/snippets/base-npc-skills.json` (sirve a más de un agente) o en el snippet del bicho — **no en
-  el framework**, salvo que sea imposible **y con permiso del dueño**. Que la regla suene a «motor» no
-  la mueve de sitio.
-- ⚠️ **«Detenerse» tiene que quedar diagnosticable.** Ya existe un diagnóstico de atasco que dice por
-  qué un agente no avanza; si «me paré porque otro no me dejó» no sale ahí, esto se convierte en
-  agentes quietos sin motivo aparente — que es exactamente el bug que la gente reporta. Frenar por
-  esta regla debería ser un **motivo con nombre**.
-- ⚠️ **Riesgo de atasco mutuo:** dos agentes que se empujan de frente, o una fila que se bloquea
-  entera. Hay un `auto_unstick` en el repo; hay que ver si esta regla lo dispara sin querer o si hace
-  falta un desempate (prioridad, aleatorio, ceder el paso).
-- ⚠️ **Coste por frame.** El planificador reparte **8 ms por turnos rotatorios** entre los agentes
-  vivos (`MC_AGENT_FRAME_MS`). «Mirar si hay otro agente delante» hecho a lo bruto es N² por frame y
-  se come el presupuesto de los demás, que es un fallo ya visto aquí (4 de 6 agentes a cero).
-
-**Guardián que pedirá el ticket:** dos agentes cara a cara en `/map/test` — el que llega empuja; con
-una pared detrás del empujado, **el que empuja se para y lo dice**; y un tercer caso que compruebe
-que **nunca comparten celda**.
-
----
-
-#### ✅ Resuelto — en el snippet, no en `app.js`
-
-Acotado por el dueño a **`game.esqueletos`** (los rigs articulados): `mc.agents` es otro cuerpo y otro
-sistema. Todo vive en `data/snippets/mundo-autoarranque.json`, en **tres parches idempotentes por
-marca** — `herramientas/parche_snp_ag17.py` → `ag17b.py` → `ag17c.py` (v1.32 → v1.35). **En `app.js`
-no se tocó nada.** Detalle largo en [`docs/agentes.md`](docs/agentes.md) y la trazabilidad de las tres
-pasadas, con las medidas, en `data/tickets/REQ-AG17/contexto.md`.
-
-**La regla:** antes de aceptar un paso se mira si la caja del cuerpo cae dentro de la de otro rig
-vivo; si cae, se intenta **empujarlo** el mismo delta (validado igual); si el otro no puede moverse,
-el paso **no vale** y el que empuja se queda en **`g.por = 3` «bloqueada»**, que es el estado que ya
-sale en el diagnóstico de atasco — o sea, la exigencia de «pararse tiene que quedar diagnosticable»
-se cubre **sin** un motivo nuevo. La excepción de los montados ([REQ-AG15](PLAN_ARCHIVO.md#-req-ag15))
-queda intacta: `separarDeAgentes` no toca a quien tiene `g.montado`.
-
-**Salió barato porque hay un solo embudo:** todo movimiento de raíz pasa por `moverRaiz` —el paso
-andando, el brinco del puñetazo y el patinaje sobre hielo—, así que un cambio los cubre los tres.
-
-**Las dos pasadas que hicieron falta después, y por qué** (las dos las destapó el dueño o una sonda,
-no el guardián — merece la pena dejarlo escrito):
-
-1. **El perdón al que ya estorbaba era incondicional** y eso es un fallo de diseño, no un caso raro:
-   volvía a un par embutido **invisible el uno para el otro para siempre**, y ese par se consigue solo
-   con dos agentes persiguiéndote a la misma `distancia` (los dos van al mismo punto del anillo). Ahora
-   el paso vale solo si **aleja los centros**. Más un **desatasco** de 1,5 bloques/s por cabeza, porque
-   validar pasos no saca a quien ya está dentro.
-2. **⚠️ Validar el destino no es validar el camino.** `avanzar` mira dónde se aterriza; el puñetazo
-   gasta la fuerza en `mov.vx * dt`, que son **0,67 bloques por fotograma a 60 fps** (el cuerpo mide
-   0,8) y **3 o 4 en un fotograma lento**. Medido con `sonda_punetazo.js`, los dos en un pasillo sin
-   salida: saltaba de `x=34,4` a `x=37,2` con el otro en `36,4` **sin solaparse ni un fotograma**. No
-   lo rodeaba: se lo atravesaba. `moverRaiz` parte ahora el desplazamiento en **trozos de medio
-   cuerpo** (tope 32) y valida cada uno. El empujón que transmite el golpe pasó de **1,99 a 6,45
-   bloques**.
-
-**Guardián:** `tests/test_agentes_empujan_y_trepan.js` (`@area: agentes`), casos **A** (dos al mismo
-sitio no acaban en la misma coordenada) · **B** (el de atrás empuja, no atraviesa) · **C** (con un muro
-detrás **se para** y dice `por = 3`) · **F** (los dos persiguiendo AL JUGADOR quieto: **0 de 600**
-fotogramas solapados) · **G** (el puñetazo). **`--area=agentes`: 19/19.**
-
-⚠️ **Lección de método, para no repetirla:** un «no solapan en ningún fotograma» **no demuestra** que
-no se atraviesen si el paso puede medir más que el cuerpo. Yo lo di por bueno una vez y era falso.
-
----
-
-<a id="-req-ag18"></a>
-
-### ✅ REQ-AG18 · Límite de escalada del agente, editable en la capacidad «anda» — ✅ resuelto 2026-08-13
-
-**Enunciado del dueño, literal:**
-
-> «revisar cuanto puede escalar un agente que se ha quedado atrapado en un hoyo, habria que poner ese
-> limite de escalado de bloques en la edicion de agentes dentro de la capacidad anda.
-> max escalar bloques: 3»
-
-**Área:** capacidades del agente (panel de edición) + su movimiento vertical. **Redactado, sin
-investigar.**
-
-Son **dos entregables**, y el primero es literalmente «revisar»:
-
-1. **Medir cuánto escala hoy** un agente metido en un hoyo. El dueño no afirma que esté mal: dice que
-   hay que **revisarlo**. Puede salir que trepa de más (sale de sitios donde debería quedarse
-   atrapado) o de menos (se queda encerrado por un escalón tonto). Esa medida **decide el resto**.
-2. **Exponer el límite** como campo editable en el panel de agentes, **dentro de la capacidad
-   «anda»**, no como constante del motor.
-
-⚠️ **Ambigüedad del enunciado, a confirmar antes de tocar nada:** «max escalar bloques: 3» admite dos
-lecturas y llevan a interfaces distintas —
-
-- **(a)** el campo tiene **tope 3**: el dueño puede poner 1, 2 o 3, y el panel no deja pasar de ahí;
-- **(b)** **3 es el valor por defecto** del campo, y el tope es otro (o no hay).
-
-No es un detalle de redacción: de (a) sale un validador en el panel, de (b) un valor inicial. Y 3
-bloques de escalada es **bastante** —un agente subiendo 3 de golpe se parece más a volar que a
-andar—, así que también hay que confirmar si se refiere a **subir un escalón de 3** o a **trepar 3
-veces seguidas de 1**.
-
-**Trampas ya conocidas de esta zona:**
-
-- ⚠️ **`app.js` no se toca para cambiar agentes.** El límite vive en el documento del agente
-  (`data/agentes/<id>.json`) y lo aplica la librería de skills, no el framework.
-- ⚠️ **Guardar no planta y plantar no guarda**: `game.agentes` son los **documentos** y
-  `game.esqueletos` lo **vivo en el mapa**. Un campo nuevo en el panel no llega solo a los bichos ya
-  plantados, y **`crearEsqueleto` rehace las piezas campo a campo** — todo campo nuevo hay que
-  traerlo ahí **explícitamente** o se pierde en silencio al replantar.
-- ⚠️ **El jugador tiene su propia escalada** (parkour, `mcCaidaPaso`). Son sistemas separados: esto
-  **no** debe cambiar cómo trepa el jugador, y el guardián debería fijarlo.
-
-**Guardián que pedirá el ticket:** un agente en un hoyo de 1, 2, 3 y 4 bloques en `/map/test`, con el
-límite puesto a N: sale de los de altura ≤ N y **se queda** en los de altura > N; y el campo persiste
-al guardar y replantar.
-
----
-
-#### ✅ Resuelto — `def.andar.escalar`, 0..8, por defecto 3
-
-**Lo primero fue medir, que es lo que pedía el enunciado:** hoy un agente atascado **se
-teletransporta hasta arriba sin importar lo hondo que hubiera caído**. O sea que la sospecha del
-dueño era buena y el arreglo es acotarlo, no inventar un tope nuevo.
-
-**Y la ambigüedad se resolvió sola al medir:** «max escalar bloques: 3» no es ni (a) ni (b) tal cual
-—es **lo que se trepa DE UNA VEZ al atascarse**, y 3 es el **valor por defecto** con el campo acotado
-a **0..8**. La otra lectura, «altura de escalón», **no aplica**: andando se sube **siempre uno**, eso
-no se toca, y el guardián lo fija (caso E). `escalar: 0` es «no trepa»: ni el escalón de andar.
-
-- **Motor:** `herramientas/parche_snp_ag18.py` (v1.31 → v1.32) sobre
-  `data/snippets/mundo-autoarranque.json`. La trepada solo se dispara tras `ATASCO_S` (0,35 s)
-  queriendo ir a algún sitio **sin avanzar ni un milímetro**, con un acumulador `rig._atasco` por rig.
-- **Panel:** campo «trepa al atascarse (bloques)» en `web/app.js`, **dentro de la capacidad «anda»**
-  como pidió el dueño, con la ayuda explicando que el escalón de andar es otra cosa. El campo llega a
-  `crearEsqueleto` explícitamente (la trampa de esta zona: todo campo nuevo hay que traerlo ahí o se
-  pierde en silencio al replantar).
-- **El jugador no se toca**: su escalada es parkour/`mcCaidaPaso`, otro sistema.
-
-**Guardián:** `tests/test_agentes_empujan_y_trepan.js`, casos **D** (hoyo de 3: con `escalar` 0 y 1
-**no sale**, con 3 sí) y **E** (andando, el peldaño de 1 se sube siempre, y por encima, no
-atravesándolo). **`--area=agentes`: 19/19.**
-
----
 
 ## Bitácora
-- 2026-08-13 · 🐛 **[BUG-IMP1](#-bug-imp1): importar objetos tumbaba el editor, y lo cazó una línea de la traza** · `TypeError: hex.slice is not a function` al importar. La clave estaba en QUÉ línea petó: `hex.slice` (412) y no `hex.length` (411), así que `hex` tenía `.length` pero no `.slice` — un **número**. Los colores del `.vox.json` venían como **enteros empaquetados**, no `'#rrggbb'`, y `hex6` los devolvía tal cual para que `shade` reventara dentro del render de la miniatura → caía el editor entero. Arreglado en el pipeline de color: entero → se recupera su hex, cualquier otro tipo raro → magenta de error, nunca un crash. `test_importar_color.js`. Falta que el dueño confirme que los colores salen bien (por si el empaquetado no fuera `0xRRGGBB`). También cerrado [REQ-FLY2](#-req-fly2) de paso (vuelo vertical ∝ playerSpeed).
-- 2026-08-13 · 📋 **Dos tickets nuevos del dueño, redactados con investigación:** [REQ-FLY2](#-req-fly2) — en modo vuelo el subir/bajar usa el fijo `mc.volarVel=6` mientras el horizontal usa `playerSpeed`, así que con velocidad alta la vertical se queda corta (confirmado en el código, fix a decidir si `game.volarVel` pasa a ser multiplicador). Y [BUG-GLOW1](#-bug-glow1) — revisar `game.glowLevel`/`glowFocus`: los setters recalculan+re-mallan bien, pero una sonda rápida dio `glowLevel` 15 y 5 con luz **idéntica** (sospechoso), y plantar una antorcha para probar resultó no trivial (`setVoxel('antorcha')` cae en roca); necesita un escenario limpio de una sola antorcha para confirmar.
-- 2026-08-13 · 🔦 **[REQ-ENV4](#-req-env4): las antorchas alumbran de noche «en la calle» — y un sampler3D que casi deja el mundo en negro** · El dueño notó que el modo noche apagaba TODO por igual y una antorcha no destacaba al aire libre (fuera, el skylight está al máximo y la tapa). El arreglo: la luz de bloque va a una **textura 3D** que el shader lee por posición, y la exposición la **resiste** (`mix(uExpo,1,blkLuz)`). Elegí textura sobre el «por vértice» que había redactado porque el vértice obligaba a cambiar el formato de malla del terreno + NPC-cubo + fino y movía offsets de varios guardianes de luz; la textura no toca ningún formato. **Pero casi la lío**: el `sampler3D` nuevo caía por defecto en la unidad 0, la misma que el atlas `sampler2D` — WebGL lo prohíbe e invalida el draw ⇒ **no se veía ni un bloque**. **SwiftShader lo tolera**, así que mis guardianes seguían en verde mientras el dueño, en su GPU real, no veía nada; lo cazó él, no el test. Lección para el futuro: sampler3D **siempre** a unidad propia (con dummy 1×1×1 para que nunca esté incompleto), y **SwiftShader no valida como una GPU real**. Medido: de noche la antorcha retiene el 82 % del brillo y la calle lejana el 20 %. `test_luz_artificial.js`. Con esto, los cuatro ambientes «de verdad» (cielo, niebla, luz global, luz artificial) están completos.
-- 2026-08-13 · 🌙 **[REQ-ENV3](#-req-env3): oscurecer el mundo de noche (luz global) — y las lámparas no se apagan** · NOCHE salía «de día con el cielo negro»: `cieloColor` apaga el cielo pero el terreno bajo skylight seguía a plena luz. El candidato obvio (`interiorDark`) **re-malla** y solo toca interiores, fatal para transiciones. La vía buena fue una **exposición** en el shader: un uniforme `uExpo` que multiplica el color de las superficies — instantáneo, no toca la malla, interpolable. Vive en los tres programas de color y se sube en **un solo sitio** (arriba de `mcSunUniforms`, por donde pasan los tres). Dos disciplinas: por defecto **1 = idéntico a hoy** (`col*1.0`, ni un float), y **las fuentes emisivas NO se apagan** (en el shader de estructuras la exposición multiplica solo la parte sombreada, así que una antorcha sigue encendida de noche). Medido: `game.luz(0.3)` deja el suelo al 31% y `luz(1)` lo devuelve al pixel. Con esto **los tres huecos de motor de los ambientes están cerrados** (cielo, niebla, luz); el snippet ya compone TODO. `test_luz_global.js`, TODO OK.
-- 2026-08-13 · 🌫️ **[REQ-ENV2](#-req-env2): niebla atmosférica de verdad sobre el agua** · El dueño probó NIEBLA y dijo lo obvio: el cielo gris está pero «falta la niebla de verdad». No se podía desde el snippet porque `mcActualizaVista` **borra la niebla cada fotograma** fuera del agua. El arreglo fue chico y limpio: `game.niebla({near,far,tinte})` reusa **los mismos uniformes** (`uFog*`) que la niebla de dentro del agua — un `mc.nieblaMundo` que la rama de fuera respeta si está puesto. Por defecto null ⇒ fuera del agua no cambia ni un float. Medido: el terreno lejano pasa de verde a gris (el color del cielo), Δ=119, y apagarla vuelve **exacta**. Cableada en los 8 presets. `test_niebla_mundo.js`, TODO OK.
-- 2026-08-13 · 🌅 **[REQ-ENV1](#-req-env1): ambientes realistas como snippet, y los dos huecos de motor que destapa** · El dueño dio un esqueleto (`Entornos` + `aplicarEntorno`) y pidió completarlo con **todos** los efectos, hacerlo snippet y ponerse a probar. Salió `data/snippets/ambientes.json` con **8 presets** (amanecer→verano) y `game.entorno(nombre[, segundos])` con transición suave — **en el snippet, no en `app.js`**, porque es pura composición de mandos que ya existen (`cieloColor` + `reflejoAgua` + `vistaAgua` + `sunShade`). Los 8 aplican y la transición aterriza clavada en el destino (sonda). **Lo valioso del ticket es lo que la iteración deja ver que FALTA**: hoy no hay ni **niebla atmosférica sobre el agua** (NIEBLA/NUBLADO se quedan en «cielo gris», sin difuminar el mundo) ni forma de **oscurecer el terreno de noche** (`cieloColor` apaga el cielo pero la pradera sigue a plena luz ⇒ NOCHE parece «de día con el cielo negro»). En vez de meter efectos a medias en el snippet, salen a [REQ-ENV2](#-req-env2) (niebla de fuera, reusando los uniformes `uFog*`) y [REQ-ENV3](#-req-env3) (atenuación global barata, sin re-mallar). El snippet queda **en curso**: falta cerrar los números con el dueño y, con ellos, un guardián que mida la pantalla de un preset frente a otro.
-- 2026-08-13 · 🪞 **[REQ-FLUID5](#-req-fluid5): el agua refleja el cielo, y un playground para jugar con ello** · Enfoque 1 (Fresnel hacia el color de cielo), **sin pasada extra ni FBO** — nubes/terreno de verdad era el enfoque 3 y con [PERF-RS1](#-perf-rs1) encima no se doblan draw calls sin medir. Lo que salió elegante: la cara de arriba del agua **ya se distingue al mallar** (tipo de fluido + `alphaFD`), así que la marca de «refleja» se hornea en el **canal `emit`** (emit=2; el agua no es emisiva) — **cero atributos nuevos, cero VBO, cero costuras en la caché de chunks**, que es donde REQ-FLUID4 se pinchó una vez; y como el uniforme `uReflejo` la escala, encender/apagar **no re-malla**. La normal y el ojo que pide el Fresnel ya los tenía `MC_SUN_LIB` gratis. Solo agua (la lava no), solo la cara de arriba, solo desde arriba (buceando se apaga). El proceso tuvo su lección de método: el guardián lo di por bueno con «no solapan» y una sonda fotograma a fotograma enseñó que era un espejismo de framing —el reflejo Fresnel⁵ está muy concentrado a rasante y llenaba pocos píxeles—; con la charca grande y la cámara a ras salta claro (Δ=28, aclara y azula). El dueño pidió **mandos para jugar** y se añadieron a `game`: `reflejoAgua/Curva/Opacidad/Color` y **`cieloColor`** (cambia `MC_SKY` = fondo **y** reflejo a la vez). `tests/test_reflejo_agua.js`, TODO OK.
-- 2026-08-13 · 🚧 **[REQ-AG17](#-req-ag17): un agente ya no se mete dentro de otro — y las tres pasadas que costó** · Cerrado **en el snippet** (`parche_snp_ag17.py` → `ag17b.py` → `ag17c.py`, v1.32→v1.35), **cero líneas de `app.js`**, que es la regla de esta zona. Salió barato porque hay **un solo embudo**: andar, el brinco del puñetazo y el patinaje sobre hielo pasan todos por `moverRaiz`. Lo que merece quedar escrito son los **dos errores míos**, porque los destapó el dueño y una sonda, no el guardián: **(1)** perdonar al que ya estorbaba antes del paso lo hice **incondicional**, y eso vuelve a un par embutido invisible el uno para el otro **para siempre** — un par que se consigue solo, con dos agentes persiguiéndote a la misma `distancia`; ahora el paso vale **solo si aleja los centros**, más un desatasco de 1,5 bloques/s por cabeza, porque validar pasos no saca a quien ya está dentro. **(2)** Di por bueno que el golpeado «rodeaba» al de delante, y era **falso**: `avanzar` valida **dónde se aterriza, no el camino**, y el puñetazo da pasos de **0,67 bloques a 60 fps** (3 o 4 en un fotograma lento) con un cuerpo de **0,8** — o sea que se lo atravesaba limpiamente y **ningún fotograma los veía solapados**. Lo cazó `data/tickets/REQ-AG17/sonda_punetazo.js` mirando el **tamaño del paso**, no el solape: `x=34,4 → 37,2` con el otro clavado en `36,4`. Arreglado partiendo el desplazamiento en **trozos de medio cuerpo**; el empujón que transmite el golpe pasó de **1,99 a 6,45 bloques**. **La lección: «no solapan en ningún fotograma» no demuestra nada si el paso puede medir más que el cuerpo.**
-- 2026-08-13 · 🧗 **[REQ-AG18](#-req-ag18): `escalar`, y por qué medir primero deshizo la ambigüedad** · El enunciado («max escalar bloques: 3») admitía dos lecturas y el ticket avisaba de que llevaban a interfaces distintas. **Medir lo resolvió sin preguntar**: hoy un agente atascado **se teletransporta hasta arriba sin importar lo hondo que hubiera caído**, así que lo que falta es acotar **lo que trepa de una vez al atascarse** — `def.andar.escalar`, **0..8, por defecto 3**, en el documento y editable **dentro de la capacidad «anda»**. La otra lectura, «altura de escalón», ni aplica: andando se sube **siempre uno** y eso no se toca (caso E del guardián lo fija). `escalar: 0` es «no trepa» ni el escalón.
+- 2026-08-13 · 🐛 **[BUG-IMP1](#-bug-imp1): importar objetos tumbaba el editor, y lo cazó una línea de la traza** · `TypeError: hex.slice is not a function` al importar. La clave estaba en QUÉ línea petó: `hex.slice` (412) y no `hex.length` (411), así que `hex` tenía `.length` pero no `.slice` — un **número**. Los colores del `.vox.json` venían como **enteros empaquetados**, no `'#rrggbb'`, y `hex6` los devolvía tal cual para que `shade` reventara dentro del render de la miniatura → caía el editor entero. Arreglado en el pipeline de color: entero → se recupera su hex, cualquier otro tipo raro → magenta de error, nunca un crash. `test_importar_color.js`. Falta que el dueño confirme que los colores salen bien (por si el empaquetado no fuera `0xRRGGBB`). También cerrado [REQ-FLY2](PLAN_ARCHIVO.md#-req-fly2) de paso (vuelo vertical ∝ playerSpeed).
+- 2026-08-13 · 📋 **Dos tickets nuevos del dueño, redactados con investigación:** [REQ-FLY2](PLAN_ARCHIVO.md#-req-fly2) — en modo vuelo el subir/bajar usa el fijo `mc.volarVel=6` mientras el horizontal usa `playerSpeed`, así que con velocidad alta la vertical se queda corta (confirmado en el código, fix a decidir si `game.volarVel` pasa a ser multiplicador). Y [BUG-GLOW1](PLAN_ARCHIVO.md#-bug-glow1) — revisar `game.glowLevel`/`glowFocus`: los setters recalculan+re-mallan bien, pero una sonda rápida dio `glowLevel` 15 y 5 con luz **idéntica** (sospechoso), y plantar una antorcha para probar resultó no trivial (`setVoxel('antorcha')` cae en roca); necesita un escenario limpio de una sola antorcha para confirmar.
+- 2026-08-13 · 🔦 **[REQ-ENV4](PLAN_ARCHIVO.md#-req-env4): las antorchas alumbran de noche «en la calle» — y un sampler3D que casi deja el mundo en negro** · El dueño notó que el modo noche apagaba TODO por igual y una antorcha no destacaba al aire libre (fuera, el skylight está al máximo y la tapa). El arreglo: la luz de bloque va a una **textura 3D** que el shader lee por posición, y la exposición la **resiste** (`mix(uExpo,1,blkLuz)`). Elegí textura sobre el «por vértice» que había redactado porque el vértice obligaba a cambiar el formato de malla del terreno + NPC-cubo + fino y movía offsets de varios guardianes de luz; la textura no toca ningún formato. **Pero casi la lío**: el `sampler3D` nuevo caía por defecto en la unidad 0, la misma que el atlas `sampler2D` — WebGL lo prohíbe e invalida el draw ⇒ **no se veía ni un bloque**. **SwiftShader lo tolera**, así que mis guardianes seguían en verde mientras el dueño, en su GPU real, no veía nada; lo cazó él, no el test. Lección para el futuro: sampler3D **siempre** a unidad propia (con dummy 1×1×1 para que nunca esté incompleto), y **SwiftShader no valida como una GPU real**. Medido: de noche la antorcha retiene el 82 % del brillo y la calle lejana el 20 %. `test_luz_artificial.js`. Con esto, los cuatro ambientes «de verdad» (cielo, niebla, luz global, luz artificial) están completos.
+- 2026-08-13 · 🌙 **[REQ-ENV3](PLAN_ARCHIVO.md#-req-env3): oscurecer el mundo de noche (luz global) — y las lámparas no se apagan** · NOCHE salía «de día con el cielo negro»: `cieloColor` apaga el cielo pero el terreno bajo skylight seguía a plena luz. El candidato obvio (`interiorDark`) **re-malla** y solo toca interiores, fatal para transiciones. La vía buena fue una **exposición** en el shader: un uniforme `uExpo` que multiplica el color de las superficies — instantáneo, no toca la malla, interpolable. Vive en los tres programas de color y se sube en **un solo sitio** (arriba de `mcSunUniforms`, por donde pasan los tres). Dos disciplinas: por defecto **1 = idéntico a hoy** (`col*1.0`, ni un float), y **las fuentes emisivas NO se apagan** (en el shader de estructuras la exposición multiplica solo la parte sombreada, así que una antorcha sigue encendida de noche). Medido: `game.luz(0.3)` deja el suelo al 31% y `luz(1)` lo devuelve al pixel. Con esto **los tres huecos de motor de los ambientes están cerrados** (cielo, niebla, luz); el snippet ya compone TODO. `test_luz_global.js`, TODO OK.
+- 2026-08-13 · 🌫️ **[REQ-ENV2](PLAN_ARCHIVO.md#-req-env2): niebla atmosférica de verdad sobre el agua** · El dueño probó NIEBLA y dijo lo obvio: el cielo gris está pero «falta la niebla de verdad». No se podía desde el snippet porque `mcActualizaVista` **borra la niebla cada fotograma** fuera del agua. El arreglo fue chico y limpio: `game.niebla({near,far,tinte})` reusa **los mismos uniformes** (`uFog*`) que la niebla de dentro del agua — un `mc.nieblaMundo` que la rama de fuera respeta si está puesto. Por defecto null ⇒ fuera del agua no cambia ni un float. Medido: el terreno lejano pasa de verde a gris (el color del cielo), Δ=119, y apagarla vuelve **exacta**. Cableada en los 8 presets. `test_niebla_mundo.js`, TODO OK.
+- 2026-08-13 · 🌅 **[REQ-ENV1](#-req-env1): ambientes realistas como snippet, y los dos huecos de motor que destapa** · El dueño dio un esqueleto (`Entornos` + `aplicarEntorno`) y pidió completarlo con **todos** los efectos, hacerlo snippet y ponerse a probar. Salió `data/snippets/ambientes.json` con **8 presets** (amanecer→verano) y `game.entorno(nombre[, segundos])` con transición suave — **en el snippet, no en `app.js`**, porque es pura composición de mandos que ya existen (`cieloColor` + `reflejoAgua` + `vistaAgua` + `sunShade`). Los 8 aplican y la transición aterriza clavada en el destino (sonda). **Lo valioso del ticket es lo que la iteración deja ver que FALTA**: hoy no hay ni **niebla atmosférica sobre el agua** (NIEBLA/NUBLADO se quedan en «cielo gris», sin difuminar el mundo) ni forma de **oscurecer el terreno de noche** (`cieloColor` apaga el cielo pero la pradera sigue a plena luz ⇒ NOCHE parece «de día con el cielo negro»). En vez de meter efectos a medias en el snippet, salen a [REQ-ENV2](PLAN_ARCHIVO.md#-req-env2) (niebla de fuera, reusando los uniformes `uFog*`) y [REQ-ENV3](PLAN_ARCHIVO.md#-req-env3) (atenuación global barata, sin re-mallar). El snippet queda **en curso**: falta cerrar los números con el dueño y, con ellos, un guardián que mida la pantalla de un preset frente a otro.
+- 2026-08-13 · 🪞 **[REQ-FLUID5](PLAN_ARCHIVO.md#-req-fluid5): el agua refleja el cielo, y un playground para jugar con ello** · Enfoque 1 (Fresnel hacia el color de cielo), **sin pasada extra ni FBO** — nubes/terreno de verdad era el enfoque 3 y con [PERF-RS1](#-perf-rs1) encima no se doblan draw calls sin medir. Lo que salió elegante: la cara de arriba del agua **ya se distingue al mallar** (tipo de fluido + `alphaFD`), así que la marca de «refleja» se hornea en el **canal `emit`** (emit=2; el agua no es emisiva) — **cero atributos nuevos, cero VBO, cero costuras en la caché de chunks**, que es donde REQ-FLUID4 se pinchó una vez; y como el uniforme `uReflejo` la escala, encender/apagar **no re-malla**. La normal y el ojo que pide el Fresnel ya los tenía `MC_SUN_LIB` gratis. Solo agua (la lava no), solo la cara de arriba, solo desde arriba (buceando se apaga). El proceso tuvo su lección de método: el guardián lo di por bueno con «no solapan» y una sonda fotograma a fotograma enseñó que era un espejismo de framing —el reflejo Fresnel⁵ está muy concentrado a rasante y llenaba pocos píxeles—; con la charca grande y la cámara a ras salta claro (Δ=28, aclara y azula). El dueño pidió **mandos para jugar** y se añadieron a `game`: `reflejoAgua/Curva/Opacidad/Color` y **`cieloColor`** (cambia `MC_SKY` = fondo **y** reflejo a la vez). `tests/test_reflejo_agua.js`, TODO OK.
+- 2026-08-13 · 🚧 **[REQ-AG17](PLAN_ARCHIVO.md#-req-ag17): un agente ya no se mete dentro de otro — y las tres pasadas que costó** · Cerrado **en el snippet** (`parche_snp_ag17.py` → `ag17b.py` → `ag17c.py`, v1.32→v1.35), **cero líneas de `app.js`**, que es la regla de esta zona. Salió barato porque hay **un solo embudo**: andar, el brinco del puñetazo y el patinaje sobre hielo pasan todos por `moverRaiz`. Lo que merece quedar escrito son los **dos errores míos**, porque los destapó el dueño y una sonda, no el guardián: **(1)** perdonar al que ya estorbaba antes del paso lo hice **incondicional**, y eso vuelve a un par embutido invisible el uno para el otro **para siempre** — un par que se consigue solo, con dos agentes persiguiéndote a la misma `distancia`; ahora el paso vale **solo si aleja los centros**, más un desatasco de 1,5 bloques/s por cabeza, porque validar pasos no saca a quien ya está dentro. **(2)** Di por bueno que el golpeado «rodeaba» al de delante, y era **falso**: `avanzar` valida **dónde se aterriza, no el camino**, y el puñetazo da pasos de **0,67 bloques a 60 fps** (3 o 4 en un fotograma lento) con un cuerpo de **0,8** — o sea que se lo atravesaba limpiamente y **ningún fotograma los veía solapados**. Lo cazó `data/tickets/REQ-AG17/sonda_punetazo.js` mirando el **tamaño del paso**, no el solape: `x=34,4 → 37,2` con el otro clavado en `36,4`. Arreglado partiendo el desplazamiento en **trozos de medio cuerpo**; el empujón que transmite el golpe pasó de **1,99 a 6,45 bloques**. **La lección: «no solapan en ningún fotograma» no demuestra nada si el paso puede medir más que el cuerpo.**
+- 2026-08-13 · 🧗 **[REQ-AG18](PLAN_ARCHIVO.md#-req-ag18): `escalar`, y por qué medir primero deshizo la ambigüedad** · El enunciado («max escalar bloques: 3») admitía dos lecturas y el ticket avisaba de que llevaban a interfaces distintas. **Medir lo resolvió sin preguntar**: hoy un agente atascado **se teletransporta hasta arriba sin importar lo hondo que hubiera caído**, así que lo que falta es acotar **lo que trepa de una vez al atascarse** — `def.andar.escalar`, **0..8, por defecto 3**, en el documento y editable **dentro de la capacidad «anda»**. La otra lectura, «altura de escalón», ni aplica: andando se sube **siempre uno** y eso no se toca (caso E del guardián lo fija). `escalar: 0` es «no trepa» ni el escalón.
 - 2026-08-13 · ✂️ **`CLAUDE.md` con tope de 15 KB, y escrito en telegráfico** (petición del dueño: «está creciendo en exceso… deja únicamente lo útil mínimamente necesario», y después «puede ser algo que tú entiendas bien, más compacto, no hace falta que lo entienda al 100 % un humano») · De **39 442 B a 14 009 B**, un **−64 %** — y ese ahorro se cobra **en cada turno de cada conversación**, porque `CLAUDE.md` se inyecta entero siempre; es la fuga de contexto más cara del repo y la única que no falla nunca, así que nadie la ve. **Nada se borró: se movió.** El detalle bajó **verbatim** a `docs/servidor-y-apis.md`, `docs/repo.md` y `docs/wiki.md` (nuevos) y a `docs/agentes.md` / `docs/rejilla-y-estructuras.md`, cada trozo con su nota «(movido verbatim desde `CLAUDE.md` el 2026-08-13)». La segunda pasada cambió el **estilo**, no el contenido: prosa → telegráfico (`⛔` prohibición, `!` trampa, `→` puntero), que es lo que pagó los últimos 1 600 B. **La comprobación de que no se perdió nada fue mecánica**, no a ojo: se extrajeron los **429 identificadores entre backticks** del fichero viejo y se exigió que cada uno siguiera en el nuevo `CLAUDE.md` **o** en algún `docs/*.md`; los 30 que no estaban resultaron ser 28 rutas y variantes de comando, más **2 pérdidas reales** —el párrafo de `mcSnippetInforme`/«VM2571» (REQ-SNIP1) y los identificadores `meta.categoria:'herramienta'` + `meta.herramienta` (REQ-TOOL1)— que se recuperaron verbatim en sus docs. Guardián nuevo `tests/test_claude_tamano.js` (**17 ok**, Node puro): el tope, que **los 14 punteros a `docs/` resuelvan a ficheros que existen** (un índice que enlaza a la nada es peor que no tener índice) y que **ninguna sección pase de 2 600 B**, que es lo que detecta que alguien ha vuelto a escribir el manual aquí dentro. Hoy queda al **91 % del tope**: el siguiente que lo pase tiene la receta escrita en el propio mensaje de fallo.
 - 2026-08-13 · 🧹 **La raíz, al mínimo: el sitio a `web/` y los módulos del servidor a `servidor/`** (petición del dueño, antes de subir a GitHub) · Bajan a **`web/`** los siete ficheros que se sirven por URL (`index.html`, `mapas.html`, `fotos.html`, `app.js`, `style.css`, `scrollbars.css`, `iconos.js`) y a **`servidor/`** los dos `import` de `server.py` (`mundos.py`, `voxfmt.py`), que gana un `__init__.py` y un `try/except ImportError` para que `python3 servidor/mundos.py` a pelo siga funcionando. En la raíz quedan `server.py`, `correr_tests.js`, `package.json` y los `.md`. **Las URL no cambian ni una**: quien elige la carpeta de disco es `Handler.translate_path`, por el **primer tramo** de la ruta (`assets`, `data`, `wiki`, `images` salen del repo; el resto, de `web/`), y se hace moviendo `self.directory` en vez de rehacer la ruta a mano para no perder el confinamiento contra `..` que ya trae `SimpleHTTPRequestHandler`. Efecto colateral **buscado**: `/server.py`, `/PLAN.md` y `/tests/…` dejan de estar servidos por HTTP — antes el docroot era el repo entero. `SYMBOLS.md` se regenera a `web/app.js:línea` (+700 tokens por lectura, pero un `app.js:6693` que ya no existe cuesta mucho más que eso). Guardián nuevo `tests/test_sitio_raiz.js` (**35 ok**): las URL de §1 **no van escritas a mano**, se sacan de los `href=`/`src=` de las cinco páginas reales, así que una página nueva entra sola.
 - 2026-08-13 · 📷 **Cuarto enlace en el menú «⋯»: Fotos** (petición del dueño, junto a Mundos / Iconos / Wiki) · `/fotos` en pestaña nueva con `rel=noopener`, como los otros tres. Detalle que no es obvio: los otros llevan **barra final** para esquivar el 301 del servidor estático, pero `/fotos` **no la lleva** porque no es un directorio sino una ruta propia de `server.py` — con barra y sin ella devuelve 200, y se dejó sin barra por coherencia con lo que sirve el backend. Los dos guardianes **derivan** el número de enlaces en vez de llevar un `3` escrito (`ESPERADOS.length` en `test_menu_enlaces.js`, `esperadas + enlaces` en `test_barra_tres_botones.js`), así que añadir el quinto no obligará a tocarlos: 4 rutas verificadas a 200 sin redirección, 23 ok en la barra.
@@ -3393,7 +2740,7 @@ atravesándolo). **`--area=agentes`: 19/19.**
 - 2026-08-11 · ♾️ [REQ-FLUID8](PLAN_ARCHIVO.md#-req-fluid8) · Abierto: **fuentes de fluido infinitas**. Una celda que toca fuentes por los lados y tiene un bloque sólido debajo se convierte ella misma en fuente; el ejemplo del dueño es el hoyo de 2×2×1 con dos fuentes en diagonal que se cierra solo. **Redactado sin investigar**, salvo dos minutos para localizar dónde cae: el simulador de fluidos vive **en `app.js`** (`fluidLevels`, `getProps`, `setFluid`, `processCell`, `queueTick`), «fuente» **ya existe** como `fluidLevel === 0`, y el bucle **ya es dirigido por eventos**, así que la regla son cuatro sondeos dentro de `processCell` y no un barrido del mundo. ⚠️ Queda **una pregunta bloqueante**: el enunciado dice «tocando fuentes» en plural y el ejemplo tiene exactamente **dos** por celda, pero la frase también se lee como «≥1» — y con ≥1 una fuente suelta convierte a su vecina, y ésta a la suya, hasta **inundar el plano entero**. Se implementará **≥2** salvo que el dueño diga otra cosa, por ser lo único compatible con su propio ejemplo. Anotadas además tres decisiones que el enunciado no fija: si «sólido debajo» admite otra fuente (o la regla solo vale en la capa del fondo), si vale para la lava (mejor bandera por tipo, como las perillas de REQ-FLUID6/7), y si es reversible al romper una de las fuentes originales — que es justo lo que decide si el cubo infinito sirve para algo.
 - 2026-08-11 · 🏊 **Nadar: hundirse despacio y subir manteniendo la tecla ([REQ-FLUID6](PLAN_ARCHIVO.md#-req-fluid6) + [REQ-FLUID7](PLAN_ARCHIVO.md#-req-fluid7), cerrados)** (dueño: «los agentes tienen que comportarse a nivel de físicas como los jugadores en todos los casos. la lava puede ser un poco más espesa»). Dentro de un líquido la gravedad baja a **×1/16** y aparece un **rozamiento vertical**; mantener la tecla de salto invierte el signo de esa aceleración. Tres cosas que gobernaron el resultado y no estaban en los tickets. **(1) Una sola función de caída, tres puntos de llamada.** Los agentes articulados tienen sus **propios** integradores en el snippet —dos, `asentar` y `movPaso`—, así que la petición del dueño se podía cumplir copiando la fórmula tres veces… y quedaría rota al primer retoque. En vez de eso `app.js` **ofrece** `mcCaidaPaso` y quien tenga cuerpo la llama, igual que `mc.sunExtra`. Es lo que hace que «como los jugadores» siga siendo verdad mañana. **(2) El tope de subida no hubo que inventarlo**: es el mismo rozamiento que frena la caída, así que salió gratis y sin techos escritos a mano — y el empuje se ancló a la gravedad de dentro, no a un número absoluto, para que las perillas no se descoloquen entre sí. **(3) Mandan los pies, salvo que haya suelo debajo.** Lo primero deja salir a la orilla; lo segundo, que no estaba en el ticket, evita que vadear un charco de un bloque se convierta en andar por pegamento: en Minecraft nadar es «en agua **y sin suelo**», no «en agua». Y una lección que costó cinco tests en rojo: **el motor integra en pasos discretos**, así que la terminal real no es `a·τ` sino `a·dt·k/(1−k)` (un 3,7 % a 60 fps) y la caída no es `½gt²` sino la suma discreta. Las cinco veces el motor tenía razón y la equivocada era mi expectativa; ahora las tolerancias se derivan de la cola calculada `|v₀−v*|·kⁿ` en lugar de ser un porcentaje a ojo. `test_hundirse.js` (20 ok) + `test_nadar.js` (19 ok), los dos con un §1 que exige que **fuera del agua no cambie ni un float**, que era la condición del dueño.
 - 2026-08-11 · 🏊 [REQ-FLUID6](PLAN_ARCHIVO.md#-req-fluid6) y [REQ-FLUID7](PLAN_ARCHIVO.md#-req-fluid7) · Abiertos: la **física dentro de un líquido**. El dueño manda dos mecánicas con cifras de Minecraft —gravedad 0,08 → 0,005 bloques/tick² dentro (velocidad terminal ≈3,92 fuera), y el salto que fuera es un impulso de 0,42 y dentro pasa a ser una aceleración sostenida de 0,04 mientras se mantiene la tecla—. **Son dos tickets porque son dos cosas distintas**: el 6 cambia una **constante** (la gravedad se multiplica por 1/16), el 7 cambia el **gesto de entrada** (la tecla de salto deja de ser un evento y pasa a ser un estado), y sin el 6 el 7 ni se nota, porque contra la gravedad de fuera un empuje de media gravedad no sube, frena. ⚠️ La instrucción que gobierna los dos: **las velocidades son RELATIVAS y fuera del líquido no se toca nada** — nuestro motor no va en ticks sino en bloques/segundo, así que lo que se implementa es la **razón** (×1/16 la gravedad; el empuje de subida = 8× la gravedad de dentro = ½ la de fuera, que deja un neto de +7× hacia arriba con la tecla pulsada). Tabla de razones escrita en el ticket para no re-derivarla. Anotadas dos incoherencias de unidades del enunciado (el impulso llega en m/s entre cifras en bloques/tick; el empuje llega en bloques/tick cuando una aceleración es bloques/tick²). Y una trampa que ya conocemos de la fase 3: **quién decide que estás «dentro»** — allí se mira el **OJO** a propósito (andar por un charco no debe teñir la pantalla), pero la física querrá los **pies**, y de eso depende que se pueda salir a la orilla. **Redactados, sin investigar**, a petición del dueño. Sin verificar y anotado como tal: si el jugador ya tiene hoy algún trato dentro del agua, si el motor sabe que una tecla **sigue** pulsada o solo ve el flanco, cuál es la velocidad terminal de dentro (el dueño no la da; probablemente arrastre y no tope duro), y si esto alcanza a los **agentes** (antecedente BUG-FLUID2) y si la **lava** es más espesa — las dos últimas, a preguntar.
-- 2026-08-11 · 🪞 [REQ-FLUID5](#-req-fluid5) · Abierto: **reflejos de cielo y nubes en la superficie del agua**. Era la fase 4 de REQ-FLUID4; el dueño la aplazó al acotar aquel ticket («más adelante») y ahora pide sacarla a ticket propio. **Redactado, sin investigar** — a petición suya, nada de código todavía. Lo que sí se anota, por venir de lo aprendido en las fases 1-3 y no de una investigación nueva: es un cambio de **shader**, no de mallado (el culling ya dejó **una sola lámina** donde pintar, en vez de dieciocho planos apilados); la cara de arriba **ya se puede identificar** en el shader gracias a `alphaFD`, el byte de dirección que se añadió en la fase 1; y las nubes son **geometría de verdad** (`white-wool` de REQ-SHADOW2), no una textura de cielo, lo que separa el enfoque barato del caro. Tres enfoques anotados sin decidir: Fresnel hacia `uSky` (sin pasada extra, no refleja nubes), + normales onduladas, o **reflexión planar** a un FBO —que es lo único que refleja nubes de verdad y también lo que **dobla los draw calls**, así que con PERF-RS1 encima no se elige sin medir, y además un plano único no vale para dos lagos a cotas distintas—. Sin verificar, y dicho en el ticket: si el shader translúcido tiene ya a mano la normal y la dirección a cámara, cómo se lleva un reflejo con el `uFogMin` de la fase 3 al mirar la superficie **desde debajo**, y si la lava entra aquí (es emisiva: puede que lo suyo sea brillo y no reflejo) — eso último **a preguntar al dueño**.
+- 2026-08-11 · 🪞 [REQ-FLUID5](PLAN_ARCHIVO.md#-req-fluid5) · Abierto: **reflejos de cielo y nubes en la superficie del agua**. Era la fase 4 de REQ-FLUID4; el dueño la aplazó al acotar aquel ticket («más adelante») y ahora pide sacarla a ticket propio. **Redactado, sin investigar** — a petición suya, nada de código todavía. Lo que sí se anota, por venir de lo aprendido en las fases 1-3 y no de una investigación nueva: es un cambio de **shader**, no de mallado (el culling ya dejó **una sola lámina** donde pintar, en vez de dieciocho planos apilados); la cara de arriba **ya se puede identificar** en el shader gracias a `alphaFD`, el byte de dirección que se añadió en la fase 1; y las nubes son **geometría de verdad** (`white-wool` de REQ-SHADOW2), no una textura de cielo, lo que separa el enfoque barato del caro. Tres enfoques anotados sin decidir: Fresnel hacia `uSky` (sin pasada extra, no refleja nubes), + normales onduladas, o **reflexión planar** a un FBO —que es lo único que refleja nubes de verdad y también lo que **dobla los draw calls**, así que con PERF-RS1 encima no se elige sin medir, y además un plano único no vale para dos lagos a cotas distintas—. Sin verificar, y dicho en el ticket: si el shader translúcido tiene ya a mano la normal y la dirección a cámara, cómo se lleva un reflejo con el `uFogMin` de la fase 3 al mirar la superficie **desde debajo**, y si la lava entra aquí (es emisiva: puede que lo suyo sea brillo y no reflejo) — eso último **a preguntar al dueño**.
 - 2026-08-11 · 💧 **Que parezca agua también desde fuera: culling de caras internas en el camino fino (REQ-FLUID4, fases 1-2)** (dueño: «vale, tiene mejor pinta, ahora quiero que parezca agua también desde fuera», y antes «no deben de verse las caras de los cubos, tiene que parecer agua o lava líquida»). Un fluido es un 16³ macizo **translúcido**, así que por BUG-STR1 va siempre por el **camino fino** (`finoAVbo`) — y ese camino **no tenía culling ninguno**: cada celda de un lago copiaba su geometría entera, las seis caras, y desde fuera se veía exactamente lo que era, cubos apilados con las costuras marcadas. Una charca de 9×9×3 emitía **1458 caras**; ahora **81** (18×). El mallador de cubos lleva su regla desde siempre, pero aquí no se podía reusar: la geometría fina se copia como bloque opaco de vértices y no sabía **hacia dónde mira** cada quad. Se añade eso, `colFD`/`alphaFD`/`texFD`, un byte por quad: **0..5 = está en la piel de la pieza y mira hacia ahí**, **6 = no está en la piel**. El 6 no es relleno — un quad interior (el techo de una cueva dentro del propio dibujo) no lo tapa ningún vecino y hay que poder decir «a éste no lo mires»; y el envés de una cara con `caras` hereda la dirección de su anverso, porque viven en el mismo plano. Con eso, tres reglas: vecino **opaco** (`mcTapaCara`, la misma pregunta del camino de cubo, y **solo con la celda llena** — un fluido que no llega arriba no alcanza el plano que el vecino tapa), mismo fluido **en vertical** (dos celdas apiladas comparten el plano exacto: `mcGetFluidHeight` ya devuelve 1.0 cuando hay fluido encima), y mismo fluido **en horizontal** solo si **llega tan alto**. ⚠️ La identidad de un fluido es su **TIPO y no su id**: `hab:agua-1`…`hab:agua-7` son ids distintos de la misma agua, así que comparando ids no se habría cullado ni un lago con corriente — `mcTablaFluido()` lo pregunta a `game.fluidos.getProps` y su caché se invalida por **dos** cosas, el tamaño de la paleta **y la identidad de `game.fluidos`**, porque si no el `null` de antes de que el snippet instale la API se queda cacheado para siempre y el culling no se enciende jamás. **Y debajo había un bug latente que era la mitad visible del problema**: `setFluid` apenda el id del nivel a la paleta y escribía sus flags en `mc.finoRejilla[id]`, `finoExtra`, `recorte` y `atraviesaDoc` — `Uint8Array` dimensionados **cuando los horneó `mcBuildPalette`** — o sea **fuera del array**, y JS lo tira sin decir nada: el nivel perdía «me dibujo con mi geometría fina», volvía al camino de cubo y salía un **cubo azul opaco** (el atlas de terreno se hornea con `d[o+3]=255`) en medio de un lago translúcido. Ahora crecen, como ya hacía `mcAltaVariante`. Válvula `mc.sinCullingFluido`, **sumada a la firma del chunk** en los dos sitios donde se calcula: cambia la malla, y sin eso el caché LRU de PERF-RS1 devolvía el VBO de antes — la A/B daba el mismo número las dos veces y costó un rato darse cuenta de que el instrumento mentía, no el código. El alpha del agua es del **asset** (`assets/agua.vox.json`, `#3377ff1a → #3377ff66`, porque una lámina de una celda era invisible; la lava se queda en `#ff5500bd`) y se retoca en el editor. Guardián nuevo `test_caras_fluido.js`: las 1458→81 y el ida y vuelta de la válvula, que los niveles siguen por el camino fino, que agua y lava cullean igual —con la cuenta **derivada de la rejilla real** usando los propios ayudantes del motor, no un número escrito a mano, que mediría el simulador de fluidos y no el culling— y que una pieza sin fluido (`flor-roja`) da una malla **byte a byte idéntica**. Sin regresión en `test_vista_subacuatica`, `test_fluido_importado`, `test_atlas_estructuras` (13), `test_luz_al_estampar` (9), `test_caras_pegadas` (15) y `test_caras_mundo`. ⚠️ `test_cubo_translucido` (2), `test_flor_en_rejilla` (3) y `test_luz_en_rejilla` (3) fallan **igual que en HEAD**: vienen de antes y no de aquí. Capturas del A/B en `data/tickets/REQ-FLUID4/4-…` a `7-…`. Queda la **fase 4 (reflejos)**, aplazada por el dueño ⇒ ticket aparte.
 - 2026-08-06 · 🔌 **El Mundo hacía cola detrás de miniaturas que nadie veía (PERF-MC3, segunda vuelta)** (dueño: «mira ver si estás midiendo las cosas bien», y luego «no puede ser que el mapa empty tarde si no tiene ni un voxel»). Tras arreglar el serie→paralelo, en su máquina la paleta seguía costando **10032 ms de 11287**, y **9905 se los comía el PRIMER bloque** (`hierba`) mientras los otros catorce salían a 4-18 ms. **Mi diagnóstico anterior era falso, y el culpable era mi propio instrumento**: la línea `RED ·` sacaba el veredicto de los KB/s y acusó al **ancho de banda** de una fase cuyas descargas habían terminado en **1265 ms**. Un caudal bajo solo dice que los documentos son pequeños para lo que tarda un viaje, no que la red sea el cuello. Segundo error encadenado: el dueño **no está en el móvil**, está en un portátil potente con buena red, así que la hipótesis de CPU (rasterizar las miniaturas de las galerías) tampoco se sostenía — la medí estrangulando la CPU ×8 por CDP y todo escalaba **uniforme**, nunca aparecía un bloque comiéndose el 99 %. La causa real estaba en el **orden de arranque**, en las tres últimas líneas del fichero: en `/map/<nombre>` se llamaba a `loadServerAssets()` + `refreshHabitantesList()` **antes** de `openWorld()`, así que el editor entero arrancaba primero aunque el Mundo lo tape entero, y sus galerías bajan **un documento por miniatura** (43 habitantes, 6,3 MB) **por el mismo host**, del que el navegador solo abre **~6 sockets**. La paleta no estaba descargando: estaba **esperando turno**. Arreglo: se parte el índice de assets en sus dos trabajos —`mcIndexAssets` (los nombres cortos que usan los snippets, hace falta ANTES) y llenar las galerías (solo lo mira el editor, va DESPUÉS)— compartiendo la promesa de `assets/index.json` para no pedirlo dos veces; y de propina **se cierra una carrera que ya existía**: `openWorld()` salía sin esperar a `loadServerAssets()`, así que el autoarranque podía encontrarse el registro de alias a medias. Medido en local: peticiones **ajenas compitiendo por el cable 3 → 0** y el pico de simultáneas de la paleta **5 → 8**. Confirmado por el dueño en su máquina: «ya carga rápido». **Y el instrumento se arregló para que no vuelva a mentir**: `RED ·` ya no calcula KB/s, sino que **solapa** la ventana de red con la duración real de la fase (comparar los dos relojes de largo daba 233 %, porque parte de esos documentos los pide la galería antes de que la fase empiece); el `ms` de cada bloque se reparte en **`doc` / `caras` / `geom`** —esperar el documento, rasterizar las 6 caras, hornear geometría fina: un bloque de 9905 ms es un problema distinto según cuál de las tres sea—; y se añade **`esperando TURNO de socket`** (`requestStart − fetchStart`) junto a cuántas **peticiones ajenas** competían en esa misma ventana, que es exactamente la cifra que distingue «la red va lenta» de «la red no era para ti» y que no aparecía en ninguna otra parte. Sin regresiones: `test_paleta_paralela` (12), `test_informe` (34), `test_galeria_assets` (7), `test_galeria_namespace` (8), `test_mapas` (18), `test_materiales_en_espera`, `test_setvoxel_autocarga` (21), `test_stamp_scripting`, `test_redstone_arranque`.
 - 2026-08-06 · ⏳ **Un mundo vacío tardaba 2,2 s porque los 15 materiales bajaban de uno en uno (PERF-MC3)** (dueño: «cargo `/map/empty`, que no tiene ni un voxel, y se tira en "Preparando bloques (0/15)…" un buen rato, cosa que no tiene sentido; quiero saber qué pasa»). Lo primero fue **medirlo con su propio informe**, no suponer: de 2178 ms, **1775 eran la paleta** y dentro de ella los 15 documentos salían **estrictamente consecutivos** (`roca` 868 ms, luego `hierba` 162, luego `tierra` 149…). El bucle de `mcBuildPaletteImpl` esperaba la `fetch` de cada bloque antes de pedir el siguiente. El arreglo es de seis líneas y **no toca el bucle**: `mcPrecargarDocs` suelta las peticiones en tandas con tope 8 y **no se espera a que acaben**, así que el bucle sigue yendo en serie —tiene que ir, rasteriza sobre un canvas compartido y escribe `mc.palette[id]` en orden— pero cuando le toca el bloque 5 su documento ya está bajando. Lo que lo hace posible es que **`getRoomData` cachea la PROMESA y no el resultado**: pedir un documento dos veces no lo baja dos veces, así que precalentar es literalmente pedirlos antes. Medido en local con caché fría, tres vueltas cada uno: **383 ms de media → 63 ms**, ≈6×. Y de paso **desmiente la sospecha del propio ticket**: si una parte gorda hubiera sido CPU (`JSON.parse` + rasterizar 6 caras), esos 383 ms no se caerían a 63 con latencia ≈ 0 — era espera en serie casi entera. El segundo síntoma era el cartel: `onProgress` se llamaba **después** de terminar cada bloque y con el nombre del bloque **ya hecho**, así que los 868 ms de `roca` transcurrían enteros diciendo «(0/15)» — justo mientras más se trabajaba, el número no se movía, y eso es lo que se lee como un cuelgue. Ahora avisa dos veces por bloque y la de «empezando» dice el que se está bajando; la de después es la única que trae el `ms` y por tanto la única que entra en el informe. Las **descargas que nadie pidió** que apuntaba el ticket resultaron ser dos cosas distintas al medirlas con la pila de llamadas: `/api/habitantes` ×3 son **tres inicializadores del editor** disparando a la vez (`refreshHabitantesList`, `loadRooms`, `refreshTexturas`), que ahora **comparten la petición en vuelo** —no el resultado, que daría listas rancias tras guardar o borrar—; y los dos assets de fuera de la paleta los pide `renderTexStrip`, la tira de texturas **del editor**, que se pinta detrás mientras el Mundo carga: no sobran, son de otra pantalla, y lo único que hacían era ocupar dos de las ~6 conexiones del navegador. Verificado con `test_paleta_paralela.js` **nuevo** (12 ok, estable en tres vueltas), que mide la **forma y no el reloj**: pico de peticiones en vuelo ≥ 4 (en serie sería 1 por definición), paleta completa **y en el mismo orden** (el id de bloque es la posición en `mc.blockKey` y los mundos guardados llevan ids dentro), primer cartel `(0/8) hierba ⬇`, y `/api/habitantes` una sola vez. Deliberadamente **no** compara reloj de pared contra suma de las partes: en localhost lo que domina es la cola de conexiones del navegador, no el código, así que aprobaría y suspendería sola. Sin regresiones en `test_informe` (34), `test_materiales_en_espera`, `test_atlas_estructuras` (13), `test_galeria_assets` (7), `test_bloques_comportamiento` (384) y `test_navegador` (15). ⚠️ **En el host remoto del dueño no está medido**: allí eran 1774 ms de idas y vueltas, así que debería ganarse más que en local, pero es previsión y no dato. Las propuestas 3 y 4 del ticket (paleta perezosa, caras ya rasterizadas por el servidor) quedan **abiertas a propósito**: ahora la paleta son ~60 ms en local y conviene volver a medir en remoto antes de decidir si sigue siendo el cuello.

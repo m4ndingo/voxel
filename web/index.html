@@ -211,6 +211,7 @@
         <canvas id="edit3d" width="400" height="400" hidden></canvas>
         <div class="fps-float" id="e3-fps" hidden title="FPS de la vista 3D (mientras interactúas)">— fps</div>
         <div class="vox-float" id="e3-vox" hidden title="Voxels dibujados en el último frame (dentro del visor)">— vox</div>
+        <div class="col-float" id="e3-col" hidden title="Colores únicos presentes en el modelo">— col</div>
         <div class="tool-float" id="tool-float" hidden>
           <button class="tool" data-tool="hand" title="Mover vista (H)">✋<span>Mano</span></button>
           <button class="tool" data-tool="orbit" title="Girar la vista (arrastra)">🔄<span>Giro</span></button>
@@ -513,7 +514,7 @@
   </div>
 
   <!-- ===================== Jugar (F5) ===================== -->
-  <div class="modal" id="play-modal" hidden>
+<div class="modal" id="play-modal" hidden>
     <div class="modal-head">
       <div><strong id="play-title">Jugar</strong> <span class="muted" id="play-sub"></span>
         <span class="play-hint-inline">· 🖱️ clic para caminar · cruza las <b>puertas</b> · Esc sale</span></div>
@@ -530,6 +531,7 @@
       <canvas id="play-canvas" width="760" height="560"></canvas>
       <div class="fps-float" id="play-fps" hidden title="FPS reales del modo Play">— fps</div>
       <div class="vox-float" id="play-vox" hidden title="Voxels dibujados de la sala (dentro del visor)">— vox</div>
+      <div class="col-float" id="play-col" hidden title="Colores únicos en la sala">— col</div>
     </div>
   </div>
 
@@ -563,6 +565,7 @@
     <div class="mc-hotbar" id="mc-hotbar"></div>
     <div class="fps-float mc-float" id="mc-fps" hidden title="FPS reales del modo Mundo">— fps</div>
     <div class="vox-float mc-float2" id="mc-vox" hidden title="Caras (quads) dibujadas por la GPU">— vox</div>
+    <div class="col-float mc-float3" id="mc-col" hidden title="Colores y materiales únicos presentes en escena">— col</div>
     <!-- Aquí estaban «🧩 Código» y «✕ Cerrar» (REQ-OSD1). QUITADOS: al Mundo se entra y se sale por
          otras puertas —Esc cierra, Alt+C abre los snippets— y dos botones fijos en la esquina salían
          en todas las capturas. La salida de TÁCTIL no se pierde: es el ✕ de #mc-touch, que aparece

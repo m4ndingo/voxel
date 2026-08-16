@@ -74,6 +74,38 @@ const intro = mc._intro = {
 Es la misma regla que sigue el autoarranque global cuando envuelve `mcUpdate`, y la que sigue
 `game.onKey`, que **reemplaza** en vez de apilar.
 
+## Reutilización y argumentos: `game.snippet`
+
+Puedes invocar otros snippets mediante `await game.snippet('id', ...args)`. Esto permite crear snippets modulares, librerías compartidas o componentes parametrizables (como menús OSD o generadores):
+
+```js
+// Invocar un snippet pasándole opciones:
+await game.snippet('mi-menu-osd', { titulo: 'Inventario', color: '#2a2a36', vidas: 3 });
+
+// O invocar como librería que devuelve funciones/objetos:
+const utils = await game.snippet('mis-utiles');
+```
+
+### Cómo recibe los argumentos el snippet llamado:
+
+El snippet invitado recibe automáticamente el primer argumento en la variable **`opts`** y la lista completa en **`args`** (o `arguments`):
+
+```js
+// Dentro de 'mi-menu-osd':
+const { titulo = 'Menú', color = '#111', vidas = 1 } = opts || {};
+
+game.osd.define('menu_principal', {
+  sitio: 'abajo-derecha',
+  html: `<div class="mc-osd-panel" style="background:${color}">
+          <div class="mc-osd-title">${titulo} (Vidas: ${vidas})</div>
+          <button class="mc-osd-btn">CERRAR</button>
+        </div>`
+});
+game.osd.abrir('menu_principal');
+```
+
+> 💡 **Nota de compatibilidad:** Si el snippet se ejecuta sin argumentos (por ejemplo desde el botón ▶ del panel o en autoarranque), `opts` vale `undefined`, por lo que el patrón `const { ... } = opts || {};` funciona siempre de forma segura sin lanzar errores.
+
 ## Lo mínimo para escribir el primero
 
 ```js
