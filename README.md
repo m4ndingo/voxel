@@ -5,151 +5,65 @@
 <h1 align="center">VoxelForge</h1>
 
 <p align="center">
-  Draw voxel assets in the browser, drop them into a Minecraft-style world,
-  rig them into articulated agents, and script the whole thing from the console.
-  <br>
-  No frameworks. No build step. Raw WebGL.
+  A lightweight, zero-dependency in-browser voxel editor and rendering engine running completely client-side via vanilla JavaScript and raw WebGL.
 </p>
 
 ---
 
-## Quick start
+## Overview
+
+**VoxelForge** started as a dedicated tool for crafting individual 16×16×16 voxel models, but evolved into a fully interactive sandbox environment capable of handling expansive spatial scenes.
+
+It bridges asset creation and gameplay without frameworks or build steps: draw voxel objects, drop them into a Minecraft-style chunked world, rig them into articulated agents, and automate the entire experience directly from the JavaScript console.
+
+## Key Technical Features
+
+- **Zero Dependencies**: Pure vanilla JavaScript with a custom-crafted, allocation-free WebGL rendering pipeline.
+- **Dual Environment**: Seamless transition of voxel assets between an isolated 2D/3D editor (layer editing, free 3D painting, extrusion, carving, mirroring) and larger spatial worlds (up to 512×512×40 cells).
+- **Extensible Scripting**: Full runtime automation via client-side JavaScript APIs (`game.*`), including custom OSD screens/menus, world autostart hooks, and rigged articulated entities.
+- **Interactive Mechanics**: First-person player physics controller (scale transformation, flight mode, parkour ledge-grabs, collisions) alongside a digital logic signal & gate system (wires, levers, repeaters, pistons, torches).
+- **Rendering & Shading**: Planar water reflections with animated wave distortion and Fresnel blending, incremental baked skylight, block-light 3D textures, ambient shading, and projected sun shadow maps.
+
+---
+
+## Quick Start
 
 ```bash
 python3 server.py 8500
 ```
 
-Nothing to install — `server.py` is Python stdlib only, and the front end is plain
-HTML/CSS/JS served as-is.
+Nothing to install — `server.py` relies exclusively on Python standard library, serving the static client files as-is.
 
-| URL | What it is |
+| URL | Description |
 |---|---|
-| `/` | The **editor** — draw a voxel object by layers or free in 3D |
-| `/map/<name>` | A **world** — walk it, build in it, script it |
-| `/map/` | Index of every world on disk |
-| `/fotos` | Screenshots taken in-world (`Alt+F`) |
-| `/wiki` | The **manual** — scripting guide and API reference |
+| `/` | The **Editor** — create and edit voxel models by layers or in free 3D |
+| `/map/<name>` | An interactive **World** — explore, build, test, and script |
+| `/map/` | Visual index and metadata of all saved worlds |
+| `/fotos` | Gallery of in-world captures taken via `Alt+F` |
+| `/wiki` | Built-in manual, scripting guide, and API reference |
 
-## Draw voxel assets
+---
 
-The model is a single sparse `Map` of `"x,y,z" → colour`, with per-object dimensions.
-You paint on a 2D layer grid with a live isometric preview beside it, or switch to free
-3D and place voxels on the face you are pointing at. Extrude, carve, mirror, a face tool
-that works in both views, an undo history with one entry per gesture.
+## Architecture & Layout
 
-Anything you draw is saved server-side and shows up in the gallery with a generated
-isometric thumbnail. Export format is a plain JSON document:
-
-```json
-{ "format": "voxelforge-1", "size": [16,16,16], "meta": {}, "voxels": { "0,0,0": "#8ab4f8" } }
+```
+server.py         Static file server + JSON storage API (Python stdlib only)
+servidor/         Server modules: mundos.py (world index), voxfmt.py (.vox reader)
+web/              Front-end application: app.js (editor + world engine), index.html, style.css
+redstone/         Digital logic and circuit simulation engine
+assets/           Built-in voxel models and textures
+data/             Saved worlds, drawings, agents, snippets, and photos
+docs/ & wiki/     Technical manuals and in-app API documentation
+tests/            Quality test suite (Playwright & Node runners)
 ```
 
-## Drop it into a Minecraft-style world
-
-Worlds are chunked voxel terrain rendered in raw WebGL — first-person movement,
-collisions, block breaking and placing, a hotbar, baked skylight and projected sun
-shadows, water and lava, ladders, ice, pressure plates, parkour ledge-grabs. Worlds go
-up to **512 × 512 × 40** cells.
-
-Whatever you drew in the editor becomes a material you can place. Small drawings melt
-into the chunk mesh; larger ones get stamped as standalone structures in any of the
-**24 orientations**, at any scale.
-
-There is also a working redstone layer — wires, torches, levers, repeaters, pistons,
-doors — built entirely out of drawings plus a property table. The engine has no idea
-what a torch is.
-
-## Articulated agents
-
-Agents are rigs: a set of voxel pieces bolted to a skeleton, each piece a drawing you
-made in the editor, saved as a document under `data/agentes/`.
-
-```js
-game.defineAgent({ id:'abeja', name:'Abeja', goal:'…' });  // a 1×1×1 NPC brain
-game.esqueletos.crear('perro', 20, 8, 20);                 // spawn a rigged agent
-```
-
-They walk, follow, get stuck and tell you why, can be ridden, ride each other, and
-respond to the blocks under their feet. Behaviour lives in agent scripts and a shared
-skill library — the engine core stays agnostic about what an agent is or does.
-
-## Scripting and automation
-
-Everything the game can do is reachable from a `game.*` API in the console, and any
-script can be saved as a **snippet** that runs on world load:
-
-```js
-game.stamp('hab:arbol', 12, 6, 30, 3);           // place a structure, rotated
-game.bloques.define('hab:hielo', { velocidad:2, deslizamiento:1.2 });
-game.bloques.define('hab:placa', { alPisar(c){ … } });
-game.osd.define('menu', { mapa:'menu1' });        // a menu screen that is itself a map
-game.foto();                                      // render + capture, server-side
-```
-
-Block behaviours, agent brains, intro sequences, HUD screens and menus are all data and
-snippets, not engine code. A menu screen is another world you drew; a button is a block
-with a note on it.
-
-The full guide — how snippets run, the four autostart hooks, and a reference for every
-call above — is at **`/wiki`** once the server is up.
-
-## Performance
-
-The whole thing is hand-written WebGL with the slow paths measured and removed:
-
-- **Meshing is chunked and allocation-free** — exact-size `Float32Array`, written by
-  index instead of `push`. An edit gesture on a 594 k-vertex mesh went from **162 ms to
-  57 ms**.
-- **Lighting is incremental and exact.** Placing a block relights a bounded box, using
-  the cells outside it as boundary conditions — not a whole-world recompute, and not an
-  approximation either.
-- **Terrain beats structures by an order of magnitude.** 200 leaves written into the
-  grid: **60 ms, 0 extra draw calls**. The same 200 stamped as structures: **385 ms, 200
-  draw calls**. The API makes the cheap path the obvious one.
-- **Agents get a fixed frame budget** (8 ms) split **round-robin**, so one busy agent
-  can't starve the rest — before that, 4 of 6 agents were getting zero time per frame.
-- **Redstone ticks only what changed**, propagating from dirty sources instead of
-  sweeping the world.
-
-## Tests
-
-129 test files under `tests/` — 113 drive a real Chromium through Playwright against a
-running server (so the GLSL actually compiles), 16 are pure Node.
+## Testing
 
 ```bash
-npm i && npx playwright install chromium   # playwright is pinned to 1.47.2 (1.48+ needs Node 20)
-
-node correr_tests.js --list           # catalogue
+npm i && npx playwright install chromium
 node correr_tests.js --node           # Node-only tests
-node correr_tests.js --area=redstone  # one area
+node correr_tests.js --area=redstone  # Test specific subsystem
 ```
-
-Run them from the repo root — they resolve `data/` and `assets/` relative to the cwd.
-
-## Layout
-
-```
-server.py         static server + JSON API (stdlib only) — the only thing you run
-servidor/         what server.py imports: mundos.py (world index), voxfmt.py (.vox reader)
-web/              the site, served as-is: app.js (editor + world engine, no dependencies),
-                  index.html · mapas.html · fotos.html, style.css · scrollbars.css · iconos.js
-redstone/         redstone engine, published into snippets
-assets/           built-in voxel drawings
-data/             worlds, drawings, agents, snippets, photos
-docs/             the manual (docs/historico/ = superseded design notes)
-wiki/             the in-app manual served at /wiki
-images/           the icon-baking page served at /images
-tests/            guardians · correr_tests.js is the runner
-herramientas/     one-off generators and snippet patchers
-performance/      measurement probes, kept for their numbers
-```
-
-Everything under `herramientas/` and `performance/` is run **from the repo root**
-(`node herramientas/make_zombie.js`) — same rule as the tests.
-
-URLs are unchanged by that layout: `server.py` picks the disk root from the first URL segment —
-`/assets`, `/data`, `/wiki` and `/images` come from the repo, everything else from `web/`. The
-source (`server.py`, `PLAN.md`, `tests/`) is not served over HTTP.
 
 ## License
 
