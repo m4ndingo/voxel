@@ -10,9 +10,7 @@
     "type": "objeto",
     "role": "Herramienta · pincel / brocha (paint brush)",
     "icon": "🖌️",
-    "description": "Pincel para modificar la textura o material de los bloques en el mapa.",
-    "categoria": "herramienta",
-    "herramienta": "paint"
+    "description": "Pincel para modificar la textura o material de los bloques en el mapa."
   },
   "voxels": {
     "13,4,2": "#49351f",
@@ -83,6 +81,6 @@
       4
     ]
   ],
-  "savedAt": "2026-08-17T18:16:00",
+  "savedAt": "2026-08-17T21:53:13",
   "createdAt": "2026-08-12T10:22:55"
 }
