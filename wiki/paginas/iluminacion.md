@@ -110,8 +110,96 @@ Con `sigueCielo` apagado (lo de fábrica) y el cielo por defecto, todo se ve igu
 Para probarlo **sin meterte a nadar**, fuerza la vista con `mc.vistaFluido = 'WATER'` (o `'LAVA'`, o
 `null` para quitarla).
 
+## Sombras proyectadas y oclusión ambiental (skylight)
+
+En el motor conviven **dos sistemas de sombras** diferentes:
+
+1. **Sombra proyectada del sol (`game.sunShade`):** El mapa de sombras arrojadas en GPU que dibuja la silueta negra de los bloques y edificios en el suelo.
+2. **Oclusión ambiental / Skylight (`game.interiorDark`):** La penumbra calculada por difusión en el aire que oscurece el interior de cuevas, galerías o zonas bajo techo.
+
+```js
+// Sombra arrojada del sol (GPU):
+game.sunShade = 1.0;   // 1.0 = desactiva por completo la silueta arrojada del sol
+game.sunShade = 0.55;  // sombra por defecto
+game.sunShade = 0.2;   // sombra de sol muy oscura y marcada
+
+// Oclusión ambiental / Skylight (interiores):
+game.interiorDark = 1.0;   // 1.0 = elimina la penumbra de interiores y cuevas (luz plena en todas partes)
+game.interiorDark = 0.55;  // penumbra suave
+game.interiorDark = 0.1;   // oscuridad profunda en cuevas (por defecto)
+```
+
+Para una iluminación **100% plana sin sombras ni penumbras** en todo el mapa:
+```js
+game.sunShade = 1.0;
+game.interiorDark = 1.0;
+game.faceShades = 1.0;
+```
+
+## Sombreado de las caras del cubo (volumen 3D y blancos)
+
+Cada cara de un bloque tiene un sombreado direccional propio para crear sensación de volumen 3D:
+
+* **Cara superior (`+Y`):** `1.12` (brillo cenital)
+* **Cara inferior (`-Y`):** `0.40`
+* **Laterales (`+X`, `-X`, `+Z`, `-Z`):** `0.64`, `0.82`, `0.52`, `0.92`
+
+### 1. Brillo cenital y texturas blancas (`game.topShade`)
+Un valor superior a `1.0` en la cara superior satura a 255 los colores muy claros (RGB > 227). Bajarlo a `1.0` o `0.98` permite ver con nitidez texturas como lana blanca (`white_whool`) o nieve sin quemar las altas luces:
+
+```js
+game.topShade = 1.0;   // neutro: relieve y texturas blancas nítidas sin saturación
+game.topShade = 0.98;  // ligera amortiguación para máximo detalle en blancos
+game.topShade = 1.5;   // brillo cenital intenso (admite hasta 3.0)
+game.topShade = 1.12;  // valor clásico por defecto
+```
+
+### 2. Sombreado direccional de las 6 caras (`game.faceShades` y `game.sideShades`)
+Permite igualar todas las caras o ajustar los laterales:
+
+```js
+game.faceShades = 1.0;   // todas las 6 caras a 1.0 (iluminación plana sin caras oscurecidas)
+game.faceShades = [1.0, 0.4, 0.9, 0.9, 0.9, 0.9]; // [arriba, abajo, +X, -X, +Z, -Z]
+game.faceShades = null;  // volver a valores de fábrica
+
+game.sideShades = 1.0;   // solo las 4 paredes laterales a brillo pleno
+game.sideShades = 0.85;  // sombra lateral sutil
+```
+
+### 3. Margen sub-téxel en texturas (`game.uvInset`)
+Evita que en bloques con filtrado `NEAREST` se filtre color de téxeles vecinos en los bordes:
+
+```js
+game.uvInset = 0.05;  // margen fino sub-téxel (0..0.5 px)
+game.uvInset = 0;     // alineación 1:1 exacta (por defecto)
+```
+
+## Materiales que no reciben ni proyectan sombra
+
+Para crear nubes realistas u objetos que brillen por sí mismos sin proyectar sombras oscuras en el suelo ni oscurecerse bajo techos:
+
+```js
+// La lana blanca se ve con brillo pleno y no arroja sombra en el suelo:
+game.bloques.define('asset:assets/white_whool.vox.json', {
+  recibeSombra: false,   // se salta la oclusión ambiental y el mapa de sombras
+  proyectaSombra: false  // no proyecta sombra en el suelo y el cielo la atraviesa
+});
+
+// Restaurar comportamiento normal:
+game.bloques.quitar('asset:assets/white_whool.vox.json');
+```
+
+## Luz artificial (antorchas, lámparas y agentes)
+
+La luz emitida por bloques o piezas de agentes (`*#hex`) se propaga de forma continua y suave:
+
+```js
+game.glowGain = 1.5;   // sobreexposición de emisores (>1 hace que brillen más que el día)
+game.glowLevel = 15;   // alcance/radio máximo en bloques (0..15)
+game.glowFocus = 0.2;  // direccionalidad del haz (0 = omnidireccional, 1 = haz estrecho)
+game.agentsLightTracking(true); // la luz sigue en tiempo real a los agentes en movimiento
+```
+
 ## Y para depurar el rendimiento
 
-Si quieres ver el mundo sin **ninguna** luz ni sombra —para saber si un tirón de fps es de la tarjeta
-o del motor— está `game.renderMode = 'fast'` (y `'normal'` para volver). Y `game.sunShade = 1` apaga
-solo la **sombra del sol** sin tocar el resto. Los dos son de diagnóstico, no de decorar.
+Si quieres ver el mundo sin **ninguna** luz ni sombra —para saber si un tirón de fps es de la tarjeta o del motor— está `game.renderMode = 'fast'` (y `'normal'` para volver).

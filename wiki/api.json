@@ -890,10 +890,37 @@
         "La ficha va quemada en el PNG a propósito: así sobrevive a copiar y pegar."
       ],
       "ver": [
-        "game.volar"
+        "game.volar",
+        "game.video"
       ],
       "fuente": "app.js · mcFoto"
     },
+    {
+      "nombre": "game.video",
+      "firma": "game.video(duracionMaxSegundos)",
+      "grupo": "Pantalla",
+      "resumen": "Inicia o detiene la grabación de vídeo de gameplay (Alt+V), compone el HUD (hotbar, FPS, mira) y abre el editor integrado para recortar y guardar en `/videos`.",
+      "params": [
+        {
+          "nombre": "duracionMaxSegundos",
+          "tipo": "number",
+          "opcional": true,
+          "desc": "Opcional. Si se pasa, la grabación se detiene automáticamente tras ese número de segundos."
+        }
+      ],
+      "devuelve": "true si se inició o detuvo la grabación correctamente, false si el Mundo no está activo.",
+      "ejemplo": "game.video(); // inicia o detiene\ngame.video.hotbar = true; // capturar barra de herramientas\ngame.video.fps = true;    // capturar medidor de FPS\ngame.video.info();        // estado y configuración",
+      "notas": [
+        "Atajo de teclado: **`Alt+V`**.",
+        "Tunables configurables en `game.video.hotbar`, `game.video.fps`, `game.video.crosshair`, `game.video.badge` y `game.video.hud`.",
+        "Los clips guardados se pueden revisar y gestionar en la galería **`/videos`**."
+      ],
+      "ver": [
+        "game.foto"
+      ],
+      "fuente": "app.js · mcToggleGrabarVideo"
+    },
+
     {
       "nombre": "mc._intro",
       "firma": "mc._intro",
@@ -1674,6 +1701,179 @@
         "game.luz"
       ],
       "fuente": "app.js · game.glowGain"
+    },
+    {
+      "nombre": "game.topShade",
+      "firma": "game.topShade",
+      "grupo": "Iluminación",
+      "resumen": "Factor de brillo y sombreado de la cara superior (+Y) de los cubos (0.1..3.0). Por defecto 1.12 (brillo cenital). Bajarlo a 1.0 o 0.98 preserva la textura y relieve en materiales blancos puros sin quemar las altas luces.",
+      "params": [],
+      "devuelve": "El factor actual (número).",
+      "ejemplo": "game.topShade = 1.0;  // neutro (evita saturación en blancos)\\ngame.topShade = 1.12; // por defecto",
+      "notas": [
+        "Un valor > 1.0 provoca que colores RGB > 227 saturen a 255 en la cara superior.",
+        "Al asignarlo, re-malla el terreno y estructuras en caliente automáticamente.",
+        "Persiste en localStorage (\u000bf_mcTopShade)."
+      ],
+      "ver": [
+        "game.faceShades",
+        "game.sideShades",
+        "game.luz"
+      ],
+      "fuente": "app.js · game.topShade"
+    },
+    {
+      "nombre": "game.faceShades",
+      "firma": "game.faceShades",
+      "grupo": "Iluminación",
+      "resumen": "Sombreado direccional propio de las 6 caras del cubo [+Y(arriba), -Y(abajo), +X, -X, +Z, -Z]. Si se asigna un número único (ej. 1.0) elimina las sombras direccionales de relieve dejando los cubos planos y uniformemente iluminados.",
+      "params": [],
+      "devuelve": "Array de 6 números con los factores de sombreado.",
+      "ejemplo": "game.faceShades = 1.0; // iluminación 100% plana sin sombras en cubos\\ngame.faceShades = [1.0, 0.4, 0.9, 0.9, 0.9, 0.9];\\ngame.faceShades = null; // restaurar valores de fábrica",
+      "notas": [
+        "Por defecto es [1.12, 0.40, 0.64, 0.82, 0.52, 0.92].",
+        "Persiste en localStorage (\u000bf_mcFaceShades).",
+        "Al asignarlo re-malla inmediatamente el mundo."
+      ],
+      "ver": [
+        "game.topShade",
+        "game.sideShades",
+        "game.interiorDark"
+      ],
+      "fuente": "app.js · game.faceShades"
+    },
+    {
+      "nombre": "game.sideShades",
+      "firma": "game.sideShades",
+      "grupo": "Iluminación",
+      "resumen": "Ajusta simultáneamente el sombreado de las 4 caras laterales del cubo (+X, -X, +Z, -Z) sin alterar la cara superior ni inferior.",
+      "params": [],
+      "devuelve": "Array de 4 números con los factores de las caras laterales.",
+      "ejemplo": "game.sideShades = 1.0; // laterales a pleno brillo\\ngame.sideShades = 0.85; // sombra lateral suave",
+      "notas": [
+        "Permite aclarar las paredes verticales del terreno o edificios.",
+        "Afecta a game.faceShades y persiste automáticamente."
+      ],
+      "ver": [
+        "game.faceShades",
+        "game.topShade"
+      ],
+      "fuente": "app.js · game.sideShades"
+    },
+    {
+      "nombre": "game.sunShade",
+      "firma": "game.sunShade",
+      "grupo": "Iluminación",
+      "resumen": "Factor de atenuación de la sombra proyectada por el sol en GPU (0.0..3.0, por defecto 0.55). Controla cuánta luz llega a las zonas cubiertas por la silueta arrojada de bloques en el suelo.",
+      "params": [],
+      "devuelve": "El factor actual (número).",
+      "ejemplo": "game.sunShade = 1.0;  // apaga las sombras arrojadas del sol\\ngame.sunShade = 0.2;  // sombras del sol muy oscuras y marcadas\\ngame.sunShade = 0.55; // valor de fábrica",
+      "notas": [
+        "Con 1.0 la sombra proyectada desaparece completamente (la zona tapada recibe 100% de luz solar).",
+        "Es independiente de game.interiorDark (oclusión ambiental de interiores).",
+        "Persiste en localStorage (\u000bf_mcSunShade)."
+      ],
+      "ver": [
+        "game.interiorDark",
+        "game.luz"
+      ],
+      "fuente": "app.js · game.sunShade"
+    },
+    {
+      "nombre": "game.interiorDark",
+      "firma": "game.interiorDark",
+      "grupo": "Iluminación",
+      "resumen": "Factor de difusión de cielo / oclusión ambiental (skylight) para zonas cubiertas, cuevas o bajo techo (0.0..1.0, por defecto 0.1).",
+      "params": [],
+      "devuelve": "El nivel actual (número).",
+      "ejemplo": "game.interiorDark = 1.0; // elimina la penumbra de interiores y cuevas\\ngame.interiorDark = 0.55; // penumbra suave\\ngame.interiorDark = 0.1; // oscuridad total en cuevas (por defecto)",
+      "notas": [
+        "Se calcula con el propagador de luz de cielo (mc.light) y se hornea en las mallas.",
+        "Al asignarlo, re-malla automáticamente el terreno y estructuras."
+      ],
+      "ver": [
+        "game.sunShade",
+        "game.luz"
+      ],
+      "fuente": "app.js · interiorDark"
+    },
+    {
+      "nombre": "game.uvInset",
+      "firma": "game.uvInset",
+      "grupo": "Iluminación",
+      "resumen": "Margen sub-téxel en las coordenadas UV del atlas de texturas (0.0..0.5 px, defecto 0). Evita el sangrado de color de téxeles adyacentes en los bordes de los bloques.",
+      "params": [],
+      "devuelve": "El margen actual en píxeles sub-téxel (número).",
+      "ejemplo": "game.uvInset = 0.05; // margen fino para eliminar líneas de sangrado\\ngame.uvInset = 0;    // alineación 1:1 exacta de fábrica",
+      "notas": [
+        "También disponible bajo el alias game.texInset.",
+        "Al asignarlo, reconstruye la paleta del atlas, lo sube a GPU y re-malla.",
+        "Persiste en localStorage (\u000bf_mcUvInset)."
+      ],
+      "ver": [
+        "game.topShade"
+      ],
+      "fuente": "app.js · uvInset"
+    },
+    {
+      "nombre": "game.glowLevel",
+      "firma": "game.glowLevel",
+      "grupo": "Iluminación",
+      "resumen": "Alcance máximo (radio de difusión en bloques) de la luz artificial emitida por antorchas y bloques luminosos (0..15, por defecto 15).",
+      "params": [],
+      "devuelve": "El nivel de alcance actual (entero 0..15).",
+      "ejemplo": "game.glowLevel = 15; // alcance máximo de luz artificial\\ngame.glowLevel = 0;  // apaga la luz artificial",
+      "notas": [
+        "La luz pierde 1 nivel por bloque atravesado por el aire.",
+        "Al modificarlo re-siembra la luz y re-malla los chunks afectados."
+      ],
+      "ver": [
+        "game.glowGain",
+        "game.glowFocus"
+      ],
+      "fuente": "app.js · glowLevel"
+    },
+    {
+      "nombre": "game.glowFocus",
+      "firma": "game.glowFocus",
+      "grupo": "Iluminación",
+      "resumen": "Foco y direccionalidad del haz de luz artificial de emisores orientados (0.0..1.0, por defecto 0.2). 0 = omnidireccional; 1 = haz estrecho hacia la normal de emisión.",
+      "params": [],
+      "devuelve": "El foco actual (0..1).",
+      "ejemplo": "game.glowFocus = 0.0; // haz omnidireccional\\ngame.glowFocus = 0.8; // haz enfocado hacia adelante",
+      "notas": [
+        "Afecta a fuentes direccionales con cara emisiva definida (como linternas o faros montados en agentes)."
+      ],
+      "ver": [
+        "game.glowLevel",
+        "game.glowGain"
+      ],
+      "fuente": "app.js · glowFocus"
+    },
+    {
+      "nombre": "game.viento",
+      "firma": "game.viento(opciones | fuerza)",
+      "grupo": "Mundo",
+      "resumen": "Controla el viento global y el balanceo orgánico de la vegetación (flores, hierbas, hojas). Los tallos permanecen anclados al suelo mientras la parte superior se mece.",
+      "params": [
+        {
+          "nombre": "opciones",
+          "tipo": "number | string | object",
+          "desc": "Número con la fuerza (0..2), objeto { fuerza, frecuencia }, \"off\" para desactivar o \"reset\" para restaurar valores por defecto (0.12, 2.0)."
+        }
+      ],
+      "devuelve": "{ fuerza, frecuencia } — los valores actuales del viento.",
+      "ejemplo": "game.viento(0.2); // más fuerza\ngame.viento({ fuerza: 0.15, frecuencia: 3.0 });\ngame.viento(\"off\"); // sin viento\ngame.viento(\"reset\"); // valores por defecto",
+      "notas": [
+        "Calculado 100% en GPU (Vertex Shader) con coste 0 en CPU.",
+        "La raíz y la base del tallo quedan inmóviles mientras el movimiento crece cuadráticamente hacia la corola.",
+        "Los bloques que responden al viento se definen en el snippet de autoarranque con `game.bloques.define(id, { viento: true })`.",
+        "Persiste en `localStorage` (`vf_mcVientoFuerza` y `vf_mcVientoFrec`)."
+      ],
+      "ver": [
+        "game.bloques.define"
+      ],
+      "fuente": "app.js · game.viento"
     }
   ]
 }

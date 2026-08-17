@@ -3,7 +3,17 @@
   "raiz": {
     "nombre": "torso",
     "pieza": "hab:calamar",
-    "rot": 0
+    "rot": 0,
+    "animacion": {
+      "tipo": "calamar",
+      "eje": "x",
+      "amplitud": 4,
+      "frecuencia": 1.2,
+      "fase": 0,
+      "contrabalanceo": 1,
+      "modo": "siempre",
+      "sentido": "tentaculos"
+    }
   },
   "piezas": [],
   "seguir": {
@@ -13,12 +23,18 @@
     "deteccion": 0,
     "distancia": 3,
     "vision": 360,
-    "velocidad": 2
-  },
-  "andar": {
-    "cadencia": 0
+    "velocidad": 2,
+    "suavidad": 3
   },
   "fisica": false,
-  "savedAt": "2026-08-15T22:35:51",
-  "id": "calamar"
+  "savedAt": "2026-08-17T19:48:14",
+  "id": "calamar",
+  "andar": {
+    "escalar": 0
+  },
+  "escala": 8,
+  "empuje": {
+    "fuerza": 16,
+    "salto": 8
+  }
 }

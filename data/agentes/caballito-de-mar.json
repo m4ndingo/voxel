@@ -3,7 +3,18 @@
   "raiz": {
     "nombre": "torso",
     "pieza": "hab:caballito-de-mar-hd",
-    "rot": 0
+    "rot": 0,
+    "animacion": {
+      "tipo": "pez_cola",
+      "eje": "x",
+      "amplitud": 12,
+      "frecuencia": 1,
+      "fase": 0,
+      "contrabalanceo": 1,
+      "pivote": 1,
+      "modo": "siempre",
+      "sentido": "cola"
+    }
   },
   "piezas": [],
   "seguir": {
@@ -20,6 +31,6 @@
     "cadencia": 0
   },
   "fisica": false,
-  "savedAt": "2026-08-15T23:20:05",
+  "savedAt": "2026-08-16T22:26:18",
   "id": "caballito-de-mar"
 }

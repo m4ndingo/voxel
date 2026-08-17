@@ -3579,6 +3579,7 @@ window.addEventListener('keydown',e=>{
   // El menú «⋯» es lo más superficial que hay abierto: se cierra ANTES que cualquier modal (REQ-NAV1).
   if(e.key==='Escape' && !MAS.hidden){ cerrarMas(); return; }
   if(e.key==='Escape' && !$('#mc-modal').hidden){                               // Mundo (REQ-MC): Esc de 2 pasos
+    if(mc.notePlacing){ mcCancelNotePlace(); return; }
     if(!$('#snip-modal').hidden){ closeSnips(); return; }                         // 1º si el modal de código está abierto → cerrarlo
     if(!$('#ag-modal').hidden){ closeAgentes(); return; }                         // 1º ídem el panel de agentes (Alt+A)
     if(!$('#mc-note').hidden){ mcCloseNote(); return; }                          // 1º si el editor de nota está abierto → cerrarlo
@@ -4315,8 +4316,24 @@ function agDibujar(){
       if(nX*fx+nY*fy+nZ*fz >= 0) continue;                      // mira al fondo: trasera
       const sh=0.42+0.58*Math.max(0, nX*lx+nY*ly+nZ*lz);
       const q=cara.v; let zs=0, k=n*8;
+      const anim=P.anim;
       for(let i=0;i<4;i++){
-        const vx=q[i*3]+P.aa[0], vy=q[i*3+1]+P.aa[1], vz=q[i*3+2]+P.aa[2];
+        let vx=q[i*3]+P.aa[0], vy=q[i*3+1]+P.aa[1], vz=q[i*3+2]+P.aa[2];
+        if(anim){
+          const lenZ=Math.max(0.001, P.aa[5]-P.aa[2]), minZ=P.aa[2];
+          const lenY=Math.max(0.001, P.aa[4]-P.aa[1]), minY=P.aa[1];
+          const esVert=(lenY > lenZ * 1.2);
+          const lenSp=esVert?lenY:lenZ, minSp=esVert?minY:minZ;
+          const posSp=esVert?vy:vz;
+          let u=Math.min(1, Math.max(0, (posSp - minSp) / lenSp));
+          if(anim.sentido==='tentaculos' || anim.tipo==='calamar') u = 1.0 - u;
+          const ampRad=(anim.amplitud!==undefined? +anim.amplitud : 25) * (Math.PI/180);
+          const ampVoxel=ampRad * lenSp * 0.5;
+          const waveHead=-0.25 * (1.0 - u / 0.35) * Math.sin((anim.frecuencia||1.5) * agTiempo + (anim.fase||0) * (Math.PI/180));
+          const waveTail=Math.pow(Math.max(0, (u - 0.35) / 0.65), 1.2) * Math.sin((anim.frecuencia||1.5) * agTiempo - 2.5 * u + (anim.fase||0) * (Math.PI/180));
+          const disp=(u <= 0.35) ? (ampVoxel * waveHead) : (ampVoxel * waveTail);
+          vx += disp;
+        }
         const wx=m[0]*vx+m[4]*vy+m[8]*vz+m[12] - cxm,
               wy=m[1]*vx+m[5]*vy+m[9]*vz+m[13] - cym,
               wz=m[2]*vx+m[6]*vy+m[10]*vz+m[14] - czm;
@@ -4341,6 +4358,7 @@ function agDibujar(){
     g.closePath(); g.fill();
   }
 }
+let agTiempo = 0;
 function agLoop(t){
   agRAF=requestAnimationFrame(agLoop);
   const dt=agTPrev? Math.min(0.1,(t-agTPrev)/1000) : 0; agTPrev=t;
@@ -4349,8 +4367,9 @@ function agLoop(t){
   // zombie frenado contra una pared deja de pedalear), pero un preview no anda a ningún sitio. Es
   // la única divergencia con el bicho vivo, y la cuenta de las articulaciones es la misma.
   if(andando) agFase+=dt*2*Math.PI*1.2;
+  agTiempo += dt * 2 * Math.PI;
   if(agPl && window.game && game.esqueletos)
-    game.esqueletos.pose(agPl, {fase:agFase, giro:+$('#ag-giro').value, activo, andando});
+    game.esqueletos.pose(agPl, {fase:agFase, t:agTiempo, giro:+$('#ag-giro').value, activo, andando});
   agDibujar();
 }
 
@@ -4648,6 +4667,68 @@ function agForm(){
                    'dos veces.');
     }
   }
+  // 🐟 Animación matemática / procedimental de la pieza (ondulación, estilo pez, aletas, etc.)
+  const anim=p.animacion||null;
+  const bAnim=agTarjeta(box, 'animacion', '🐟', 'Animación de pieza', !!anim,
+    anim? ((anim.tipo||'pez')+' · ±'+(+anim.amplitud||25)+'° en '+((anim.eje||'y').toUpperCase())+' ('+(+anim.frecuencia||1.5)+' Hz)')
+        : 'sin animación matemática',
+    v=>{ if(v) p.animacion={tipo:'pez_cola', eje:'y', amplitud:25, frecuencia:1.5, fase:0, contrabalanceo:1, pivote:1, modo:'siempre', sentido:'cola'};
+         else delete p.animacion; cambia(); });
+  if(anim){
+    const PRESETS_ANIM=[
+      {key:'pez_cola', name:'🐟 Cola de pez (oscilación Y principal)'},
+      {key:'pez_cabeza', name:'🐟 Cabeza (contrabalanceo Y sutil)'},
+      {key:'calamar', name:'🦑 Calamar (tentáculos en -Z / manto firme)'},
+      {key:'medusa', name:'🪼 Medusa (pulsación / flotación suave)'},
+      {key:'tiburon', name:'🦈 Tiburón / Depredador (nado potente y pausado)'},
+      {key:'aleta', name:'🪶 Aleta lateral (aleteo Z desfasado)'},
+      {key:'personalizada', name:'⚙️ Personalizada (parámetros libres)'}
+    ];
+    bAnim.appendChild(agCampoSelect({t:'preset / estilo', ayuda:
+      'Ajusta automáticamente los parámetros típicos para animación de criaturas acuáticas o mecánicas.'},
+      anim.tipo||'pez_cola', v=>{
+        anim.tipo=v;
+        if(v==='pez_cola'){ anim.eje='y'; anim.amplitud=25; anim.contrabalanceo=1; anim.fase=0; anim.frecuencia=1.5; anim.sentido='cola'; }
+        else if(v==='pez_cabeza'){ anim.eje='y'; anim.amplitud=25; anim.contrabalanceo=-0.2; anim.fase=0; anim.frecuencia=1.5; anim.sentido='cola'; }
+        else if(v==='calamar'){ anim.eje='x'; anim.amplitud=18; anim.contrabalanceo=0.0; anim.fase=0; anim.frecuencia=1.2; anim.sentido='tentaculos'; }
+        else if(v==='medusa'){ anim.eje='x'; anim.amplitud=14; anim.contrabalanceo=0.1; anim.fase=90; anim.frecuencia=0.8; anim.sentido='tentaculos'; }
+        else if(v==='tiburon'){ anim.eje='y'; anim.amplitud=30; anim.contrabalanceo=-0.35; anim.fase=0; anim.frecuencia=0.8; anim.sentido='cola'; }
+        else if(v==='aleta'){ anim.eje='z'; anim.amplitud=20; anim.contrabalanceo=1; anim.fase=90; anim.frecuencia=1.5; anim.sentido='cola'; }
+        cambia();
+      }, PRESETS_ANIM));
+    bAnim.appendChild(agCampoSelect({t:'extremo libre / móvil', ayuda:
+      'Qué parte del bloque se deforma y ondea: «cola (+z)» para peces/animales donde la cola está atrás, o «tentáculos (-z)» para calamares/pulpos donde los tentáculos están delante y el manto al fondo.'},
+      anim.sentido==='tentaculos'?'tentaculos':'cola', v=>{ anim.sentido=v; cambia(); },
+      [{key:'cola', name:'🐟 Cola / extremo posterior (+z)'},
+       {key:'tentaculos', name:'🦑 Tentáculos / extremo anterior (-z)'}]));
+    bAnim.appendChild(agCampoSelect({t:'eje de rotación', ayuda:
+      'Eje sobre el que oscila matemáticamente la pieza: «y» es lateral (cola/cabeza), «z» es alabeo/aleteo (aletas), «x» es cabeceo vertical.'},
+      anim.eje==='z'?'z':(anim.eje==='x'?'x':'y'), v=>{ anim.eje=v; cambia(); },
+      [{key:'y', name:'y · oscilación lateral (cola / cabeza de pez)'},
+       {key:'z', name:'z · aleteo / alabeo (aletas laterales)'},
+       {key:'x', name:'x · cabeceo vertical'}]));
+    bAnim.appendChild(agCampoNum({t:'amplitud (grados A)', ayuda:
+      'Ángulo máximo de rotación en grados (±A). Por ejemplo 25° para cola principal, 15-20° para aletas.'},
+      anim.amplitud!==undefined? +anim.amplitud : 25, 5, v=>{ anim.amplitud=v; cambia(); }));
+    bAnim.appendChild(agCampoNum({t:'frecuencia (ω ciclos/s)', ayuda:
+      'Velocidad de oscilación matemática en ciclos por segundo. Mayor número = aleteo/nado más rápido.'},
+      anim.frecuencia!==undefined? +anim.frecuencia : 1.5, 0.25, v=>{ anim.frecuencia=Math.max(0, +v||0); cambia(); }));
+    bAnim.appendChild(agCampoNum({t:'desfase (grados φ)', ayuda:
+      'Desfase angular de la oscilación (ej. 90° o 180° para aletas laterales en oposición o desfasadas respecto a la cola).'},
+      anim.fase!==undefined? +anim.fase : 0, 15, v=>{ anim.fase=v; cambia(); }));
+    bAnim.appendChild(agCampoNum({t:'contrabalanceo (factor)', ayuda:
+      'Multiplicador sobre la oscilación. Para cabeza de pez: -0.2 (contrabalanceo sutil que da sensación de inercia y masa). Para aleta opuesta: -1.0.'},
+      anim.contrabalanceo!==undefined? +anim.contrabalanceo : 1, 0.1, v=>{ anim.contrabalanceo=v; cambia(); }));
+    bAnim.appendChild(agCampoSelect({t:'activación', ayuda:
+      '«siempre»: nada/oscila continuamente (peces, pájaros volando). «al moverse»: solo oscila cuando el agente se está desplazando.'},
+      anim.modo==='movimiento'?'movimiento':'siempre', v=>{ anim.modo=v; cambia(); },
+      [{key:'siempre', name:'🌊 siempre (natación / oscilación continua)'},
+       {key:'movimiento', name:'🚶 solo al moverse (cuando camina/nada)'}]));
+    bAnim.appendChild(agCampoNum({t:'pivote nº', ayuda:
+      'Pivote sobre el que gira matemáticamente la pieza (p.ej. la articulación entre cola y cuerpo, o base de la aleta).'},
+      anim.pivote===undefined?1:anim.pivote, 1, v=>{ anim.pivote=v|0; cambia(); }));
+    agNota(bAnim, 'Fórmula de oscilación: rotación = factor · A · sin(ω·t + φ) sobre el eje elegido desde su pivote.');
+  }
   // 🧍 montable (REQ-MNT2). Antes solo se podía encender a mano y por instancia
   // (`game.esqueletos.montable(1,'cabeza')`), así que había que repetirlo cada vez que se plantaba el
   // bicho y no quedaba escrito en ninguna parte. La marca vive en la PIEZA del documento, al lado de
@@ -4911,6 +4992,7 @@ function agChips(){
   const mira=(agDoc.piezas||[]).some(q=>q&&q.mirar);
   // Por `agPiezas()` y no por `agDoc.piezas`: la raíz también puede llevarte (agente-plataforma).
   const monta=agPiezas().some(q=>q&&q.montable);
+  const animPieza=agPiezas().some(q=>q&&q.animacion);
   const cabalg=!!(agDoc.cabalgable || (seg&&seg.cabalgable));
   const chips=[[sigue, sigue? '👁 te ve a '+((seg&&seg.deteccion!==undefined)? +seg.deteccion : 16) : '👁 plantado'],
                [cad>0, cad>0? '🚶 '+cad+' pasos/bloque' : '🚶 sin patas'],
@@ -4918,6 +5000,7 @@ function agChips(){
                [fis, fis? '🧊 pisa como tú' : '🧊 ignora el suelo'],
                [cue, cue? '🧱 caja a medida' : '🧱 caja de las piezas'],
                [mira, mira? '👀 te mira' : '👀 sin cuello'],
+               [animPieza, animPieza? '🐟 animado' : '🐟 sin ondular'],
                [monta, monta? (cabalg? '🏇 cabalgable' : '🧍 te lleva encima') : '🧍 no te lleva']];
   for(const [on,txt] of chips){
     const s=document.createElement('span'); s.className='ag-chip'+(on?' on':''); s.textContent=txt;
@@ -6789,7 +6872,31 @@ const mc={
   structures:[],                  // instancias estampadas: {key, ox,oy,oz, rot, colVbo,colCount, texVbo,texCount, aabb} (voxeles finos, malla propia 1/16; rot=cuartos de vuelta que la orientan al jugador)
   structAtlas:null, structAtlasTex:null, // atlas de TEXTURAS de estructuras (gemelo de atlas/atlasTex) — solo claves tex: usadas por las estructuras vivas
   structUV:{},                    // clave tex: → [6 rects UV] dentro del atlas de estructuras
-  notes:{}, noteCell:null,        // t1 · notas post-it: "x,y,z" → texto (persiste en mundo.json); noteCell = bloque que edita el panel
+  notes:{}, noteRots:{}, noteCell:null,
+  showTool: true,
+  toolPos: [0.9, -0.6, 0],
+  toolRot: [-10, -80, -30],
+  toolScale: 0.8,
+  toolSwing: 0,
+  toolSwingCfg: {
+    dur: 0.32,        // duración total (s)
+    windupP: 0.25,    // fracción fase 1 impulso (0..1)
+    strikeP: 0.58,    // fracción fase 2 golpe (0..1)
+    windupRot: -35,   // rotación hacia atrás en impulso (grados)
+    chopRot: 15,      // rotación hacia delante en golpe (grados)
+    lift: 0.12,       // subida en impulso
+    pull: 0.06,       // retroceso en impulso
+    drop: 0.20,       // bajada en golpe
+    reach: 0.28       // avance hacia el bloque en golpe
+  },
+  toolBob: 10,
+  toolBobRise: 0.05,    // tau arranque (s): qué tan rápido sigue la onda al empezar a andar
+  toolBobDecay: 0.25,   // tau parada (s): qué tan suave es la transición al parar/saltar
+  toolDebug: false,
+  videoCfg: { hotbar: true, fps: true, crosshair: true, badge: false },
+  _heldToolMesh: null,
+  _heldToolKey: null,
+  _heldToolMeshes: {},        // t1 · notas post-it: "x,y,z" → texto (persiste en mundo.json); noteCell = bloque que edita el panel
   noteAlpha:0.85,                 // opacidad del marcador flotante de nota (game.noteAlpha) — solo para las notas SIN cartel
   noteSigns:true,                 // game.noteSigns: cada nota planta un cartel de verdad (assets/cartel.vox.json) en vez del post-it
   noteText:true, noteTextDist:21, // game.noteText / game.noteTextDist: el texto escrito en la tabla del cartel, y desde cuántos bloques se lee
@@ -6908,6 +7015,9 @@ const mc={
   sunProbe:0.51,                  // distancia a la que cada cara pregunta al mapa del sol, en bloques (game.sunProbe).
                                   // 0.51 y no 0.5: valor ELEGIDO A OJO por el dueño, no derivado. Ver el comentario
                                   // largo del accesor game.sunProbe para lo que se sabe y lo que no.
+  vientoFuerza:0.12,              // oscilación por viento de vegetación y hojas (game.viento)
+  vientoFrec:2.0,                 // frecuencia de oscilación por viento
+  uvInset:0,                      // margen sub-téxel en las UV del atlas (0..0.5 px, game.uvInset / game.texInset)
   shadowSize:2048,                // lado del mapa de sombra en téxeles (game.shadowSize); 2048 sobre un mundo de 96 = 21 téxeles por bloque
   sunShade:0.55,                  // cuánto apaga la SOMBRA PROYECTADA (game.sunShade); 1 = sin sombra de sol
   blockLight:null,                // Uint8Array 0..MC_MAXLIGHT por celda: luz de BLOQUE emisiva (*#hex) difundida por el aire (mcComputeBlockLight); escalar/neutra (no tiñe)
@@ -7496,6 +7606,8 @@ const mat4={
   translate(x,y,z){ const m=mat4.ident(); m[12]=x; m[13]=y; m[14]=z; return m; },
   rotX(a){ const c=Math.cos(a),s=Math.sin(a); const m=mat4.ident(); m[5]=c;m[6]=s;m[9]=-s;m[10]=c; return m; },
   rotY(a){ const c=Math.cos(a),s=Math.sin(a); const m=mat4.ident(); m[0]=c;m[2]=-s;m[8]=s;m[10]=c; return m; },
+  rotZ(a){ const c=Math.cos(a),s=Math.sin(a); const m=mat4.ident(); m[0]=c;m[1]=s;m[4]=-s;m[5]=c; return m; },
+  scale(x,y,z){ const m=mat4.ident(); m[0]=x;m[5]=y;m[10]=z; return m; },
 };
 function glCompile(gl,type,src){ const sh=gl.createShader(type); gl.shaderSource(sh,src); gl.compileShader(sh);
   if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)) console.error('[mundo] shader:',gl.getShaderInfoLog(sh));
@@ -7597,6 +7709,7 @@ function mcFreeStruct(s){         // libera las VBO de una instancia (color opac
 function mcClearStructures(){    // suelta las VBO de las estructuras estampadas y vacía instancias + huella de colisión
   for(const s of mc.structures) mcFreeStruct(s);
   mc.structures=[];
+  mc._heldToolStruct = null; mc._heldToolKey = null;
   if(mc.gl && mc.structAtlasTex){ mc.gl.deleteTexture(mc.structAtlasTex); mc.structAtlasTex=null; }
   mc.structAtlas=null; mc.structUV={};
   // Y el reparto de filas: si no, el mundo nuevo hereda la marca de agua del viejo y arranca con un atlas enorme
@@ -7697,7 +7810,6 @@ function mcCabeEnRejilla(key){
   const rec=key && mc.structs[key];
   if(!rec || rec.w==null){ if(key) mcStructCells(key).catch(()=>{}); return false; }
   if(rec.w>1 || rec.h>1 || rec.d>1) return false;
-  if(rec.pielCubre && rec.conCaras) return false;
   return true;
 }
 // ¿Y esta pieza, en la rejilla, sale con su GEOMETRÍA de verdad (mc.finoRejilla) en vez de proyectada
@@ -8162,7 +8274,7 @@ async function mcStructGeom(srcKey, rot){
   return mesh;
 }
 // Malla de una INSTANCIA estampada: traslada cada flujo fino a la celda de mundo (ox,oy,oz) y sube DOS VBO.
-async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc){
+async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc, noBakeLight){
   rot=mcOriNorm(rot);                   // una de las 24 posturas; ver mcStructGeom
   const geom=await mcStructGeom(srcKey, rot);
   const gl=mc.gl;
@@ -8174,7 +8286,7 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc){
   // de aire vecina (celda-muestra en geom.*SC, en unidades de bloque relativas al origen). lv = max(skylight, luz de
   // bloque). Sin luz activa (interiorDark>=1 y sin brillo) → factor 1: comportamiento de hoy (plena luz).
   const dark=mc.interiorDark, L=mc.light, BL=mc.blockLight;
-  const doLight=(dark<1 || mc.hasGlow) && (L || BL);
+  const doLight=!noBakeLight && (dark<1 || mc.hasGlow) && (L || BL);
   let lightLut=null;
   if(dark<1 && L){ lightLut=new Float32Array(MC_MAXLIGHT+1);
     for(let lv=0;lv<=MC_MAXLIGHT;lv++) lightLut[lv]=Math.pow(dark,(MC_MAXLIGHT-lv)/MC_MAXLIGHT); }
@@ -8370,7 +8482,7 @@ async function mcBuildPaletteImpl(onProgress){
       const dx=fi*MC_TILE, dy=bi*MC_TILE;
       if(faces && faces[fi]) ctx.drawImage(faces[fi],0,0,faces[fi].width,faces[fi].height, dx,dy,MC_TILE,MC_TILE);
       else { ctx.fillStyle='#b0468c'; ctx.fillRect(dx,dy,MC_TILE,MC_TILE); }   // fucsia = textura ausente
-      const ins=0;                                                              // alineación exacta 1-a-1 con el sub-voxel grid
+      const ins=(mc.uvInset!=null&&isFinite(mc.uvInset))?mc.uvInset:0;          // margen sub-téxel (game.uvInset)
       rects.push({ u0:(dx+ins)/AW, v0:(dy+ins)/AH, u1:(dx+MC_TILE-ins)/AW, v1:(dy+MC_TILE-ins)/AH });
     }
     mc.palette[id]=rects;
@@ -8480,6 +8592,13 @@ vec3 mcFogSky(vec3 w){
   }
 }
 
+float sunSample(vec2 uv, float py){
+  if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0) return 1.0;
+  vec2 e=texture2D(uSunMap,uv).rg;
+  float top=(e.x+e.y/255.0)*uSunDim.y+uSunOrg.y;
+  return py < top-0.04 ? 0.0 : 1.0;
+}
+
 float sunFactor(vec3 w){
 #ifndef SUN_DERIV
   return 1.0;                                                // sin dFdx/dFdy no hay normal ⇒ sin sombra (el shader ni la compila)
@@ -8490,9 +8609,22 @@ float sunFactor(vec3 w){
   vec3 p=w+n*uSunProbe;                                      // el aire al que da la cara
   vec2 uv=(p.xz-uSunOrg.xz)/uSunDim.xz;
   if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0) return 1.0;     // fuera del mapa = cielo abierto
-  vec2 e=texture2D(uSunMap,uv).rg;                           // altura en 16 bits empaquetados (por eso NEAREST: no se puede interpolar)
-  float top=(e.x+e.y/255.0)*uSunDim.y+uSunOrg.y;
-  return p.y < top-0.05 ? uSunShade : 1.0;
+
+  // Filtrado suave PCF (Percentage-Closer Filtering) 9-tap con distribución gaussiana:
+  // Suaviza la silueta de los vóxeles y elimina bordes pixelados/rectangulares en terreno y arena.
+  vec2 texel = 1.0 / vec2(uSunDim.x * 16.0, uSunDim.z * 16.0);
+  float s0 = sunSample(uv, p.y);
+  float s1 = sunSample(uv + vec2( texel.x,  0.0), p.y);
+  float s2 = sunSample(uv + vec2(-texel.x,  0.0), p.y);
+  float s3 = sunSample(uv + vec2( 0.0,  texel.y), p.y);
+  float s4 = sunSample(uv + vec2( 0.0, -texel.y), p.y);
+  float s5 = sunSample(uv + vec2( texel.x,  texel.y), p.y);
+  float s6 = sunSample(uv + vec2(-texel.x,  texel.y), p.y);
+  float s7 = sunSample(uv + vec2( texel.x, -texel.y), p.y);
+  float s8 = sunSample(uv + vec2(-texel.x, -texel.y), p.y);
+
+  float occ = s0 * 0.28 + (s1 + s2 + s3 + s4) * 0.12 + (s5 + s6 + s7 + s8) * 0.06;
+  return mix(uSunShade, 1.0, occ);
 #endif
 }`;
 // REQ-ENV4 · Luz de bloque (antorchas) leída de una TEXTURA 3D por posición de mundo, no horneada por vértice: así
@@ -8559,7 +8691,32 @@ vec3 mcLitGlow(vec3 baseCol, vec4 blk, float dyn, float expo, float gain){
 // Extrae el sombreado [0,1.12] y el bit 1 (recibe sol). Bit 2 (proyecta sombra) no se lee aquí: viaja al mapa del sol.
 const MC_SHADE_LIB=`
 float mcShade(float s){ return s - 2.0*floor(s*0.5); }
-float mcRecibeSol(float s){ return 1.0 - floor(mod(floor(s*0.5), 2.0)); }`;
+float mcRecibeSol(float s){ return 1.0 - floor(mod(floor(s*0.5), 2.0)); }
+float mcViento(float s){ return floor(mod(floor(s*0.5), 8.0) * 0.25); }
+uniform vec3 uWind;
+vec3 mcWindOffset(vec3 pos, float shade){
+  float isWind = mcViento(shade);
+  if(isWind <= 0.0 || uWind.x <= 0.0) return pos;
+  float ph1 = uWind.z * uWind.y + pos.x * 1.3 + pos.z * 1.7 + pos.y * 0.3;
+  float ph2 = uWind.z * uWind.y * 0.75 + pos.x * 0.9 - pos.z * 1.2 + pos.y * 0.2;
+  float dx = (sin(ph1) + sin(ph1 * 2.1) * 0.25) * uWind.x * 0.60;
+  float dz = (cos(ph2) + cos(ph2 * 1.9) * 0.25) * uWind.x * 0.42;
+  float dy = -(dx * dx + dz * dz) * 0.4;
+  return pos + vec3(dx, dy, dz);
+}
+vec3 mcWindOffsetFine(vec3 pos, float shade){
+  float isWind = mcViento(shade);
+  if(isWind <= 0.0 || uWind.x <= 0.0) return pos;
+  float ph1 = uWind.z * uWind.y + pos.x * 1.3 + pos.z * 1.7 + pos.y * 0.3;
+  float ph2 = uWind.z * uWind.y * 0.75 + pos.x * 0.9 - pos.z * 1.2 + pos.y * 0.2;
+  float cellY = pos.y - floor(pos.y);
+  float h = clamp(cellY * 1.7, 0.0, 1.0);
+  float h2 = h * h;
+  float dx = (sin(ph1) + sin(ph1 * 2.1) * 0.25) * uWind.x * h2;
+  float dz = (cos(ph2) + cos(ph2 * 1.9) * 0.25) * uWind.x * 0.7 * h2;
+  float dy = -(dx * dx + dz * dz) * 0.4;
+  return pos + vec3(dx, dy, dz);
+}`;
 
 function mcGLSL(src, esVS){
   if(!mc.gl2) return ((mc.deriv && !esVS) ? '#extension GL_OES_standard_derivatives : enable\n' : '')
@@ -8579,7 +8736,7 @@ attribute vec3 aPos; attribute vec2 aUV; attribute float aShade;
 uniform mat4 uProj; uniform mat4 uView;
 varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
 ${MC_SHADE_LIB}
-void main(){ vec4 vp=uView*vec4(aPos,1.0); gl_Position=uProj*vp; vUV=aUV; vShade=mcShade(aShade); vSol=mcRecibeSol(aShade); vDist=length(vp.xyz); vWorld=aPos; }`;
+void main(){ vec3 pos=mcWindOffset(aPos, aShade); vec4 vp=uView*vec4(pos,1.0); gl_Position=uProj*vp; vUV=aUV; vShade=mcShade(aShade); vSol=mcRecibeSol(aShade); vDist=length(vp.xyz); vWorld=pos; }`;
 const MC_FS=`
 precision mediump float;
 varying vec2 vUV; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
@@ -8655,6 +8812,7 @@ function mcLocOf(p){ const gl=mc.gl; return {
   uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
   uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
+  uWind:gl.getUniformLocation(p,'uWind'),
   uSunProbe:gl.getUniformLocation(p,'uSunProbe') }; }
 function mcBuildProgram(){
   const gl=mc.gl;
@@ -8667,7 +8825,19 @@ attribute vec3 aPos; attribute vec3 aColor; attribute float aShade; attribute fl
 uniform mat4 uProj; uniform mat4 uView; uniform mat4 uModel;
 varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld; varying float vSol;
 ${MC_SHADE_LIB}
-void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz; vec4 vp=uView*vec4(w,1.0); gl_Position=uProj*vp; vColor=aColor; vShade=mcShade(aShade); vSol=mcRecibeSol(aShade); vDist=length(vp.xyz); vEmit=aEmit; vAlpha=aAlpha; vWorld=w; }`;
+void main(){
+  vec3 pos = mcWindOffsetFine(aPos, aShade);
+  vec3 w=(uModel*vec4(pos,1.0)).xyz;
+  vec4 vp=uView*vec4(w,1.0);
+  gl_Position=uProj*vp;
+  vColor=aColor;
+  vShade=mcShade(aShade);
+  vSol=mcRecibeSol(aShade);
+  vDist=length(vp.xyz);
+  vEmit=aEmit;
+  vAlpha=aAlpha;
+  vWorld=w;
+}`;
 const MC_STRUCT_FS=`
 precision mediump float;
 varying vec3 vColor; varying float vShade; varying float vDist; varying float vEmit; varying float vAlpha; varying vec3 vWorld; varying float vSol;
@@ -8774,6 +8944,8 @@ function mcBuildStructProgram(){
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
     uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
+    uAnimSpine:gl.getUniformLocation(p,'uAnimSpine'), uAnimState:gl.getUniformLocation(p,'uAnimState'),
+    uWind:gl.getUniformLocation(p,'uWind'),
     uSunProbe:gl.getUniformLocation(p,'uSunProbe') };
 }
 // Programa de estructuras TEXTURADAS con repetición por voxel: aTile = coord de tile (0..W / 0..H sobre la cara
@@ -8785,7 +8957,7 @@ attribute vec3 aPos; attribute vec2 aTile; attribute vec4 aRect; attribute float
 uniform mat4 uProj; uniform mat4 uView; uniform mat4 uModel;
 varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
 ${MC_SHADE_LIB}
-void main(){ vec3 w=(uModel*vec4(aPos,1.0)).xyz; vec4 vp=uView*vec4(w,1.0); gl_Position=uProj*vp; vTile=aTile; vRect=aRect; vShade=mcShade(aShade); vSol=mcRecibeSol(aShade); vDist=length(vp.xyz); vWorld=w; }`;
+void main(){ vec3 pos=mcWindOffsetFine(aPos, aShade); vec3 w=(uModel*vec4(pos,1.0)).xyz; vec4 vp=uView*vec4(w,1.0); gl_Position=uProj*vp; vTile=aTile; vRect=aRect; vShade=mcShade(aShade); vSol=mcRecibeSol(aShade); vDist=length(vp.xyz); vWorld=w; }`;
 const MC_STEX_FS=`
 precision highp float;
 varying highp vec2 vTile; varying vec4 vRect; varying float vShade; varying float vDist; varying vec3 vWorld; varying float vSol;
@@ -8813,6 +8985,7 @@ function mcBuildStructTexProgram(){
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
     uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
+    uWind:gl.getUniformLocation(p,'uWind'),
     uSunProbe:gl.getUniformLocation(p,'uSunProbe') };
 }
 // Programa del RÓTULO de un cartel: un quad texturado en coordenadas de mundo, y nada más. Ni luz, ni
@@ -8979,8 +9152,8 @@ function mcRenderShadow(){
   for(const a of mc.agents.values()) if(a.count && a.vbo) draw(a.vbo, a.count, 6*4);   // un agente no es un material: siempre proyecta
   for(const st of mc.structures){
     if(st.sinProyectar) continue;                                   // pieza entera fuera del mapa: más barato que recortarla vértice a vértice
-    if(st.colCount && st.colVbo) draw(st.colVbo, st.colCount, 9*4, st.model);
-    if(st.texCount && st.texVbo) draw(st.texVbo, st.texCount, 10*4, st.model);
+    if(st.colCount && st.colVbo) draw(st.colVbo, st.colCount, 9*4, st.model, 6*4);
+    if(st.texCount && st.texVbo) draw(st.texVbo, st.texCount, 10*4, st.model, 9*4);
   }
   // Lo que dibuja otro (p.ej. los cuerpos de ESTRUCTURA de los agentes, que van con matriz de modelo propia y no
   // están en ninguna de las listas de arriba). app.js no sabe qué es: solo le presta el dibujante de la pasada.
@@ -9272,6 +9445,7 @@ function mcSunUniforms(L, S){
   // porque por este embudo pasan los tres programas de color (terreno, estructuras/agua, estructuras con textura);
   // ANTES del early-return de la sombra, para que valga aunque la sombra del sol esté apagada. 1 = pleno día.
   if(L.uExpo!==undefined && L.uExpo!==null) gl.uniform1f(L.uExpo, mc.luzGlobal!=null?mc.luzGlobal:1);
+  if(L.uWind) gl.uniform3f(L.uWind, mc.vientoFuerza||0, mc.vientoFrec||2.0, (typeof performance!=='undefined'?performance.now()*0.001:0));
   // REQ-ENV4 · la textura 3D de luz de bloque (unidad 2). uBlkOn=0 cuando no hay emisivos ⇒ el shader ni la mira.
   if(L.uBlkOn!==undefined && L.uBlkOn!==null){
     // ⚠️ uBlkTex (sampler3D) SIEMPRE a la unidad 2, aunque no se use: dejarlo en la 0 por defecto choca con uTex
@@ -10234,6 +10408,7 @@ function mcStructColl(s){
 function mcFineBoxHit(fx0,fy0,fz0,fx1,fy1,fz1){
   const T=MC_TILE;
   for(const s of mc.structures){
+    if(s._isHeldTool) continue;
     const g=mcStructColl(s); if(!g) continue;
     const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T, E=s.esc;
     // Instancia ESCALADA (REQ-AGESC1): el bitset es siempre el de la pieza a tamaño 1, así que la caja del
@@ -10334,9 +10509,26 @@ function mcCollides(px,py,pz){   // ¿el AABB del jugador en (px,py,pz) solapa a
 // (playerScale alto) mide 1.8·scale de alto, así que subir 3 bloques fijos no lo sacaba de la estructura.
 function mcUnstick(){
   if(!mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])) return true;
-  const step=1/MC_TILE, top=mc.dim.y+MC_PH*mc.scale+2;   // por encima del mundo y de la estructura más alta → siempre hay aire
-  for(let y=mc.pos[1]+step; y<=top; y+=step){
-    if(!mcCollides(mc.pos[0], y, mc.pos[2])){ mc.pos[1]=y; mc.vel[1]=0; mc.onGround=true; return true; }
+  // Búsqueda instantánea O(1): superficie más alta del terreno en esta columna
+  const px=Math.floor(mc.pos[0]), pz=Math.floor(mc.pos[2]);
+  const surf=(typeof mcSurfaceY==='function')? mcSurfaceY(px, pz) : -1;
+  if(surf>=0){
+    const targetY=surf+1;
+    if(!mcCollides(mc.pos[0], targetY, mc.pos[2])){
+      mc.pos[1]=targetY; mc.vel[1]=0; mc.onGround=true; return true;
+    }
+  }
+  // Búsqueda vertical rápida por bloques enteros y ajuste fino
+  const top=mc.dim.y+MC_PH*mc.scale+2;
+  for(let y=Math.floor(mc.pos[1])+1; y<=top; y++){
+    if(!mcCollides(mc.pos[0], y, mc.pos[2])){
+      let bestY=y;
+      for(let fy=y-1/MC_TILE; fy>=y-1; fy-=1/MC_TILE){
+        if(!mcCollides(mc.pos[0], fy, mc.pos[2])) bestY=fy;
+        else break;
+      }
+      mc.pos[1]=bestY; mc.vel[1]=0; mc.onGround=true; return true;
+    }
   }
   return false;   // no encontró hueco subiendo (raro) → el llamador reubica al spawn
 }
@@ -10424,6 +10616,7 @@ function mcStuckWhy(px,py,pz){
   // 2) Estructuras finas estampadas, en la celda donde se las estampó.
   const yaVistas=new Set();
   for(const s of mc.structures){
+    if(s._isHeldTool) continue;
     const g=mcStructColl(s); if(!g) continue;
     const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T, E=s.esc;
     let x0,x1,y0,y1,z0,z1;
@@ -10779,6 +10972,7 @@ function mcModelOf(s){ const m = s && s.model; return (m && m.length === 16) ? m
 // Sin modelo no se toca nada: mismo coste y mismo resultado de siempre.
 const MC_AABB_GIRO = { aabb:[0,0,0,0,0,0] };
 function mcStructVisible(s, pv){
+  if(s && s._isHeldTool) return true;
   const m = s.model; if(!(m && m.length === 16)) return mcChunkVisible(s, pv);
   const a = s.aabb;
   const cx=(a[0]+a[3])*0.5, cy=(a[1]+a[4])*0.5, cz=(a[2]+a[5])*0.5;
@@ -11007,14 +11201,277 @@ function mcRender(){
     mcStructGL(false);   // fuera antes de la pasada del sol del frame siguiente, que hereda el estado
   }
   mcDrawNoteTexts(pj, view);      // el texto de cada nota, pegado en la tabla de su cartel (se desvanece de lejos)
-  mcDrawPreview(pj, view);        // vista-previa translúcida de la habitación mientras se mantiene el clic derecho
   mcDrawVolumeBlocks(pj, view);   // bloques reales texturados de la herramienta volumen
+  mcDrawPasteBlocks(pj, view);    // bloques reales de la herramienta pegar (Ctrl+V)
   mcDrawOverlays(pj, view);
   mc.quads=quads; game.voxels=Math.round(quads);
+  if(mcMediaRecorder && mcMediaRecorder.state === 'recording') mcCompositaVideoFrame();
 }
+
+
 // Dibuja la vista-previa de una estructura (mc.preview) como MALLA renderizada de verdad, translúcida
 // (game.structGhostAlpha), siguiendo la mira antes de estampar. Dos pasadas idénticas al render de estructuras
 // (color por vértice + textura vía atlas de estructuras), con mezcla por alfa constante y sin escribir profundidad.
+
+
+// ── REQ-HELDTOOL · Herramienta en primera persona (game.showTool) integrada en el mundo ──
+// La herramienta se instancia como una estructura real (mc._heldToolStruct) con iluminación completa,
+// reflejo en el agua y sombra del sol. Se posiciona mediante su matriz de modelo cada frame.
+
+function mcMat4Mul(out, a, b){
+  const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+  const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+  const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+  const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+  let b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+  out[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+  b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+  out[4] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[5] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[6] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[7] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+  b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+  out[8] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[9] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[10] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[11] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+  b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+  out[12] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[13] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  return out;
+}
+
+function mcMat4RotY(out, rad){
+  const s = Math.sin(rad), c = Math.cos(rad);
+  out.fill(0);
+  out[0] = c; out[2] = -s; out[5] = 1; out[8] = s; out[10] = c; out[15] = 1;
+  return out;
+}
+
+function mcMat4RotX(out, rad){
+  const s = Math.sin(rad), c = Math.cos(rad);
+  out.fill(0);
+  out[0] = 1; out[5] = c; out[6] = s; out[9] = -s; out[10] = c; out[15] = 1;
+  return out;
+}
+
+function mcMat4RotZ(out, rad){
+  const s = Math.sin(rad), c = Math.cos(rad);
+  out.fill(0);
+  out[0] = c; out[1] = s; out[4] = -s; out[5] = c; out[10] = 1; out[15] = 1;
+  return out;
+}
+
+function mcGetActiveToolAsset(){
+  const t = mc.tool || 'build';
+  const k = mcHerramientaKey(t);
+  if(k) return k;
+  // Solo si el catálogo aún no ha cargado (arranque inicial)
+  if(!mc.catalog){
+    if(t === 'build') return 'hab:pico-de-piedra';
+    if(t === 'box') return 'hab:caja-de-volumen';
+    if(t === 'paint') return 'hab:pincel-de-texturizado';
+  }
+  return null;
+}
+
+
+function mcBuildToolTransform(eye, yaw, pitch){
+  const tPos = mc.toolPos || [0.9, -0.6, 0];
+  const tRot = mc.toolRot || [-10, -80, -30];
+  const esc = (mc.toolScale !== undefined ? +mc.toolScale : 0.8) * mc.scale;
+
+  // Balanceo natural al caminar (view bobbing) con amortiguación suave
+  const sp = mc.vel ? Math.hypot(mc.vel[0], mc.vel[2]) : 0;
+  const moviendo = mc.onGround && (sp > 0.5);
+  const bobFactor = (mc.toolBob !== undefined && isFinite(+mc.toolBob)) ? +mc.toolBob : 10;
+  const now = performance.now();
+  const t = now * 0.008;
+
+  // Valores objetivo del bob (animados si moviendo, 0 si no)
+  const targetBobX  = moviendo ? Math.cos(t * 0.5) * (0.015 * bobFactor) : 0;
+  const targetBobY  = moviendo ? Math.abs(Math.sin(t)) * (0.012 * bobFactor) : 0;
+  const targetBobRX = moviendo ? Math.sin(t) * (1.5 * bobFactor) : 0;
+  const targetBobRZ = moviendo ? Math.cos(t * 0.5) * (1.5 * bobFactor) : 0;
+
+  // Amortiguación exponencial: dt en segundos, tau = constante de tiempo (s)
+  // Al parar/saltar decae suave (bobDecay); al arrancar sigue la onda (bobRise).
+  const dt = Math.min((now - (mc._bobLastT || now)) / 1000, 0.1);
+  mc._bobLastT = now;
+  const tau = moviendo
+    ? (isFinite(+mc.toolBobRise)  ? +mc.toolBobRise  : 0.05)   // arranque
+    : (isFinite(+mc.toolBobDecay) ? +mc.toolBobDecay : 0.12);  // parada/salto
+  const alpha = 1 - Math.exp(-dt / tau);
+  mc._bobX  = (mc._bobX  || 0) + (targetBobX  - (mc._bobX  || 0)) * alpha;
+  mc._bobY  = (mc._bobY  || 0) + (targetBobY  - (mc._bobY  || 0)) * alpha;
+  mc._bobRX = (mc._bobRX || 0) + (targetBobRX - (mc._bobRX || 0)) * alpha;
+  mc._bobRZ = (mc._bobRZ || 0) + (targetBobRZ - (mc._bobRZ || 0)) * alpha;
+
+  // Animación de picar con clic izquierdo (solo para el pico / build)
+  let swX = 0, swY = 0, swZ = 0;
+  let swRotX = 0, swRotY = 0, swRotZ = 0;
+  if(mc._toolSwingT > 0){
+    const elapsed = (now - mc._toolSwingT) / 1000;
+    const cfg = mc.toolSwingCfg || {};
+    const dur = (isFinite(+cfg.dur) && +cfg.dur > 0) ? +cfg.dur : 0.32;
+    const windupP = (isFinite(+cfg.windupP) && +cfg.windupP > 0) ? Math.min(0.8, +cfg.windupP) : 0.25;
+    const strikeP = (isFinite(+cfg.strikeP) && +cfg.strikeP > windupP) ? Math.min(0.95, +cfg.strikeP) : 0.58;
+    const windupRot = isFinite(+cfg.windupRot) ? +cfg.windupRot : -35;
+    const chopRot = isFinite(+cfg.chopRot) ? +cfg.chopRot : 15;
+    const lift = isFinite(+cfg.lift) ? +cfg.lift : 0.12;
+    const pull = isFinite(+cfg.pull) ? +cfg.pull : 0.06;
+    const drop = isFinite(+cfg.drop) ? +cfg.drop : 0.20;
+    const reach = isFinite(+cfg.reach) ? +cfg.reach : 0.28;
+
+    if(elapsed < dur){
+      const p = elapsed / dur; // 0..1
+      if(p < windupP){
+        // Fase 1: Coger impulso (el pico se alza, retrocede y se inclina hacia atrás)
+        const u = p / windupP;
+        const ease = Math.sin(u * Math.PI * 0.5);
+        swY = lift * ease;
+        swZ = -pull * ease;
+        swRotX = windupRot * ease;
+        swRotY = (4 * Math.abs(windupRot) / 24) * ease;
+      } else if(p < strikeP){
+        // Fase 2: Golpe seco y acelerado (baja con fuerza hacia adelante contra el bloque)
+        const u = (p - windupP) / (strikeP - windupP);
+        const snap = Math.pow(u, 1.4);
+        swY = lift - (lift + drop) * snap;
+        swZ = -pull + (pull + reach) * snap;
+        swX = -0.02 * snap;
+        swRotX = windupRot + (chopRot - windupRot) * snap;
+        swRotY = 4 - 8 * snap;
+      } else {
+        // Fase 3: Amortiguación y retorno suave a reposo
+        const u = (p - strikeP) / (1.0 - strikeP);
+        const decay = Math.pow(1 - u, 2);
+        swY = -drop * decay;
+        swZ = reach * decay;
+        swX = -0.02 * decay;
+        swRotX = chopRot * decay;
+        swRotY = -4 * decay;
+      }
+    } else {
+      mc._toolSwingT = 0;
+    }
+  }
+
+  // En espacio de cámara (WebGL view space: +X der, +Y arr, -Z del):
+  const posX = tPos[0] + mc._bobX + swX;
+  const posY = tPos[1] - mc._bobY + swY;
+  const posZ = -(1.2 + tPos[2]) - swZ;
+
+  // 1. Matriz de la cámara en el mundo = T(eye) * Ry(yaw) * Rx(pitch)
+  const mCam = mat4.mul(mat4.translate(eye[0], eye[1], eye[2]),
+               mat4.mul(mat4.rotY(yaw), mat4.rotX(pitch)));
+
+  // 2. Desplazamiento en cámara
+  const mCamPos = mat4.translate(posX, posY, posZ);
+
+  // 3. Rotación base de la herramienta + rotaciones dinámicas (bob y swing) aplicadas en espacio de cámara.
+  // Al aplicar el swing en espacio de cámara (antes de la pose base), el golpe de picar siempre
+  // ocurre en el plano vertical hacia delante (eje X de cámara) sin verse distorsionado ni ladeado por tRot.
+  const mBaseRot = mat4.mul(mat4.rotY(tRot[1] * Math.PI / 180),
+                   mat4.mul(mat4.rotX(tRot[0] * Math.PI / 180),
+                            mat4.rotZ(tRot[2] * Math.PI / 180)));
+
+  const mDynRot = mat4.mul(mat4.rotX(- (mc._bobRX + swRotX) * Math.PI / 180),
+                  mat4.mul(mat4.rotY(swRotY * Math.PI / 180),
+                           mat4.rotZ((mc._bobRZ + swRotZ) * Math.PI / 180)));
+
+  const mRot = mat4.mul(mDynRot, mBaseRot);
+
+  // 4. Centrado en el pivote del asset definido en el editor (marcador "1")
+  const s = mc._heldToolStruct;
+  const piv = (s && s.assetPivot) ? s.assetPivot : [0.5, 0.5, 0.5];
+  const mPivot = mat4.translate(-piv[0], -piv[1], -piv[2]);
+  const mEsc = mat4.scale(esc, esc, esc);
+
+  // M = mCam * mCamPos * mRot * mEsc * mPivot
+  const mLoc = mat4.mul(mRot, mat4.mul(mEsc, mPivot));
+  const mRel = mat4.mul(mCamPos, mLoc);
+  return mat4.mul(mCam, mRel);
+}
+
+const mcHeldToolCache = new Map();
+let mcHeldToolLoading = false;
+
+async function mcSyncHeldToolStruct(){
+  if(!mc.active || !mc.showTool){
+    if(mc._heldToolStruct){
+      const idx = mc.structures.indexOf(mc._heldToolStruct);
+      if(idx >= 0) mc.structures.splice(idx, 1);
+      mc._heldToolStruct = null;
+      mc._heldToolKey = null;
+    }
+    return;
+  }
+  const key = mcGetActiveToolAsset();
+  if(!key) return;
+  if(mc._heldToolKey !== key && !mcHeldToolLoading){
+    mcHeldToolLoading = true;
+    const reqKey = key;
+    try{
+      let s = mcHeldToolCache.get(reqKey);
+      if(!s){
+        let doc = null;
+        try{ doc = await getRoomData(reqKey); }catch(e){}
+        const mesh = await mcBuildStructMesh(reqKey, 0, 0, 0, 0, 1.0, true);
+        const pvs = doc && doc.pivotes && doc.pivotes[0];
+        const sz = (doc && doc.size) || {x:16, y:16, z:16};
+        // El mesh aplica el swap de ejes de mcStructGeom:
+        //   asset X (pvs[0]) → mesh X
+        //   asset Y (pvs[1]) → mesh Z  ← swap!
+        //   asset Z (pvs[2]) → mesh Y (altura)
+        // El tamaño en mesh coords: sz.x, sz.z(=sz.y), sz.y(=sz.z)
+        const szX = sz.x||16, szY = sz.y||16, szZ = sz.z||16;
+        const pivNorm = pvs
+          ? [(pvs[0]+0.5)/szX, (pvs[2]+0.5)/szZ, (pvs[1]+0.5)/szY]   // [meshX, meshY, meshZ]
+          : [0.5, 0.5, 0.5];
+        s = Object.assign({
+          key: reqKey, ox: 0, oy: 0, oz: 0, rot: 0, esc: 1.0,
+          efimera: true, _isHeldTool: true, model: MC_IDENT,
+          assetPivot: pivNorm,
+          assetPivotVoxel: pvs ? pvs.slice() : null
+        }, mesh);
+        mcHeldToolCache.set(reqKey, s);
+      }
+      // Reemplazo atómico sin frames vacíos: desvincula el anterior e inserta el nuevo
+      if(mc._heldToolStruct && mc._heldToolStruct !== s){
+        const oldIdx = mc.structures.indexOf(mc._heldToolStruct);
+        if(oldIdx >= 0) mc.structures.splice(oldIdx, 1);
+      }
+      if(!mc.structures.includes(s)){
+        mc.structures.push(s);
+      }
+      mc._heldToolStruct = s;
+      mc._heldToolKey = reqKey;
+    }catch(e){
+      console.warn('[heldTool] error loading tool mesh:', e);
+    }finally{
+      mcHeldToolLoading = false;
+    }
+  }
+  if(mc._heldToolStruct){
+    const eye = [mc.pos[0], mc.pos[1] + MC_EYE * mc.scale, mc.pos[2]];
+    const model = mcBuildToolTransform(eye, mc.yaw, mc.pitch);
+    mc._heldToolStruct.model = model;
+    mc._heldToolStruct.ox = mc.pos[0];
+    mc._heldToolStruct.oy = mc.pos[1];
+    mc._heldToolStruct.oz = mc.pos[2];
+  }
+}
+
 function mcDrawPreview(pj, view){
   const gl=mc.gl, s=mc.preview; if(!s) return;
   mcStructGL(true);   // el fantasma se apoya en el suelo → su cara de abajo es coplanar con él (mismo empate que la pasada 3)
@@ -11316,8 +11773,128 @@ function mcDrawVolumeBlocks(pj, view){
   gl.disable(gl.CULL_FACE);
   gl.frontFace(gl.CCW);
 }
+
+function mcClipboardDims(){
+  if(!clipboard || !clipboard.cells || !clipboard.cells.length) return null;
+  let maxDx = 0, maxDy = 0, maxDz = 0;
+  for(const cel of clipboard.cells){
+    if(cel.dx > maxDx) maxDx = cel.dx;
+    if(cel.dz > maxDy) maxDy = cel.dz;
+    if(cel.dy > maxDz) maxDz = cel.dy;
+  }
+  return { w: maxDx + 1, h: maxDy + 1, d: maxDz + 1 };
+}
+
+// Renderiza los bloques del portapapeles (Ctrl+V) en tiempo real apoyados en la superficie antes de plantar
+function mcDrawPasteBlocks(pj, view){
+  if(!mc.pasteActive || mc.escaparate || !clipboard || !clipboard.cells || !clipboard.cells.length){
+    mc._pasteCache = null;
+    return;
+  }
+  const near = mcRaycast(mcReach(), true);
+  if(!near){ mc._pasteCache = null; return; }
+  const dims = mcClipboardDims();
+  if(!dims){ mc._pasteCache = null; return; }
+
+  const rot = (mc.pasteRot || 0) & 3;
+  const n = near.normal;
+  const bx = near.cell[0] + n[0], by = near.cell[1] + n[1], bz = near.cell[2] + n[2];
+
+  const gl = mc.gl;
+  const cacheKey = [bx, by, bz, rot, clipboard.cells.length, (clipboard.cells[0] ? clipboard.cells[0].c : '')].join(':');
+
+  if(!mc._pasteCache || mc._pasteCache.key !== cacheKey){
+    const totalFloats = clipboard.cells.length * 6 * 36;
+    if(!mc._pasteBuf || mc._pasteBuf.length < totalFloats) mc._pasteBuf = new Float32Array(Math.max(totalFloats, 2048));
+    const out = mc._pasteBuf;
+    let ptr = 0;
+
+    const occ = new Set();
+    const cellCoords = [];
+    for(let i=0; i<clipboard.cells.length; i++){
+      const cel = clipboard.cells[i];
+      const [rx, rz] = mcRotXZ(cel.dx, cel.dy, rot, dims.w, dims.d);
+      const ry = cel.dz;
+      const wx = bx + rx, wy = by + ry, wz = bz + rz;
+      occ.add(wx + ',' + wy + ',' + wz);
+      cellCoords.push({ wx, wy, wz, c: cel.c });
+    }
+
+    for(let i=0; i<cellCoords.length; i++){
+      const item = cellCoords[i];
+      const wx = item.wx, wy = item.wy, wz = item.wz, v = item.c;
+      let mat = 0;
+      if(typeof v === 'string' && v.slice(0, 4) === 'tex:'){
+        const key = v.slice(4);
+        mat = mc.blockKey ? mc.blockKey.indexOf(key) : 0;
+      }
+      if(mat <= 0) mat = 1;
+      const rects = (mat && mc.palette) ? mc.palette[mat] : ((mc.palette && mc.palette[1]) || null);
+      if(!rects) continue;
+
+      for(let f = 0; f < 6; f++){
+        const dir = MC_FACES[f].dir;
+        const ax = wx + dir[0], ay = wy + dir[1], az = wz + dir[2];
+        if(occ.has(ax + ',' + ay + ',' + az)) continue;
+
+        const F = MC_FACES[f], r = rects[F.tex] || rects[0], C = F.corners;
+        const uv = [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]];
+        for(const k of [0, 1, 2, 0, 2, 3]){
+          const c = C[k];
+          out[ptr++] = wx + c[0]; out[ptr++] = wy + c[1]; out[ptr++] = wz + c[2];
+          out[ptr++] = uv[k][0]; out[ptr++] = uv[k][1];
+          out[ptr++] = F.s;
+        }
+      }
+    }
+
+    if(!mc.pasteVbo) mc.pasteVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, mc.pasteVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, out.subarray(0, ptr), gl.DYNAMIC_DRAW);
+    mc._pasteCache = { key: cacheKey, vertCount: ptr / 6 };
+  }
+
+  if(!mc._pasteCache || !mc._pasteCache.vertCount) return;
+
+  const opaque = !mc.atlasHasAlpha && mc.progOpaque;
+  const TP = opaque ? mc.progOpaque : mc.prog, L = opaque ? mc.locOpaque : mc.loc;
+  gl.useProgram(TP);
+  mcAttribs([L.aPos, L.aUV, L.aShade]);
+  if(L.uClipY) gl.uniform1f(L.uClipY, -1000.0);
+  gl.uniformMatrix4fv(L.uProj, false, pj.m);
+  gl.uniformMatrix4fv(L.uView, false, view);
+  gl.uniform3f(L.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
+  gl.uniform1f(L.uFogMin, mcFogMin());
+  gl.uniform1f(L.uFogNear, mcFogNear(pj.far));
+  gl.uniform1f(L.uFogFar, mcFogFar(pj.far));
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, mc.atlasTex);
+  gl.uniform1i(L.uTex, 0);
+  mcSunUniforms(L, null);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, mc.pasteVbo);
+  const stride = 6 * 4;
+  gl.vertexAttribPointer(L.aPos, 3, gl.FLOAT, false, stride, 0);
+  gl.vertexAttribPointer(L.aUV, 2, gl.FLOAT, false, stride, 12);
+  gl.vertexAttribPointer(L.aShade, 1, gl.FLOAT, false, stride, 20);
+
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+  gl.frontFace(gl.CW);
+  gl.enable(gl.CULL_FACE);
+  gl.cullFace(gl.BACK);
+  gl.enable(gl.POLYGON_OFFSET_FILL);
+  gl.polygonOffset(-1.0, -1.0);
+  gl.drawArrays(gl.TRIANGLES, 0, mc._pasteCache.vertCount);
+  gl.polygonOffset(0, 0);
+  gl.disable(gl.POLYGON_OFFSET_FILL);
+  gl.disable(gl.CULL_FACE);
+  gl.frontFace(gl.CCW);
+}
+
 // Libera la vista-previa de estructura (VBO) y olvida su memo. Se llama al soltar, al perder el foco o al cerrar.
-function mcClearPreview(){ if(mc.preview){ mcFreeStruct(mc.preview); mc.preview=null; } mc.previewKey=null; mc.previewBusy=null; mc.previewStructKey=null; mc._volCache=null; }
+function mcClearPreview(){ if(mc.preview){ mcFreeStruct(mc.preview); mc.preview=null; } mc.previewKey=null; mc.previewBusy=null; mc.previewStructKey=null; mc._volCache=null; mc._pasteCache=null; }
+
 // ¿la sala usa texturas `tex:` que aún NO están en el atlas de estructuras? (⇒ hay que recomponerlo para la vista-previa)
 async function mcRoomNeedsAtlas(sk){
   try{ const d=await getRoomData(sk); const vox=d.voxels||{};
@@ -11329,16 +11906,27 @@ async function mcRoomNeedsAtlas(sk){
 // malla real de la habitación en la celda apuntada + giro al jugador. Sólo re-malla si cambió el objetivo/giro
 // (memo) → no revienta fps al mirar quieto; al salir del foco se limpia. Asíncrona (no bloquea el frame).
 async function mcUpdatePreview(){
-  const sk=mc.slotStruct[mc.sel];
-  const on = mc.active && !mcToolPasiva() && sk && document.pointerLockElement===mc.canvas && mc.structGhostAlpha>0;
+  const isNotePlace = !!mc.notePlacing;
+  const cfg = mcCartelCfg();
+  const sk = isNotePlace ? (cfg.palo ? MC_NOTE_SIGN : MC_NOTE_SIGN_PLANO) : mc.slotStruct[mc.sel];
+  const on = mc.active && (isNotePlace || (!mcToolPasiva() && sk)) && document.pointerLockElement===mc.canvas && mc.structGhostAlpha>0;
   if(!on){ if(mc.preview||mc.previewKey||mc.previewStructKey) mcClearPreview(); return; }
   const hit=mcRaycast(mcReach(), true); if(!hit){ if(mc.preview) mcClearPreview(); return; }   // el fantasma se ancla también a caras de estructura (lo que ves = lo que colocas)
-  const isPaint = (mc.tool === 'paint');
+  const isPaint = !isNotePlace && (mc.tool === 'paint');
   const c=hit.cell, n=hit.normal;
-  const tx = isPaint ? c[0] : (c[0]+n[0]), ty = isPaint ? c[1] : (c[1]+n[1]), tz = isPaint ? c[2] : (c[2]+n[2]);   // construir = hueco adyacente; pintar = celda apuntada
-  if(!mcInside(tx,ty,tz)){ if(mc.preview) mcClearPreview(); return; }
-  await mcStructCells(sk);                                                    // asegura la huella para centrar bien
-  const rot=mcPreviewOri(), [ox,oy,oz]=mcStructOrigin(sk, tx,ty,tz, rot, isPaint ? [0,1,0] : n);    // orientación a mano (R giro / Shift+R vuelco); centro en suelo, canto en pared
+  let rot, ox, oy, oz;
+  if(isNotePlace){
+    rot = (mc.notePlaceRot !== undefined) ? mc.notePlaceRot : cfg.rot;
+    ox = c[0] + cfg.dx;
+    oy = c[1] + cfg.dy;
+    oz = c[2] + cfg.dz;
+  } else {
+    const tx = isPaint ? c[0] : (c[0]+n[0]), ty = isPaint ? c[1] : (c[1]+n[1]), tz = isPaint ? c[2] : (c[2]+n[2]);   // construir = hueco adyacente; pintar = celda apuntada
+    if(!mcInside(tx,ty,tz)){ if(mc.preview) mcClearPreview(); return; }
+    await mcStructCells(sk);                                                    // asegura la huella para centrar bien
+    rot=mcPreviewOri();
+    [ox,oy,oz]=mcStructOrigin(sk, tx,ty,tz, rot, isPaint ? [0,1,0] : n);    // orientación a mano (R giro / Shift+R vuelco); centro en suelo, canto en pared
+  }
   const memo=sk+'|'+ox+'|'+oy+'|'+oz+'|'+rot;
   if(memo===mc.previewKey || memo===mc.previewBusy) return;      // ya dibujada o en construcción → nada que hacer
   mc.previewBusy=memo;
@@ -11612,18 +12200,68 @@ function mcDrawOverlays(pj, view){
     mcPushBoxTris(notes, x+0.34,y+1.16,z+0.44, x+0.66,y+1.5,z+0.5, 1,0.84,0.22);   // hoja del post-it (cara amarilla)
     mcPushBoxTris(notes, x+0.47,y+1.0,z+0.47,  x+0.53,y+1.18,z+0.53, 0.55,0.4,0.12); // «pincho» que lo clava al bloque
   }
-  // 4) Herramienta Seleccionar: caja CIAN de la selección confirmada + previa ámbar de la esquina A hacia la mira.
+  // 4) Herramienta Seleccionar: caja CIAN viva de la selección confirmada + previa ámbar con corchetes y rejilla
   const selLines=[];
-  if(mc.selBox && mc.tool==='select'){ const a=mc.selBox.a, b=mc.selBox.b;
-    mcPushBoxEdges(selLines, Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.min(a[2],b[2]),
-                             Math.max(a[0],b[0])+1,Math.max(a[1],b[1])+1,Math.max(a[2],b[2])+1, 0.3,0.9,1);
-  }
-  if(mc.tool==='select' && mc.selA && playing){ const near=mcRaycast();
-    if(near && near.cell[1]>=0){ const a=mc.selA, c=near.cell;
-      mcPushBoxEdges(selLines, Math.min(a[0],c[0]),Math.min(a[1],c[1]),Math.min(a[2],c[2]),
-                               Math.max(a[0],c[0])+1,Math.max(a[1],c[1])+1,Math.max(a[2],c[2])+1, 1,0.85,0.2);
+  if(mc.tool==='select' && !mc.escaparate){
+    const cyan = [0.15, 0.95, 1.0];
+    const amb = [1.0, 0.88, 0.15];
+    if(mc.selBox){
+      const a=mc.selBox.a, b=mc.selBox.b;
+      const x0=Math.min(a[0],b[0]), x1=Math.max(a[0],b[0])+1;
+      const y0=Math.min(a[1],b[1]), y1=Math.max(a[1],b[1])+1;
+      const z0=Math.min(a[2],b[2]), z1=Math.max(a[2],b[2])+1;
+      mcPushBoxEdges(selLines, x0, y0, z0, x1, y1, z1, cyan[0], cyan[1], cyan[2]);
+      mcPushCornerBrackets(selLines, x0, y0, z0, x1, y1, z1, 0.65, cyan[0], cyan[1], cyan[2]);
+      mcPushGridDividers(selLines, x0, y0, z0, x1, y1, z1, 0.25, 0.85, 0.95);
+      // Marcador de las esquinas extremas
+      mcPushCornerBrackets(selLines, a[0], a[1], a[2], a[0]+1, a[1]+1, a[2]+1, 0.35, 1.0, 0.85, 0.2);
+      mcPushCornerBrackets(selLines, b[0], b[1], b[2], b[0]+1, b[1]+1, b[2]+1, 0.35, 1.0, 0.85, 0.2);
+    }
+    if(mc.selA && playing){
+      const near=mcRaycast();
+      if(near && near.cell[1]>=0){
+        const a=mc.selA, c=near.cell;
+        const x0=Math.min(a[0],c[0]), x1=Math.max(a[0],c[0])+1;
+        const y0=Math.min(a[1],c[1]), y1=Math.max(a[1],c[1])+1;
+        const z0=Math.min(a[2],c[2]), z1=Math.max(a[2],c[2])+1;
+        mcPushBoxEdges(selLines, x0, y0, z0, x1, y1, z1, amb[0], amb[1], amb[2]);
+        mcPushCornerBrackets(selLines, x0, y0, z0, x1, y1, z1, 0.55, amb[0], amb[1], amb[2]);
+        mcPushGridDividers(selLines, x0, y0, z0, x1, y1, z1, 0.9, 0.8, 0.3);
+        // Esquina A fija
+        mcPushBoxEdges(selLines, a[0], a[1], a[2], a[0]+1, a[1]+1, a[2]+1, cyan[0], cyan[1], cyan[2]);
+        mcPushCornerBrackets(selLines, a[0], a[1], a[2], a[0]+1, a[1]+1, a[2]+1, 0.4, cyan[0], cyan[1], cyan[2]);
+      }
+    } else if(!mc.selBox && playing){
+      // Hover inicial sobre el bloque para marcar esquina A
+      const near=mcRaycast();
+      if(near && near.cell[1]>=0 && mcSolid(near.cell[0], near.cell[1], near.cell[2])){
+        const c=near.cell;
+        mcPushBoxEdges(selLines, c[0], c[1], c[2], c[0]+1, c[1]+1, c[2]+1, cyan[0], cyan[1], cyan[2]);
+        mcPushCornerBrackets(selLines, c[0], c[1], c[2], c[0]+1, c[1]+1, c[2]+1, 0.4, cyan[0], cyan[1], cyan[2]);
+      }
     }
   }
+
+  // 4b) Modo Pegar (Ctrl+V): caja, rejilla y corchetes en esquina sobre la superficie apuntada
+  if(playing && mc.pasteActive && clipboard && clipboard.cells && clipboard.cells.length){
+    const near = mcRaycast(mcReach(), true);
+    if(near){
+      const dims = mcClipboardDims();
+      if(dims){
+        const rot = (mc.pasteRot || 0) & 3;
+        const rw = (rot % 2 === 0) ? dims.w : dims.d;
+        const rd = (rot % 2 === 0) ? dims.d : dims.w;
+        const rh = dims.h;
+        const n = near.normal;
+        const bx = near.cell[0] + n[0], by = near.cell[1] + n[1], bz = near.cell[2] + n[2];
+        const cyan = [0.2, 0.9, 1.0];
+        mcPushBoxEdges(selLines, bx, by, bz, bx + rw, by + rh, bz + rd, cyan[0], cyan[1], cyan[2]);
+        mcPushCornerBrackets(selLines, bx, by, bz, bx + rw, by + rh, bz + rd, 0.45, cyan[0], cyan[1], cyan[2]);
+        mcPushGridDividers(selLines, bx, by, bz, bx + rw, by + rh, bz + rd, 0.25, 0.85, 0.95);
+      }
+    }
+  }
+
   // 5) Herramienta Volumen (tool === 'box'): caja, rejilla y guías de esquina verdes/blancas
   const boxLines=[];
   if(mc.tool==='box' && !mc.escaparate){
@@ -11694,9 +12332,48 @@ function mcDrawOverlays(pj, view){
       }
     }
   }
+
+  const toolDebugLines = [];
+  if(mc.showTool && mc.toolDebug && mc._heldToolStruct && mc._heldToolStruct.model){
+    const M = mc._heldToolStruct.model;
+    const s = mc._heldToolStruct;
+    const piv = (s && s.assetPivot) ? s.assetPivot : [0.5, 0.5, 0.5];
+    const tf = (vx, vy, vz) => {
+      return [M[0]*vx+M[4]*vy+M[8]*vz+M[12], M[1]*vx+M[5]*vy+M[9]*vz+M[13], M[2]*vx+M[6]*vy+M[10]*vz+M[14]];
+    };
+    // Pivote "1" del asset — en espacio modelo [0..1], transformado por M a mundo
+    const p0 = tf(piv[0], piv[1], piv[2]);
+    // Ejes locales: longitud 0.1 en espacio modelo (~10% del modelo)
+    const px = tf(piv[0]+0.1, piv[1], piv[2]);
+    const py = tf(piv[0], piv[1]+0.1, piv[2]);
+    const pz = tf(piv[0], piv[1], piv[2]+0.1);
+    const addL = (a, b, r, g, bl) => mcPushLine(toolDebugLines, a[0],a[1],a[2], b[0],b[1],b[2], r,g,bl);
+    // Ejes: X=rojo, Y=verde, Z=azul
+    addL(p0, px, 1, 0.15, 0.15);
+    addL(p0, py, 0.15, 1, 0.15);
+    addL(p0, pz, 0.2, 0.6, 1);
+    // Cruz amarilla también en espacio modelo para que sea proporcional al tamaño de la herramienta
+    const S = 0.06; // 6% del tamaño del modelo en cada eje
+    const cx0 = tf(piv[0]-S, piv[1], piv[2]), cx1 = tf(piv[0]+S, piv[1], piv[2]);
+    const cy0 = tf(piv[0], piv[1]-S, piv[2]), cy1 = tf(piv[0], piv[1]+S, piv[2]);
+    const cz0 = tf(piv[0], piv[1], piv[2]-S), cz1 = tf(piv[0], piv[1], piv[2]+S);
+    addL(cx0, cx1, 1, 0.9, 0);
+    addL(cy0, cy1, 1, 0.9, 0);
+    addL(cz0, cz1, 1, 0.9, 0);
+    // Caja delimitadora del modelo vóxel (0..1 en espacio modelo)
+    const c000 = tf(0,0,0), c100 = tf(1,0,0), c010 = tf(0,1,0), c110 = tf(1,1,0);
+    const c001 = tf(0,0,1), c101 = tf(1,0,1), c011 = tf(0,1,1), c111 = tf(1,1,1);
+    addL(c000, c100, 0.6, 0.6, 0.6); addL(c010, c110, 0.6, 0.6, 0.6);
+    addL(c001, c101, 0.6, 0.6, 0.6); addL(c011, c111, 0.6, 0.6, 0.6);
+    addL(c000, c010, 0.6, 0.6, 0.6); addL(c100, c110, 0.6, 0.6, 0.6);
+    addL(c001, c011, 0.6, 0.6, 0.6); addL(c101, c111, 0.6, 0.6, 0.6);
+    addL(c000, c001, 0.6, 0.6, 0.6); addL(c100, c101, 0.6, 0.6, 0.6);
+    addL(c010, c011, 0.6, 0.6, 0.6); addL(c110, c111, 0.6, 0.6, 0.6);
+  }
+
   const showGhost=lines.length && mc.ghostAlpha>0;
   const showStruct=structLines.length && mc.structGhostAlpha>0;
-  if(!showGhost && !showStruct && !paintLines.length && !xray.length && !xrayLines.length && !notes.length && !selLines.length && !boxLines.length) return;
+  if(!showGhost && !showStruct && !paintLines.length && !xray.length && !xrayLines.length && !notes.length && !selLines.length && !boxLines.length && !toolDebugLines.length) return;
 
   gl.useProgram(mc.structProg);
   gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
@@ -11708,6 +12385,13 @@ function mcDrawOverlays(pj, view){
   if(SL.aEmit >= 0) gl.vertexAttrib1f(SL.aEmit, 1.0);
   if(SL.aAlpha >= 0) gl.vertexAttrib1f(SL.aAlpha, 1.0);
   mcAttribs([SL.aPos, SL.aColor, SL.aShade]);   // deja habilitados SOLO estos 3; ningún atributo huérfano con VBO nulo
+  // Gizmo de depuración de agarre de la herramienta (game.showTool.debug): sin profundidad para verlo siempre encima
+  if(toolDebugLines.length){
+    gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+    gl.enable(gl.BLEND); gl.blendColor(0,0,0,1.0); gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+    mcDrawArr(SL, toolDebugLines, gl.LINES);
+    gl.disable(gl.BLEND);
+  }
   // Rayos-X: relleno translúcido (alpha constante vía blendColor) y SIN test de profundidad (atraviesa muros).
   if(xray.length){
     gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
@@ -11729,7 +12413,7 @@ function mcDrawOverlays(pj, view){
   if(showStruct){       gl.blendColor(0,0,0,mc.structGhostAlpha); mcDrawArr(SL, structLines, gl.LINES); }
   if(paintLines.length){gl.blendColor(0,0,0,0.95);                mcDrawArr(SL, paintLines,  gl.LINES); }
   if(notes.length){     gl.blendColor(0,0,0,mc.noteAlpha);        mcDrawArr(SL, notes,       gl.TRIANGLES); }   // t1 · post-its (relleno, ocluidos por muros)
-  if(selLines.length){  gl.blendColor(0,0,0,0.9);                 mcDrawArr(SL, selLines,    gl.LINES); }    // herramienta Seleccionar: caja(s) de selección
+  if(selLines.length){  gl.blendColor(0,0,0,0.98);                mcDrawArr(SL, selLines,    gl.LINES); }    // herramienta Seleccionar: caja(s) de selección
   if(boxLines.length){  gl.blendColor(0,0,0,0.95);                mcDrawArr(SL, boxLines,    gl.LINES); }    // herramienta Volumen: caja y guías de esquina
   gl.disable(gl.BLEND);
   gl.depthMask(true); gl.enable(gl.DEPTH_TEST);   // restaura estado para el próximo frame
@@ -11978,6 +12662,7 @@ function mcRaycast(maxd, hitStruct){   // desde el ojo, dirección de mirada; de
 function mcAimBoxHit(fx0,fy0,fz0,fx1,fy1,fz1){
   const T=MC_TILE;
   for(const s of mc.structures){
+    if(s._isHeldTool) continue;
     const g=mcStructColl(s); if(!g) continue;
     const bits=g.bitsAim||g.bits;
     const d=g.fdim, bx=s.ox*T, by=s.oy*T, bz=s.oz*T, E=s.esc;
@@ -12035,6 +12720,7 @@ function mcStructRayHit(x,y,z, o,d, t0){
 function mcStructAt(px,py,pz){
   const T=MC_TILE, fx=Math.floor(px*T), fy=Math.floor(py*T), fz=Math.floor(pz*T);
   for(const s of mc.structures){
+    if(s._isHeldTool) continue;
     const g=mcStructColl(s); if(!g) continue;
     const bits=g.bitsAim||g.bits;                      // qué estructura estoy señalando, aunque se atraviese
     const d=g.fdim, E=s.esc;                           // escala (REQ-AGESC1): mundo → coords de la pieza
@@ -12107,7 +12793,7 @@ function mcRejillaRayHit(x,y,z, o,d, t0){
 // se mantiene en pie durante el re-horneado: mcStructColl cae al bitset de colRot, que NO se invalida aquí.
 async function mcRestampAll(){
   for(const k in mc.structs){ if(mc.structs[k]) mc.structs[k].meshRot={}; }   // solo la geometría; colRot (colisión) sigue viva
-  const insts=mc.structures.slice();   // las instancias VIVAS siguen dibujándose mientras se re-hornean (no se liberan aún)
+  const insts=mc.structures.filter(s => !s._isHeldTool);   // las instancias VIVAS de mapa (la herramienta en mano se excluye)
   await mcBuildStructAtlas();          // el atlas recolecta claves de las estructuras vivas (siguen en mc.structures)
   // emitCells de cada inst desde su geom CACHEADO (posición-independiente). Las instancias cargadas de disco son
   // {key,ox,oy,oz,rot} SIN emitCells, así que hay que poblarlo ANTES de la luz de bloque; si no, mcRecomputeHasGlow
@@ -12354,9 +13040,21 @@ function mcUseRight(){ if(mc.tool==='paint') mcPickBlock(); else mcPlace(); }
 // Herramientas PASIVAS: no rompen, no colocan y no estampan. Las rutas de estructura
 // y la repetición al mantener pulsado tienen que preguntar por esto y no
 // por `tool!=='select'`, o cada herramienta nueva vuelve a colocar bloques por la puerta de atrás.
-function mcToolPasiva(){ return mc.tool==='select' || mc.tool==='pick' || mc.tool==='box'; }
+function mcToolPasiva(){ return mc.tool==='select' || mc.tool==='pick' || mc.tool==='box' || !!mc.pasteActive; }
 // Acción de un botón de ratón (para el clic inicial y la repetición al mantener pulsado).
 function mcDoAction(btn){
+  // Modo Pegar (Ctrl+V): clic izquierdo (0) planta los bloques previsualizados, clic derecho (2) cancela
+  if(mc.pasteActive){
+    if(btn===0) mcPasteConfirm();
+    else if(btn===2) mcPasteCancel();
+    mcRevealHotbar();
+    return;
+  }
+  // Solo la herramienta pico ('build') con clic izquierdo (0) realiza la animación de picar
+  if((mc.tool === 'build' || !mc.tool) && btn === 0){
+    mc._toolSwingT = performance.now();
+  }
+
   // REQ-OSD4 · en una pantalla incrustada (?osd=1) el clic izquierdo PULSA el bloque, no lo rompe: un
   // menú donde el botón «JUGAR» se desintegra al pulsarlo no es un menú. Va lo primero, antes que
   // cualquier herramienta, porque en escaparate ninguna de ellas tiene sentido.
@@ -12365,6 +13063,16 @@ function mcDoAction(btn){
   // está suelto, así que esto no debería alcanzarse nunca: es el cinturón, por si un camino nuevo
   // (un mando táctil, un script) llamara aquí sin pasar por el ratón.
   if(mc.osdAbierta) return;
+  if(mc.notePlacing){
+    const hit = mcRaycast(mcReach(), true);
+    if(hit){
+      const cell = hit.cell.slice();
+      const rot = (mc.notePlaceRot !== undefined) ? mc.notePlaceRot : mcCartelCfg().rot;
+      mcCancelNotePlace();
+      mcOpenNote(cell, rot);
+    }
+    return;
+  }
   if(mc.tool==='select'){ if(btn===0) mcSelectClick(); else if(btn===2) mcSelectClear(); mcRevealHotbar(); return; }   // Seleccionar: izq marca esquinas, dcho limpia (NO rompe/pone)
   if(mc.tool==='pick'){ mcPickBlock(); mcRevealHotbar(); return; }   // Cuentagotas: los DOS botones pillan; ninguno rompe ni pone
   if(mc.tool==='paint'){ if(btn===0) mcPaint(); else if(btn===2) mcPickBlock(); mcRevealHotbar(); return; } // Pintar: izq pinta, dcho cuentagotas
@@ -12598,6 +13306,26 @@ function mcCopySelection(){
   toast(raw.length+' bloque(s) copiados — Ctrl+V para pegar en el editor');
   return true;
 }
+// Ctrl+X: corta la selección a `clipboard` (copia y limpia los bloques del mapa con historial)
+function mcCutSelection(){
+  if(!mc.selBox){ toast(mc.tool==='select'?'Nada seleccionado (marca 2 esquinas)':'Usa la herramienta Seleccionar (P)'); return false; }
+  let minx=Infinity,miny=Infinity,minz=Infinity, maxx=-Infinity,maxy=-Infinity; const raw=[];
+  const edits=[];
+  mcSelForEach((x,y,z,id)=>{ const key=mc.blockKey[id]; if(!key) return;
+    raw.push({x,y,z,key});
+    if(x<minx)minx=x; if(z<miny)miny=z; if(y<minz)minz=y;
+    if(x>maxx)maxx=x; if(z>maxy)maxy=z;
+    mc.grid[mcIdx(x,y,z)]=0; mcDirty(x,y,z); mcGlowTocada(x,y,z);
+    edits.push({x,y,z,before:id,after:0});
+  });
+  if(!raw.length){ toast('Nada que cortar'); return false; }
+  clipboard={ cells:raw.map(v=>({ dx:v.x-minx, dy:v.z-miny, dz:v.y-minz, c:'tex:'+v.key })),
+              gx:Math.floor((maxx-minx)/2), gy:Math.floor((maxy-miny)/2) };
+  if(edits.length){ mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave(); }
+  toast(raw.length+' bloque(s) cortados al portapapeles — Ctrl+V para pegar');
+  return true;
+}
+
 // Ctrl+V dentro del Mundo: pega el portapapeles EN EL MAPA, apoyado en la cara apuntada (esquina min en la celda
 // vacía adyacente, como colocar un bloque). El Mundo NO se cierra (se cierra a mano). Portapapeles del editor y del
 // Mundo es el MISMO, así que sirve tanto para copiar aquí→pegar allí como para cortar en el editor 3D→pegar aquí.
@@ -12655,26 +13383,52 @@ function mcRotateSelBox(){
   toast('Selección rotada 90°');
   return true;
 }
-async function mcPasteWorld(){
-  if(!clipboard || !clipboard.cells || !clipboard.cells.length){ toast('Nada que pegar (Ctrl+C/X primero)'); return; }
-  const hit=mcRaycast(mcReach(), true); if(!hit){ toast('Apunta dónde pegar'); return; }
-  const c=hit.cell, n=hit.normal, bx=c[0]+n[0], by=c[1]+n[1], bz=c[2]+n[2];   // celda vacía pegada a la cara = esquina min
-  const keyId={}, colorId={}; let fellBack=0;
-  for(const cel of clipboard.cells){ const v=cel.c;
-    if(typeof v==='string' && v.slice(0,4)==='tex:'){ const key=v.slice(4);   // tex: → resuelve (o crea) su id de mundo
-      if(!(key in keyId)) keyId[key]=await mcAddBlock(key); }
-    else { const hx=String(v);                                               // color puro → material existente más parecido
-      if(!(hx in colorId)) colorId[hx]=mcNearestMaterial(hx); }
+function mcPasteWorld(){
+  if(!clipboard || !clipboard.cells || !clipboard.cells.length){
+    toast('Nada que pegar (Ctrl+C en Seleccionar o editor primero)');
+    return;
   }
+  mc.pasteActive = true;
+  mc.pasteRot = 0;
+  mc._pasteCache = null;
+  toast('Pegar: mueve la mira para posicionar · Clic izq planta · R rota · Clic dcho cancela');
+}
+
+async function mcPasteConfirm(){
+  if(!mc.pasteActive || !clipboard || !clipboard.cells || !clipboard.cells.length){
+    mc.pasteActive = false;
+    return;
+  }
+  const hit = mcRaycast(mcReach(), true);
+  if(!hit){ toast('Apunta a una superficie para pegar'); return; }
+  const c = hit.cell, n = hit.normal, bx = c[0] + n[0], by = c[1] + n[1], bz = c[2] + n[2];
+  const dims = mcClipboardDims();
+  const rot = (mc.pasteRot || 0) & 3;
+
+  const keyId={}, colorId={}; let fellBack=0;
+  for(const cel of clipboard.cells){
+    const v=cel.c;
+    if(typeof v==='string' && v.slice(0,4)==='tex:'){
+      const key=v.slice(4);
+      if(!(key in keyId)) keyId[key]=await mcAddBlock(key);
+    } else {
+      const hx=String(v);
+      if(!(hx in colorId)) colorId[hx]=mcNearestMaterial(hx);
+    }
+  }
+
   const edits=[]; let minx=Infinity,miny=Infinity,minz=Infinity,maxx=-Infinity,maxy=-Infinity,maxz=-Infinity;
-  for(const cel of clipboard.cells){ const v=cel.c;
+  for(const cel of clipboard.cells){
+    const v=cel.c;
     let id, isColor=false;
     if(typeof v==='string' && v.slice(0,4)==='tex:') id=keyId[v.slice(4)];
     else { id=colorId[String(v)]; isColor=true; }
     if(!id) continue;
-    const wx=bx+cel.dx, wy=by+cel.dz, wz=bz+cel.dy;                            // editor(dx,dy,dz) → mundo(x, z, y)
+    const [rx, rz] = dims ? mcRotXZ(cel.dx, cel.dy, rot, dims.w, dims.d) : [cel.dx, cel.dy];
+    const ry = cel.dz;
+    const wx = bx + rx, wy = by + ry, wz = bz + rz;
     if(!mcInside(wx,wy,wz)) continue;
-    if(wx<minx)minx=wx; if(wy<miny)miny=wy; if(wz<minz)minz=wz;                // caja de lo pegado, para dejarlo seleccionado
+    if(wx<minx)minx=wx; if(wy<miny)miny=wy; if(wz<minz)minz=wz;
     if(wx>maxx)maxx=wx; if(wy>maxy)maxy=wy; if(wz>maxz)maxz=wz;
     const before=mc.grid[mcIdx(wx,wy,wz)]; if(before===id) continue;
     mc.grid[mcIdx(wx,wy,wz)]=id; mcDirty(wx,wy,wz); mcGlowTocada(wx,wy,wz); edits.push({x:wx,y:wy,z:wz,before,after:id});
@@ -12682,10 +13436,20 @@ async function mcPasteWorld(){
   }
   if(minx===Infinity){ toast('Nada colocado (fuera del mapa o sin material)'); return; }
   if(edits.length){ mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave(); }
-  mc.selBox={a:[minx,miny,minz], b:[maxx,maxy,maxz]}; mc.selA=null;            // deja lo pegado seleccionado: Ctrl+C / R (rotar) siguen operando sobre ello
-  mcSetPlayerTool('select', false);
-  toast((edits.length||'0')+' bloque(s) pegados y seleccionados'+(fellBack?' · '+fellBack+' de color al material más parecido':'')+' · R rota');
+  mc.selBox={a:[minx,miny,minz], b:[maxx,maxy,maxz]}; mc.selA=null;
+  mc.pasteActive = false;
+  mc._pasteCache = null;
+  toast((edits.length||'0')+' bloque(s) plantados'+(fellBack?' · '+fellBack+' de color al material más parecido':'')+' · R rota');
 }
+
+function mcPasteCancel(){
+  if(mc.pasteActive){
+    mc.pasteActive = false;
+    mc._pasteCache = null;
+    toast('Pegado cancelado');
+  }
+}
+
 // --- t1 · notas post-it sobre un bloque ---
 function mcNoteKey(c){ return c[0]+','+c[1]+','+c[2]; }
 const MC_NOTE_MAX=280;                                  // tope de una nota (post-it, no un ensayo)
@@ -12729,8 +13493,12 @@ function mcNoteSignOrigin(k){                                        // por defe
 // ¿Hay algún cartel de más, de menos o plantado con otros ajustes? Es el chequeo barato que corre en
 // el bucle: recorre las estructuras (no las notas), y solo si no cuadra se paga la sincronización.
 function mcNoteSignsDesfasados(){
-  const quiere=mc.noteSigns!==false, firma=mcCartelFirma(); let n=0;
-  for(const s of mc.structures) if(s.nota){ if(!quiere || !mc.notes[s.nota] || s.cartel!==firma) return true; n++; }
+  const quiere=mc.noteSigns!==false, c=mcCartelCfg(), firma=mcCartelFirma(); let n=0;
+  for(const s of mc.structures) if(s.nota){
+    const wantedRot = (mc.noteRots && mc.noteRots[s.nota] !== undefined) ? mc.noteRots[s.nota] : c.rot;
+    if(!quiere || !mc.notes[s.nota] || s.cartel!==firma || (s.rot|0)!==wantedRot) return true;
+    n++;
+  }
   return n!==(quiere ? Math.min(Object.keys(mc.notes).length, MC_NOTE_SIGN_MAX) : 0);
 }
 // Las sincronizaciones se ENCOLAN, no se descartan: estampar es asíncrono, y una nota escrita
@@ -12745,7 +13513,8 @@ async function mcSyncNoteSignsRun(){
   if(!mc.grid) return;
   const quiere=mc.noteSigns!==false, c=mcCartelCfg(), firma=mcCartelFirma(), tienen=new Map();
   for(const s of mc.structures.slice()) if(s.nota){
-    if(quiere && mc.notes[s.nota] && s.cartel===firma && !tienen.has(s.nota)) tienen.set(s.nota, s);
+    const wantedRot = (mc.noteRots && mc.noteRots[s.nota] !== undefined) ? mc.noteRots[s.nota] : c.rot;
+    if(quiere && mc.notes[s.nota] && s.cartel===firma && (s.rot|0)===wantedRot && !tienen.has(s.nota)) tienen.set(s.nota, s);
     else mcRemoveStruct(s, true);                       // nota borrada, carteles apagados, ajustes cambiados o duplicado
   }
   if(!quiere) return;
@@ -12759,9 +13528,10 @@ async function mcSyncNoteSignsRun(){
     if(plantados>=MC_NOTE_SIGN_LOTE) break;
     const o=mcNoteSignOrigin(k);
     if(!mcInside(o[0],o[1],o[2])) continue;
-    const s=await mcStampStruct(c.palo?MC_NOTE_SIGN:MC_NOTE_SIGN_PLANO, o[0],o[1],o[2], c.rot, true, c.esc);
+    const rot = (mc.noteRots && mc.noteRots[k] !== undefined) ? mc.noteRots[k] : c.rot;
+    const s=await mcStampStruct(c.palo?MC_NOTE_SIGN:MC_NOTE_SIGN_PLANO, o[0],o[1],o[2], rot, true, c.esc);
     if(!s) continue;
-    s.efimera=true; s.nota=k; s.cartel=firma;           // marcar DESPUÉS del await: antes no hay instancia viva
+    s.efimera=true; s.nota=k; s.cartel=firma; s.noteRot=rot;           // marcar DESPUÉS del await: antes no hay instancia viva
     tienen.set(k, s); plantados++;
   }
 }
@@ -13053,14 +13823,41 @@ function mcDrawNoteTexts(pj, view){
   }
   if(listo){ gl.depthMask(true); gl.disable(gl.BLEND); }
 }
+let mcCurNoteRot = 0, mcOrigNoteRot = 0;
+function mcSetNoteRotUI(r, livePreview){
+  mcCurNoteRot = (r | 0) & 3;
+  document.querySelectorAll('.mc-note-rot-btn').forEach(btn => {
+    const br = parseInt(btn.getAttribute('data-rot'), 10);
+    btn.classList.toggle('active', br === mcCurNoteRot);
+  });
+  if(livePreview && mc.noteCell){
+    const k = mcNoteKey(mc.noteCell);
+    if(mc.notes[k]){
+      mc.noteRots[k] = mcCurNoteRot;
+      mcSyncNoteSigns();
+    }
+  }
+}
+function mcStartNotePlace(){
+  mc.notePlacing = true;
+  const playerRot = Math.round(((mc.yaw * 180 / Math.PI) % 360 + 360) / 90 + 2) % 4;
+  mc.notePlaceRot = playerRot;
+  mcClearPreview();
+  mcUpdatePreview();
+  mcSyncHeldToolStruct();
+  toast('📝 Modo Cartel: Apunta y haz Clic para plantar (R: girar, Esc: cancelar)');
+}
+function mcCancelNotePlace(){
+  mc.notePlacing = false;
+  mcClearPreview();
+}
 // Tecla N: abre el panel para el bloque apuntado (crea o edita). Como el editor libera el ratón, guarda la celda.
-function mcOpenNote(){
-  // hitStruct=true: sin él el rayo ATRAVIESA el cartel (una estructura fina no cuenta salvo que se
-  // pida), y la N mirando al cartel abría una nota en la pared del fondo.
-  const hit=mcRaycast(mcReach(), true); if(!hit){ toast('Apunta a un bloque para anotarlo'); return; }
-  // Apuntar al CARTEL es apuntar a su nota: si no, la N sobre un cartel abriría una nota nueva en el
-  // aire, justo encima de la que se quería leer.
-  const cell=mcNoteAnchor(hit.cell)||hit.cell;
+function mcOpenNote(cellOverride, rotOverride){
+  let cell = cellOverride;
+  if(!cell){
+    const hit=mcRaycast(mcReach(), true); if(!hit){ toast('Apunta a un bloque para anotarlo'); return; }
+    cell=mcNoteAnchor(hit.cell)||hit.cell;
+  }
   mc.noteCell=cell.slice();
   const k=mcNoteKey(cell);
   const cur=mc.notes[k]||'';
@@ -13068,24 +13865,58 @@ function mcOpenNote(){
   const ta=$('#mc-note-text'); ta.value=cur; ta.maxLength=MC_NOTE_MAX;
   $('#mc-note-del').hidden=!cur;                        // «Borrar» solo si ya había nota
   
+  let curRot;
+  if(rotOverride !== undefined){
+    curRot = rotOverride;
+  } else if(mc.noteRots && mc.noteRots[k] !== undefined){
+    curRot = mc.noteRots[k];
+  } else if(cur){
+    curRot = mcCartelCfg().rot;
+  } else {
+    curRot = Math.round(((mc.yaw * 180 / Math.PI) % 360 + 360) / 90 + 2) % 4;
+  }
+  mcOrigNoteRot = curRot;
+  mcSetNoteRotUI(curRot, false);
+
   const hasTrace = (typeof game !== 'undefined' && game.noteTraces && (game.noteTraces[k] || game.noteTraces[cell[0] + ',' + (cell[1]-1) + ',' + cell[2]] || game.noteTraces[cell[0] + ',' + (cell[1]+1) + ',' + cell[2]]));
   const traceBtn = $('#mc-note-trace');
   if (traceBtn) traceBtn.hidden = !hasTrace;
 
-  $('#mc-note').hidden=false; setTimeout(()=>{ ta.focus(); ta.select(); }, 0);
+  const noteEl = $('#mc-note');
+  noteEl.hidden = false;
+  setTimeout(()=>{ ta.focus(); ta.select(); }, 0);
 }
-function mcCloseNote(){ $('#mc-note').hidden=true; mc.noteCell=null; }
+function mcCloseNote(cancelar){
+  const noteEl = $('#mc-note');
+  if(noteEl) noteEl.hidden = true;
+  if(cancelar && mc.noteCell){
+    const k = mcNoteKey(mc.noteCell);
+    if(mc.notes[k] && mc.noteRots[k] !== mcOrigNoteRot){
+      mc.noteRots[k] = mcOrigNoteRot;
+      mcSyncNoteSigns();
+    }
+  }
+  mc.noteCell = null;
+}
 function mcSaveNote(){
   if(mc.noteCell){ const k=mcNoteKey(mc.noteCell), txt=$('#mc-note-text').value.trim();
-    if(txt){ mc.notes[k]=txt.slice(0,MC_NOTE_MAX); toast('Nota guardada'); }
-    else if(mc.notes[k]){ delete mc.notes[k]; toast('Nota borrada'); }   // guardar en blanco = borrar
+    if(txt){
+      mc.notes[k]=txt.slice(0,MC_NOTE_MAX);
+      mc.noteRots[k]=mcCurNoteRot & 3;
+      toast('Nota guardada');
+    }
+    else if(mc.notes[k]){
+      delete mc.notes[k];
+      delete mc.noteRots[k];
+      toast('Nota borrada');
+    }   // guardar en blanco = borrar
     mcDirtyHeader();
     mcScheduleSave();
     mcSyncNoteSigns();                                                  // …y el cartel aparece/desaparece con ella
   }
-  mcCloseNote();
+  mcCloseNote(false);
 }
-function mcDeleteNote(){ if(mc.noteCell){ delete mc.notes[mcNoteKey(mc.noteCell)]; mcDirtyHeader(); mcScheduleSave(); mcSyncNoteSigns(); toast('Nota borrada'); } mcCloseNote(); }
+function mcDeleteNote(){ if(mc.noteCell){ const k=mcNoteKey(mc.noteCell); delete mc.notes[k]; if(mc.noteRots) delete mc.noteRots[k]; mcDirtyHeader(); mcScheduleSave(); mcSyncNoteSigns(); toast('Nota borrada'); } mcCloseNote(false); }
 
 function mcShowTraceModal(){
   if(!mc.noteCell) return;
@@ -13894,6 +14725,7 @@ function mcFichaFoto(){
     rumbo: MC_RUMBOS[Math.round(yaw360/45)%8],
     escala: +mc.scale.toFixed(2),
     apunta,
+    tool: mc.showTool ? { key: mc._heldToolKey, vbo: mc._heldToolStruct ? (mc._heldToolStruct.colCount || mc._heldToolStruct.texCount) : 0, pos: mc.toolPos, rot: mc.toolRot, scale: mc.toolScale } : null,
     ancho: cv.width, alto: cv.height,
     fecha: new Date().toISOString()
   };
@@ -13910,7 +14742,8 @@ function mcPintaFicha(ctx, f, w, y, h){
   ctx.textBaseline='middle';
   ctx.font='600 '+px+'px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
   ctx.fillStyle='#e7ecf4';
-  ctx.fillText(f.mapa+'  ·  '+f.pos.join(', ')+'  ·  mirando '+f.rumbo+' ('+f.yaw+'° / '+f.pitch+'°)',
+  const tInfo = f.tool ? ('  ·  🗡️ ' + f.tool.key + ' (' + f.tool.vbo + 'v, p:' + (f.tool.pos||[]).join(',') + ' s:' + f.tool.scale + ')') : '';
+  ctx.fillText(f.mapa+'  ·  '+f.pos.join(', ')+'  ·  mirando '+f.rumbo+' ('+f.yaw+'° / '+f.pitch+'°)' + tInfo,
                izq, y+h*0.32);
   ctx.font=px*0.82+'px ui-monospace,SFMono-Regular,Menlo,monospace';
   ctx.fillStyle='#8a93a6';
@@ -13967,6 +14800,454 @@ function mcFoto(){
       return Object.assign({ficha, portapapeles}, res);
     })
     .catch(e=>{ toast('📷 no se pudo guardar la foto: '+e, 4); return null; });
+}
+
+// ---- REQ-REC1: Grabación, Edición y Exportación de Vídeo de Gameplay (Alt+V) ----
+let mcMediaRecorder = null, mcVideoChunks = [], mcVideoStartT = 0, mcVideoTimer = null;
+let mcCurrentVideoBlob = null, mcCurrentVideoMeta = null;
+let mcVideoCanvas = null, mcVideoCtx = null;
+
+try{
+  const vcfg = JSON.parse(localStorage.getItem('vf_mcVideoCfg'));
+  if(vcfg && typeof vcfg === 'object') Object.assign(mc.videoCfg, vcfg);
+}catch(e){}
+
+function mcSaveVideoCfg(){
+  try{ localStorage.setItem('vf_mcVideoCfg', JSON.stringify(mc.videoCfg)); }catch(e){}
+}
+
+function mcCompositaVideoFrame(){
+  if(!mc.active || !mc.canvas) return;
+  if(!mcVideoCanvas){
+    mcVideoCanvas = document.createElement('canvas');
+  }
+  if(mcVideoCanvas.width !== mc.canvas.width || mcVideoCanvas.height !== mc.canvas.height){
+    mcVideoCanvas.width = mc.canvas.width;
+    mcVideoCanvas.height = mc.canvas.height;
+    mcVideoCtx = mcVideoCanvas.getContext('2d');
+  }
+  const ctx = mcVideoCtx;
+  if(!ctx) return;
+  const w = mcVideoCanvas.width, h = mcVideoCanvas.height;
+  const cfg = mc.videoCfg || {};
+
+  // 1. Dibujar el fotograma 3D WebGL
+  ctx.drawImage(mc.canvas, 0, 0);
+
+  // 2. Punto de mira (crosshair)
+  if(cfg.crosshair !== false){
+    const cx = Math.round(w / 2), cy = Math.round(h / 2);
+    const r = Math.max(5, Math.round(w / 160));
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.lineWidth = Math.max(1.5, Math.round(w / 700));
+    ctx.beginPath();
+    ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy);
+    ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r);
+    ctx.stroke();
+  }
+
+  // 3. Contador de FPS (arriba a la izquierda, igual que el medidor del juego)
+  if(cfg.fps !== false){
+    const fpsVal = Math.round(mc.fps || 60);
+    const fpsText = fpsVal + ' fps';
+    const fontSize = Math.max(11, Math.min(18, Math.round(w / 85)));
+    ctx.font = '600 ' + fontSize + 'px ui-monospace, monospace';
+    const padX = Math.round(fontSize * 0.65), padY = Math.round(fontSize * 0.35);
+    const tw = ctx.measureText(fpsText).width;
+    const bx = Math.max(12, Math.round(w * 0.012));
+    const by = Math.max(12, Math.round(h * 0.015));
+    ctx.fillStyle = 'rgba(14, 17, 25, 0.82)';
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(bx, by, tw + padX * 2, fontSize + padY * 2, 8);
+    else ctx.rect(bx, by, tw + padX * 2, fontSize + padY * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = fpsVal >= 45 ? '#4ade80' : (fpsVal >= 25 ? '#facc15' : '#f87171');
+    ctx.textBaseline = 'top';
+    ctx.fillText(fpsText, bx + padX, by + padY);
+  }
+
+  // 4. Barra de herramientas (Hotbar)
+  if(cfg.hotbar !== false){
+    const barEl = $('#mc-hotbar');
+    const slotCount = 10;
+    const slotSize = Math.max(28, Math.min(56, Math.round(w / 28)));
+    const gap = Math.max(3, Math.round(slotSize * 0.1));
+    const totalW = slotCount * slotSize + (slotCount - 1) * gap + gap * 2;
+    const totalH = slotSize + gap * 2;
+    const barX = Math.round((w - totalW) / 2);
+    const barY = h - totalH - Math.max(12, Math.round(h * 0.025));
+
+    ctx.fillStyle = 'rgba(15, 20, 30, 0.82)';
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(barX, barY, totalW, totalH, 8);
+    else ctx.rect(barX, barY, totalW, totalH);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    for(let i=0; i<slotCount; i++){
+      const sx = barX + gap + i * (slotSize + gap);
+      const sy = barY + gap;
+      const isActive = (i === mc.sel) || (i === 9 && mc.tool !== 'build');
+
+      ctx.fillStyle = isActive ? 'rgba(255, 255, 255, 0.22)' : 'rgba(0, 0, 0, 0.45)';
+      ctx.beginPath();
+      if(ctx.roundRect) ctx.roundRect(sx, sy, slotSize, slotSize, 4);
+      else ctx.rect(sx, sy, slotSize, slotSize);
+      ctx.fill();
+
+      if(isActive){
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(sx, sy, slotSize, slotSize);
+      } else {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sx, sy, slotSize, slotSize);
+      }
+
+      if(barEl && barEl.children[i]){
+        const slotDiv = barEl.children[i];
+        const cvEl = slotDiv.querySelector('canvas');
+        if(cvEl && cvEl.width > 0){
+          ctx.drawImage(cvEl, sx + 2, sy + 2, slotSize - 4, slotSize - 4);
+        }
+      }
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.font = '600 ' + Math.max(9, Math.round(slotSize * 0.28)) + 'px sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.fillText(i < 9 ? String(i + 1) : 'E', sx + 3, sy + 2);
+    }
+  }
+
+  // 5. Badge REC (arriba a la derecha, opcional)
+  if(cfg.badge === true){
+    const s = Math.floor((performance.now() - mcVideoStartT) / 1000);
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    const recText = 'REC ' + mm + ':' + ss;
+    const fontSize = Math.max(12, Math.min(20, Math.round(w / 85)));
+    ctx.font = '700 ' + fontSize + 'px sans-serif';
+    const padX = fontSize * 0.7, padY = fontSize * 0.35;
+    const tw = ctx.measureText(recText).width;
+    const bx = w - tw - padX * 2 - Math.max(12, Math.round(w * 0.015));
+    const by = Math.max(12, Math.round(h * 0.015));
+    ctx.fillStyle = 'rgba(220, 38, 38, 0.85)';
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(bx, by, tw + padX * 2, fontSize + padY * 2, 6);
+    else ctx.rect(bx, by, tw + padX * 2, fontSize + padY * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.textBaseline = 'top';
+    ctx.fillText(recText, bx + padX, by + padY);
+  }
+
+}
+
+function mcSoporteVideoMime(){
+  const tipos = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4;codecs=avc1',
+    'video/mp4',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm'
+  ];
+  for(const t of tipos){
+    if(window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return 'video/webm';
+}
+
+function mcActualizaRecBadge(){
+  const badge = $('#mc-rec-badge'), txt = $('#mc-rec-time');
+  if(!badge || !txt) return;
+  if(!mcMediaRecorder || mcMediaRecorder.state !== 'recording'){
+    badge.hidden = true;
+    if(mcVideoTimer){ clearInterval(mcVideoTimer); mcVideoTimer = null; }
+    return;
+  }
+  badge.hidden = false;
+  const s = Math.floor((performance.now() - mcVideoStartT) / 1000);
+  const mm = String(Math.floor(s / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  txt.textContent = 'REC ' + mm + ':' + ss;
+}
+
+function mcToggleGrabarVideo(duracionMaxSegundos){
+  if(!mc.active || !mc.canvas){ toast('🎬 Abre el Mundo primero'); return false; }
+  if(mcMediaRecorder && mcMediaRecorder.state === 'recording'){
+    return mcDetenerGrabacion();
+  }
+  return mcIniciarGrabacion(duracionMaxSegundos);
+}
+
+function mcIniciarGrabacion(duracionMaxSegundos){
+  if(!window.MediaRecorder){
+    toast('🎬 Tu navegador no soporta MediaRecorder para grabar vídeo');
+    return false;
+  }
+  try{
+    const cfg = mc.videoCfg || {};
+    const hasHud = cfg.hotbar || cfg.fps || cfg.crosshair || cfg.badge;
+    let stream;
+    if(hasHud){
+      if(!mcVideoCanvas){
+        mcVideoCanvas = document.createElement('canvas');
+      }
+      mcVideoCanvas.width = mc.canvas.width;
+      mcVideoCanvas.height = mc.canvas.height;
+      mcVideoCtx = mcVideoCanvas.getContext('2d');
+      mcCompositaVideoFrame();
+      stream = mcVideoCanvas.captureStream(60);
+    } else {
+      stream = mc.canvas.captureStream(60);
+    }
+
+    const mime = mcSoporteVideoMime();
+    mcVideoChunks = [];
+    mcMediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 });
+    mcMediaRecorder.ondataavailable = e => { if(e.data && e.data.size > 0) mcVideoChunks.push(e.data); };
+    mcMediaRecorder.onstop = () => {
+      const mimeBase = mcMediaRecorder.mimeType || mime;
+      const ext = mimeBase.includes('mp4') ? 'mp4' : 'webm';
+      const blob = new Blob(mcVideoChunks, { type: mimeBase });
+      const meta = mcFichaFoto();
+      meta.duracion = (performance.now() - mcVideoStartT) / 1000;
+      meta.resolucion = mc.canvas.width + '×' + mc.canvas.height;
+      meta.ancho = mc.canvas.width; meta.alto = mc.canvas.height;
+      mcActualizaRecBadge();
+      mcAbreEditorVideo(blob, meta, ext);
+    };
+    mcVideoStartT = performance.now();
+    mcMediaRecorder.start(100);
+    mcActualizaRecBadge();
+    mcVideoTimer = setInterval(mcActualizaRecBadge, 500);
+    toast('⏺️ Grabando gameplay... Pulsa Alt+V para finalizar y editar', 3);
+    if(duracionMaxSegundos && isFinite(duracionMaxSegundos) && duracionMaxSegundos > 0){
+      setTimeout(() => {
+        if(mcMediaRecorder && mcMediaRecorder.state === 'recording') mcDetenerGrabacion();
+      }, duracionMaxSegundos * 1000);
+    }
+    return true;
+  }catch(e){
+    console.error('mcIniciarGrabacion:', e);
+    toast('🎬 Error al iniciar grabación: ' + e.message);
+    return false;
+  }
+}
+
+
+function mcDetenerGrabacion(){
+  if(mcMediaRecorder && mcMediaRecorder.state === 'recording'){
+    mcMediaRecorder.stop();
+    toast('🎬 Procesando clip de vídeo...');
+    return true;
+  }
+  return false;
+}
+
+function mcAbreEditorVideo(blob, meta, ext){
+  mcCurrentVideoBlob = blob;
+  mcCurrentVideoMeta = meta || {};
+  const modal = $('#vf-video-modal'), player = $('#vf-video-player');
+  if(!modal || !player) return;
+  if(document.pointerLockElement) document.exitPointerLock();
+
+  const url = URL.createObjectURL(blob);
+  player.src = url;
+  $('#vf-video-meta').textContent = `· ${meta.mapa || mcMapName()} (${meta.ancho||mc.canvas.width}×${meta.alto||mc.canvas.height})`;
+  $('#vf-format-select').value = ext === 'webm' ? 'webm' : 'mp4';
+
+  const sIn = $('#vf-trim-start'), sOut = $('#vf-trim-end');
+  const vIn = $('#vf-trim-start-val'), vOut = $('#vf-trim-end-val'), vDur = $('#vf-trim-dur');
+
+  player.onloadedmetadata = () => {
+    const dur = player.duration && isFinite(player.duration) ? player.duration : (meta.duracion || 10);
+    sIn.min = 0; sIn.max = dur; sIn.step = 0.05; sIn.value = 0;
+    sOut.min = 0; sOut.max = dur; sOut.step = 0.05; sOut.value = dur;
+    vIn.textContent = '0.00s';
+    vOut.textContent = dur.toFixed(2) + 's';
+    vDur.textContent = dur.toFixed(2) + 's';
+  };
+
+  function updateTrimUI(){
+    let t0 = parseFloat(sIn.value), t1 = parseFloat(sOut.value);
+    if(t0 > t1 - 0.1){ t0 = Math.max(0, t1 - 0.1); sIn.value = t0; }
+    vIn.textContent = t0.toFixed(2) + 's';
+    vOut.textContent = t1.toFixed(2) + 's';
+    vDur.textContent = (t1 - t0).toFixed(2) + 's';
+  }
+
+  sIn.oninput = () => {
+    updateTrimUI();
+    player.currentTime = parseFloat(sIn.value);
+  };
+  sOut.oninput = () => {
+    updateTrimUI();
+    player.currentTime = parseFloat(sOut.value);
+  };
+
+  player.ontimeupdate = () => {
+    const t0 = parseFloat(sIn.value), t1 = parseFloat(sOut.value);
+    if(player.currentTime < t0 || player.currentTime > t1){
+      player.currentTime = t0;
+    }
+  };
+
+  modal.hidden = false;
+}
+
+function mcCierraEditorVideo(){
+  const modal = $('#vf-video-modal'), player = $('#vf-video-player');
+  if(player){ player.pause(); player.removeAttribute('src'); player.load(); }
+  if(modal) modal.hidden = true;
+  mcCurrentVideoBlob = null;
+}
+
+async function mcProcesarVideo(blob, startT, endT, scaleVal, targetFormat){
+  const overlay = $('#vf-video-proc-overlay'), statusTxt = $('#vf-video-proc-text');
+  if(overlay) overlay.hidden = false;
+
+  const tempVideo = document.createElement('video');
+  tempVideo.src = URL.createObjectURL(blob);
+  tempVideo.muted = true;
+  tempVideo.playsInline = true;
+  await new Promise(r => { tempVideo.onloadedmetadata = r; });
+
+  const dur = tempVideo.duration || (endT - startT);
+  const t0 = Math.max(0, startT), t1 = Math.min(dur, endT);
+  const originalW = tempVideo.videoWidth || 1280, originalH = tempVideo.videoHeight || 720;
+
+  let outW = originalW, outH = originalH;
+  if(scaleVal === '720'){
+    outH = 720; outW = Math.round((originalW * 720) / originalH);
+  } else if(scaleVal === '480'){
+    outH = 480; outW = Math.round((originalW * 480) / originalH);
+  } else if(scaleVal === 'square'){
+    const side = Math.min(originalW, originalH, 1080);
+    outW = side; outH = side;
+  }
+  // Dimensiones pares
+  outW = outW + (outW % 2);
+  outH = outH + (outH % 2);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+
+  const stream = canvas.captureStream(60);
+  let mime = targetFormat === 'webm' ? 'video/webm;codecs=vp9,opus' : 'video/mp4;codecs=avc1';
+  if(!MediaRecorder.isTypeSupported(mime)) mime = mcSoporteVideoMime();
+
+  const chunks = [];
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 });
+  rec.ondataavailable = e => { if(e.data && e.data.size > 0) chunks.push(e.data); };
+
+  tempVideo.currentTime = t0;
+  await new Promise(r => { tempVideo.onseeked = r; });
+
+  rec.start();
+  tempVideo.play();
+
+  const processPromise = new Promise(resolve => {
+    rec.onstop = () => {
+      if(overlay) overlay.hidden = true;
+      const resBlob = new Blob(chunks, { type: mime });
+      resolve({ blob: resBlob, ext: mime.includes('mp4') ? 'mp4' : 'webm', ancho: outW, alto: outH });
+    };
+  });
+
+  return new Promise(resolve => {
+    function frameLoop(){
+      if(tempVideo.currentTime >= t1 || tempVideo.paused || tempVideo.ended){
+        tempVideo.pause();
+        rec.stop();
+        resolve(processPromise);
+        return;
+      }
+      if(scaleVal === 'square'){
+        const side = Math.min(tempVideo.videoWidth, tempVideo.videoHeight);
+        const sx = (tempVideo.videoWidth - side) / 2, sy = (tempVideo.videoHeight - side) / 2;
+        ctx.drawImage(tempVideo, sx, sy, side, side, 0, 0, outW, outH);
+      } else {
+        ctx.drawImage(tempVideo, 0, 0, outW, outH);
+      }
+      if(statusTxt){
+        const pct = Math.round(((tempVideo.currentTime - t0) / Math.max(0.1, t1 - t0)) * 100);
+        statusTxt.textContent = `Procesando vídeo: ${pct}%…`;
+      }
+      requestAnimationFrame(frameLoop);
+    }
+    requestAnimationFrame(frameLoop);
+  });
+}
+
+async function mcGuardarVideoServidor(){
+  if(!mcCurrentVideoBlob){ toast('No hay vídeo para guardar'); return; }
+  const sIn = $('#vf-trim-start'), sOut = $('#vf-trim-end');
+  const scaleSelect = $('#vf-scale-select'), fmtSelect = $('#vf-format-select');
+  const t0 = parseFloat(sIn.value), t1 = parseFloat(sOut.value);
+
+  toast('⏳ Procesando y subiendo vídeo...');
+  const proc = await mcProcesarVideo(mcCurrentVideoBlob, t0, t1, scaleSelect.value, fmtSelect.value);
+
+  const reader = new FileReader();
+  reader.readAsDataURL(proc.blob);
+  reader.onloadend = async () => {
+    const b64 = reader.result;
+    const ficha = Object.assign({}, mcCurrentVideoMeta, {
+      duracion: t1 - t0,
+      ancho: proc.ancho,
+      alto: proc.alto,
+      resolucion: proc.ancho + '×' + proc.alto,
+      mapa: mcCurrentVideoMeta.mapa || mcMapName() || 'default',
+      recorte: [t0, t1]
+    });
+    try {
+      const res = await fetch('/api/videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video: b64, ext: proc.ext, ficha })
+      });
+      const j = await res.json();
+      if(res.ok){
+        toast('🎬 Vídeo #' + j.id.split('_')[0] + ' guardado en servidor → /videos', 4);
+        mcCierraEditorVideo();
+      } else {
+        toast('Error al guardar vídeo: ' + (j.error || res.status));
+      }
+    } catch(e) {
+      toast('Error al subir vídeo: ' + e.message);
+    }
+  };
+}
+
+async function mcDescargarVideoLocal(){
+  if(!mcCurrentVideoBlob){ toast('No hay vídeo para descargar'); return; }
+  const sIn = $('#vf-trim-start'), sOut = $('#vf-trim-end');
+  const scaleSelect = $('#vf-scale-select'), fmtSelect = $('#vf-format-select');
+  const t0 = parseFloat(sIn.value), t1 = parseFloat(sOut.value);
+
+  toast('⏳ Procesando recorte para descarga...');
+  const proc = await mcProcesarVideo(mcCurrentVideoBlob, t0, t1, scaleSelect.value, fmtSelect.value);
+
+  const url = URL.createObjectURL(proc.blob);
+  const a = document.createElement('a');
+  const mapa = mcCurrentVideoMeta.mapa || mcMapName() || 'gameplay';
+  const sello = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+  a.href = url;
+  a.download = `voxelforge_${mapa}_${sello}.${proc.ext}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  toast('⬇️ Vídeo descargado a tu disco local');
 }
 // Al mirar un bloque con nota (jugando), muestra su texto bajo la mira; si no, oculta el visor.
 function mcUpdateNoteView(){
@@ -14438,7 +15719,7 @@ function mcSerialize(){
     const id=g[mcIdx(x,y,z)]; if(!id) continue;
     vox[x+','+y+','+z]='tex:'+mc.blockKey[id];
   }
-  return { format:'voxelworld-1', dim:{x:dim.x,y:dim.y,z:dim.z}, spawn:mc.spawn, voxels:vox, structures:mcStructuresDoc(), notes:{...mc.notes} };   // t1 · notas post-it "x,y,z"→texto
+  return { format:'voxelworld-1', dim:{x:dim.x,y:dim.y,z:dim.z}, spawn:mc.spawn, voxels:vox, structures:mcStructuresDoc(), notes:{...mc.notes}, noteRots:{...(mc.noteRots||{})}, noteRots:{...(mc.noteRots||{})} };   // t1 · notas post-it "x,y,z"→texto
 }
 // Estructuras: sala + posición + giro (se re-mallan al cargar). Lo usan el doc completo y la
 // cabecera del guardado incremental, así que vive en un solo sitio.
@@ -14480,6 +15761,7 @@ function mcBake(doc){                          // hornea un mundo guardado a la 
   mc.spawn=s; mc.pos=[s.x+0.5, s.y, s.z+0.5]; mc.vel=[0,0,0]; mc.onGround=false;
   // t1 · notas: solo pares "x,y,z"→texto dentro de los límites (una nota sobre un bloque que ya no existe se conserva igual: es del bloque, no exige sólido)
   mc.notes={}; const dn=doc.notes; if(dn && typeof dn==='object') for(const k in dn){ const p=k.split(','); if(p.length===3 && typeof dn[k]==='string') mc.notes[k]=dn[k]; }
+  mc.noteRots={}; const dr=doc.noteRots; if(dr && typeof dr==='object') for(const k in dr){ if(typeof dr[k]==='number') mc.noteRots[k]=dr[k]&3; }
   mcMeshAll();
   // re-hornear estructuras (malla fina) — apila las instancias y deja que mcRestampAll componga el atlas UNA vez
   // y malle todo (evita la carrera de estampar N a la vez, cada una recomponiendo el atlas). El render las dibuja
@@ -14487,25 +15769,61 @@ function mcBake(doc){                          // hornea un mundo guardado a la 
   for(const st of (doc.structures||[])){ if(st&&st.key)
     mc.structures.push({key:st.key, ox:st.x|0, oy:st.y|0, oz:st.z|0, rot:mcOriNorm(st.rot), colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[st.x|0,st.y|0,st.z|0,st.x|0,st.y|0,st.z|0]}); }
   if(mc.structures.length) mcRestampAll().then(mcForceUnstick);   // al terminar de mallar, sácalo si una sala cayó sobre el spawn (p.ej. escala grande la última vez)
+  else mcForceUnstick();                                           // sin estructuras: desatasca inmediatamente sobre el terreno
 }
-// game.reloadWorld() · recarga el mundo desde el servidor SIN teletransportar: re-hornea /api/mundo pero
-// conserva tu posición/mirada/velocidad. Útil para ver cambios guardados por otra vía (edición del fichero,
-// otra pestaña) sin volver al spawn. mcBake reubica al spawn, así que guardamos y restauramos tu sitio.
+function mcInvalidateAllAssets(){
+  _idxAssetsP = null;
+  texDefs.clear();
+  texFaceCache.clear();
+  texReprCache.clear();
+  roomDataCache.clear();
+  mcMat2id = {};
+  mcWarnedMat = {};
+  if(mc.structs) for(const k in mc.structs) delete mc.structs[k];
+  if(mc.finoGeom) for(const k in mc.finoGeom) delete mc.finoGeom[k];
+  if(mc.fineBoxes) for(const k in mc.fineBoxes) delete mc.fineBoxes[k];
+  e3baseKey = '';
+}
+// game.reloadWorld() · recarga el mundo y TODOS los assets desde disco SIN mover al jugador.
+// Invalida cachés de texturas/modelos, re-construye el atlas WebGL y re-malla los chunks.
 async function mcReloadWorld(){
   if(!mc.active){ toast('Abre el Mundo primero'); return; }
-  const doc=await mcFetchWorld();
+  mcInvalidateAllAssets();
+  try{
+    const idx = await fetch('assets/index.json', { cache: 'no-store' }).then(r => r.json());
+    mcIndexAssets(idx);
+  }catch(e){}
+
+  const doc = await mcFetchWorld();
   if(!doc || !(doc.voxBuf || doc.voxels)){ toast('No se pudo recargar el mundo'); return; }
-  // claves nuevas en el guardado ⇒ amplía la lista de bloques y recompón paleta/atlas (si no, mcBake las ignora)
-  let grew=false;
-  for(const v of Object.values(doc.voxels)){ const k=String(v).replace(/^tex:/,'');
-    if(k && !mc.blocks.some(b=>b.key===k)){ mc.blocks.push({name:k, key:k}); grew=true; } }
-  if(grew){ await mcBuildPalette(); mcUploadAtlas(); }
-  const pos=mc.pos.slice(), vel=mc.vel.slice(), yaw=mc.yaw, pitch=mc.pitch, onG=mc.onGround;   // dónde estás ahora
-  mcBake(doc);                                                                                  // re-hornea (reubicaría al spawn…)
-  mc.pos=pos; mc.vel=vel; mc.yaw=yaw; mc.pitch=pitch; mc.onGround=onG;                           // …pero te devolvemos a tu sitio
-  toast('Mundo recargado (sin mover)');
+
+  const addKey = k => {
+    k = k ? String(k).replace(/^tex:/, '') : '';
+    if(k && !mc.blocks.some(b => b.key === k)){ mc.blocks.push({ name: k, key: k }); }
+  };
+  const loadout = mcLoadoutKeys();
+  if(loadout) loadout.forEach(k => addKey(k));
+  if(doc.palette && Array.isArray(doc.palette)) for(const k of doc.palette) addKey(k);
+  else if(doc.voxels) for(const v of Object.values(doc.voxels)) addKey(v);
+
+  await mcBuildPalette();
+  mcUploadAtlas();
+
+  const pos = mc.pos.slice(), vel = mc.vel.slice(), yaw = mc.yaw, pitch = mc.pitch, onG = mc.onGround;
+  mcBake(doc);
+  mc.pos = pos; mc.vel = vel; mc.yaw = yaw; mc.pitch = pitch; mc.onGround = onG;
+  mcForceUnstick();
+  toast('Mundo y assets recargados');
 }
-game.reloadWorld=mcReloadWorld;
+game.reloadWorld = mcReloadWorld;
+game.reloadworld = mcReloadWorld;
+game.reloadAssets = async function(){
+  mcInvalidateAllAssets();
+  try{ const idx = await fetch('assets/index.json', { cache: 'no-store' }).then(r => r.json()); mcIndexAssets(idx); }catch(e){}
+  if(mc.active){ await mcBuildPalette(); mcUploadAtlas(); mcMeshAll(); toast('Assets recargados'); }
+};
+game.reloadassets = game.reloadAssets;
+game.refreshAssets = game.reloadAssets;
 // Desglose de la última carga del Mundo: en qué se fue el tiempo bajo «Preparando bloques…» y compañía.
 game.loadReport=mcLoadReport;
 // game.mapName = nombre del mapa actual (de la URL /map/<nombre>; 'default' = mundo sagrado).
@@ -14605,6 +15923,58 @@ game.aim=function(alcance){
 // {id, url, bytes, ficha}: `const f = await game.foto()` deja en f.ficha las coordenadas exactas
 // desde las que se sacó, y en f.url la ruta para verla o descargarla (galería completa en /fotos).
 game.foto=mcFoto;
+// game.video([segundos]) · inicia o detiene la grabación de vídeo de gameplay (Alt+V).
+game.video=mcToggleGrabarVideo;
+game.grabar=mcToggleGrabarVideo;
+game.grabarVideo=mcToggleGrabarVideo;
+
+// Tunables de qué elementos del HUD se capturan en el vídeo (hotbar, fps, crosshair, badge):
+Object.defineProperty(mcToggleGrabarVideo, 'hotbar', {
+  configurable: true, enumerable: true,
+  get: () => mc.videoCfg.hotbar !== false,
+  set: (v) => { mc.videoCfg.hotbar = !!v; mcSaveVideoCfg(); toast('Vídeo Hotbar: ' + (mc.videoCfg.hotbar ? 'ON' : 'OFF')); }
+});
+Object.defineProperty(mcToggleGrabarVideo, 'fps', {
+  configurable: true, enumerable: true,
+  get: () => mc.videoCfg.fps !== false,
+  set: (v) => { mc.videoCfg.fps = !!v; mcSaveVideoCfg(); toast('Vídeo FPS: ' + (mc.videoCfg.fps ? 'ON' : 'OFF')); }
+});
+Object.defineProperty(mcToggleGrabarVideo, 'crosshair', {
+  configurable: true, enumerable: true,
+  get: () => mc.videoCfg.crosshair !== false,
+  set: (v) => { mc.videoCfg.crosshair = !!v; mcSaveVideoCfg(); toast('Vídeo Mira: ' + (mc.videoCfg.crosshair ? 'ON' : 'OFF')); }
+});
+Object.defineProperty(mcToggleGrabarVideo, 'badge', {
+  configurable: true, enumerable: true,
+  get: () => !!mc.videoCfg.badge,
+  set: (v) => { mc.videoCfg.badge = !!v; mcSaveVideoCfg(); toast('Vídeo Badge REC: ' + (mc.videoCfg.badge ? 'ON' : 'OFF')); }
+});
+Object.defineProperty(mcToggleGrabarVideo, 'hud', {
+  configurable: true, enumerable: true,
+  get: () => Object.assign({}, mc.videoCfg),
+  set: (v) => {
+    if(v && typeof v === 'object'){
+      if(v.hotbar !== undefined) mc.videoCfg.hotbar = !!v.hotbar;
+      if(v.fps !== undefined) mc.videoCfg.fps = !!v.fps;
+      if(v.crosshair !== undefined) mc.videoCfg.crosshair = !!v.crosshair;
+      if(v.badge !== undefined) mc.videoCfg.badge = !!v.badge;
+      mcSaveVideoCfg();
+      toast('Vídeo HUD actualizado');
+    }
+  }
+});
+mcToggleGrabarVideo.info = function(){
+  return {
+    recording: !!(mcMediaRecorder && mcMediaRecorder.state === 'recording'),
+    hud: Object.assign({}, mc.videoCfg),
+    hotbar: mc.videoCfg.hotbar !== false,
+    fps: mc.videoCfg.fps !== false,
+    crosshair: mc.videoCfg.crosshair !== false,
+    badge: !!mc.videoCfg.badge,
+    duracion: mcMediaRecorder && mcMediaRecorder.state === 'recording' ? (performance.now() - mcVideoStartT) / 1000 : 0
+  };
+};
+
 // game.notes() · tabla de las notas post-it del mundo ("x,y,z" → texto) para copiar coords a game.tp / game.gotoNote.
 game.notes=function(){
   const ks=Object.keys(mc.notes);
@@ -15060,6 +16430,7 @@ function mcTick(now){
   }
   mcUpdatePreview();              // refresca la malla de la vista-previa si cambió el objetivo/giro (asíncrono, no bloquea)
   mcUpdateHotbar(dt);             // hunde/emerge la hotbar según la carrera (ver mcUpdateHotbar)
+  mcSyncHeldToolStruct();         // sincroniza y posiciona la herramienta en mano si game.showTool está activo
   mcRender();
   mcUpdateNoteView();            // t1 · muestra/oculta el texto de la nota apuntada
   // Carteles de las notas: el repaso barato va aquí y no en cada escritura de mc.notes porque quien
@@ -15265,46 +16636,34 @@ async function openWorld(){
     mcShowLoading(hasVox ? 'Construyendo el mundo…' : (doc && doc.fresh ? 'Generando terreno…' : 'Cargando mundo vacío…')); await mcYield();
     mcLoadPhase(hasVox ? 'Bake del mundo guardado + mallado' : (doc && doc.fresh ? 'Generar terreno + mallado' : 'Bake de mundo vacío'));
     if(hasVox) mcBake(doc);              // conserva lo construido
-    else if(doc && doc.fresh) { mcGenFlat(); mcMeshAll(); }   // mundo recién nacido (sin fichero) → terreno plano
+    else if(doc && doc.fresh) { mcGenFlat(); mcMeshAll(); mcForceUnstick(); }   // mundo recién nacido (sin fichero) → terreno plano y desatasca
     else mcBake(doc || {voxels:{}});     // vacío GUARDADO (p.ej. wipeMap) → vacío total, sin voxels
     // Reconstruir fluidLevels desde las claves de bloque (hab:agua-3 → nivel 3) para que
     // mcGetFluidHeight dibuje las alturas correctas tras recargar.
     if(typeof game !== 'undefined' && game.fluidos && game.fluidos.rebuild) game.fluidos.rebuild();
     mcLoadStop();
-    mcHideLoading();
-    mcLoadReport();
   }
   mcResize();
   mc.hotbarShown=1; mcRevealHotbar();     // la hotbar arranca visible en su sitio
-  mc.active=true; mc.fpsN=0; mc.fpsT=0; mc.last=performance.now();
   mcMarcaSync();        // REQ-INTRO2 · con el Mundo delante, la marca del editor no es pulsable
   mcTouchShow(true);    // joystick y salto, si esto es un móvil (o game.touchControls=true)
   mcAplicaEscaparate(); // REQ-OSD3: si esto es la PANTALLA de un menú (?osd=1), quitar de encima todo lo de jugar
   mcResumeAgents();     // reanudar agentes pausados al volver del editor
-  mc.raf=requestAnimationFrame(mcTick);
-  // REQ-INTRO1 · con ?intro=1 el mundo NO se enseña todavía. En esta línea ya está pintado y jugable,
-  // pero lo siguiente —'mundo-autoarranque', 274 KB de snippet— **bloquea el hilo** varios segundos en un
-  // mapa grande (~8 s medidos por el dueño en /map/fps). Enseñarlo antes daba las dos versiones del mismo
-  // problema: primero al visitante de pie en el suelo esperando, y luego el menú puesto y la cámara
-  // congelada sin volar. Así que se deja el cartel de carga puesto y se descubre TODO a la vez: menú y
-  // vuelo. Un cartel de carga que tarda es normal; un producto que arranca trabado, no.
-  const _conIntro = mcEsIntro() && !mc._introHecha;
-  if(_conIntro) mcShowLoading('Preparando el mundo…');
-  // REQ-OSD11 · Una pantalla-mapa paga el autoarranque entero del mundo: 'mundo-autoarranque' son 274 KB
-  // y detrás vienen el motor de redstone, sus piezas y la lista de habitantes — y después queda simulando
-  // para siempre por detrás de unos botones. Medido sobre /map/voxelforge: ~200 ms de los ~1,5 s que
-  // tarda en salir (el grueso es levantar una segunda copia de la app: mundo, malla y luz), más la CPU
-  // que ya no se gasta. O sea, esto NO arregla el «tarda»; quita el trabajo que sobra.
-  // `vivo:false` en el define (→ `&postal=1`) se lo salta, para un decorado que solo tiene que estar ahí.
-  // ⚠️ NO es gratis y por eso NO es el modo por defecto: el autoarranque no solo anima, también da de alta
-  // materiales, y sin él algunos se pintan distinto (medido en /map/voxelforge: la lava y la lámpara
-  // cambian de color). Se enciende mirando el decorado, no a ciegas.
+
+  // Autoarranque y comportamientos se ejecutan MIENTRAS el overlay de carga sigue puesto
   if(!mc.escaparate || !mcEscaparatePostal()) await mcAutoarranque();
-  if(_conIntro) mcHideLoading();
   await mcIntroArranque(true);
-  // REQ-OSD6 · y aquí, con el autoarranque ya corrido, es cuando una pantalla-mapa está de verdad lista
-  // para verse: antes de esta línea le faltarían los comportamientos y saldría a medio vestir.
   mcEscaparateListo();
+
+  // Desatasco instantáneo garantizado sobre el mundo completamente cargado
+  mcForceUnstick();
+
+  // El mundo ya está 100% horneado, inicializado y desatascado: quitamos carga e iniciamos bucle fluido a 60 FPS
+  mcHideLoading();
+  mcLoadReport();
+  mc.active=true; mc.fpsN=0; mc.fpsT=0; mc.last=performance.now();
+  if(mc.raf) cancelAnimationFrame(mc.raf);
+  mc.raf=requestAnimationFrame(mcTick);
 }
 // PUNTO DE EXTENSIÓN DEL MUNDO. Los snippets no se ejecutan solos (solo a mano desde Alt+C), así que
 // nada podía hacer que el mundo «se comporte» al abrirlo: la escalera dejaba de ser escalera en cada
@@ -15679,23 +17038,32 @@ function mcSetPlayerTool(v, announce){    // centraliza mc.tool (setter de conso
   mcSetCrosshair(MC_HERRAMIENTA_MIRA[v] || '+');
   mc.selA=null;                                      // al cambiar de herramienta, olvida la esquina a medio marcar (la caja confirmada se conserva para Ctrl+C)
   if(v!=='box') mcBoxClear();
+  if(mc.pasteActive) mcPasteCancel();
   if(announce && mc.active) toast(v==='box' ? 'Volumen: arrastra base con clic izq · fija altura con clic izq · clic dcho planta · clic izq reinicia'
                                 : v==='select' ? 'Seleccionar: clic marca 2 esquinas · Ctrl+C copia · clic dcho limpia'
                                 : v==='pick' ? 'Cuentagotas: clic sobre un bloque y su material va a la ranura'
                                 : 'Clic derecho: '+(v==='paint'?'Pintar bloque':'Construir'));
   return v;
 }
-// Conmutación de herramientas:
-// 'principales' (tecla 'e'): conmuta únicamente Construir ↔ Volumen
-// 'secundarias' (tecla 'E' con mayúsculas / shift): conmuta Pintar → Seleccionar → Cuentagotas
-function mcRotaHerramienta(grupo){
-  if(grupo === 'secundarias' || grupo === 'sec' || grupo === true){
-    const nextSec = { paint:'select', select:'pick', pick:'paint' };
-    return mcSetPlayerTool(nextSec[mc.tool] || 'paint', true);
-  }
-  const nextPrinc = { build:'box', box:'build' };
-  return mcSetPlayerTool(nextPrinc[mc.tool] || 'build', true);
+// Herramientas disponibles en la rotación: solo aquellas que tengan un asset marcado como tal en el catálogo
+function mcHerramientasDisponibles(secundarias){
+  const pool = secundarias ? ['paint', 'select', 'pick'] : ['build', 'box'];
+  if(!mc.catalog) return pool;
+  const disp = pool.filter(t => mcHerramientaKey(t));
+  return disp.length ? disp : (secundarias ? ['paint'] : ['build']);
 }
+
+// Conmutación de herramientas:
+// 'principales' (tecla 'e'): conmuta únicamente Construir ↔ Volumen (si están marcadas)
+// 'secundarias' (tecla 'E' con mayúsculas / shift): conmuta únicamente las secundarias que estén marcadas como herramienta
+function mcRotaHerramienta(grupo){
+  const esSec = (grupo === 'secundarias' || grupo === 'sec' || grupo === true);
+  const lista = mcHerramientasDisponibles(esSec);
+  const idx = lista.indexOf(mc.tool);
+  const next = lista[(idx + 1) % lista.length];
+  return mcSetPlayerTool(next, true);
+}
+
 Object.defineProperty(game,'playerTool',{ enumerable:true, get:()=>mc.tool, set:v=>mcSetPlayerTool(v) });
 try{ const t=localStorage.getItem('vf_mcStructTex'); if(t!==null) mc.structTextures=(t!=='0'); }catch(e){}
 // Textureado de las estructuras estampadas. true (por defecto) = textura COMPLETA por voxel como el editor 3D,
@@ -15763,6 +17131,171 @@ try{ const d=parseFloat(localStorage.getItem('vf_mcSunProbe')); if(isFinite(d)) 
 Object.defineProperty(game,'sunProbe',{ enumerable:true, get:()=>mc.sunProbe,
   set:v=>{ v=Math.max(0.01,Math.min(1, isFinite(+v)?+v:0.51)); mc.sunProbe=v; try{localStorage.setItem('vf_mcSunProbe',v);}catch(e){} return v; } });
 try{ const d=parseFloat(localStorage.getItem('vf_mcSunShade')); if(isFinite(d)) mc.sunShade=Math.max(0,Math.min(1,d)); }catch(e){}
+
+// game.viento = control global del viento en vegetación y hojas (game.viento({ fuerza: 0.15, frecuencia: 2.5 })).
+// Persiste en vf_mcVientoFuerza y vf_mcVientoFrec.
+try{
+  const vf=parseFloat(localStorage.getItem('vf_mcVientoFuerza'));
+  if(isFinite(vf) && vf > 0) mc.vientoFuerza=Math.max(0,Math.min(2.0,vf));
+  else mc.vientoFuerza = 0.12;
+  const vfr=parseFloat(localStorage.getItem('vf_mcVientoFrec'));
+  if(isFinite(vfr) && vfr > 0) mc.vientoFrec=Math.max(0.1,Math.min(20.0,vfr));
+  else mc.vientoFrec = 2.0;
+}catch(e){ mc.vientoFuerza=0.12; mc.vientoFrec=2.0; }
+game.viento=function(v){
+  if(v==='off'||v===false) mc.vientoFuerza=0;
+  else if(v==='reset'){ mc.vientoFuerza=0.12; mc.vientoFrec=2.0; }
+  else if(typeof v==='number'&&isFinite(v)) mc.vientoFuerza=Math.max(0,Math.min(2.0,v));
+  else if(v&&typeof v==='object'){
+    if(v.fuerza!==undefined) mc.vientoFuerza=Math.max(0,Math.min(2.0,+v.fuerza||0));
+    if(v.frecuencia!==undefined) mc.vientoFrec=Math.max(0.1,Math.min(20.0,+v.frecuencia||2.0));
+  }
+  try{ localStorage.setItem('vf_mcVientoFuerza',mc.vientoFuerza); localStorage.setItem('vf_mcVientoFrec',mc.vientoFrec); }catch(e){}
+  return { fuerza:mc.vientoFuerza, frecuencia:mc.vientoFrec };
+};
+Object.defineProperty(game.viento,'fuerza',{ enumerable:true, get:()=>mc.vientoFuerza, set:v=>game.viento({fuerza:v}) });
+Object.defineProperty(game.viento,'frecuencia',{ enumerable:true, get:()=>mc.vientoFrec, set:v=>game.viento({frecuencia:v}) });
+
+// game.uvInset / game.texInset = margen sub-téxel en las coordenadas UV del atlas (0.0..0.5 px, defecto 0).
+// Evita sangrado de color de téxeles adyacentes en las uniones de los bloques.
+try{ const uv=parseFloat(localStorage.getItem('vf_mcUvInset')); if(isFinite(uv)) mc.uvInset=Math.max(0,Math.min(0.5,uv)); }catch(e){}
+Object.defineProperty(game,'uvInset',{ enumerable:true, get:()=>mc.uvInset||0,
+  set:v=>{
+    v=Math.max(0,Math.min(0.5, isFinite(+v)?+v:0));
+    if(mc.uvInset===v) return v;
+    mc.uvInset=v;
+    try{localStorage.setItem('vf_mcUvInset',v);}catch(e){}
+    mcBuildPalette().then(()=>{ mcUploadAtlas(); mcMeshAll(); });
+    return v;
+  }
+});
+Object.defineProperty(game,'texInset',{ enumerable:true, get:()=>game.uvInset, set:v=>game.uvInset=v });
+
+// game.showTool (REQ-HELDTOOL) = visualización de la herramienta en primera persona.
+// El pivote de agarre viene del marcador "1" dibujado en el editor 2D/3D con la herramienta 📍.
+// Tunables disponibles: pos, rot, scale, bob, debug.
+try{ const st = localStorage.getItem('vf_mcShowTool'); if(st !== null) mc.showTool = (st === '1'); }catch(e){}
+try{ const tp = JSON.parse(localStorage.getItem('vf_mcToolPos')); if(Array.isArray(tp)&&tp.length===3) mc.toolPos=tp; }catch(e){}
+try{ const tr = JSON.parse(localStorage.getItem('vf_mcToolRot')); if(Array.isArray(tr)&&tr.length===3) mc.toolRot=tr; }catch(e){}
+try{ const ts = parseFloat(localStorage.getItem('vf_mcToolScale')); if(isFinite(ts)&&ts>0) mc.toolScale=ts; }catch(e){}
+try{ const tb = parseFloat(localStorage.getItem('vf_mcToolBob')); if(isFinite(tb)&&tb>=0) mc.toolBob=tb; }catch(e){}
+try{ const td = parseFloat(localStorage.getItem('vf_mcToolBobDecay')); if(isFinite(td)&&td>=0) mc.toolBobDecay=td; }catch(e){}
+try{ const tr = parseFloat(localStorage.getItem('vf_mcToolBobRise'));  if(isFinite(tr)&&tr>0)  mc.toolBobRise=tr;  }catch(e){}
+try{ const sw = JSON.parse(localStorage.getItem('vf_mcToolSwingCfg')); if(sw&&typeof sw==='object') Object.assign(mc.toolSwingCfg, sw); }catch(e){}
+
+game.showTool = function(v){
+  if(v === undefined) return mc.showTool;
+  if(typeof v === 'boolean'){ mc.showTool = v; }
+  else if(typeof v === 'object' && v !== null){
+    if(v.enabled !== undefined) mc.showTool = !!v.enabled;
+    if(Array.isArray(v.pos)&&v.pos.length===3) mc.toolPos=[Number(v.pos[0])||0,Number(v.pos[1])||0,Number(v.pos[2])||0];
+    if(Array.isArray(v.rot)&&v.rot.length===3) mc.toolRot=[Number(v.rot[0])||0,Number(v.rot[1])||0,Number(v.rot[2])||0];
+    if(isFinite(+v.scale)&&+v.scale>0) mc.toolScale=+v.scale;
+    if(isFinite(+v.bob)&&+v.bob>=0) mc.toolBob=+v.bob;
+  } else { mc.showTool = !!v; }
+  try{ localStorage.setItem('vf_mcShowTool', mc.showTool?'1':'0'); }catch(e){}
+  return mc.showTool;
+};
+
+Object.defineProperty(game.showTool, 'pos', {
+  enumerable: true,
+  get: () => mc.toolPos,
+  set: (p) => { if(Array.isArray(p)&&p.length===3){ mc.toolPos=[Number(p[0])||0,Number(p[1])||0,Number(p[2])||0]; try{localStorage.setItem('vf_mcToolPos',JSON.stringify(mc.toolPos));}catch(e){} } }
+});
+Object.defineProperty(game.showTool, 'rot', {
+  enumerable: true,
+  get: () => mc.toolRot,
+  set: (r) => { if(Array.isArray(r)&&r.length===3){ mc.toolRot=[Number(r[0])||0,Number(r[1])||0,Number(r[2])||0]; try{localStorage.setItem('vf_mcToolRot',JSON.stringify(mc.toolRot));}catch(e){} } }
+});
+Object.defineProperty(game.showTool, 'scale', {
+  enumerable: true,
+  get: () => mc.toolScale,
+  set: (s) => { if(isFinite(+s)&&+s>0){ mc.toolScale=+s; try{localStorage.setItem('vf_mcToolScale',String(mc.toolScale));}catch(e){} } }
+});
+// game.showTool.bob: multiplicador de amplitud del balanceo al caminar (1 = normal, 0 = quieto)
+Object.defineProperty(game.showTool, 'bob', {
+  enumerable: true,
+  get: () => mc.toolBob,
+  set: (b) => { if(isFinite(+b)&&+b>=0){ mc.toolBob=+b; try{localStorage.setItem('vf_mcToolBob',String(mc.toolBob));}catch(e){} } }
+});
+// game.showTool.bobDecay: tau de parada/salto (s) — cuánto tarda en asentarse al parar (0.12 por defecto)
+// Valores altos = más inercia/suavidad; valores bajos = corte más brusco; 0 = inmediato
+Object.defineProperty(game.showTool, 'bobDecay', {
+  enumerable: true,
+  get: () => mc.toolBobDecay,
+  set: (v) => { if(isFinite(+v)&&+v>=0){ mc.toolBobDecay=+v; try{localStorage.setItem('vf_mcToolBobDecay',String(mc.toolBobDecay));}catch(e){} } }
+});
+// game.showTool.bobRise: tau de arranque (s) — cuánto tarda en enganchar la onda al empezar a andar (0.05 por defecto)
+Object.defineProperty(game.showTool, 'bobRise', {
+  enumerable: true,
+  get: () => mc.toolBobRise,
+  set: (v) => { if(isFinite(+v)&&+v>0){ mc.toolBobRise=+v; try{localStorage.setItem('vf_mcToolBobRise',String(mc.toolBobRise));}catch(e){} } }
+});
+// game.showTool.swing: tunables de la animación de picar en 3 fases (dur, windupP, strikeP, windupRot, chopRot, lift, pull, drop, reach)
+function mcSaveSwingCfg(){ try{ localStorage.setItem('vf_mcToolSwingCfg', JSON.stringify(mc.toolSwingCfg)); }catch(e){} }
+Object.defineProperty(game.showTool, 'swing', {
+  enumerable: true,
+  get: () => Object.assign({}, mc.toolSwingCfg),
+  set: (v) => {
+    if(v && typeof v === 'object'){
+      if(isFinite(+v.dur) && +v.dur > 0) mc.toolSwingCfg.dur = +v.dur;
+      if(isFinite(+v.windupP) && +v.windupP > 0) mc.toolSwingCfg.windupP = Math.min(0.8, +v.windupP);
+      if(isFinite(+v.strikeP) && +v.strikeP > 0) mc.toolSwingCfg.strikeP = Math.min(0.95, +v.strikeP);
+      if(isFinite(+v.windupRot)) mc.toolSwingCfg.windupRot = +v.windupRot;
+      if(isFinite(+v.chopRot)) mc.toolSwingCfg.chopRot = +v.chopRot;
+      if(isFinite(+v.lift)) mc.toolSwingCfg.lift = +v.lift;
+      if(isFinite(+v.pull)) mc.toolSwingCfg.pull = +v.pull;
+      if(isFinite(+v.drop)) mc.toolSwingCfg.drop = +v.drop;
+      if(isFinite(+v.reach)) mc.toolSwingCfg.reach = +v.reach;
+      mcSaveSwingCfg();
+    }
+  }
+});
+['dur', 'windupP', 'strikeP', 'windupRot', 'chopRot', 'lift', 'pull', 'drop', 'reach'].forEach(prop => {
+  const cap = prop.charAt(0).toUpperCase() + prop.slice(1);
+  Object.defineProperty(game.showTool, 'swing' + cap, {
+    enumerable: true,
+    get: () => mc.toolSwingCfg[prop],
+    set: (val) => { if(isFinite(+val)){ mc.toolSwingCfg[prop] = +val; mcSaveSwingCfg(); } }
+  });
+});
+
+// game.showTool.debug: muestra la cruz amarilla en el pivote "1" del asset, ejes RGB y caja del modelo
+Object.defineProperty(game.showTool, 'debug', {
+  enumerable: true,
+  get: () => !!mc.toolDebug,
+  set: (d) => {
+    mc.toolDebug = !!d;
+    try{ localStorage.setItem('vf_mcToolDebug', mc.toolDebug?'1':'0'); }catch(e){}
+    toast(mc.toolDebug ? '📐 Gizmo ON — pivote del asset' : '📐 Gizmo OFF');
+  }
+});
+
+game.showTool.info = function(){
+  const s = mc._heldToolStruct;
+  return {
+    enabled: mc.showTool,
+    tool: mc.tool,
+    asset: mcGetActiveToolAsset(),
+    assetPivotVoxel: s ? s.assetPivotVoxel : null,
+    assetPivotNorm:  s ? s.assetPivot : null,
+    pos: mc.toolPos, rot: mc.toolRot, scale: mc.toolScale,
+    bob: mc.toolBob, bobDecay: mc.toolBobDecay, bobRise: mc.toolBobRise,
+    swing: Object.assign({}, mc.toolSwingCfg),
+    debug: !!mc.toolDebug
+  };
+};
+
+Object.defineProperty(game, 'toolPos',      { enumerable:true, get:()=>mc.toolPos,      set:p=>{ game.showTool.pos=p; } });
+Object.defineProperty(game, 'toolRot',      { enumerable:true, get:()=>mc.toolRot,      set:r=>{ game.showTool.rot=r; } });
+Object.defineProperty(game, 'toolScale',    { enumerable:true, get:()=>mc.toolScale,    set:s=>{ game.showTool.scale=s; } });
+Object.defineProperty(game, 'toolBob',      { enumerable:true, get:()=>mc.toolBob,      set:b=>{ game.showTool.bob=b; } });
+Object.defineProperty(game, 'toolBobDecay', { enumerable:true, get:()=>mc.toolBobDecay, set:v=>{ game.showTool.bobDecay=v; } });
+Object.defineProperty(game, 'toolBobRise',  { enumerable:true, get:()=>mc.toolBobRise,  set:v=>{ game.showTool.bobRise=v; } });
+Object.defineProperty(game, 'toolSwing',    { enumerable:true, get:()=>game.showTool.swing, set:v=>{ game.showTool.swing=v; } });
+Object.defineProperty(game, 'toolDebug',    { enumerable:true, get:()=>game.showTool.debug, set:d=>{ game.showTool.debug=d; } });
+
+
 Object.defineProperty(game,'sunShade',{ enumerable:true, get:()=>mc.sunShade,
   set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.55)); mc.sunShade=v; try{localStorage.setItem('vf_mcSunShade',v);}catch(e){}
     mcShadowDirty(); return v; } });
@@ -15843,6 +17376,7 @@ game.dumpVars=function(){
     'ghostAlpha','structGhostAlpha','noteAlpha','noteSigns','noteText','noteTextDist','noteFont','noteWidth','structBias','structCull','playerSpeed','playerScale','playerTool',
     'airControl','airAccel','airCap','autoUnstick',
     'structTextures','structGreedy','useOldStructBuildCall','interiorDark','sunShade','shadowSize','glowLevel','glowFocus','worldSize',
+    'viento','uvInset',
     'agentSpeed','agentSaveMs'];
   const V={ showFPS:_showFPS, showVoxels:_showVox, showColors:_showColors, carasMarcadas:carasMarcar }; // callables → su booleano subyacente
   for(const k of keys) V[k]=game[k];
@@ -15886,7 +17420,46 @@ $('#mc-note-del').onclick=mcDeleteNote;
 if($('#mc-note-trace')) $('#mc-note-trace').onclick=mcShowTraceModal;
 if($('#trace-close')) $('#trace-close').onclick=mcCloseTraceModal;
 if($('#trace-copy')) $('#trace-copy').onclick=mcCopyTraceText;
-$('#mc-note-cancel').onclick=mcCloseNote;
+$('#mc-note-cancel').onclick = () => mcCloseNote(true);
+document.querySelectorAll('.mc-note-rot-btn').forEach(btn => {
+  btn.onclick = (e) => { e.preventDefault(); mcSetNoteRotUI(parseInt(btn.getAttribute('data-rot'), 10), true); };
+});
+const bRotStep = $('#mc-note-rot-step');
+if(bRotStep) bRotStep.onclick = (e) => { e.preventDefault(); mcSetNoteRotUI((mcCurNoteRot + 1) % 4, true); };
+
+// Arrastre libre de la ventana modal de notas por su cabecera
+(function(){
+  const noteEl = $('#mc-note');
+  const headEl = noteEl && noteEl.querySelector('.mc-note-head');
+  if(!noteEl || !headEl) return;
+  let dragging = false, startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
+  headEl.addEventListener('pointerdown', (e) => {
+    if(e.target.closest('button') || e.target.closest('input') || e.target.closest('textarea')) return;
+    dragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = noteEl.getBoundingClientRect();
+    initialLeft = rect.left;
+    initialTop = rect.top;
+    noteEl.style.transform = 'none';
+    noteEl.style.left = initialLeft + 'px';
+    noteEl.style.top = initialTop + 'px';
+    headEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  headEl.addEventListener('pointermove', (e) => {
+    if(!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const newLeft = Math.max(10, Math.min(window.innerWidth - noteEl.offsetWidth - 10, initialLeft + dx));
+    const newTop = Math.max(10, Math.min(window.innerHeight - noteEl.offsetHeight - 10, initialTop + dy));
+    noteEl.style.left = newLeft + 'px';
+    noteEl.style.top = newTop + 'px';
+  });
+  const endDrag = () => { dragging = false; };
+  headEl.addEventListener('pointerup', endDrag);
+  headEl.addEventListener('pointercancel', endDrag);
+})();
 $('#mc-note-text').addEventListener('keydown',e=>{                    // Ctrl/⌘+Enter guarda (Esc lo cierra el handler del Mundo; los atajos del editor no aplican con el Mundo abierto)
   if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); mcSaveNote(); }
 });
@@ -15931,19 +17504,30 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     e.preventDefault(); return; }
   const k=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey) && k==='c'){ mcCopySelection(); e.preventDefault(); return; }   // Ctrl+C: copia la selección (tool=select) al portapapeles compatible con el editor
+  if((e.ctrlKey||e.metaKey) && k==='x'){ mcCutSelection(); e.preventDefault(); return; }    // Ctrl+X: corta la selección al portapapeles y limpia los bloques del mapa
   if((e.ctrlKey||e.metaKey) && k==='v'){ mcPasteWorld(); e.preventDefault(); return; }        // Ctrl+V: pega el portapapeles EN EL MAPA, apoyado en la cara apuntada (el Mundo no se cierra)
+
   if(k==='e' || k==='p'){                                                                                   // e = conmuta construir↔volumen · E = conmuta pintar→seleccionar→cuentagotas
     if(e.altKey){ mcOpenPickerHerramientas(); e.preventDefault(); return; }
     mcRotaHerramienta(e.shiftKey || e.key === 'E'); e.preventDefault(); return; }
   if(k==='b'){ const st=1.15; game.playerScale=mc.scale*(e.shiftKey?1/st:st); toast('Tamaño ×'+(+mc.scale.toFixed(2))); e.preventDefault(); return; }   // b = más grande («big») · B (mayús) = más pequeño (paso fino ×1.15)
   if(k==='x'){ mc.xray=!mc.xray; toast('Rayos-X: '+(mc.xray?'ON':'OFF')); e.preventDefault(); return; }    // modo depuración: ver el volumen de colisión
   if(k==='u'){ mcForceUnstick(); toast('Desatascado'); e.preventDefault(); return; }                       // U = sácame de aquí (sube sobre lo que estorbe; si no, al spawn)
-  if(k==='n'){ mcOpenNote(); e.preventDefault(); return; }                                                  // N = anota el bloque apuntado (post-it)
+  if(k==='n'){
+    if(mc.notePlacing){ mcCancelNotePlace(); e.preventDefault(); return; }
+    const hit = mcRaycast(mcReach(), true);
+    const anchor = hit && (mcNoteAnchor(hit.cell) || (mc.notes && mc.notes[mcNoteKey(hit.cell)] ? hit.cell : null));
+    if(anchor) mcOpenNote(anchor);
+    else mcStartNotePlace();
+    e.preventDefault();
+    return;
+  }
   // REQ-FLY1 · la F pasa a ser VOLAR y la foto se va a Alt+F. El dueño lo pidió así porque volar es de
   // cada minuto y la foto de vez en cuando; el botón táctil 📷 sigue siendo la foto (en táctil no hay Alt).
   // La rama de Alt mira e.code (tecla FÍSICA) y no `k`, por lo mismo que Alt+C (app.js:3529): con Alt
   // pulsado, e.key llega compuesto en varios teclados (en Mac, Alt+F es 'ƒ') y la foto no se dispararía.
   if(e.altKey && e.code==='KeyF' && !e.ctrlKey && !e.metaKey){ mcFoto(); e.preventDefault(); return; }       // Alt+F = foto de lo que se ve (ficha quemada en la imagen) → data/fotos/ y galería en /fotos
+  if(e.altKey && e.code==='KeyV' && !e.ctrlKey && !e.metaKey){ mcToggleGrabarVideo(); e.preventDefault(); return; } // Alt+V = grabar clip de vídeo (gameplay) → visor de recorte/escalado y /videos
   if(k==='f' && !e.altKey){
     toast('Vuelo: '+(mcSetVolar(!mc.volar)?'ON':'OFF')+' — Espacio sube, Shift baja');
     e.preventDefault(); return; }
@@ -15957,6 +17541,23 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     }
     mc._volCache = null;
     e.preventDefault(); return;
+  }
+  if(k==='r' && mc.pasteActive){
+    mc.pasteRot = ((mc.pasteRot || 0) + 1) & 3;
+    mc._pasteCache = null;
+    toast('Pegar giro: ' + (mc.pasteRot * 90) + '° (' + (mc.pasteRot + 1) + '/4)');
+    e.preventDefault();
+    return;
+  }
+
+  if(k==='r' && mc.notePlacing){
+
+    mc.notePlaceRot = ((mc.notePlaceRot || 0) + 1) % 4;
+    mcClearPreview();
+    mcUpdatePreview();
+    toast('Giro del cartel: ' + (mc.notePlaceRot * 90) + '°');
+    e.preventDefault();
+    return;
   }
   if(k==='r' && (mc.slotStruct[mc.sel] || mc.tool==='box')){                                                                       // coloca la estructura en cualquiera de sus 24 posturas (mantén clic derecho para ver la vista-previa; suelta = estampa así)
     // Dos pasos, que es como se piensa: primero QUÉ CARA queda arriba, y luego cómo está girada sobre ella.
@@ -16065,11 +17666,20 @@ function mcStickSuelta(){    // el pulgar levantado deja de andar: si no, te que
   // soltar, así que mcTouchSuelta no tiene que saber de él.
   const foto=$('#mc-tfoto');
   if(foto) foto.addEventListener('pointerup',e=>{ if(!mc.active) return; mcFoto(); e.preventDefault(); });
+  const tvideo=$('#mc-tvideo');
+  if(tvideo) tvideo.addEventListener('pointerup',e=>{ if(!mc.active) return; mcToggleGrabarVideo(); e.preventDefault(); });
   // Desatasco (BUG-AG7). Va aquí con los demás mandos pero NO dentro de #mc-touch: en el escritorio
   // también hace falta. También en pointerup, por lo mismo que la foto. Lo esconde el propio mcUpdate
   // en cuanto quedas libre; no hace falta apagarlo a mano.
   const stuck=$('#mc-stuck');
   if(stuck) stuck.addEventListener('pointerup',e=>{ if(!mc.active) return; mcForceUnstick(); toast('Desatascado'); e.preventDefault(); });
+
+  const vClose=$('#vf-video-close'), vDiscard=$('#vf-video-discard');
+  const vSave=$('#vf-video-save-server'), vDown=$('#vf-video-download');
+  if(vClose) vClose.addEventListener('click', mcCierraEditorVideo);
+  if(vDiscard) vDiscard.addEventListener('click', mcCierraEditorVideo);
+  if(vSave) vSave.addEventListener('click', mcGuardarVideoServidor);
+  if(vDown) vDown.addEventListener('click', mcDescargarVideoLocal);
 }
 // ⚠️ LOS FINALES SE ESCUCHAN EN WINDOW, NO EN CADA MANDO. Un `pointerup` perdido deja el estado
 // pegado, y los dos síntomas salen a la vez: te quedas ANDANDO SOLO (la tecla del joystick no se

@@ -3,7 +3,18 @@
   "raiz": {
     "nombre": "torso",
     "pieza": "hab:manta-raya",
-    "rot": 0
+    "rot": 0,
+    "animacion": {
+      "tipo": "aleta",
+      "eje": "z",
+      "amplitud": 20,
+      "frecuencia": 1.2,
+      "fase": 0,
+      "contrabalanceo": 1,
+      "pivote": 1,
+      "modo": "siempre",
+      "sentido": "cola"
+    }
   },
   "piezas": [],
   "seguir": {
@@ -19,6 +30,6 @@
     "cadencia": 0
   },
   "fisica": false,
-  "savedAt": "2026-08-15T22:46:54",
+  "savedAt": "2026-08-16T22:29:12",
   "id": "manta-raya"
 }

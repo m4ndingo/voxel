@@ -69,9 +69,11 @@
       <div class="menu-sep"></div>
       <a class="menu-item" href="/map/" target="_blank" rel="noopener">🗺 Mundos ↗<small>listado de mapas</small></a>
       <a class="menu-item" href="/fotos" target="_blank" rel="noopener">📷 Fotos ↗<small>capturas del Mundo (Alt+F)</small></a>
+      <a class="menu-item" href="/videos" target="_blank" rel="noopener">🎬 Vídeos ↗<small>clips de gameplay (Alt+V)</small></a>
       <a class="menu-item" href="/images/" target="_blank" rel="noopener">🖼 Iconos ↗<small>favicon, marca y herramientas</small></a>
       <a class="menu-item" href="/wiki/" target="_blank" rel="noopener">📖 Wiki ↗<small>guía y referencia</small></a>
     </div>
+
   </header>
 
   <!-- ===================== Cuerpo ===================== -->
@@ -538,6 +540,11 @@
   <!-- ===================== Mundo (REQ-MC · sandbox 3D WebGL) ===================== -->
   <div class="modal mc-modal" id="mc-modal" hidden>
     <canvas id="mc-canvas"></canvas>
+    <div class="mc-rec-badge" id="mc-rec-badge" hidden>
+      <span class="rec-dot"></span>
+      <span id="mc-rec-time">REC 00:00</span>
+      <span class="rec-hint">(Alt+V para parar)</span>
+    </div>
     <div class="mc-loading" id="mc-loading" hidden>
       <div class="mc-spinner" aria-hidden="true"></div>
       <div class="mc-loading-text" id="mc-loading-text">Cargando mundo…</div>
@@ -554,6 +561,7 @@
       <div class="mc-stick" id="mc-stick"><div class="mc-stick-knob" id="mc-stick-knob"></div></div>
       <button class="mc-tbtn" id="mc-tjump" type="button" title="Saltar">⤒</button>
       <button class="mc-tbtn foto" id="mc-tfoto" type="button" title="Sacar foto (Alt+F)">📷</button>
+      <button class="mc-tbtn video" id="mc-tvideo" type="button" title="Grabar vídeo (Alt+V)">🎬</button>
       <!-- La salida del Mundo en táctil, y la ÚNICA: sin teclado no hay Esc. Vive aquí dentro y no
            en la esquina a propósito — así se enciende y se apaga con los mandos táctiles (un solo
            `hidden`, el de #mc-touch) y en escritorio no existe, que es lo que se pidió. -->
@@ -606,7 +614,17 @@
     <div class="mc-xray-labels" id="mc-xray-labels" aria-hidden="true" hidden></div>
     <!-- t1 · editor de nota post-it de un bloque (tecla N) -->
     <div class="mc-note" id="mc-note" hidden>
-      <div class="mc-note-head">📝 Nota del bloque</div>
+      <div class="mc-note-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <span>📝 Nota del bloque</span>
+        <div class="mc-note-rot-bar" style="display:flex; align-items:center; gap:4px; font-size:12px;">
+          <span style="opacity:0.8; margin-right:4px;">Giro:</span>
+          <button type="button" class="btn sm ghost mc-note-rot-btn" data-rot="0" title="Rotación 0° (Frente Z+)">⬆ 0°</button>
+          <button type="button" class="btn sm ghost mc-note-rot-btn" data-rot="1" title="Rotación 90° (Frente X+)">➡ 90°</button>
+          <button type="button" class="btn sm ghost mc-note-rot-btn" data-rot="2" title="Rotación 180° (Frente Z-)">⬇ 180°</button>
+          <button type="button" class="btn sm ghost mc-note-rot-btn" data-rot="3" title="Rotación 270° (Frente X-)">⬅ 270°</button>
+          <button type="button" class="btn sm ghost" id="mc-note-rot-step" title="Girar 90° (⟳)">⟳</button>
+        </div>
+      </div>
       <textarea id="mc-note-text" rows="4" maxlength="280" placeholder="Escribe una nota… (Ctrl+Enter guarda)"></textarea>
       <div class="mc-note-actions">
         <button class="btn sm ghost" id="mc-note-del" hidden>Borrar</button>
@@ -630,6 +648,61 @@
       </div>
       <div style="flex:1; min-height:0; display:flex; flex-direction:column; padding:14px; box-sizing:border-box;">
         <pre id="trace-content" style="flex:1; height:100%; margin:0; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; line-height:1.45; white-space:pre-wrap; background:rgba(0,0,0,0.6); color:#ffe08a; padding:14px; border-radius:8px; border:1px solid rgba(255,224,138,0.2); overflow-y:auto; box-sizing:border-box;"></pre>
+      </div>
+    </div>
+
+    <!-- Modal de Vídeo: previsualización, recorte temporal, escalado y guardado -->
+    <div class="modal vf-video-modal" id="vf-video-modal" hidden>
+      <div class="vf-video-box">
+        <div class="vf-video-head">
+          <div class="vf-video-title">🎬 Clip de Gameplay <span id="vf-video-meta" class="sub"></span></div>
+          <button class="btn sm ghost" id="vf-video-close" title="Cerrar">✕</button>
+        </div>
+        <div class="vf-video-player-wrap">
+          <video id="vf-video-player" controls autoplay loop playsinline></video>
+          <div id="vf-video-proc-overlay" class="vf-video-proc-overlay" hidden>
+            <div class="mc-spinner"></div>
+            <div id="vf-video-proc-text">Procesando recorte y escalado…</div>
+          </div>
+        </div>
+        <div class="vf-video-controls">
+          <div class="vf-video-row">
+            <div class="vf-range-group">
+              <label>Inicio: <b id="vf-trim-start-val">0.0s</b></label>
+              <input type="range" id="vf-trim-start" min="0" max="10" step="0.1" value="0">
+            </div>
+            <div class="vf-range-group">
+              <label>Fin: <b id="vf-trim-end-val">10.0s</b></label>
+              <input type="range" id="vf-trim-end" min="0" max="10" step="0.1" value="10">
+            </div>
+            <div class="vf-duration-badge">Duración: <b id="vf-trim-dur">10.0s</b></div>
+          </div>
+          <div class="vf-video-row opt-row">
+            <div class="vf-opt-group">
+              <label>Resolución:</label>
+              <select id="vf-scale-select">
+                <option value="1" selected>Original (100%)</option>
+                <option value="720">720p HD</option>
+                <option value="480">480p SD</option>
+                <option value="square">1:1 Cuadrado (Reddit)</option>
+              </select>
+            </div>
+            <div class="vf-opt-group">
+              <label>Formato:</label>
+              <select id="vf-format-select">
+                <option value="mp4" selected>MP4 (H.264 / AVC)</option>
+                <option value="webm">WebM (VP9)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="vf-video-foot">
+          <button class="btn ghost" id="vf-video-discard">Descartar</button>
+          <div class="vf-foot-right">
+            <button class="btn pri" id="vf-video-save-server">💾 Guardar en Servidor</button>
+            <button class="btn" id="vf-video-download">⬇️ Descargar a Disco</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

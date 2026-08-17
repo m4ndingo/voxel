@@ -10,9 +10,12 @@
     {
       "titulo": "La aplicación",
       "paginas": [
-        { "id": "atajos", "titulo": "Atajos de teclado" },
-        { "id": "iconos", "titulo": "Los iconos salen de dibujos tuyos" }
+        { "id": "atajos",             "titulo": "Atajos de teclado" },
+        { "id": "iconos",             "titulo": "Los iconos salen de dibujos tuyos" },
+        { "id": "herramienta-en-mano","titulo": "Herramienta en mano (primera persona)" },
+        { "id": "grabacion-video",    "titulo": "Grabación de vídeo (Alt+V)" }
       ]
+
     },
     {
       "titulo": "Aspecto del mundo",

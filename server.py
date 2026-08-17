@@ -17,6 +17,7 @@ WORLDS = os.path.join(BASE, 'data', 'worlds')             # mundos con nombre: /
 SNIPS = os.path.join(BASE, 'data', 'snippets')             # gestor de snippets de código (data/snippets/<id>.json)
 AGENTS = os.path.join(BASE, 'data', 'agentes')             # agentes articulados (data/agentes/<id>.json) — el documento, no el motor
 FOTOS = os.path.join(BASE, 'data', 'fotos')                # fotos del Mundo (tecla F): <n>_<mapa>_<fecha>.png + .json con la ficha
+VIDEOS = os.path.join(BASE, 'data', 'videos')              # vídeos del Mundo (Alt+V): <n>_<mapa>_<fecha>.mp4/.webm + .json
 UI = os.path.join(BASE, 'data', 'ui')                      # iconos de la aplicación horneados desde /images (favicon, marca, herramientas)
 UIFILE = os.path.join(UI, 'ranuras.json')                  # la ASIGNACIÓN (ranura → dibujo@postura, modo, aa): la fuente de verdad de los .png
 # Snippets que NO se pueden borrar desde la UI. 'mundo-autoarranque' lo busca app.js POR ESE ID al
@@ -30,6 +31,7 @@ os.makedirs(WORLDS, exist_ok=True)
 os.makedirs(SNIPS, exist_ok=True)
 os.makedirs(AGENTS, exist_ok=True)
 os.makedirs(FOTOS, exist_ok=True)
+os.makedirs(VIDEOS, exist_ok=True)
 os.makedirs(UI, exist_ok=True)
 
 DEFAULT_MAP = {'cols': 8, 'rows': 8, 'cells': {}}
@@ -310,6 +312,57 @@ def list_fotos():
     out.sort(key=lambda f: f['n'], reverse=True)          # por número y no por texto: '10000' es posterior a '9999'
     return out
 
+# ---- Vídeos del Mundo (Alt+V / game.video()) ---------------------------------------------------
+VIDEO_MAX_BYTES = 120 * 1024 * 1024    # 120 MB de tope para clips de vídeo
+RE_VIDEO = re.compile(r'^(\d{4,})_([a-z0-9-]+)_(\d{8}-\d{6})$')
+
+def video_nueva(mapa, ext='mp4'):
+    """Reserva un nombre de vídeo libre y devuelve (id, ruta_video)."""
+    mapa = re.sub(r'[^a-z0-9]+', '-', (mapa or 'default').lower()).strip('-') or 'default'
+    sello = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    ext = 'webm' if ext == 'webm' else 'mp4'
+    n = 0
+    for fn in os.listdir(VIDEOS):
+        if fn.endswith('.mp4') or fn.endswith('.webm') or fn.endswith('.mov') or fn.endswith('.m4v'):
+            base = os.path.splitext(fn)[0]
+            m = RE_VIDEO.match(base)
+            if m:
+                n = max(n, int(m.group(1)))
+    while True:
+        n += 1
+        idd = f'{n:04d}_{mapa}_{sello}'
+        fp = os.path.join(VIDEOS, f'{idd}.{ext}')
+        try:
+            os.close(os.open(fp, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return idd, fp
+        except FileExistsError:
+            continue
+
+def list_videos():
+    out = []
+    for fn in os.listdir(VIDEOS):
+        if not (fn.endswith('.mp4') or fn.endswith('.webm') or fn.endswith('.mov') or fn.endswith('.m4v')):
+            continue
+        base, ext = os.path.splitext(fn)
+        m = RE_VIDEO.match(base)
+        if not m:
+            continue
+        idd = base
+        fp = os.path.join(VIDEOS, fn)
+        try:
+            tam = os.path.getsize(fp)
+        except OSError:
+            continue
+        try:
+            ficha = json.load(open(os.path.join(VIDEOS, idd + '.json'), encoding='utf-8'))
+        except Exception:
+            ficha = {}
+        out.append({'id': idd, 'n': int(m.group(1)), 'mapa': m.group(2),
+                    'url': '/data/videos/' + fn, 'ext': ext.lstrip('.'),
+                    'bytes': tam, 'ficha': ficha})
+    out.sort(key=lambda f: f['n'], reverse=True)
+    return out
+
 # ---------------------------------------------------------------------------------------------
 # Iconos de la aplicación (/images). Dos cosas distintas viven en data/ui/:
 #   · `ranuras.json` — la ASIGNACIÓN: qué dibujo, en qué postura, plano o iso, con o sin suavizado.
@@ -531,6 +584,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return super().do_GET()
         if path_only == '/api/fotos':
             return self._send(200, list_fotos())
+        if path_only in ('/videos', '/videos/'):                  # galería de los vídeos que saca Alt+V
+            self.path = '/videos.html'
+            return super().do_GET()
+        if path_only == '/api/videos':
+            return self._send(200, list_videos())
         if path_only == '/api/ui':                                # asignación de iconos de /images
             return self._send(200, ui_leer())
         if path_only == '/api/mundos':                            # listado de /map/ (cache por mtime en data/_thumbs/)
@@ -660,6 +718,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             ficha['id'] = idd
             atomic_dump(ficha, os.path.join(FOTOS, idd + '.json'))
             return self._send(200, {'ok': True, 'id': idd, 'url': '/data/fotos/' + idd + '.png',
+                                    'bytes': len(crudo)})
+        if ruta_post == '/api/videos':                            # Alt+V en el Mundo: guarda el clip de vídeo + su ficha
+            if int(self.headers.get('Content-Length', 0) or 0) > VIDEO_MAX_BYTES:
+                return self._send(413, {'error': 'el vídeo pesa demasiado'})
+            d = self._read()
+            vid = d.get('video') if isinstance(d, dict) else None
+            if not isinstance(vid, str) or not vid:
+                return self._send(400, {'error': 'falta video (base64)'})
+            vid = vid.split(',', 1)[1] if vid.startswith('data:') else vid
+            try:
+                crudo = base64.b64decode(vid, validate=True)
+            except (binascii.Error, ValueError):
+                return self._send(400, {'error': 'video no es base64 válido'})
+            ext = str(d.get('ext') or 'mp4').lower()
+            if ext not in ('mp4', 'webm', 'mov', 'm4v'):
+                ext = 'mp4'
+            ficha = d.get('ficha') if isinstance(d.get('ficha'), dict) else {}
+            ficha['guardadaEn'] = now_iso()
+            ficha['bytes'] = len(crudo)
+            ficha['ext'] = ext
+            idd, fp = video_nueva(ficha.get('mapa'), ext)
+            with open(fp, 'wb') as f:
+                f.write(crudo)
+            ficha['id'] = idd
+            atomic_dump(ficha, os.path.join(VIDEOS, idd + '.json'))
+            return self._send(200, {'ok': True, 'id': idd, 'url': '/data/videos/' + idd + '.' + ext,
                                     'bytes': len(crudo)})
         if ruta_post == '/api/ui':                                # «Publicar» en /images: asignación + PNG horneados
             if int(self.headers.get('Content-Length', 0) or 0) > UI_MAX_BYTES:
@@ -988,6 +1072,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             to_trash(png)                                          # a papelera, como todo lo demás
             to_trash(os.path.join(FOTOS, mf.group(1) + '.json'))
             return self._send(200, {'ok': True})
+        mv = re.match(r'^/api/videos/(\d{4,}_[a-z0-9-]+_\d{8}-\d{6})$', urllib.parse.urlparse(self.path).path)
+        if mv:
+            idd = mv.group(1)
+            borrado = False
+            for ext in ('.mp4', '.webm', '.mov', '.m4v'):
+                vfp = os.path.join(VIDEOS, idd + ext)
+                if os.path.exists(vfp):
+                    to_trash(vfp)
+                    borrado = True
+            jfp = os.path.join(VIDEOS, idd + '.json')
+            if os.path.exists(jfp):
+                to_trash(jfp)
+            if borrado:
+                return self._send(200, {'ok': True})
+            return self._send(404, {'error': 'no existe ese vídeo'})
         sid = self._snip_id()
         if sid:
             if sid in SNIPS_PROTEGIDOS:

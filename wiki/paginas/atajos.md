@@ -123,7 +123,10 @@ tecla de movimiento lo captura** — no hace falta volver a hacer clic en el lie
 | `n` | anota el bloque al que apuntas (sale como cartel 3D legible) |
 | `z` / `Z` | deshacer / rehacer (romper, poner, pintar, estampar, retirar) |
 | `Ctrl`+`C` | copiar la caja seleccionada, en el formato del editor |
-| `Ctrl`+`V` | pegarla **en el mapa**, apoyada en la cara que apuntas (el Mundo no se cierra) |
+| `Ctrl`+`X` | cortar la caja seleccionada al portapapeles y eliminar sus bloques del mapa |
+| `Ctrl`+`V` | activa el **modo de pegado** con previsualización 3D (mueve la mira para posicionar, `r` rota 90°, clic izq. planta, clic der. cancela) |
+
+
 
 ### Ratón
 

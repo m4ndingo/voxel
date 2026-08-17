@@ -3,7 +3,17 @@
   "raiz": {
     "nombre": "torso",
     "pieza": "hab:medusa-luminiscente",
-    "rot": 0
+    "rot": 0,
+    "animacion": {
+      "tipo": "medusa",
+      "eje": "x",
+      "amplitud": 14,
+      "frecuencia": 0.8,
+      "fase": 90,
+      "contrabalanceo": 1,
+      "modo": "siempre",
+      "sentido": "tentaculos"
+    }
   },
   "piezas": [],
   "seguir": {
@@ -19,6 +29,6 @@
     "cadencia": 0
   },
   "fisica": false,
-  "savedAt": "2026-08-15T21:24:23",
+  "savedAt": "2026-08-16T22:34:57",
   "id": "medusa"
 }

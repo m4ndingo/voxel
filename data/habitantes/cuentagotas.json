@@ -10,9 +10,7 @@
     "type": "objeto",
     "role": "Herramienta · cuentagotas / pipeta (eyedropper)",
     "icon": "💧",
-    "description": "Cuentagotas para seleccionar y copiar la textura o material de cualquier bloque del mapa.",
-    "categoria": "herramienta",
-    "herramienta": "pick"
+    "description": "Cuentagotas para seleccionar y copiar la textura o material de cualquier bloque del mapa."
   },
   "voxels": {
     "13,1,2": "#3a3a3a",
@@ -76,6 +74,13 @@
     "2,2,13": "#69f0ae",
     "2,3,13": "#00e676"
   },
-  "savedAt": "2026-08-12T22:22:15",
+  "pivotes": [
+    [
+      11,
+      2,
+      4
+    ]
+  ],
+  "savedAt": "2026-08-17T18:59:01",
   "createdAt": "2026-08-12T10:25:25"
 }

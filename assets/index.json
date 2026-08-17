@@ -1268,5 +1268,112 @@
     "savedAt": "2026-08-15T09:55:00",
     "createdAt": "2026-08-15T09:55:00",
     "count": 4096
+  },
+  {
+    "id": "oak",
+    "name": "Oak",
+    "role": "Bloque · madera de roble (oak)",
+    "icon": "🪵",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/oak.vox.json",
+    "description": "Bloque de madera de roble estilo Minecraft.",
+    "alias": "oak_wood",
+    "categoria": "construccion",
+    "savedAt": "2026-08-17T06:25:05",
+    "createdAt": "2026-08-17T06:25:05",
+    "count": 4096
+  },
+  {
+    "id": "dirt",
+    "name": "Dirt",
+    "role": "Bloque · tierra (dirt)",
+    "icon": "🟫",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": 16,
+    "file": "assets/dirt.vox.json",
+    "description": "Bloque de tierra estilo Minecraft.",
+    "alias": "dirt_block",
+    "categoria": "construccion",
+    "savedAt": "2026-08-17T06:25:05",
+    "createdAt": "2026-08-17T06:25:05",
+    "count": 4096
+  },
+  {
+    "id": "1-voxel",
+    "name": "1 voxel",
+    "role": "Bloque básico 16³",
+    "icon": "🧱",
+    "type": "objeto",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/1-voxel.vox.json",
+    "savedAt": "2026-08-17T11:33:56",
+    "createdAt": "2026-08-17T11:33:56",
+    "count": 1,
+    "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir."
+  },
+  {
+    "id": "coco",
+    "name": "Coco",
+    "role": "Bloque · fruto de coco tropical",
+    "icon": "🥥",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/coco.vox.json",
+    "savedAt": "2026-08-17T14:01:00",
+    "createdAt": "2026-08-17T13:48:42",
+    "count": 1320,
+    "alias": "coco",
+    "description": "Nuez de coco con cáscara fibrosa y ojos germinativos."
+  },
+  {
+    "id": "tronco-palmera",
+    "name": "Tronco Palmera",
+    "role": "Bloque · tronco de palmera tropical",
+    "icon": "🌴",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/tronco-palmera.vox.json",
+    "savedAt": "2026-08-17T13:50:03",
+    "createdAt": "2026-08-17T13:50:03",
+    "count": 1352,
+    "alias": "tronco_palmera",
+    "description": "Estípite de palmera con corteza anillada y fibras tropicales."
+  },
+  {
+    "id": "hojas-palmera",
+    "name": "Hojas Palmera",
+    "role": "Bloque · hojas tropicales de palmera",
+    "icon": "🌿",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hojas-palmera.vox.json",
+    "savedAt": "2026-08-17T15:47:40",
+    "createdAt": "2026-08-17T13:50:15",
+    "count": 1314,
+    "alias": "hojas_palmera",
+    "description": "Frondas de palmera con nervaduras doradas y calados al viento."
   }
 ]

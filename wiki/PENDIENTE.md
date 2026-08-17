@@ -6,5 +6,5 @@ El dueño dirá cuándo hay que ponerse a actualizarla; entonces se vacía esta 
 
 Formato: `- [ ] <ticket> · <qué cambió> → <dónde tocaría>`
 
-*(Sincronización completada el 2026-08-15: incorporados mandos de REQ-ENV5 `game.reflejoEntorno`, `game.reflejoOndas`, `game.reflejoPlanoY` en `wiki/api.json` e `iluminacion.md`, así como `game.agentsLightTracking` y `game.glowGain`.)*
+*(Sincronización completada el 2026-08-17: incorporados mandos de iluminación y sombras `game.topShade`, `game.faceShades`, `game.sideShades`, `game.sunShade`, `game.interiorDark`, `game.uvInset`/`game.texInset`, `game.glowLevel`, `game.glowFocus` en `wiki/api.json` e `iluminacion.md`.)*
 
