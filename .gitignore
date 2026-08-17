@@ -54,6 +54,7 @@ data/habitantes_trash/
 data/worlds/
 # recursos compartidos publicos
 !data/habitantes/pincel-de-texturizado.json
+!data/habitantes/caja-de-volumen.json
 !data/habitantes/varita-de-selecci-n.json
 !data/habitantes/pico-de-piedra.json
 !data/habitantes/cuentagotas.json
