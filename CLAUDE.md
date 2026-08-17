@@ -20,7 +20,8 @@ como línea, pero el fichero es `web/app.js`.
   `mcResolveMat`/`mcMatKey`. **Sin línea a propósito** (envejecen → sitio equivocado).
 - Nombre corto de asset ← **`assets/index.json`**, ⛔ NUNCA de un `*.vox.json` (taberna = 283 k tokens >
   ventana). **Vetados al `Read`** (`.claude/settings.json`): `data/worlds/*.vox`, `data/mundo.vox`,
-  `data/fotos/*.png`, los 3 assets grandes.
+  `data/fotos/*.png`, los 3 assets grandes. Foto que te pasen por número → **`data/fotos/mini/<id>.png`**
+  (800 px, ésa SÍ se lee; la escribe el navegador al sacarla, atrasadas con `herramientas/fotos_mini.py`).
 - **Raíz mínima** (2026-08-13): `server.py`, `correr_tests.js`, `package.json`, `.md`. SITIO → **`web/`**
   (`.html`, `app.js`, `.css`); resto → `servidor/`, `herramientas/`, `performance/`, `docs/historico/`.
   Todo se lanza **desde la raíz** ⇒ su `__file__`/`__dirname` lleva `..`.

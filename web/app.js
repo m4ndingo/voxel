@@ -5085,8 +5085,18 @@ async function agPlantar(){
   }
   closeAgentes();
   if($('#mc-modal').hidden) await openWorld();
-  const yaw=mc.yaw||0, dx=-Math.sin(yaw)*3, dz=-Math.cos(yaw)*3;
-  const h=await game.esqueletos.crear(agDoc, mc.pos[0]+dx, mc.pos[1], mc.pos[2]+dz);
+  // Un esqueleto se ancla por la ESQUINA de su raíz (crearEsqueleto → mcStampStruct), no por su centro,
+  // y `escala` (REQ-AGESC1) multiplica esa huella hasta ×8. Con el paso fijo de 3 celdas de siempre, un
+  // calamar a escala 8 crecía 8 celdas hacia +x/+z desde el punto de plantado: según hacia dónde
+  // mirases, te lo tragabas o te aparecía detrás. Un perro (escala 1) cabía en el hueco, y por eso ése
+  // sí salía bien. Se centra la huella en la línea de la mira y el paso crece con lo que ocupa el bicho.
+  const esc=Math.max(0.1, Math.min(8, (+agDoc.escala>0)?+agDoc.escala:1));
+  let w=1, d=1;
+  try{ const rec=await mcStructCells(mcClaveBase(agDoc.raiz.pieza)); if(rec && rec.w){ w=rec.w; d=rec.d||1; } }
+  catch(e){ console.warn('[agentes] no se pudo medir la raíz para plantar; la doy por 1×1', e); }
+  const yaw=mc.yaw||0, ux=-Math.sin(yaw), uz=-Math.cos(yaw);
+  const dist=3+Math.max(w,d)*esc*0.5;                  // 3 celdas de aire ENTRE el jugador y el bicho, mida lo que mida
+  const h=await game.esqueletos.crear(agDoc, mc.pos[0]+ux*dist-w*esc/2, mc.pos[1], mc.pos[2]+uz*dist-d*esc/2);
   toast(h? 'Plantado ahí delante' : 'No se pudo plantar (mira la consola)');
 }
 $('#ag-close').onclick=closeAgentes;
@@ -7124,6 +7134,16 @@ function mcIsCellReplaceable(x,y,z){
   const id = mc.grid[mcIdx(x,y,z)];
   return mcIsReplaceable(id, x, y, z);
 }
+// ¿esta celda tiene FLUIDO (agua/lava), no aire? Es otra pregunta que mcIsCellReplaceable, que mete
+// el aire en el mismo saco. La necesita colocar/pintar: una pieza fina no puede escribirse en la
+// rejilla aquí —un id por celda— porque borraría el voxel de agua y abriría un hueco en la superficie
+// (foto #46: en un charco de 1 de hondo la pieza salía seca en vez de sumergida). Se estampa como
+// estructura y el agua se queda donde estaba.
+function mcCeldaFluida(x,y,z){
+  if(!mc || !mc.grid || !mcInside(x,y,z)) return false;
+  const id = mc.grid[mcIdx(x,y,z)];
+  return id!==0 && mcIsReplaceable(id, x, y, z);
+}
 function mcSetBlock(x,y,z,id){
   if(mcInside(x,y,z)){
     const oldId = mc.grid[mcIdx(x,y,z)];
@@ -7897,11 +7917,13 @@ function mcClaveConOri(k,ori){ ori=mcOriNorm(ori); return ori ? mcClaveBase(k)+'
 // Al girar el fantasma (R / Shift+R) la pieza pasa a ser OTRO material, y darlo de alta es descargar +
 // re-hornear la paleta. Se hace ya, mientras el dueño mira el fantasma, para que el clic de después sea
 // el camino normal y no el de «material pendiente» (que llega tarde y sin historial).
+// Devuelve promesa: quien necesite la variante YA dada de alta (el relleno de una selección, que
+// escribe al momento en vez de esperar a un clic) encadena; los demás la ignoran como siempre.
 function mcPrecargaGirada(key, ori){
-  if(!key || !ori || !mcEsFinaEnRejilla(key)) return;
+  if(!key || !ori || !mcEsFinaEnRejilla(key)) return Promise.resolve();
   const vk=mcClaveConOri(key, ori);
-  if(mc.blockKey.indexOf(vk)>0) return;
-  game.addMaterial(vk).catch(e=>console.warn('[mundo] variante girada', vk, e));
+  if(mc.blockKey.indexOf(vk)>0) return Promise.resolve();
+  return game.addMaterial(vk).catch(e=>console.warn('[mundo] variante girada', vk, e));
 }
 // Ancla la estructura por el CENTRO de su base (no por la esquina): convierte la celda apuntada por la mira
 // en la esquina min de estampado restando media huella horizontal —según el giro (90°/270° intercambian
@@ -11201,6 +11223,7 @@ function mcRender(){
     mcStructGL(false);   // fuera antes de la pasada del sol del frame siguiente, que hereda el estado
   }
   mcDrawNoteTexts(pj, view);      // el texto de cada nota, pegado en la tabla de su cartel (se desvanece de lejos)
+  mcDrawPreview(pj, view);        // vista-previa translúcida de la habitación/cartel mientras se apunta (mc.preview)
   mcDrawVolumeBlocks(pj, view);   // bloques reales texturados de la herramienta volumen
   mcDrawPasteBlocks(pj, view);    // bloques reales de la herramienta pegar (Ctrl+V)
   mcDrawOverlays(pj, view);
@@ -12919,6 +12942,14 @@ function mcBreak(){
 // roto. Duplicar la marcha con otro criterio sería la manera de que el cuentagotas y el pico apunten a
 // bloques distintos desde el mismo píxel.
 function mcPickBlock(){
+  const clave=mcClaveApuntada();
+  if(clave===undefined){ toast('Cuentagotas: no hay nada a tiro'); return; }
+  mcPickClave(clave);
+}
+// La marcha del rayo, suelta de lo que se haga después con lo pillado: el cuentagotas la lleva a la
+// hotbar y el clic derecho de Seleccionar rellena la caja con ella. Devuelve la clave de lo apuntado,
+// o `undefined` si no hay nada a tiro (que NO es lo mismo que apuntar a algo sin material: eso es null).
+function mcClaveApuntada(){
   const o=[mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]], cp=Math.cos(mc.pitch);
   const d=[-Math.sin(mc.yaw)*cp, Math.sin(mc.pitch), -Math.cos(mc.yaw)*cp];
   const T=MC_TILE, MAXD=mcReach(), step=1/T;
@@ -12926,13 +12957,13 @@ function mcPickBlock(){
     const px=o[0]+d[0]*t, py=o[1]+d[1]*t, pz=o[2]+d[2]*t;
     if(mc.structures.length && mcAimSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T))){
       const s=mcStructAt(px,py,pz);
-      if(s) return mcPickClave(s.key);
+      if(s) return s.key;
     }
     const bx=Math.floor(px), by=Math.floor(py), bz=Math.floor(pz);
     if(mcRejillaSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T)) && !mcIsCellReplaceable(bx,by,bz))
-      return mcPickClave(mc.blockKey[mc.grid[mcIdx(bx,by,bz)]]);
+      return mc.blockKey[mc.grid[mcIdx(bx,by,bz)]];
   }
-  toast('Cuentagotas: no hay nada a tiro');
+  return undefined;
 }
 // Lleva una clave a la hotbar. Se guarda la clave BASE (sin el `@ori` de las 24 posturas): al colocar,
 // la orientación la pone la mano del jugador (R / Shift+R), así que arrastrar el giro del bloque pillado
@@ -12974,7 +13005,9 @@ function mcPlace(){
     // va por setVoxel y deja de costar un draw call. La orientación a mano (R giro / Shift+R vuelco)
     // también, porque el giro cabe en la clave: se pone la variante `<clave>@<ori>` (ver mcClaveConOri).
     // Lo que se proyecta sobre las 6 caras del cubo no puede —ahí no se ve el giro— y se sigue estampando.
-    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk))){
+    // ...salvo dentro del agua: la celda ya está ocupada por el fluido y escribir la pieza lo borraría
+    // (hueco en la superficie, foto #46). Ahí cae al estampado, que convive con el voxel de agua.
+    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk)) && !mcCeldaFluida(nx,ny,nz)){
       mcPonEnRejilla(nx,ny,nz, mcClaveConOri(sk,rot)); return; }
     const o=mcStructOrigin(sk, nx, ny, nz, rot, n);               // orientación a mano (R giro / Shift+R vuelco); centro en suelo, canto en pared
     mcStampStruct(sk, o[0], o[1], o[2], rot); return; }           // ranura de estructura: estampa la habitación entera con la orientación elegida
@@ -13023,10 +13056,11 @@ function mcPaint(){
   const c=hit.cell; if(c[1]<0) return;
   if(sk){
     const rot=mcPreviewOri();
-    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk))){
+    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk)) && !mcCeldaFluida(c[0],c[1],c[2])){
       mcPonEnRejilla(c[0],c[1],c[2], mcClaveConOri(sk,rot)); return;
     }
-    if(mcSolid(c[0],c[1],c[2])){ mcSetBlock(c[0],c[1],c[2],0); mcRemeshAround(c[0],c[2]); }
+    // el fluido NO se vacía para hacerle sitio a la pieza: se estampa dentro y se ve sumergida
+    if(mcSolid(c[0],c[1],c[2]) && !mcCeldaFluida(c[0],c[1],c[2])){ mcSetBlock(c[0],c[1],c[2],0); mcRemeshAround(c[0],c[2]); }
     const o=mcStructOrigin(sk, c[0], c[1], c[2], rot, [0,1,0]);
     mcStampStruct(sk, o[0], o[1], o[2], rot); return;
   }
@@ -13042,7 +13076,7 @@ function mcUseRight(){ if(mc.tool==='paint') mcPickBlock(); else mcPlace(); }
 // por `tool!=='select'`, o cada herramienta nueva vuelve a colocar bloques por la puerta de atrás.
 function mcToolPasiva(){ return mc.tool==='select' || mc.tool==='pick' || mc.tool==='box' || !!mc.pasteActive; }
 // Acción de un botón de ratón (para el clic inicial y la repetición al mantener pulsado).
-function mcDoAction(btn){
+function mcDoAction(btn, shift){
   // Modo Pegar (Ctrl+V): clic izquierdo (0) planta los bloques previsualizados, clic derecho (2) cancela
   if(mc.pasteActive){
     if(btn===0) mcPasteConfirm();
@@ -13073,7 +13107,7 @@ function mcDoAction(btn){
     }
     return;
   }
-  if(mc.tool==='select'){ if(btn===0) mcSelectClick(); else if(btn===2) mcSelectClear(); mcRevealHotbar(); return; }   // Seleccionar: izq marca esquinas, dcho limpia (NO rompe/pone)
+  if(mc.tool==='select'){ if(btn===0) mcSelectClick(); else if(btn===2) mcSelectPickFill(shift); mcRevealHotbar(); return; }   // Seleccionar: izq marca esquinas, dcho pilla material y reemplaza (shift o sin caja: limpia). NO rompe/pone
   if(mc.tool==='pick'){ mcPickBlock(); mcRevealHotbar(); return; }   // Cuentagotas: los DOS botones pillan; ninguno rompe ni pone
   if(mc.tool==='paint'){ if(btn===0) mcPaint(); else if(btn===2) mcPickBlock(); mcRevealHotbar(); return; } // Pintar: izq pinta, dcho cuentagotas
   if(mc.tool==='box'){
@@ -13277,6 +13311,90 @@ function mcSelectClick(){                                    // izq en modo Sele
          const n=mcSelCount(); toast(n ? n+' bloque(s) — Ctrl+C para copiar' : 'Caja vacía (sin bloques)'); }
 }
 function mcSelectClear(){ if(mc.selA||mc.selBox){ mc.selA=null; mc.selBox=null; toast('Selección limpiada'); } }
+// Clic DERECHO con una caja ya confirmada: en vez de limpiar, pilla el material de lo que se esté
+// apuntando —bloque, textura o pieza— y reemplaza con él lo seleccionado, SIN perder la selección. Es
+// el mismo gesto que pulsar una ranura, pero eligiendo el material a ojo del propio mapa en vez del
+// cajón. Sin caja (o con Shift) el derecho sigue limpiando, que es la única forma de dejarlo sin nada.
+function mcSelectPickFill(shift){
+  if(!mc.selBox || shift){ mcSelectClear(); return; }
+  const clave=mcClaveApuntada();
+  if(clave===undefined){ toast('No hay nada a tiro (shift+dcho limpia la selección)'); return; }
+  if(!clave){ toast('Eso no tiene material'); return; }
+  // Se pilla la clave BASE por lo mismo que el cuentagotas: la postura la pone la mano (R / Shift+R) y
+  // arrastrar el giro del bloque apuntado pelearía con ella; del fluido se pilla «agua», no «agua 3/7».
+  const k=mcFluidBase(mcClaveBase(clave));
+  if(mc.structs[k]) return mcSelectFillPieza(k, '«'+mcNombreMat(k)+'»');   // pieza: pasa por el camino que sabe de posturas
+  const id=mc.blockKey.indexOf(k);
+  if(id>0) return mcSelectFillId(id);
+  return mcSelectFillPieza(k, '«'+mcNombreMat(k)+'»');          // clave sin id todavía: que la dé de alta escribiéndola
+}
+// Tecla 1-9 con la herramienta Seleccionar y una caja confirmada: cambia de material los bloques
+// SÓLIDOS de dentro (los huecos siguen huecos — se reemplaza lo que hay, no se rellena la caja). Un
+// solo gesto de historial ('bb') para que Ctrl+Z lo deshaga entero, como el corte. Callar y salir si
+// no hay caja o la ranura no da un bloque: el número ya ha hecho lo suyo (activar la ranura).
+function mcSelectFill(i){
+  if(mc.tool!=='select' || !mc.selBox) return false;
+  const sk=mc.slotStruct && mc.slotStruct[i];
+  if(sk) return mcSelectFillPieza(sk, 'La pieza de la ranura '+(i+1));
+  return mcSelectFillId(mc.hotbar[i]);
+}
+// Rellenar con una PIEZA (estructura), venga de una ranura o del clic derecho sobre el mapa. Lo suyo
+// es resolver clave → id; el reparto por las celdas es de mcSelectFillId.
+function mcSelectFillPieza(sk, quien){
+  if(mc.tool!=='select' || !mc.selBox) return false;
+  let vk=sk;
+  // Lo que es una PIEZA de verdad (está en mc.structs, o va armado en una ranura) tiene dos preguntas
+  // propias; una clave suelta que aún no tiene id en la paleta no, y se escribe tal cual.
+  if(mc.structs[sk] || (mc.slotStruct && mc.slotStruct.indexOf(sk)>=0)){
+    // Rellena igual que un bloque mientras QUEPA EN UNA CELDA (mcCabeEnRejilla): ahí vive en la rejilla
+    // como un id más de la paleta y esto es un cambio de material como cualquier otro. Lo que no cabe es
+    // una habitación entera: una instancia estampada por bloque seleccionado no sería reemplazar el
+    // material, sería otra cosa (y otros tantos draw calls).
+    if(!mcCabeEnRejilla(sk)){ toast('«'+sk+'» ocupa más de un bloque: no sirve para reemplazar'); return false; }
+    // La postura de R / Shift+R viaja EN LA CLAVE (`pieza@ori`), igual que al plantar a mano. Solo la
+    // aguanta la pieza que sale con su geometría de verdad dentro del chunk: la que se proyecta sobre
+    // las 6 caras del cubo no tiene dónde enseñar el giro (mcEsFinaEnRejilla), y ahí se rellena sin él.
+    const oriPed=mcPreviewOri(), ori=mcEsFinaEnRejilla(sk)?oriPed:0;
+    if(oriPed && !ori) toast('«'+sk+'» se proyecta sobre el cubo: en la rejilla no puede enseñar el giro');
+    vk=mcClaveConOri(sk, ori);
+  }
+  // La clave se resuelve a id escribiéndola en la PRIMERA celda por el camino de poner a mano
+  // (mcPonEnRejilla), que es el único que sabe de piezas a medio cargar y de dar de alta la clave en la
+  // paleta. Esa celda ya queda puesta; las demás las reparte mcSelectFillId con el id resuelto, y entra
+  // en su mismo gesto 'bb' (histLock) para que un solo Ctrl+Z lo deshaga todo.
+  let p=null; mcSelForEach((x,y,z,before)=>{ if(!p) p=[x,y,z,before]; });
+  if(!p){ toast('Nada que reemplazar'); return true; }
+  const lock=mc.histLock;
+  let puesto;
+  mc.histLock=true;
+  try{ puesto=mcPonEnRejilla(p[0],p[1],p[2], vk); } finally { mc.histLock=lock; }
+  if(puesto===false){ toast('Ahí no cabe la pieza (¿estás dentro de la selección?)'); return false; }
+  const id=mc.grid[mcIdx(p[0],p[1],p[2])];
+  if(!id || id===p[3]){
+    if(mc.blockKey[p[3]]===vk) return mcSelectFillId(p[3]);       // misma pieza y misma postura: no es que no cargue, es que ya estaba
+    toast(quien+' aún se está cargando — vuelve a pulsar'); return false; }
+  return mcSelectFillId(id, {x:p[0],y:p[1],z:p[2],before:p[3],after:id});
+}
+// Reparte un id ya resuelto por los bloques SÓLIDOS de la caja. `yaHecha` es la celda que
+// mcSelectFillPieza tuvo que escribir para resolver la clave: se suma al mismo gesto de historial.
+function mcSelectFillId(id, yaHecha){
+  if(mc.tool!=='select' || !mc.selBox || !id) return false;
+  const celdas=[]; mcSelForEach((x,y,z,before)=>celdas.push([x,y,z,before]));
+  if(!celdas.length){ toast('Nada que reemplazar'); return true; }
+  const edits=[];
+  let desde=0;
+  if(yaHecha){ edits.push(yaHecha); desde=1; }
+  for(let n=desde;n<celdas.length;n++){
+    const [x,y,z,before]=celdas[n];
+    if(before===id) continue;                                // ya es ese material: ni edición ni historial
+    mc.grid[mcIdx(x,y,z)]=id; mcDirty(x,y,z); mcGlowTocada(x,y,z);
+    edits.push({x,y,z,before,after:id});
+  }
+  if(!edits.length){ toast('Nada que reemplazar'); return true; }
+  mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave();
+  toast(edits.length+' bloque(s) → '+mcNombreMat(mc.blockKey[id]||''));
+  return true;
+}
 // Recorre los bloques SÓLIDOS del mundo dentro de la caja confirmada, llamando fn(x,y,z,id).
 function mcSelForEach(fn){
   const s=mc.selBox; if(!s) return;
@@ -13293,7 +13411,7 @@ function mcSelCount(){ let n=0; mcSelForEach(()=>n++); return n; }
 // a la inversa): mundo-X→editor-X, mundo-Z(profundidad)→editor-Y, mundo-Y(altura)→editor-Z(capa). Así la pieza
 // queda derecha en la vista 3D. gx/gy = punto de agarre (centro) en el plano X/Y del editor.
 function mcCopySelection(){
-  if(!mc.selBox){ toast(mc.tool==='select'?'Nada seleccionado (marca 2 esquinas)':'Usa la herramienta Seleccionar (P)'); return false; }
+  if(!mc.selBox){ toast(mc.tool==='select'?'Nada seleccionado (marca 2 esquinas)':'Usa la herramienta Seleccionar (e)'); return false; }
   let minx=Infinity,miny=Infinity,minz=Infinity, maxx=-Infinity,maxy=-Infinity; const raw=[];
   mcSelForEach((x,y,z,id)=>{ const key=mc.blockKey[id]; if(!key) return;
     raw.push({x,y,z,key});
@@ -13308,7 +13426,7 @@ function mcCopySelection(){
 }
 // Ctrl+X: corta la selección a `clipboard` (copia y limpia los bloques del mapa con historial)
 function mcCutSelection(){
-  if(!mc.selBox){ toast(mc.tool==='select'?'Nada seleccionado (marca 2 esquinas)':'Usa la herramienta Seleccionar (P)'); return false; }
+  if(!mc.selBox){ toast(mc.tool==='select'?'Nada seleccionado (marca 2 esquinas)':'Usa la herramienta Seleccionar (e)'); return false; }
   let minx=Infinity,miny=Infinity,minz=Infinity, maxx=-Infinity,maxy=-Infinity; const raw=[];
   const edits=[];
   mcSelForEach((x,y,z,id)=>{ const key=mc.blockKey[id]; if(!key) return;
@@ -13840,7 +13958,7 @@ function mcSetNoteRotUI(r, livePreview){
 }
 function mcStartNotePlace(){
   mc.notePlacing = true;
-  const playerRot = Math.round(((mc.yaw * 180 / Math.PI) % 360 + 360) / 90 + 2) % 4;
+  const playerRot = Math.round(((mc.yaw * 180 / Math.PI) % 360 + 360) / 90 + 1) % 4;
   mc.notePlaceRot = playerRot;
   mcClearPreview();
   mcUpdatePreview();
@@ -13873,7 +13991,7 @@ function mcOpenNote(cellOverride, rotOverride){
   } else if(cur){
     curRot = mcCartelCfg().rot;
   } else {
-    curRot = Math.round(((mc.yaw * 180 / Math.PI) % 360 + 360) / 90 + 2) % 4;
+    curRot = Math.round(((mc.yaw * 180 / Math.PI) % 360 + 360) / 90 + 1) % 4;
   }
   mcOrigNoteRot = curRot;
   mcSetNoteRotUI(curRot, false);
@@ -14756,6 +14874,23 @@ function mcPintaFicha(ctx, f, w, y, h){
                izq, y+h*0.71);
 }
 
+// Copia reducida de la foto ya montada (con mira y ficha quemadas), a lo ancho MC_FOTO_MINI_ANCHO.
+// No es una miniatura de galería: es la ÚNICA versión que puede leer un asistente, porque la de
+// tamaño completo está vetada en .claude/settings.json por lo que cuesta en tokens. Se hace aquí y
+// no en el servidor para no meterle una dependencia de imagen a server.py (stdlib pelada).
+const MC_FOTO_MINI_ANCHO = 800;
+function mcFotoMini(out){
+  if(out.width<=MC_FOTO_MINI_ANCHO) return null;             // ya es pequeña: no se duplica
+  const k=MC_FOTO_MINI_ANCHO/out.width;
+  const mini=document.createElement('canvas');
+  mini.width=MC_FOTO_MINI_ANCHO; mini.height=Math.max(1,Math.round(out.height*k));
+  const c=mini.getContext('2d');
+  c.imageSmoothingEnabled=true; c.imageSmoothingQuality='high';
+  c.drawImage(out,0,0,mini.width,mini.height);
+  const u=mini.toDataURL('image/png');
+  return u.slice(u.indexOf(',')+1);
+}
+
 // Devuelve una promesa con {id, url, bytes, ficha, portapapeles}. `game.foto()` la expone tal cual.
 function mcFoto(){
   if(!mc.active || !mc.gl){ toast('📷 abre el Mundo primero'); return Promise.resolve(null); }
@@ -14792,7 +14927,7 @@ function mcFoto(){
   }catch(e){}
 
   return fetch('/api/fotos',{ method:'POST', headers:{'Content-Type':'application/json'},
-                              body:JSON.stringify({png:b64, ficha}) })
+                              body:JSON.stringify({png:b64, mini:mcFotoMini(out), ficha}) })
     .then(r=>r.ok?r.json():r.json().then(j=>Promise.reject(j.error||r.status)))
     .then(res=>{
       toast('📷 '+res.id.split('_')[0]+' · '+ficha.mapa+' '+ficha.celda.join(',')+' · '+ficha.rumbo+
@@ -15373,7 +15508,7 @@ function mcSlotHerramienta(){
   slot.id='mc-slot-tool';
   const cv=document.createElement('canvas'); cv.width=cv.height=MC_ICONO_PX; slot.appendChild(cv);
   const key=document.createElement('span'); key.className='mc-slot-key'; key.textContent='E'; slot.appendChild(key);
-  // Mismo reparto que en las ranuras de bloque: izquierdo conmuta (e = construir↔volumen, shift+clic/E = pintar/seleccionar/cuentagotas)
+  // Mismo reparto que en las ranuras de bloque: izquierdo conmuta (e = construir/volumen/seleccionar, shift+clic/E = pintar/cuentagotas)
   // y derecho abre la galería.
   slot.onclick=e=>mcRotaHerramienta(e.shiftKey ? 'secundarias' : 'principales');
   slot.oncontextmenu=e=>{ e.preventDefault(); mcOpenPickerHerramientas(); };
@@ -15385,7 +15520,7 @@ function mcSlotHerramienta(){
 function mcPintaSlotHerramienta(slot){
   slot=slot||$('#mc-slot-tool'); if(!slot) return;
   const etiqueta=mcEtiquetaHerramienta(mc.tool);
-  slot.title=etiqueta+' · clic (o e) Construir↔Volumen · shift+clic (o E) Pintar/Seleccionar/Cuentagotas · clic dcho elige';
+  slot.title=etiqueta+' · clic (o e) Construir/Volumen/Seleccionar · shift+clic (o E) Pintar/Cuentagotas · clic dcho elige';
   const cv=slot.querySelector('canvas'); if(!cv) return;
   // El catálogo se construye al abrir el picker, y al cargar el mundo todavía no existe. Se pide una
   // sola vez y en segundo plano —no se mete en la secuencia de carga, que ya es larga— y al llegar se
@@ -15719,7 +15854,7 @@ function mcSerialize(){
     const id=g[mcIdx(x,y,z)]; if(!id) continue;
     vox[x+','+y+','+z]='tex:'+mc.blockKey[id];
   }
-  return { format:'voxelworld-1', dim:{x:dim.x,y:dim.y,z:dim.z}, spawn:mc.spawn, voxels:vox, structures:mcStructuresDoc(), notes:{...mc.notes}, noteRots:{...(mc.noteRots||{})}, noteRots:{...(mc.noteRots||{})} };   // t1 · notas post-it "x,y,z"→texto
+  return { format:'voxelworld-1', dim:{x:dim.x,y:dim.y,z:dim.z}, spawn:mc.spawn, voxels:vox, structures:mcStructuresDoc(), notes:{...mc.notes}, noteRots:{...(mc.noteRots||{})} };   // t1 · notas post-it "x,y,z"→texto
 }
 // Estructuras: sala + posición + giro (se re-mallan al cargar). Lo usan el doc completo y la
 // cabecera del guardado incremental, así que vive en un solo sitio.
@@ -16363,7 +16498,7 @@ async function mcSaveWorldAhora(){
     if(header){
       const r=await fetch(mcMundoUrl('/cabecera'),
         {method:'POST',headers:{'Content-Type':'application/json'},
-         body:JSON.stringify({spawn:mc.spawn, structures:mcStructuresDoc(), notes:{...mc.notes}})});
+         body:JSON.stringify({spawn:mc.spawn, structures:mcStructuresDoc(), notes:{...mc.notes}, noteRots:{...(mc.noteRots||{})}})});
       if(r.status===409){ mc.v2=false; mcDirtyAll(); return mcSaveWorldFull(); }
       if(!r.ok) throw new Error('cabecera '+r.status);
     }
@@ -17047,15 +17182,17 @@ function mcSetPlayerTool(v, announce){    // centraliza mc.tool (setter de conso
 }
 // Herramientas disponibles en la rotación: solo aquellas que tengan un asset marcado como tal en el catálogo
 function mcHerramientasDisponibles(secundarias){
-  const pool = secundarias ? ['paint', 'select', 'pick'] : ['build', 'box'];
+  // Seleccionar va con las PRINCIPALES (2026-08-17, orden del dueño): construir, marcar un volumen y
+  // marcar una caja son el mismo trabajo y se alternan a cada rato; pintar y cuentagotas no.
+  const pool = secundarias ? ['paint', 'pick'] : ['build', 'box', 'select'];
   if(!mc.catalog) return pool;
   const disp = pool.filter(t => mcHerramientaKey(t));
   return disp.length ? disp : (secundarias ? ['paint'] : ['build']);
 }
 
 // Conmutación de herramientas:
-// 'principales' (tecla 'e'): conmuta únicamente Construir ↔ Volumen (si están marcadas)
-// 'secundarias' (tecla 'E' con mayúsculas / shift): conmuta únicamente las secundarias que estén marcadas como herramienta
+// 'principales' (tecla 'e'): conmuta Construir → Volumen → Seleccionar (las que estén marcadas)
+// 'secundarias' (tecla 'E' con mayúsculas / shift): conmuta Pintar ↔ Cuentagotas
 function mcRotaHerramienta(grupo){
   const esSec = (grupo === 'secundarias' || grupo === 'sec' || grupo === true);
   const lista = mcHerramientasDisponibles(esSec);
@@ -17500,14 +17637,17 @@ document.addEventListener('mousemove',e=>{
 window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || !$('#mc-note').hidden || !$('#snip-modal').hidden || !$('#ag-modal').hidden || (e.target && e.target.matches && e.target.matches('input,select,textarea'))) return;   // selector/editor de nota/código/agentes abierto ⇒ no mover/seleccionar
   if(/^[1-9]$/.test(e.key)){ const i=+e.key-1;
     // Alt+número: abre el selector de esa ranura (sin Esc+clic derecho); si no, selecciona la ranura.
-    if(i<mc.hotbar.length){ if(e.altKey) mcOpenPicker(i); else { mc.sel=i; mcSelectSlot(); } }
+    // Con la herramienta Seleccionar y una caja marcada, ADEMÁS reemplaza lo seleccionado por ese
+    // material (mcSelectFill). Se hace después de activar la ranura, no en vez de: así el gesto de
+    // toda la vida —elegir ranura— nunca se pierde, ni con una caja marcada delante.
+    if(i<mc.hotbar.length){ if(e.altKey) mcOpenPicker(i); else { mc.sel=i; mcSelectSlot(); mcSelectFill(i); } }
     e.preventDefault(); return; }
   const k=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey) && k==='c'){ mcCopySelection(); e.preventDefault(); return; }   // Ctrl+C: copia la selección (tool=select) al portapapeles compatible con el editor
   if((e.ctrlKey||e.metaKey) && k==='x'){ mcCutSelection(); e.preventDefault(); return; }    // Ctrl+X: corta la selección al portapapeles y limpia los bloques del mapa
   if((e.ctrlKey||e.metaKey) && k==='v'){ mcPasteWorld(); e.preventDefault(); return; }        // Ctrl+V: pega el portapapeles EN EL MAPA, apoyado en la cara apuntada (el Mundo no se cierra)
 
-  if(k==='e' || k==='p'){                                                                                   // e = conmuta construir↔volumen · E = conmuta pintar→seleccionar→cuentagotas
+  if(k==='e' || k==='p'){                                                                                   // e = conmuta construir→volumen→seleccionar · E = conmuta pintar↔cuentagotas
     if(e.altKey){ mcOpenPickerHerramientas(); e.preventDefault(); return; }
     mcRotaHerramienta(e.shiftKey || e.key === 'E'); e.preventDefault(); return; }
   if(k==='b'){ const st=1.15; game.playerScale=mc.scale*(e.shiftKey?1/st:st); toast('Tamaño ×'+(+mc.scale.toFixed(2))); e.preventDefault(); return; }   // b = más grande («big») · B (mayús) = más pequeño (paso fino ×1.15)
@@ -17564,7 +17704,10 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     if(e.shiftKey){ mc.previewGiro=(mc.previewGiro+1)&3; toast('Giro: '+(mc.previewGiro*90)+'° sobre esa cara'); }   // Shift+R = los 4 giros dentro de la cara elegida
     else { mc.previewCara=(mc.previewCara+1)%6; toast('Cara arriba: '+MC_ORI_CARA[mc.previewCara]+' ('+(mc.previewCara+1)+'/6)'); }  // R = las 6 caras
     const rawKey = mc.slotStruct[mc.sel] || (mc.hotbar[mc.sel] && mc.blockKey ? mc.blockKey[mc.hotbar[mc.sel]] : null);
-    if(rawKey) mcPrecargaGirada(rawKey, mcPreviewOri());   // la pieza girada es otro material (mcClaveConOri): que esté listo ANTES del clic
+    const listo = rawKey ? mcPrecargaGirada(rawKey, mcPreviewOri()) : Promise.resolve();   // la pieza girada es otro material (mcClaveConOri): que esté listo ANTES del clic
+    // Con una caja ya rellenada por esta ranura (mcSelectFill), girar no es solo mover el fantasma:
+    // se vuelve a aplicar el relleno con la postura nueva. Si no, el aviso de giro sale y no cambia nada.
+    if(mc.tool==='select' && mc.selBox && mc.slotStruct[mc.sel]) listo.then(()=>mcSelectFill(mc.sel));
     e.preventDefault(); return; }
   if(k==='r' && mc.tool==='select' && mc.selBox){ mcRotateSelBox(); e.preventDefault(); return; }              // gira 90° (horizontal) los bloques de la caja seleccionada — p.ej. tras Ctrl+V pegar
   // S SOLO mientras se MANTIENE el clic derecho colocando una estructura: alterna pegado canto↔centrado (la
@@ -18297,7 +18440,7 @@ $('#mc-canvas').addEventListener('mousedown',e=>{
   if(!mc.active || document.pointerLockElement!==mc.canvas) return;
   if(e.button!==0 && e.button!==2) return;
   mc.heldBtn=e.button; mc.actAt=performance.now();
-  mcDoAction(e.button);
+  mcDoAction(e.button, e.shiftKey);
 });
 window.addEventListener('mouseup',e=>{ if(!mc.active) return;
   if(mc.tool==='box' && mc.heldBtn===0 && mc.boxStep===1 && document.pointerLockElement===mc.canvas) mcBoxMouseUp();

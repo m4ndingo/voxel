@@ -3,7 +3,7 @@
     "deny": [
       "Read(./data/worlds/**)",
       "Read(./data/mundo.vox)",
-      "Read(./data/fotos/**)",
+      "Read(./data/fotos/*.png)",
       "Read(./releases/**)",
       "Read(./node_modules/**)",
       "Read(./assets/taberna.vox.json)",

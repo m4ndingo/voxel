@@ -105,10 +105,10 @@ function mcSetPlayerTool(v, announce){
 }
 function mcRotaHerramienta(grupo){
   if(grupo === 'secundarias' || grupo === 'sec' || grupo === true){
-    const nextSec = { paint:'select', select:'pick', pick:'paint' };
+    const nextSec = { paint:'pick', pick:'paint' };
     return mcSetPlayerTool(nextSec[mc.tool] || 'paint', true);
   }
-  const nextPrinc = { build:'box', box:'build' };
+  const nextPrinc = { build:'box', box:'select', select:'build' };
   return mcSetPlayerTool(nextPrinc[mc.tool] || 'build', true);
 }
 function mcBoxClear(){
@@ -300,22 +300,23 @@ test('MC_HERRAMIENTAS incluye box con rótulo 📦 Volumen', () => {
   assert.strictEqual(h[1], '📦 Volumen');
 });
 
-test('Conmutación de herramientas: e para construir/volumen y E para pintar/seleccionar/cuentagotas', () => {
-  // Con 'e' (principales): alterna construir ↔ volumen
+test('Conmutación de herramientas: e para construir/volumen/seleccionar y E para pintar/cuentagotas', () => {
+  // Con 'e' (principales): cicla construir → volumen → seleccionar. Seleccionar se mudó aquí desde
+  // las secundarias (2026-08-17): se alterna con construir y volumen a cada rato, pintar no.
   mcSetPlayerTool('build');
   assert.strictEqual(mc.tool, 'build');
   mcRotaHerramienta();
   assert.strictEqual(mc.tool, 'box', 'build -> box');
   mcRotaHerramienta();
-  assert.strictEqual(mc.tool, 'build', 'box -> build');
+  assert.strictEqual(mc.tool, 'select', 'box -> select');
+  mcRotaHerramienta();
+  assert.strictEqual(mc.tool, 'build', 'select -> build');
 
-  // Con 'E' (secundarias): cicla pintar → seleccionar → cuentagotas
+  // Con 'E' (secundarias): alterna pintar ↔ cuentagotas
   mcRotaHerramienta('secundarias');
   assert.strictEqual(mc.tool, 'paint', 'inicia en paint');
   mcRotaHerramienta('secundarias');
-  assert.strictEqual(mc.tool, 'select', 'paint -> select');
-  mcRotaHerramienta('secundarias');
-  assert.strictEqual(mc.tool, 'pick', 'select -> pick');
+  assert.strictEqual(mc.tool, 'pick', 'paint -> pick');
   mcRotaHerramienta('secundarias');
   assert.strictEqual(mc.tool, 'paint', 'pick -> paint');
 

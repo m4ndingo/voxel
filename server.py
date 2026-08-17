@@ -17,6 +17,8 @@ WORLDS = os.path.join(BASE, 'data', 'worlds')             # mundos con nombre: /
 SNIPS = os.path.join(BASE, 'data', 'snippets')             # gestor de snippets de código (data/snippets/<id>.json)
 AGENTS = os.path.join(BASE, 'data', 'agentes')             # agentes articulados (data/agentes/<id>.json) — el documento, no el motor
 FOTOS = os.path.join(BASE, 'data', 'fotos')                # fotos del Mundo (tecla F): <n>_<mapa>_<fecha>.png + .json con la ficha
+FOTOS_MINI = os.path.join(FOTOS, 'mini')                   # la MISMA foto a 800 px de ancho, que es la que puede abrir un asistente:
+                                                           # la de tamaño completo está vetada en .claude/settings.json (tokens)
 VIDEOS = os.path.join(BASE, 'data', 'videos')              # vídeos del Mundo (Alt+V): <n>_<mapa>_<fecha>.mp4/.webm + .json
 UI = os.path.join(BASE, 'data', 'ui')                      # iconos de la aplicación horneados desde /images (favicon, marca, herramientas)
 UIFILE = os.path.join(UI, 'ranuras.json')                  # la ASIGNACIÓN (ranura → dibujo@postura, modo, aa): la fuente de verdad de los .png
@@ -716,6 +718,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             with open(fp, 'wb') as f:                              # foto_nueva ya lo creó vacío con O_EXCL: aquí solo se rellena
                 f.write(crudo)
             ficha['id'] = idd
+            # La reducida la manda ya hecha el navegador (mcFotoMini): aquí solo se valida igual que
+            # la grande. Si no viene o no cuela, la foto se guarda igual — la copia es un extra.
+            mini = d.get('mini') if isinstance(d, dict) else None
+            if isinstance(mini, str) and mini:
+                try:
+                    chico = base64.b64decode(mini.split(',', 1)[-1], validate=True)
+                except (binascii.Error, ValueError):
+                    chico = b''
+                if chico.startswith(b'\x89PNG\r\n\x1a\n'):
+                    os.makedirs(FOTOS_MINI, exist_ok=True)
+                    with open(os.path.join(FOTOS_MINI, idd + '.png'), 'wb') as f:
+                        f.write(chico)
             atomic_dump(ficha, os.path.join(FOTOS, idd + '.json'))
             return self._send(200, {'ok': True, 'id': idd, 'url': '/data/fotos/' + idd + '.png',
                                     'bytes': len(crudo)})
