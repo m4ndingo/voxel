@@ -29,11 +29,12 @@ como línea, pero el fichero es `web/app.js`.
   `wiki`, `images` ← repo; resto ← `web/`) ⇒ `/server.py`, `/PLAN.md` ya no se sirven por HTTP. Carpeta
   nueva que pida el navegador → **a `RAIZ_URL` o 404**. Guardián `tests/test_sitio_raiz.js`.
 
-**Tickets sin releer `PLAN.md`** (500 KB) → [`docs/repo.md`](docs/repo.md):
-- Abiertos → **solo** el índice `PLAN.md:74` (22 líneas). ⛔ nada de `grep` al fichero entero.
+**Tickets sin releer `PLAN.md`** (27 KB) → [`docs/repo.md`](docs/repo.md):
+- Abiertos → **solo** el índice `PLAN.md:32` (14 líneas). ⛔ nada de `grep` al fichero entero.
 - Uno concreto → su sección por el ancla `(#id)`. Contexto + capturas del dueño →
   **`data/tickets/<ID>/contexto.md`** (ésa es la puerta); los `*.png`, **uno a uno**.
-- **2 ficheros** desde 2026-08-13: `PLAN.md` (abiertos) + `PLAN_ARCHIVO.md` (cerrados). Cada sección
+- **2 ficheros**: `PLAN.md` = **solo abierto/pendiente** (2026-08-18: índice de cerrados y bitácora
+  fuera); `PLAN_ARCHIVO.md` (900 KB) = todo lo cerrado, ⛔ no abrirlo entero. Cada sección
   necesita `<a id="-req-osd13"></a>` **explícito** antes del `###` o el enlace no salta. Guardián
   `tests/test_plan_enlaces.js`.
 
@@ -44,8 +45,8 @@ como línea, pero el fichero es `web/app.js`.
 1. ⛔ **NUNCA borrar de `data/habitantes/` ni `data/agentes/`** — autoría del dueño, no runtime. Ni
    `DELETE` ni `rm`; sobrante → `data/habitantes_trash/<ms>__<nombre>`. Igual notas del Mundo (se añade
    `[PROCESADA]` debajo, no se reescriben) y `data/tickets/`. Duda → preguntar.
-2. El trabajo entra por **`PLAN.md`** (índice `PLAN.md:74`). Cerrar ticket = editar su sección **y** su
-   fila + **1 commit por ticket**.
+2. El trabajo entra por **`PLAN.md`** (índice `PLAN.md:32`). Cerrar ticket = **mover** su sección **y**
+   su fila a `PLAN_ARCHIVO.md` + **1 commit por ticket**.
 3. Servidor primero: `python3 server.py 8500` (antes `pgrep -af server.py`). Plantar/estampar de prueba →
    **`/map/test`**, ⛔ nunca `/map/default` ni `/map/agents`; lo que ya hay ahí **no se borra**.
 4. **129 tests** en `tests/` (113 Chromium real vía Playwright vs `http://localhost:8500`, 16 Node puro).

@@ -56,7 +56,7 @@ for (const f of FICHEROS) {
       enlaces.push({ destino: m[1] || f, ancla: m[2], linea: i + 1 });
     }
   });
-  doc[f] = { explicitas, anclas: new Set(explicitas), slugs, enlaces };
+  doc[f] = { lineas, explicitas, anclas: new Set(explicitas), slugs, enlaces };
 }
 
 console.log('\n§1 cada enlace resuelve a una sección que existe');
@@ -71,11 +71,38 @@ for (const f of FICHEROS) {
     (nuevos.length ? ' -> ' + nuevos.slice(0, 5).map((e) => `${e.ancla} (línea ${e.linea})`).join(', ') : ''));
 }
 
-console.log('\n§2 los enlaces CRUZAN de fichero (que es lo que la partición tenía que conseguir)');
+console.log('\n§2 en PLAN.md solo vive lo ABIERTO (orden del dueño, 2026-08-18)');
+// Hasta el 2026-08-18 esto exigía >50 enlaces PLAN.md -> archivo, porque el índice de CERRADOS
+// (una fila por ticket, cada una enlazando al archivo) vivía aquí. Ese índice y la bitácora se
+// bajaron al archivo: PLAN.md ya no tiene ni una fila cerrada, así que lo que se vigila cambia.
 const cruzan = doc['PLAN.md'].enlaces.filter((e) => e.destino === 'PLAN_ARCHIVO.md');
-check(cruzan.length > 50, `PLAN.md apunta al archivo ${cruzan.length} veces (>50)`);
+check(cruzan.length > 0, `PLAN.md apunta al archivo ${cruzan.length} veces (el puntero, >0)`);
 check(doc['PLAN_ARCHIVO.md'].enlaces.some((e) => e.destino === 'PLAN.md'),
   'el archivo apunta de vuelta a PLAN.md');
+
+// Un ticket cerrado se reconoce por su encabezado: `### ✅ …` o `— ✅ resuelto/hecho/done`.
+const cerrados = doc['PLAN.md'].lineas
+  .map((l, i) => ({ l, n: i + 1 }))
+  .filter(({ l }) => /^#{3,4} /.test(l) && /✅|\bresuelto\b|\bdone \(/.test(l));
+check(cerrados.length === 0,
+  `PLAN.md: 0 secciones de ticket cerrado` +
+  (cerrados.length ? ' -> ' + cerrados.slice(0, 5).map((c) => `línea ${c.n}`).join(', ') : ''));
+
+// El índice de ABIERTOS y las secciones de detalle tienen que cuadrar en los dos sentidos: una
+// fila sin sección manda a la nada, y una sección sin fila es un ticket que ya no se ve al abrir.
+const iIdx = doc['PLAN.md'].lineas.findIndex((l) => /^## .*Tickets ABIERTOS — índice/.test(l));
+const iFin = doc['PLAN.md'].lineas.findIndex((l, i) => i > iIdx && /^## /.test(l));
+const filas = new Set();
+doc['PLAN.md'].lineas.slice(iIdx, iFin < 0 ? undefined : iFin)
+  .filter((l) => l.startsWith('|'))
+  .forEach((l) => [...l.matchAll(/\]\((#-[a-z0-9-]+)\)/g)].forEach((m) => filas.add(m[1].slice(1))));
+const secciones = new Set(doc['PLAN.md'].explicitas);
+const sinSeccion = [...filas].filter((a) => !secciones.has(a));
+const sinFila = [...secciones].filter((a) => !filas.has(a));
+check(sinSeccion.length === 0 && sinFila.length === 0,
+  `índice de ABIERTOS ↔ detalle: ${filas.size} filas, ${secciones.size} secciones, cuadran` +
+  (sinSeccion.length ? ` -> fila sin sección: ${sinSeccion.join(', ')}` : '') +
+  (sinFila.length ? ` -> sección sin fila: ${sinFila.join(', ')}` : ''));
 
 console.log('\n§3 ningún ancla explícita duplicada');
 for (const f of FICHEROS) {
