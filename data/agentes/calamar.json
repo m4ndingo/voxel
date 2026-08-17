@@ -13,7 +13,8 @@
       "contrabalanceo": 1,
       "modo": "siempre",
       "sentido": "tentaculos"
-    }
+    },
+    "montable": true
   },
   "piezas": [],
   "seguir": {
@@ -26,15 +27,19 @@
     "velocidad": 2,
     "suavidad": 3
   },
-  "fisica": false,
-  "savedAt": "2026-08-17T19:48:14",
+  "savedAt": "2026-08-17T20:18:45",
   "id": "calamar",
   "andar": {
-    "escalar": 0
+    "escalar": 1,
+    "cadencia": 2
   },
   "escala": 8,
   "empuje": {
     "fuerza": 16,
     "salto": 8
-  }
+  },
+  "fisica": {
+    "caida": 9999
+  },
+  "cabalgable": true
 }
