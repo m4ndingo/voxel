@@ -17864,13 +17864,13 @@ $('#mc-canvas').addEventListener('pointermove',e=>{
 // game.onKey('t', fn) · liga una tecla a tu función mientras el Mundo (🌍) esté activo. Ejemplo:
 //   game.onKey('t', ()=> throwAndExplodeTNT(...game.aim(), {radius:8, fuseTimeMs:500, tntMat:'roca'}));
 // Re-registrar la misma tecla la REEMPLAZA (no acumula listeners); game.onKey('t', null) la quita.
-// Las teclas del motor (WASD, espacio, shift, 1-9, p/b/x/u/n/r/z, Esc) están reservadas. game.keys() lista las tuyas.
+// Las teclas del motor (WASD, espacio, shift, 1-9, e/p/b/x/u/n/r/z/f, Esc) están reservadas. game.keys() lista las tuyas.
 game.onKey=function(tecla, fn){
   const k=String(tecla==null?'':tecla).toLowerCase();
   if(k.length!==1 && k!=='escape'){ console.warn('game.onKey: indica UNA tecla, p.ej. game.onKey("t", fn)'); return; }
   if(fn==null){ delete mcUserKeys[k]; return k; }                 // quitar
   if(typeof fn!=='function'){ console.warn('game.onKey: el 2º argumento debe ser una función (o null para quitar)'); return; }
-  if(MC_RESERVED.has(k)){ console.warn('game.onKey: la tecla "'+k+'" la usa el Mundo; elige una libre (t,g,h,j,k,l,y,c,v,m,q,e…)'); return; }
+  if(MC_RESERVED.has(k)){ console.warn('game.onKey: la tecla "'+k+'" la usa el Mundo; elige una libre (t,g,h,j,k,l,y,c,v,m,q…)'); return; }
   mcUserKeys[k]=fn; return k;
 };
 // game.keys() · lista las teclas que has ligado con game.onKey

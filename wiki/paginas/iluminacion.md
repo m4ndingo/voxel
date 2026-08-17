@@ -133,8 +133,10 @@ Para una iluminación **100% plana sin sombras ni penumbras** en todo el mapa:
 ```js
 game.sunShade = 1.0;
 game.interiorDark = 1.0;
-game.faceShades = 1.0;
 ```
+
+Eso apaga la sombra del sol y la penumbra de interiores. El sombreado direccional de las caras
+(abajo) **no se apaga**: es fijo y no tiene mando.
 
 ## Sombreado de las caras del cubo (volumen 3D y blancos)
 
@@ -144,27 +146,9 @@ Cada cara de un bloque tiene un sombreado direccional propio para crear sensaci�
 * **Cara inferior (`-Y`):** `0.40`
 * **Laterales (`+X`, `-X`, `+Z`, `-Z`):** `0.64`, `0.82`, `0.52`, `0.92`
 
-### 1. Brillo cenital y texturas blancas (`game.topShade`)
-Un valor superior a `1.0` en la cara superior satura a 255 los colores muy claros (RGB > 227). Bajarlo a `1.0` o `0.98` permite ver con nitidez texturas como lana blanca (`white_whool`) o nieve sin quemar las altas luces:
-
-```js
-game.topShade = 1.0;   // neutro: relieve y texturas blancas nítidas sin saturación
-game.topShade = 0.98;  // ligera amortiguación para máximo detalle en blancos
-game.topShade = 1.5;   // brillo cenital intenso (admite hasta 3.0)
-game.topShade = 1.12;  // valor clásico por defecto
-```
-
-### 2. Sombreado direccional de las 6 caras (`game.faceShades` y `game.sideShades`)
-Permite igualar todas las caras o ajustar los laterales:
-
-```js
-game.faceShades = 1.0;   // todas las 6 caras a 1.0 (iluminación plana sin caras oscurecidas)
-game.faceShades = [1.0, 0.4, 0.9, 0.9, 0.9, 0.9]; // [arriba, abajo, +X, -X, +Z, -Z]
-game.faceShades = null;  // volver a valores de fábrica
-
-game.sideShades = 1.0;   // solo las 4 paredes laterales a brillo pleno
-game.sideShades = 0.85;  // sombra lateral sutil
-```
+El reparto es **fijo**: vive en la tabla `MC_FACES` de `app.js` y no hay ningún `game.*` que lo
+cambie en caliente. Si necesitas que una textura blanca no se queme en la cara de arriba, el mando
+que sí existe es la propia textura, o `game.uvInset` para los bordes.
 
 ### 3. Margen sub-téxel en texturas (`game.uvInset`)
 Evita que en bloques con filtrado `NEAREST` se filtre color de téxeles vecinos en los bordes:

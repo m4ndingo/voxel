@@ -1703,64 +1703,6 @@
       "fuente": "app.js · game.glowGain"
     },
     {
-      "nombre": "game.topShade",
-      "firma": "game.topShade",
-      "grupo": "Iluminación",
-      "resumen": "Factor de brillo y sombreado de la cara superior (+Y) de los cubos (0.1..3.0). Por defecto 1.12 (brillo cenital). Bajarlo a 1.0 o 0.98 preserva la textura y relieve en materiales blancos puros sin quemar las altas luces.",
-      "params": [],
-      "devuelve": "El factor actual (número).",
-      "ejemplo": "game.topShade = 1.0;  // neutro (evita saturación en blancos)\\ngame.topShade = 1.12; // por defecto",
-      "notas": [
-        "Un valor > 1.0 provoca que colores RGB > 227 saturen a 255 en la cara superior.",
-        "Al asignarlo, re-malla el terreno y estructuras en caliente automáticamente.",
-        "Persiste en localStorage (\u000bf_mcTopShade)."
-      ],
-      "ver": [
-        "game.faceShades",
-        "game.sideShades",
-        "game.luz"
-      ],
-      "fuente": "app.js · game.topShade"
-    },
-    {
-      "nombre": "game.faceShades",
-      "firma": "game.faceShades",
-      "grupo": "Iluminación",
-      "resumen": "Sombreado direccional propio de las 6 caras del cubo [+Y(arriba), -Y(abajo), +X, -X, +Z, -Z]. Si se asigna un número único (ej. 1.0) elimina las sombras direccionales de relieve dejando los cubos planos y uniformemente iluminados.",
-      "params": [],
-      "devuelve": "Array de 6 números con los factores de sombreado.",
-      "ejemplo": "game.faceShades = 1.0; // iluminación 100% plana sin sombras en cubos\\ngame.faceShades = [1.0, 0.4, 0.9, 0.9, 0.9, 0.9];\\ngame.faceShades = null; // restaurar valores de fábrica",
-      "notas": [
-        "Por defecto es [1.12, 0.40, 0.64, 0.82, 0.52, 0.92].",
-        "Persiste en localStorage (\u000bf_mcFaceShades).",
-        "Al asignarlo re-malla inmediatamente el mundo."
-      ],
-      "ver": [
-        "game.topShade",
-        "game.sideShades",
-        "game.interiorDark"
-      ],
-      "fuente": "app.js · game.faceShades"
-    },
-    {
-      "nombre": "game.sideShades",
-      "firma": "game.sideShades",
-      "grupo": "Iluminación",
-      "resumen": "Ajusta simultáneamente el sombreado de las 4 caras laterales del cubo (+X, -X, +Z, -Z) sin alterar la cara superior ni inferior.",
-      "params": [],
-      "devuelve": "Array de 4 números con los factores de las caras laterales.",
-      "ejemplo": "game.sideShades = 1.0; // laterales a pleno brillo\\ngame.sideShades = 0.85; // sombra lateral suave",
-      "notas": [
-        "Permite aclarar las paredes verticales del terreno o edificios.",
-        "Afecta a game.faceShades y persiste automáticamente."
-      ],
-      "ver": [
-        "game.faceShades",
-        "game.topShade"
-      ],
-      "fuente": "app.js · game.sideShades"
-    },
-    {
       "nombre": "game.sunShade",
       "firma": "game.sunShade",
       "grupo": "Iluminación",
@@ -1771,7 +1713,7 @@
       "notas": [
         "Con 1.0 la sombra proyectada desaparece completamente (la zona tapada recibe 100% de luz solar).",
         "Es independiente de game.interiorDark (oclusión ambiental de interiores).",
-        "Persiste en localStorage (\u000bf_mcSunShade)."
+        "Persiste en localStorage (vf_mcSunShade)."
       ],
       "ver": [
         "game.interiorDark",
@@ -1808,10 +1750,10 @@
       "notas": [
         "También disponible bajo el alias game.texInset.",
         "Al asignarlo, reconstruye la paleta del atlas, lo sube a GPU y re-malla.",
-        "Persiste en localStorage (\u000bf_mcUvInset)."
+        "Persiste en localStorage (vf_mcUvInset)."
       ],
       "ver": [
-        "game.topShade"
+        "game.sunShade"
       ],
       "fuente": "app.js · uvInset"
     },

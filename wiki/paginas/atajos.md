@@ -107,10 +107,15 @@ tecla de movimiento lo captura** — no hace falta volver a hacer clic en el lie
 
 | Tecla | Qué hace |
 |---|---|
-| `1`…`9` | elegir ranura |
+| `1`…`9` | elegir ranura (y con **Seleccionar** y una caja marcada, además la **rellena** con ese material — ver abajo) |
 | `Alt`+`1`…`9` | abrir la **galería** de esa ranura (sin soltar el ratón ni usar el clic derecho) |
-| `p` | rota la herramienta del clic derecho: Construir → Pintar → Seleccionar → Cuentagotas |
-| `Alt`+`P` | galería de **herramientas** (la ranura 10) |
+| `e` | rota la herramienta: Construir → Volumen → Seleccionar |
+| `E` | rota las **secundarias**: Pintar ↔ Cuentagotas |
+| `Alt`+`E` | galería de **herramientas** (la ranura 10) |
+
+Las tres primeras van juntas porque son el mismo trabajo —construir, marcar un volumen y marcar una
+caja— y se alternan a cada rato; pintar y cuentagotas no, y por eso viven en su propio ciclo. `p` y
+`Alt`+`P` siguen valiendo como alias de `e` y `Alt`+`E`.
 
 ### Colocar, girar y deshacer
 
@@ -119,6 +124,7 @@ tecla de movimiento lo captura** — no hace falta volver a hacer clic en el lie
 | `r` | con una **estructura** en la ranura: cambia qué **cara** queda arriba (6 opciones) |
 | `Shift`+`R` | …y los 4 **giros** dentro de esa cara. Entre las dos salen las 24 posturas |
 | `r` | con la herramienta **Seleccionar** y una caja marcada: la gira 90° |
+| `r` / `Shift`+`R` | …pero si la caja ya la has **rellenado** con una estructura, giran la **pieza** y vuelven a aplicar el relleno con la postura nueva |
 | `s` | **solo mientras mantienes el clic derecho** colocando una estructura: alterna pegado centrado ↔ al canto. Fuera de ese gesto, `s` sigue siendo andar hacia atrás |
 | `n` | anota el bloque al que apuntas (sale como cartel 3D legible) |
 | `z` / `Z` | deshacer / rehacer (romper, poner, pintar, estampar, retirar) |
@@ -131,8 +137,20 @@ tecla de movimiento lo captura** — no hace falta volver a hacer clic en el lie
 ### Ratón
 
 Clic **izquierdo** rompe, clic **derecho** usa / coloca; mantenerlos pulsados **repite** la acción.
-Con **Seleccionar** activa no rompen nada: el izquierdo marca las dos esquinas de la caja y el
-derecho la limpia. Con **Cuentagotas**, los dos botones toman el material.
+Con **Seleccionar** activa no rompen nada: el izquierdo marca las dos esquinas de la caja. El
+derecho, **con una caja ya marcada**, coge del mapa el material al que apuntas —bloque, textura o
+pieza— y con él **rellena la selección sin perderla**: es el mismo gesto que pulsar una ranura, pero
+eligiendo a ojo del propio mundo en vez del cajón. Sin caja marcada (o con `Shift`) el derecho
+limpia la selección, que es la única forma de dejarla en nada. Con **Cuentagotas**, los dos botones
+toman el material.
+
+### Rellenar una selección
+
+Con **Seleccionar** y una caja confirmada, `1`…`9` (o el clic derecho de arriba) **cambia de material
+los bloques sólidos de dentro**. Ojo a la diferencia: reemplaza lo que hay, **no rellena los huecos**
+—el aire de dentro de la caja sigue siendo aire—, así que sirve para revestir lo construido sin
+tapar sus ventanas. Vale igual para bloques y para **estructuras**, entra entero en el historial
+(un solo `z` lo deshace) y la selección se queda puesta para el siguiente intento.
 
 ---
 
@@ -147,8 +165,8 @@ game.keys();                              // qué teclas tienes puestas
 Registrar la misma tecla otra vez la **reemplaza**, no acumula manejadores.
 
 Las que ya usa el Mundo están **reservadas** y `game.onKey` las rechaza con un aviso en consola:
-`w` `a` `s` `d` `Espacio` `Shift` `p` `b` `x` `u` `n` `r` `z` `f` `Esc` y `1`…`9`. Libres, por
-ejemplo: `t` `g` `h` `j` `k` `l` `y` `c` `v` `m` `q` `e`.
+`w` `a` `s` `d` `Espacio` `Shift` `e` `p` `b` `x` `u` `n` `r` `z` `f` `Esc` y `1`…`9`. Libres, por
+ejemplo: `t` `g` `h` `j` `k` `l` `y` `c` `v` `m` `q`.
 
 La lista de reservadas y el orden del manejador tienen que ir juntos: el motor atiende sus teclas
 **antes** de mirar las tuyas, así que una tecla suya que no estuviera en la lista se aceptaría sin

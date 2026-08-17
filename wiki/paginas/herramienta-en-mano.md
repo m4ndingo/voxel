@@ -20,8 +20,8 @@ La herramienta en mano sigue al **modo de edición activo**. Solo entran en la r
 
 | Tecla / Grupo | Modos posibles | Asset por defecto |
 |---------------|----------------|-------------------|
-| **`e`** (principales) | Construir (`build`), Volumen (`box`) | `hab:pico-de-piedra`, `hab:caja-de-volumen` |
-| **`E`** (secundarias) | Pintar (`paint`), Seleccionar (`select`), Cuentagotas (`pick`) | `hab:pincel-de-texturizado`, `hab:varita-de-seleccion`, `hab:cuentagotas` |
+| **`e`** (principales) | Construir (`build`), Volumen (`box`), Seleccionar (`select`) | `hab:pico-de-piedra`, `hab:caja-de-volumen`, `hab:varita-de-seleccion` |
+| **`E`** (secundarias) | Pintar (`paint`), Cuentagotas (`pick`) | `hab:pincel-de-texturizado`, `hab:cuentagotas` |
 
 ---
 
