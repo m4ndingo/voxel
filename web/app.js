@@ -8079,6 +8079,10 @@ function mcOriDims(w, h, d, rot){
 function mcPreviewOri(){ return ((mc.previewCara|0)%6)*4 + (mc.previewGiro&3); }
 // Orientación del volumen de bloques (tecla V para 6 caras, Shift+V para 4 giros = 24 posturas).
 function mcBoxOri(){ return ((mc.boxCara|0)%6)*4 + (mc.boxGiro&3); }
+// Orientación del pegado (Ctrl+V): mismo gesto de dos pasos que la vista-previa, R cara y Shift+R giro.
+// Hasta 2026-08-18 el pegado llevaba su propio `mc.pasteRot` de 0..3 (solo el yaw) y se quedaba en 4 de
+// las 24 posturas: no había forma de tumbar lo copiado. Ahora pasa por MC_ORI como todo lo demás.
+function mcPasteOri(){ return ((mc.pasteCara|0)%6)*4 + (mc.pasteGiro&3); }
 // La geometría depende de rot ⇒ se cachea por (srcKey, rot) en mc.structs[srcKey].meshRot[rot].
 async function mcStructGeom(srcKey, rot){
   rot=mcOriNorm(rot);                   // una de las 24 posturas; mcOriMove la abre en los tres cuartos de vuelta
@@ -11819,12 +11823,13 @@ function mcDrawPasteBlocks(pj, view){
   const dims = mcClipboardDims();
   if(!dims){ mc._pasteCache = null; return; }
 
-  const rot = (mc.pasteRot || 0) & 3;
+  const ori = mcPasteOri();
+  const mueve = mcOriMove(ori, dims.w, dims.h, dims.d);
   const n = near.normal;
   const bx = near.cell[0] + n[0], by = near.cell[1] + n[1], bz = near.cell[2] + n[2];
 
   const gl = mc.gl;
-  const cacheKey = [bx, by, bz, rot, clipboard.cells.length, (clipboard.cells[0] ? clipboard.cells[0].c : '')].join(':');
+  const cacheKey = [bx, by, bz, ori, clipboard.cells.length, (clipboard.cells[0] ? clipboard.cells[0].c : '')].join(':');
 
   if(!mc._pasteCache || mc._pasteCache.key !== cacheKey){
     const totalFloats = clipboard.cells.length * 6 * 36;
@@ -11836,9 +11841,8 @@ function mcDrawPasteBlocks(pj, view){
     const cellCoords = [];
     for(let i=0; i<clipboard.cells.length; i++){
       const cel = clipboard.cells[i];
-      const [rx, rz] = mcRotXZ(cel.dx, cel.dy, rot, dims.w, dims.d);
-      const ry = cel.dz;
-      const wx = bx + rx, wy = by + ry, wz = bz + rz;
+      const q = mueve(cel.dx, cel.dz, cel.dy);   // portapapeles: dy es profundidad y dz altura; mcOriMove va en ejes del mundo
+      const wx = bx + q[0], wy = by + q[1], wz = bz + q[2];
       occ.add(wx + ',' + wy + ',' + wz);
       cellCoords.push({ wx, wy, wz, c: cel.c });
     }
@@ -12271,10 +12275,7 @@ function mcDrawOverlays(pj, view){
     if(near){
       const dims = mcClipboardDims();
       if(dims){
-        const rot = (mc.pasteRot || 0) & 3;
-        const rw = (rot % 2 === 0) ? dims.w : dims.d;
-        const rd = (rot % 2 === 0) ? dims.d : dims.w;
-        const rh = dims.h;
+        const [rw, rh, rd] = mcOriDims(dims.w, dims.h, dims.d, mcPasteOri());   // tumbar la pieza también cambia el alto
         const n = near.normal;
         const bx = near.cell[0] + n[0], by = near.cell[1] + n[1], bz = near.cell[2] + n[2];
         const cyan = [0.2, 0.9, 1.0];
@@ -13507,9 +13508,10 @@ function mcPasteWorld(){
     return;
   }
   mc.pasteActive = true;
-  mc.pasteRot = 0;
+  mc.pasteCara = 0;
+  mc.pasteGiro = 0;
   mc._pasteCache = null;
-  toast('Pegar: mueve la mira para posicionar · Clic izq planta · R rota · Clic dcho cancela');
+  toast('Pegar: mueve la mira para posicionar · Clic izq planta · R cara, Shift+R giro · Clic dcho cancela');
 }
 
 async function mcPasteConfirm(){
@@ -13521,7 +13523,7 @@ async function mcPasteConfirm(){
   if(!hit){ toast('Apunta a una superficie para pegar'); return; }
   const c = hit.cell, n = hit.normal, bx = c[0] + n[0], by = c[1] + n[1], bz = c[2] + n[2];
   const dims = mcClipboardDims();
-  const rot = (mc.pasteRot || 0) & 3;
+  const mueve = dims ? mcOriMove(mcPasteOri(), dims.w, dims.h, dims.d) : null;
 
   const keyId={}, colorId={}; let fellBack=0;
   for(const cel of clipboard.cells){
@@ -13542,9 +13544,8 @@ async function mcPasteConfirm(){
     if(typeof v==='string' && v.slice(0,4)==='tex:') id=keyId[v.slice(4)];
     else { id=colorId[String(v)]; isColor=true; }
     if(!id) continue;
-    const [rx, rz] = dims ? mcRotXZ(cel.dx, cel.dy, rot, dims.w, dims.d) : [cel.dx, cel.dy];
-    const ry = cel.dz;
-    const wx = bx + rx, wy = by + ry, wz = bz + rz;
+    const q = mueve ? mueve(cel.dx, cel.dz, cel.dy) : [cel.dx, cel.dz, cel.dy];   // dy = profundidad, dz = altura
+    const wx = bx + q[0], wy = by + q[1], wz = bz + q[2];
     if(!mcInside(wx,wy,wz)) continue;
     if(wx<minx)minx=wx; if(wy<miny)miny=wy; if(wz<minz)minz=wz;
     if(wx>maxx)maxx=wx; if(wy>maxy)maxy=wy; if(wz>maxz)maxz=wz;
@@ -17683,9 +17684,14 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     e.preventDefault(); return;
   }
   if(k==='r' && mc.pasteActive){
-    mc.pasteRot = ((mc.pasteRot || 0) + 1) & 3;
+    if(e.shiftKey){                                  // Shift+R = los 4 giros dentro de la cara elegida
+      mc.pasteGiro = ((mc.pasteGiro || 0) + 1) & 3;
+      toast('Pegar giro: ' + (mc.pasteGiro * 90) + '° sobre esa cara (' + (mc.pasteGiro + 1) + '/4)');
+    } else {                                         // R = las 6 caras; entre las dos salen las 24 posturas
+      mc.pasteCara = ((mc.pasteCara || 0) + 1) % 6;
+      toast('Pegar cara arriba: ' + MC_ORI_CARA[mc.pasteCara] + ' (' + (mc.pasteCara + 1) + '/6)');
+    }
     mc._pasteCache = null;
-    toast('Pegar giro: ' + (mc.pasteRot * 90) + '° (' + (mc.pasteRot + 1) + '/4)');
     e.preventDefault();
     return;
   }
