@@ -6,7 +6,7 @@ El dueño dirá cuándo hay que ponerse a actualizarla; entonces se vacía esta 
 
 Formato: `- [ ] <ticket> · <qué cambió> → <dónde tocaría>`
 
-- [ ] Pegado (Ctrl+V) · `r` ya no rota 90° sin más: recorre las **6 caras**, y `Shift`+`R` los **4 giros** dentro de la cara (24 posturas, como las estructuras de la hotbar) → `atajos.md`, fila de `Ctrl`+`V` en «Colocar, girar y deshacer».
+- [ ] Pegado (Ctrl+V) · la fila de `Ctrl`+`V` en «Colocar, girar y deshacer» de `atajos.md` está entera desactualizada: `r` recorre las **6 caras** y `Shift`+`R` los **4 giros** (24 posturas, como las estructuras); **planta el clic DERECHO** y el izquierdo suelta; el cúmulo **sigue cargado tras plantar** (pegado continuo); y `Ctrl` + ratón elige el **agarre**, como en la herramienta volumen.
 
 *(Sincronización completada el 2026-08-18: herramienta Seleccionar al grupo principal (`e`), relleno de la selección por ranura `1`…`9`, relleno por clic derecho, `r`/`Shift`+`R` re-aplicando la postura, y `e` añadida a las teclas reservadas — en `atajos.md` y `herramienta-en-mano.md`.)*
 

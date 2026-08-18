@@ -8083,6 +8083,50 @@ function mcBoxOri(){ return ((mc.boxCara|0)%6)*4 + (mc.boxGiro&3); }
 // Hasta 2026-08-18 el pegado llevaba su propio `mc.pasteRot` de 0..3 (solo el yaw) y se quedaba en 4 de
 // las 24 posturas: no había forma de tumbar lo copiado. Ahora pasa por MC_ORI como todo lo demás.
 function mcPasteOri(){ return ((mc.pasteCara|0)%6)*4 + (mc.pasteGiro&3); }
+// Dónde cae el cúmulo del portapapeles: UN SOLO SITIO lo decide, y los tres que lo dibujan o lo plantan
+// —la malla de la vista previa, el contorno cian y mcPasteConfirm— preguntan aquí. Antes cada uno se
+// calculaba su esquina a mano y coincidían de milagro; con el agarre y la postura de por medio, tres
+// copias de esta cuenta serían tres sitios donde la caja miente sobre lo que vas a plantar.
+//
+// El AGARRE (`mc.pasteAnchor`, Ctrl + ratón como en la herramienta volumen) es la celda del cúmulo que
+// se clava en la mira. Se guarda SIN ROTAR —en los ejes de la pieza, no en los de la pantalla— y se pasa
+// por `mueve` como todo lo demás: así el agarre queda pegado al mismo vóxel aunque luego gires con R, que
+// es lo que uno espera («lo sujeto por esta esquina» sigue siendo esa esquina al tumbarlo). Guardarlo ya
+// rotado era más corto, pero al girar la pieza el agarre saltaba a otro sitio y había que rehacerlo.
+// Por defecto [0,0,0] = la esquina mínima, que es como pegaba siempre.
+function mcPasteOrigen(near){
+  const dims = mcClipboardDims();
+  if(!dims) return null;
+  const ori = mcPasteOri();
+  const [rw, rh, rd] = mcOriDims(dims.w, dims.h, dims.d, ori);
+  const mueve = mcOriMove(ori, dims.w, dims.h, dims.d);
+  // Con Ctrl pulsado el cúmulo se CONGELA donde estaba: si siguiera a la mira no habría forma de
+  // señalar una de sus celdas, porque se movería justo con el gesto que la elige.
+  let base = (mc.pasteCtrlHeld && mc.pasteCtrlFreeze) ? mc.pasteCtrlFreeze : null;
+  if(!base){
+    if(!near) return null;
+    const n = near.normal;
+    base = [near.cell[0] + n[0], near.cell[1] + n[1], near.cell[2] + n[2]];
+  }
+  const a = mc.pasteAnchor || [0, 0, 0];
+  const ax = Math.min(Math.max(a[0]|0, 0), dims.w - 1);   // los topes son los de la PIEZA (w,h,d), que no
+  const ay = Math.min(Math.max(a[1]|0, 0), dims.h - 1);   // cambian al girar; por eso el agarre nunca se
+  const az = Math.min(Math.max(a[2]|0, 0), dims.d - 1);   // sale de la caja ni hay que recortarlo al rotar
+  const [rax, ray, raz] = mueve(ax, ay, az);
+  return { ox: base[0] - rax, oy: base[1] - ray, oz: base[2] - raz,
+           rw, rh, rd, dims, ori, mueve, anchor: [rax, ray, raz] };
+}
+// Inversa de `mueve` por barrido: el ratón señala una celda de la caja YA ROTADA y hay que guardar cuál
+// es en los ejes de la pieza. No hay matriz inversa escrita en ninguna parte y no merece la pena añadirla:
+// esto corre UNA vez, al soltar Ctrl, y una pieza de 32³ son 32 k comprobaciones enteras.
+function mcPasteAnchorDesdeRotado(dims, ori, rot){
+  const mueve = mcOriMove(ori, dims.w, dims.h, dims.d);
+  for(let x=0; x<dims.w; x++) for(let y=0; y<dims.h; y++) for(let z=0; z<dims.d; z++){
+    const q = mueve(x, y, z);
+    if(q[0]===rot[0] && q[1]===rot[1] && q[2]===rot[2]) return [x, y, z];
+  }
+  return null;
+}
 // La geometría depende de rot ⇒ se cachea por (srcKey, rot) en mc.structs[srcKey].meshRot[rot].
 async function mcStructGeom(srcKey, rot){
   rot=mcOriNorm(rot);                   // una de las 24 posturas; mcOriMove la abre en los tres cuartos de vuelta
@@ -11818,18 +11862,13 @@ function mcDrawPasteBlocks(pj, view){
     mc._pasteCache = null;
     return;
   }
-  const near = mcRaycast(mcReach(), true);
-  if(!near){ mc._pasteCache = null; return; }
-  const dims = mcClipboardDims();
-  if(!dims){ mc._pasteCache = null; return; }
-
-  const ori = mcPasteOri();
-  const mueve = mcOriMove(ori, dims.w, dims.h, dims.d);
-  const n = near.normal;
-  const bx = near.cell[0] + n[0], by = near.cell[1] + n[1], bz = near.cell[2] + n[2];
+  const org = mcPasteOrigen(mcRaycast(mcReach(), true));
+  if(!org){ mc._pasteCache = null; return; }
+  const mueve = org.mueve;
+  const bx = org.ox, by = org.oy, bz = org.oz;
 
   const gl = mc.gl;
-  const cacheKey = [bx, by, bz, ori, clipboard.cells.length, (clipboard.cells[0] ? clipboard.cells[0].c : '')].join(':');
+  const cacheKey = [bx, by, bz, org.ori, clipboard.cells.length, (clipboard.cells[0] ? clipboard.cells[0].c : '')].join(':');
 
   if(!mc._pasteCache || mc._pasteCache.key !== cacheKey){
     const totalFloats = clipboard.cells.length * 6 * 36;
@@ -12271,17 +12310,26 @@ function mcDrawOverlays(pj, view){
 
   // 4b) Modo Pegar (Ctrl+V): caja, rejilla y corchetes en esquina sobre la superficie apuntada
   if(playing && mc.pasteActive && clipboard && clipboard.cells && clipboard.cells.length){
-    const near = mcRaycast(mcReach(), true);
-    if(near){
-      const dims = mcClipboardDims();
-      if(dims){
-        const [rw, rh, rd] = mcOriDims(dims.w, dims.h, dims.d, mcPasteOri());   // tumbar la pieza también cambia el alto
-        const n = near.normal;
-        const bx = near.cell[0] + n[0], by = near.cell[1] + n[1], bz = near.cell[2] + n[2];
-        const cyan = [0.2, 0.9, 1.0];
-        mcPushBoxEdges(selLines, bx, by, bz, bx + rw, by + rh, bz + rd, cyan[0], cyan[1], cyan[2]);
-        mcPushCornerBrackets(selLines, bx, by, bz, bx + rw, by + rh, bz + rd, 0.45, cyan[0], cyan[1], cyan[2]);
-        mcPushGridDividers(selLines, bx, by, bz, bx + rw, by + rh, bz + rd, 0.25, 0.85, 0.95);
+    const org = mcPasteOrigen(mcRaycast(mcReach(), true));
+    if(org){
+      const { ox, oy, oz, rw, rh, rd } = org;
+      const cyan = [0.2, 0.9, 1.0];
+      mcPushBoxEdges(selLines, ox, oy, oz, ox + rw, oy + rh, oz + rd, cyan[0], cyan[1], cyan[2]);
+      mcPushCornerBrackets(selLines, ox, oy, oz, ox + rw, oy + rh, oz + rd, 0.45, cyan[0], cyan[1], cyan[2]);
+      mcPushGridDividers(selLines, ox, oy, oz, ox + rw, oy + rh, oz + rd, 0.25, 0.85, 0.95);
+      // Con Ctrl pulsado: la celda que señalas dentro del cúmulo se pinta en ÁMBAR y será el agarre al
+      // soltar. Mismo código de color que la herramienta volumen, para que el gesto se lea igual.
+      if(mc.pasteCtrlHeld){
+        const hover = mcBoxRaycastLocal(ox, oy, oz, rw, rh, rd);
+        if(hover) mc.pasteAnchorHover = hover;
+        const h = hover || mc.pasteAnchorHover;
+        if(h){
+          mcPushBoxEdges(selLines, ox+h[0], oy+h[1], oz+h[2], ox+h[0]+1, oy+h[1]+1, oz+h[2]+1, 1.0, 0.85, 0.1);
+          mcPushCornerBrackets(selLines, ox+h[0], oy+h[1], oz+h[2], ox+h[0]+1, oy+h[1]+1, oz+h[2]+1, 0.35, 1.0, 0.85, 0.1);
+        }
+      } else if(org.anchor[0] || org.anchor[1] || org.anchor[2]){
+        const [ax, ay, az] = org.anchor;   // agarre ya elegido: se marca en cian para saber por dónde se sujeta
+        mcPushBoxEdges(selLines, ox+ax, oy+ay, oz+az, ox+ax+1, oy+ay+1, oz+az+1, 0.2, 0.85, 0.95);
       }
     }
   }
@@ -13078,10 +13126,13 @@ function mcUseRight(){ if(mc.tool==='paint') mcPickBlock(); else mcPlace(); }
 function mcToolPasiva(){ return mc.tool==='select' || mc.tool==='pick' || mc.tool==='box' || !!mc.pasteActive; }
 // Acción de un botón de ratón (para el clic inicial y la repetición al mantener pulsado).
 function mcDoAction(btn, shift){
-  // Modo Pegar (Ctrl+V): clic izquierdo (0) planta los bloques previsualizados, clic derecho (2) cancela
+  // Modo Pegar (Ctrl+V): clic DERECHO (2) planta los bloques previsualizados, clic izquierdo (0) cancela.
+  // Van al revés que el resto del Mundo a propósito (2026-08-18, orden del dueño): pegar es «colocar», y
+  // colocar es el botón derecho en todo lo demás —poner un bloque, estampar una estructura—, así que el
+  // izquierdo (el que rompe) aquí solo puede significar «quita eso de en medio».
   if(mc.pasteActive){
-    if(btn===0) mcPasteConfirm();
-    else if(btn===2) mcPasteCancel();
+    if(btn===2) mcPasteConfirm();
+    else if(btn===0) mcPasteCancel();
     mcRevealHotbar();
     return;
   }
@@ -13510,8 +13561,12 @@ function mcPasteWorld(){
   mc.pasteActive = true;
   mc.pasteCara = 0;
   mc.pasteGiro = 0;
+  mc.pasteAnchor = [0, 0, 0];       // agarre: esquina mínima, como se ha pegado siempre
+  mc.pasteCtrlHeld = false;
+  mc.pasteCtrlFreeze = null;
+  mc.pasteAnchorHover = null;
   mc._pasteCache = null;
-  toast('Pegar: mueve la mira para posicionar · Clic izq planta · R cara, Shift+R giro · Clic dcho cancela');
+  toast('Pegar: mueve la mira para posicionar · Clic dcho planta (sigue cargado) · R cara, Shift+R giro · Clic izq suelta');
 }
 
 async function mcPasteConfirm(){
@@ -13519,11 +13574,9 @@ async function mcPasteConfirm(){
     mc.pasteActive = false;
     return;
   }
-  const hit = mcRaycast(mcReach(), true);
-  if(!hit){ toast('Apunta a una superficie para pegar'); return; }
-  const c = hit.cell, n = hit.normal, bx = c[0] + n[0], by = c[1] + n[1], bz = c[2] + n[2];
-  const dims = mcClipboardDims();
-  const mueve = dims ? mcOriMove(mcPasteOri(), dims.w, dims.h, dims.d) : null;
+  const org = mcPasteOrigen(mcRaycast(mcReach(), true));
+  if(!org){ toast('Apunta a una superficie para pegar'); return; }
+  const bx = org.ox, by = org.oy, bz = org.oz, mueve = org.mueve;
 
   const keyId={}, colorId={}; let fellBack=0;
   for(const cel of clipboard.cells){
@@ -13544,7 +13597,7 @@ async function mcPasteConfirm(){
     if(typeof v==='string' && v.slice(0,4)==='tex:') id=keyId[v.slice(4)];
     else { id=colorId[String(v)]; isColor=true; }
     if(!id) continue;
-    const q = mueve ? mueve(cel.dx, cel.dz, cel.dy) : [cel.dx, cel.dz, cel.dy];   // dy = profundidad, dz = altura
+    const q = mueve(cel.dx, cel.dz, cel.dy);   // portapapeles: dy = profundidad, dz = altura
     const wx = bx + q[0], wy = by + q[1], wz = bz + q[2];
     if(!mcInside(wx,wy,wz)) continue;
     if(wx<minx)minx=wx; if(wy<miny)miny=wy; if(wz<minz)minz=wz;
@@ -13556,16 +13609,23 @@ async function mcPasteConfirm(){
   if(minx===Infinity){ toast('Nada colocado (fuera del mapa o sin material)'); return; }
   if(edits.length){ mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave(); }
   mc.selBox={a:[minx,miny,minz], b:[maxx,maxy,maxz]}; mc.selA=null;
-  mc.pasteActive = false;
+  // El pegado NO se desarma al plantar: queda cargado como si acabaras de pulsar Ctrl+V, para poder
+  // sembrar la misma pieza varias veces sin repetir el gesto. Se conservan cara y giro —desandar la
+  // postura después de cada copia era justo el trabajo que esto ahorra—; se sale con el clic izquierdo
+  // o con Esc. No hay riesgo de sembrar sin querer al mantener pulsado: `mcToolPasiva()` es cierta
+  // mientras `pasteActive`, y la repetición de `mc.heldBtn` pregunta por ella antes de repetir.
   mc._pasteCache = null;
-  toast((edits.length||'0')+' bloque(s) plantados'+(fellBack?' · '+fellBack+' de color al material más parecido':'')+' · R rota');
+  toast((edits.length||'0')+' bloque(s) plantados'+(fellBack?' · '+fellBack+' de color al material más parecido':'')+' · sigue cargado · clic izq. suelta');
 }
 
 function mcPasteCancel(){
   if(mc.pasteActive){
     mc.pasteActive = false;
+    mc.pasteCtrlHeld = false;      // si se suelta con Ctrl pulsado, el keyup no debe fijar nada después
+    mc.pasteCtrlFreeze = null;
+    mc.pasteAnchorHover = null;
     mc._pasteCache = null;
-    toast('Pegado cancelado');
+    toast('Pegado soltado');   // «soltado» y no «cancelado»: se sale con el izquierdo y puede que ya hayas plantado copias
   }
 }
 
@@ -17734,6 +17794,22 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     mc.boxAnchorHover = (mc.boxAnchor ? mc.boxAnchor.slice() : [0, 0, 0]);
     toast('Ajustando agarre: apunta al bloque del volumen · Suelta Control para fijar');
   }
+  // Lo mismo para el pegado continuo (Ctrl+V): Ctrl congela el cúmulo y el ratón elige por qué celda
+  // se sujeta. Es el gesto que ya tenía la herramienta volumen, no uno nuevo que aprenderse.
+  if(e.key==='Control' && !e.repeat && mc.pasteActive && !mc.pasteCtrlHeld){
+    mc.pasteCtrlHeld = true;
+    const near = mcRaycast(mcReach(), true);
+    if(near && near.cell[1] >= 0){
+      const n = near.normal;
+      mc.pasteCtrlFreeze = [near.cell[0] + n[0], near.cell[1] + n[1], near.cell[2] + n[2]];
+    } else {
+      mc.pasteCtrlFreeze = mc.pos.map(Math.floor);
+    }
+    const orgA = mcPasteOrigen(near);                 // el resalte va en coords rotadas: el agarre guardado
+    mc.pasteAnchorHover = orgA ? orgA.anchor.slice() : [0, 0, 0];   // hay que pasarlo por la postura
+    mc._pasteCache = null;
+    toast('Ajustando agarre: apunta al bloque del pegado · Suelta Control para fijar');
+  }
   if(MC_KEYS.includes(k)){
     mc.keys[k]=true; if(k!=='shift') e.preventDefault();
     // Si el ratón no está capturado, moverse con WASD/salto lo captura (como un clic) — keydown es gesto de usuario.
@@ -17750,6 +17826,21 @@ window.addEventListener('keyup',e=>{
     mc.boxCtrlFreeze = null;
     const [ax, ay, az] = mc.boxAnchor || [0, 0, 0];
     toast('Punto de agarre fijado en [' + ax + ', ' + ay + ', ' + az + ']');
+  }
+  if(e.key==='Control' && mc.pasteCtrlHeld){
+    mc.pasteCtrlHeld = false;
+    const dims = mcClipboardDims();
+    if(mc.pasteAnchorHover && dims){
+      // El ratón ha señalado una celda de la caja rotada; se guarda en los ejes de la pieza para que
+      // sobreviva a un giro posterior. Si el barrido no la encuentra (no debería), se deja el agarre viejo.
+      const sin = mcPasteAnchorDesdeRotado(dims, mcPasteOri(), mc.pasteAnchorHover);
+      if(sin) mc.pasteAnchor = sin;
+    }
+    mc.pasteCtrlFreeze = null;
+    mc.pasteAnchorHover = null;
+    mc._pasteCache = null;
+    const [ax, ay, az] = mc.pasteAnchor || [0, 0, 0];
+    toast('Agarre del pegado fijado en [' + ax + ', ' + ay + ', ' + az + ']');
   }
 });
 
