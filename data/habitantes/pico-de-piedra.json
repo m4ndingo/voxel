@@ -11,8 +11,7 @@
     "role": "Herramienta · pico de piedra (stone pickaxe)",
     "icon": "⛏️",
     "description": "Pico de piedra estilo Minecraft tallado en matriz voxel 16³.",
-    "categoria": "herramienta",
-    "herramienta": "build"
+    "categoria": "herramienta"
   },
   "voxels": {
     "13,0,2": "#49351f",
@@ -71,6 +70,6 @@
       4
     ]
   ],
-  "savedAt": "2026-08-17T18:15:18",
+  "savedAt": "2026-08-18T14:17:14",
   "createdAt": "2026-08-12T10:22:44"
 }

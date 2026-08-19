@@ -127,6 +127,18 @@ capacidad. `game.bloques.info()` = descubridor de la clave EXACTA de lo que piso
 - **El snippet se PARCHEA, no se reescribe** (dueño lo edita en vivo, **2 copias vivas**):
   `parche_snp_*.py` idempotente, ancla única, **aborta si el ancla no aparece exactamente 1 vez**.
 
+## Partículas y efectos → [`docs/particulas-y-efectos.md`](docs/particulas-y-efectos.md)
+
+3 snippets, **0 líneas de `app.js`**: `sondas-mundo` (mundo por **FORMA**, no por celda) + `particulas-voxel`
+(motor) + `efectos-demo` (7 efectos: nieve, lluvia, estrellas, chispas, polvo, hojas, humo).
+- ⛔ `mcSolid` dice **celda**: lo que caiga se posa en la **caja invisible** de una antorcha. Forma real =
+  `mc._geoFina[id]`. Estructuras con **`mcFineBoxHit._orig`** (la envuelta trae agentes, BUG-AG19).
+- Agrandar = **`game.voxelesUI.grosor(grupo,n)`** (agranda el cubo, no el paso), ⛔ NUNCA apilar voxeles:
+  `mcDrawArr` sube la capa **entera** a la GPU cada frame (240 estrellas g16 = 983 040 vox vs **240**).
+- Se dibuja **con el mundo** (`mcDrawVoxUI`), NO en el overlay: el translúcido no escribe z (BUG-VOXUI1).
+- Vuelo en tiempo **simulado**, reposo en el de **reloj** (`dt` va acotado). Medir con `dt` fijo a mano:
+  el navegador de pruebas va a 1,4 fps ⇒ 9 s de reloj = 0,6 s simulados, y sus fps no miden nada.
+
 ## Física del jugador
 
 - Parkour → [`docs/parkour.md`](docs/parkour.md); `game.parkour.estado()` dice **por qué** no engancha.

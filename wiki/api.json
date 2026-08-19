@@ -920,7 +920,6 @@
       ],
       "fuente": "app.js · mcToggleGrabarVideo"
     },
-
     {
       "nombre": "mc._intro",
       "firma": "mc._intro",
@@ -1816,6 +1815,44 @@
         "game.bloques.define"
       ],
       "fuente": "app.js · game.viento"
+    },
+    {
+      "nombre": "game.voxelesUI",
+      "firma": "game.voxelesUI.pon(x, y, z, color, grupo) · .grosor(grupo, n) · .encima",
+      "grupo": "Partículas",
+      "resumen": "La capa de adorno: cubitos de color que se dibujan CON el mundo —lo que tengas delante los tapa— sin llegar a ser mundo. Es sobre lo que se dibujan TODOS los efectos (chispas, sangre, nieve, lluvia, estrellas). No colisiona, no se guarda, no sale en la foto del mapa y se pierde al recargar. Con .encima = true se dibuja al final, encima de todo, para marcas que se quieran ver a través de las paredes.",
+      "params": [
+        {
+          "nombre": "x, y, z",
+          "tipo": "number",
+          "desc": "Coordenadas ENTERAS en la rejilla de la propia capa, que es **fina: 16 pasos por bloque**. Para poner algo en la posición del mundo `p`, es `Math.round(p * 16)`."
+        },
+        {
+          "nombre": "color",
+          "tipo": "string | array",
+          "desc": "`'#rrggbb'`, `[r,g,b]` de 0 a 1, o `{r,g,b}`."
+        },
+        {
+          "nombre": "grupo",
+          "tipo": "string",
+          "opcional": true,
+          "desc": "Etiqueta de la tanda, para poder borrarla sin tocar las demás. Por defecto `'ui'`."
+        }
+      ],
+      "devuelve": "La propia capa, así que se pueden encadenar llamadas.",
+      "ejemplo": "// un cubito rojo justo delante de ti\nconst p = 1/16;\ngame.voxelesUI.pon(Math.round(mc.pos[0]/p), Math.round((mc.pos[1]+2)/p), Math.round(mc.pos[2]/p), '#cc1111', 'prueba');\n\ngame.voxelesUI.linea(0,0,0, 100,0,0, '#00ff00', 'eje');   // una recta sin huecos\ngame.voxelesUI.caja(0,0,0, 160,160,160, '#ffff00', 'caja'); // las 12 aristas\ngame.voxelesUI.info();          // cuántos hay en cada grupo\ngame.voxelesUI.limpia('prueba'); // borra esa tanda (sin argumento, borra todo)\n\ngame.voxelesUI.grosor('estrellas', 16);   // cada voxel del grupo, un bloque entero",
+      "notas": [
+        "**Se dibuja SIN luz ni sombreado del sol.** Un voxel blanco se ve blanco a medianoche: la capa es autoiluminada por construcción. Es justo lo que hace posible un cielo de estrellas sin tocar el motor de luz.",
+        "**`grosor(grupo, n)` agranda el CUBO de un grupo sin mover nada** (n = lado en voxeles finos, 16 = un bloque entero). Es la forma de tener, por ejemplo, estrellas grandes: **un voxel por estrella, mida lo que mida**. Hacerlas gordas apilando un cubo de `n³` voxeles multiplica la geometría por `n³` y hunde los fps — 240 estrellas a grosor 16 son 983 040 voxeles apiladas (~1 640 ms/frame) contra 240 voxeles y 2,1 ms con `grosor`. De grosor 1 a 16 el coste es el mismo.",
+        "**Cuesta rehacer la capa ENTERA cada vez que algo cambia**, no el voxel que has tocado. Medido: 0,48 ms con 100 voxeles, 2,88 ms con 500, 6,29 ms con 1000 — o sea ~6 µs por voxel, una vez por frame mientras algo se mueva. Por eso no ahorra nada pintar de uno en uno, ni repartir un mismo efecto en varios grupos.",
+        "`game.voxelesUI.tam(n)` agranda el cubo **y** el paso a la vez (1 = voxel fino, 16 = un bloque entero). `game.voxelesUI.alfa(n)` pone la transparencia de toda la capa.",
+        "Para efectos con física (que caigan, reboten y se posen) no hace falta escribir nada: eso es el motor de partículas, en el snippet `particulas-voxel`. Ver la página «El motor de partículas»."
+      ],
+      "ver": [
+        "game.setVoxel",
+        "game.snippet"
+      ],
+      "fuente": "app.js · game.voxelesUI"
     }
   ]
 }

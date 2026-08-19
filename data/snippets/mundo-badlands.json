@@ -1,0 +1,6 @@
+{
+  "id": "mundo-badlands",
+  "name": "Mundo BadLands",
+  "code": "A=await game.snippet(\"efectos-demo\")\nawait game.snippet(\"ambientes\")\ngame.entorno(\"NIEBLA\",0)\nA.nieve.enciende()\ntoast(\"Welcome to BadLands\")\n",
+  "savedAt": "2026-08-19T22:05:30"
+}

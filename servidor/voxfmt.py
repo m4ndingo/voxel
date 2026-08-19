@@ -8,7 +8,7 @@ no supuesto. De ahi los 3,3 GB de data/habitantes_trash: eran 30 bloques puestos
 
 v2 parte el mundo en dos ficheros hermanos:
 
-    <mundo>.json    {format, dim, spawn, palette, structures, notes, noteRots} ~40 KB
+    <mundo>.json    {format, dim, spawn, palette, structures, notes, noteRots, noteTints} ~40 KB
     <mundo>.vox     dim.x*dim.y*dim.z uint16 little-endian, sin cabecera       21 MB
 
 El indice del .vox es EXACTAMENTE mcIdx del cliente (app.js): idx = x + y*dim.x + z*dim.x*dim.y.
@@ -134,6 +134,7 @@ def desde_v1(doc):
         'structures': doc.get('structures') or [],
         'notes': doc.get('notes') or {},
         'noteRots': doc.get('noteRots') or {},
+        'noteTints': doc.get('noteTints') or {},
     }
     return cab, _a_bytes_le(g)
 
@@ -167,6 +168,7 @@ def a_doc_v1(wf, cab=None):
         'structures': cab.get('structures') or [],
         'notes': cab.get('notes') or {},
         'noteRots': cab.get('noteRots') or {},
+        'noteTints': cab.get('noteTints') or {},
     }
 
 
@@ -340,12 +342,12 @@ def aplicar_edits(wf, edits, atomic_dump, to_trash):
 
 
 def guardar_cabecera(wf, parcial, atomic_dump, to_trash):
-    """Guarda solo lo que no esta en el .vox (spawn, structures, notes, noteRots). El .vox no se toca."""
+    """Guarda solo lo que no esta en el .vox (spawn, structures, notes, noteRots, noteTints). El .vox no se toca."""
     with _cerrojo(wf):
         cab = leer_cabecera(wf)
         if not es_v2(cab):
             return False
-        for k in ('spawn', 'structures', 'notes', 'noteRots'):
+        for k in ('spawn', 'structures', 'notes', 'noteRots', 'noteTints'):
             if k in parcial:
                 cab[k] = parcial[k]
         to_trash(wf, move=False)

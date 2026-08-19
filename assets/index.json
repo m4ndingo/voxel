@@ -246,15 +246,19 @@
   {
     "id": "white_whool",
     "name": "White Wool",
-    "role": "Bloque · lana blanca (white whool)",
+    "role": "Bloque · lana blanca (white wool)",
     "icon": "🧶",
     "type": "textura",
     "group": "Bloques de construcción",
-    "size": 16,
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
     "file": "assets/white_whool.vox.json",
     "description": "",
     "alias": "white_wool",
-    "savedAt": "2026-08-04T16:13:36",
+    "savedAt": "2026-08-19T22:22:19",
     "createdAt": "2026-08-04T16:13:36",
     "count": 4096
   },
@@ -877,7 +881,7 @@
     "file": "assets/cartel.vox.json",
     "description": "Cartel",
     "alias": "sign",
-    "savedAt": "2026-08-06T08:46:10",
+    "savedAt": "2026-08-19T21:11:37",
     "createdAt": "2026-08-06T08:46:10",
     "count": 544
   },
@@ -1375,5 +1379,22 @@
     "count": 1314,
     "alias": "hojas_palmera",
     "description": "Frondas de palmera con nervaduras doradas y calados al viento."
+  },
+  {
+    "id": "capa-de-nieve",
+    "name": "Capa de nieve",
+    "role": "Bloque · capa de nieve (snow layer)",
+    "icon": "❄️",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 2
+    },
+    "file": "assets/capa-de-nieve.vox.json",
+    "savedAt": "2026-08-19T21:30:00",
+    "createdAt": "2026-08-19T21:30:00",
+    "count": 512
   }
 ]

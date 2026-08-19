@@ -197,6 +197,9 @@
           <span id="zoom-label">100%</span>
           <button class="btn sm" id="zoom-in" title="Acercar (+)">+</button>
           <button class="btn sm" id="zoom-reset" title="Ajustar (0)">Ajustar</button>
+          <!-- REQ-ED3 · guías de rejilla: rota sin guías → ÷2 → ÷4. Va aquí y no en HERRAMIENTAS porque
+               no dibuja nada: es estado de vista, y `setTool` es excluyente (te dejaría sin pincel). -->
+          <button class="btn sm" id="btn-grid" title="Guías de rejilla">⊞ ÷2</button>
         </div>
         <!-- Solo aparece si el dibujo tiene alguna cara apagada (o estás con la herramienta): un
              botón más en la barra no le sirve de nada a un asset sin máscara, que son casi todos. -->
@@ -399,9 +402,13 @@
   <!-- ===================== Mapa del mundo ===================== -->
   <!-- ===================== Gestor de snippets de código (editor estilo Minecraft) ===================== -->
   <div class="modal snip-modal" id="snip-modal" hidden>
+    <!-- REQ-SPLIT1 · el agarre de la pantalla dividida. Solo se ve en modo dividido; arrastrarlo reparte
+         la altura entre el Mundo (arriba) y el código (abajo), y el doble clic la devuelve a la mitad. -->
+    <div class="snip-grip" id="snip-grip" title="Arrastra para repartir la pantalla · doble clic: a la mitad"></div>
     <div class="modal-head">
       <div><strong>🧩 Snippets de código</strong> <span class="muted" id="snip-sub">guarda, edita y ejecuta código contra el Mundo</span></div>
       <div class="modal-actions">
+        <button class="btn sm" id="snip-split" title="Pantalla dividida: el Mundo arriba y el código abajo (Alt+D)">⬍ Dividir</button>
         <button class="btn sm" id="snip-refresh" title="Recargar lista">↻</button>
         <button class="btn sm" id="snip-close" title="Cerrar (Esc)">✕ Cerrar</button>
       </div>
@@ -409,12 +416,19 @@
     <div class="snip-body">
       <aside class="snip-list-pane">
         <button class="btn sm snip-new-btn" id="snip-new">+ Nuevo snippet</button>
+        <input type="search" id="snip-search" class="snip-search" autocomplete="off" spellcheck="false"
+               placeholder="🔍 Buscar en el código (2 letras mín.)…"
+               title="Busca el texto DENTRO del código de todos los snippets, y también en su rótulo e id." />
+        <div class="snip-modo" id="snip-modo" hidden></div>
         <div class="snip-list" id="snip-list"></div>
       </aside>
       <section class="snip-editor">
         <div class="snip-editor-head">
           <input type="text" id="snip-name" class="snip-name" placeholder="Nombre del snippet…" maxlength="80" />
+          <input type="text" id="snip-id" class="snip-id" maxlength="60" spellcheck="false" placeholder="id…"
+                 title="Id del snippet: el fichero data/snippets/&lt;id&gt;.json y el nombre con el que lo llama game.snippet('id'). Se puede cambiar; vacío = se deriva del nombre." />
           <div class="snip-actions">
+            <button class="btn sm" id="snip-usos" title="Qué otros snippets llaman a éste (game.snippet('&lt;id&gt;'))">🔗 Usos</button>
             <button class="btn sm" id="snip-save" title="Guardar (Ctrl+S)">💾 Guardar</button>
             <button class="btn sm snip-run-btn" id="snip-run" title="Ejecutar en el Mundo (Ctrl+Enter)">▶ Ejecutar</button>
             <button class="btn sm snip-del-btn" id="snip-del" title="Borrar" hidden>🗑 Borrar</button>
@@ -559,13 +573,27 @@
          la zona de MIRAR arrastrando. -->
     <div class="mc-touch" id="mc-touch" hidden>
       <div class="mc-stick" id="mc-stick"><div class="mc-stick-knob" id="mc-stick-knob"></div></div>
+      <!-- REQ-MOV1 · los TRES botones del ratón. `data-btn` es el número del botón del ratón, no un
+           nombre de acción: lo que hagan lo decide la herramienta que lleves puesta, igual que en el
+           escritorio, y por eso no hay aquí ni un `if` de qué es romper y qué es poner. -->
+      <button class="mc-tbtn accion romper" id="mc-tizq" type="button" data-btn="0" title="Romper (clic izquierdo)">⛏</button>
+      <button class="mc-tbtn accion poner" id="mc-tder" type="button" data-btn="2" title="Poner / usar (clic derecho)">▣</button>
+      <button class="mc-tbtn accion redstone" id="mc-tmed" type="button" data-btn="1" title="Conmutar redstone (clic central)">⚡</button>
       <button class="mc-tbtn" id="mc-tjump" type="button" title="Saltar">⤒</button>
-      <button class="mc-tbtn foto" id="mc-tfoto" type="button" title="Sacar foto (Alt+F)">📷</button>
-      <button class="mc-tbtn video" id="mc-tvideo" type="button" title="Grabar vídeo (Alt+V)">🎬</button>
-      <!-- La salida del Mundo en táctil, y la ÚNICA: sin teclado no hay Esc. Vive aquí dentro y no
-           en la esquina a propósito — así se enciende y se apaga con los mandos táctiles (un solo
-           `hidden`, el de #mc-touch) y en escritorio no existe, que es lo que se pidió. -->
-      <button class="mc-tbtn salir" id="mc-tsalir" type="button" title="Salir del Mundo">✕</button>
+      <!-- REQ-MOV1 · el ✕ era la ÚNICA salida en táctil (sin teclado no hay Esc) y ahora es un menú;
+           salir sigue estando dentro, y sigue siendo la única. El menú vive aquí, no en la esquina,
+           por lo de siempre: se enciende y se apaga con `#mc-touch` de un solo `hidden`. -->
+      <!-- clase `tmenu`, NO `menu`: `.menu` ya es el desplegable «⋯» del editor (min-width:220px,
+           display:flex) y se lo llevaba por delante — el ☰ salía de 220 px de ancho. -->
+      <button class="mc-tbtn tmenu" id="mc-tmenu" type="button" title="Menú" aria-expanded="false">☰</button>
+      <div class="mc-tmenu-panel" id="mc-tmenu-panel" hidden>
+        <!-- ⤢ y no ⛶ (U+26F6, el símbolo «de manual» para esto): ⛶ sale como CAJA en el navegador de
+             pruebas —no hay fuente que lo dibuje— mientras que el resto de glifos de aquí sí están. -->
+        <button type="button" id="mc-tfull">⤢ Pantalla completa</button>
+        <button type="button" id="mc-tfoto">📷 Sacar foto</button>
+        <button type="button" id="mc-tvideo">🎬 Grabar vídeo</button>
+        <button type="button" id="mc-tsalir" class="rojo">✕ Salir del Mundo</button>
+      </div>
     </div>
     <!-- Botón de desatasco (BUG-AG7). Sale SOLO cuando estás atascado de verdad, porque con
          game.autoUnstick apagado el juego ya no te saca solo y en el móvil no hay tecla U. -->
@@ -624,6 +652,14 @@
           <button type="button" class="btn sm ghost mc-note-rot-btn" data-rot="3" title="Rotación 270° (Frente X-)">⬅ 270°</button>
           <button type="button" class="btn sm ghost" id="mc-note-rot-step" title="Girar 90° (⟳)">⟳</button>
         </div>
+      </div>
+      <!-- Tinte del cartel (por nota): los 6 de siempre son colores de post-it, y el selector abre cualquier RGB -->
+      <div class="mc-note-tint-bar" id="mc-note-tint-bar" style="display:flex; align-items:center; gap:4px; flex-wrap:wrap; font-size:12px; margin:2px 0 6px;">
+        <span style="opacity:0.8; margin-right:4px;">Tinte:</span>
+        <button type="button" class="btn sm ghost mc-note-tint-btn" data-tint="" title="Sin tinte (el cartel tal cual)">∅</button>
+        <label class="mc-note-tint-pick" title="Color a medida (RGB)">
+          <input type="color" id="mc-note-tint-color" value="#ffe066">
+        </label>
       </div>
       <textarea id="mc-note-text" rows="4" maxlength="280" placeholder="Escribe una nota… (Ctrl+Enter guarda)"></textarea>
       <div class="mc-note-actions">

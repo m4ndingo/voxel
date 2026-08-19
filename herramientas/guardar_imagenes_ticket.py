@@ -22,7 +22,10 @@ import json
 import os
 import sys
 
-TRANSCRIPTS = '/root/.claude/projects/-root/*.jsonl'
+# Claude Code nombra la carpeta del transcript por el directorio de trabajo de la sesión. Este repo
+# se abrió primero desde /root (-root) y ahora desde /root/voxel (-root-voxel): se miran las dos, o
+# las capturas del dueño se pierden cada vez que cambia por dónde entra.
+TRANSCRIPTS = ['/root/.claude/projects/-root/*.jsonl', '/root/.claude/projects/-root-voxel/*.jsonl']
 DESTINO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'tickets')
 EXT = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif'}
 
@@ -30,7 +33,8 @@ EXT = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif
 def mensajes_con_imagen():
     """Todos los mensajes del dueño que llevan imagen, del más viejo al más nuevo."""
     fuera = []
-    for f in sorted(glob.glob(TRANSCRIPTS), key=os.path.getmtime):
+    ficheros = [f for patron in TRANSCRIPTS for f in glob.glob(patron)]
+    for f in sorted(ficheros, key=os.path.getmtime):
         with open(f, encoding='utf-8') as fh:
             for linea in fh:
                 try:

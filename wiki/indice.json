@@ -24,6 +24,12 @@
       ]
     },
     {
+      "titulo": "Partículas y efectos",
+      "paginas": [
+        { "id": "particulas", "titulo": "El motor de partículas" }
+      ]
+    },
+    {
       "titulo": "Scripting",
       "paginas": [
         { "id": "scripting",    "titulo": "Snippets: qué son y cómo corren" },

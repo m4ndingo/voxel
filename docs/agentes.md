@@ -785,6 +785,88 @@ arriba sin importar lo hondo que hubiera caído, que es justo lo que el dueño p
 
 `escalar: 0` es **«no trepa»**: ni el escalón de andar, así que se queda donde lo dejen.
 
+### 🗡️ Apuntar a un agente y saber DÓNDE le das (BUG-AG19)
+
+**Chocar y apuntar son DOS caminos distintos en `app.js`**, y ésta es la trampa cara del área. La librería
+envuelve **cuatro** sondas, no tres, y cada una está en un camino:
+
+| envoltura | para qué | quién la llama |
+|---|---|---|
+| `mcStructColl` | apaga el ancla vacía de la pieza | todas las demás |
+| `mcFineBoxHit` | **chocar** con la pieza donde se la ve | la física |
+| `mcStructAt` | **romper/identificar** la pieza donde se la ve | el clic, `mcBreak` |
+| `mcAimBoxHit` | **apuntar** a la pieza donde se la ve | `mcRaycast(d,true) → mcStructRayHit → mcAimSolidAt` |
+
+Faltando la cuarta, el rayo de la mira **atravesaba entero** a todos los agentes articulados y se clavaba en
+el terreno de detrás: la espada de `game.herramientas` anunciaba «tajo al aire» con el bicho delante. Las
+cuatro se ponen en `envolverColision()` de `mundo-autoarranque`, y las tres últimas comparten el mismo
+`golpe()`; la de apuntar le pasa `mirar = true`, que cambia sólo tres cosas: lee `bitsAim || bits`, **no**
+salta las piezas `atravesable` y salta `s._isHeldTool`.
+
+Para las herramientas, la ficha del impacto:
+
+```js
+const h = game.esqueletos.enLaMira();          // o .enPunto(x,y,z) / .enPunto(c.punto)
+// { id, nombre, agente, agenteId, pieza, texto, punto, dist, local, dim, alto, rig, s, parte }
+if (h) toast('tajo a ' + h.texto + ' · voxel ' + h.local.join(',') + ' (alto ' + h.alto.toFixed(2) + ')');
+```
+
+Existe porque el `c` de `game.herramientas` habla de **celdas y materiales** y una pieza de agente no es
+ninguna de las dos cosas. `local` es el voxel **dentro del dibujo de la pieza** (índices del editor, no del
+mundo) — ahí es donde va el efecto, sea un tajo o plantar una margarita.
+
+⚠️ **`s.model[12..14]` NO es la posición** de la pieza: es el resto fraccionario del plantado; dónde se la ve
+lo dice su `aabb`.
+⚠️ Para el bitset de una pieza hay que llamar a **`mcStructColl._orig`**: la envuelta devuelve `null` para
+todo lo que no sea la raíz del rig.
+⚠️ `enLaMira()` usa el rayo del **golpe** (atraviesa lo que no tiene colisión); `mcRaycast` se para en ello.
+Con un cartel de por medio uno dice «el zombi» y `c.celda` dice «el cartel» — quien quiera ser estricto usa
+`enPunto(c.punto)`.
+
+### 🩸 `game.sangre` — el efecto que sale de ese punto (REQ-SANGRE1)
+
+📌 **2026-08-19 (REQ-SNP-LIB1): el motor ya no vive aquí.** Salió a dos librerías —`sondas-mundo` (preguntar
+al mundo por forma fina) y `particulas-voxel` (la física)— y `herramienta-espada` bajó de 271 a 125 líneas.
+Lo de abajo sigue describiendo bien **el comportamiento**, pero para tocarlo o reutilizarlo la puerta es
+**[`particulas-y-efectos.md`](particulas-y-efectos.md)**; ahí están también los siete efectos que salieron
+gratis (nieve, lluvia, estrellas autoiluminadas, chispas, polvo, hojas, humo) y cómo se miden.
+
+Primer consumidor de `enLaMira()`, y el ejemplo de que **el efecto no es cosa del motor**: vive entero en el
+snippet `herramienta-espada` (`herramientas/parche_snp_sangre.py`), cero líneas de `app.js`. La espada, donde
+ya sabía que había acertado, añade una línea:
+
+```js
+game.sangre.salpica(h.punto);        // sale DE la herida, no del centro del bicho
+```
+
+Pinta en **`game.voxelesUI`**, grupo `'sangre'`, con `tam:1` ⇒ cubos de `MC_VOX` (1/16 de bloque, el voxel
+1×1×1 del editor). Al no ser mundo: no colisiona, no se guarda, no sale en la foto del mapa. Mandos en
+caliente: `activa`, `chorro` (22), `dura` (30 s en el suelo), `desvanece` (4), `grav`, `fuerza`, `rebote`,
+`vuelo` (8), `tope` (500); más `salpica(punto)`, `limpia()` e `info()`.
+
+⚠️ **La sonda del suelo se pide SIN ENVOLVER: `mcFineBoxHit._orig`.** La envuelta por `mundo-autoarranque`
+incluye a los agentes articulados (es justo lo de BUG-AG19, arriba) y con ella las gotas se posan **sobre el
+propio bicho**: medido, 9 de 22 «posadas» a los 0,1 s a media altura, sin haber caído. Vale para cualquier
+efecto que quiera saber dónde está *el mundo*, no dónde está el monstruo.
+
+⚠️ **El vuelo se cuenta en tiempo simulado; el descanso, en el de reloj.** `dt` va acotado (`Math.min(0.05,…)`),
+así que en una máquina a pocos fps un segundo de reloj es una fracción de segundo de caída: midiendo el tope
+de vuelo por reloj se matan gotas **que aún están en el aire** (medido: 16 de 22). Los 30 s del suelo sí son
+de reloj —«30 segundos son 30 segundos»— y se cuentan **desde que la gota se posa**, no desde el tajo.
+
+⚠️ **La rejilla se pregunta por FORMA, no por celda.** `mcSolid` contesta «¿hay materia en esta celda?», que
+para una antorcha, una flor o un repetidor es `true` en el **cubo entero**: la gota se posa sobre una caja
+invisible de 1×1×1 flotando alrededor de la pieza. La forma de verdad está en **`mc._geoFina[id]`**
+(`{bits, fdim}`, en 1/16), indexada con las coordenadas finas **locales a la celda** (`Math.floor(x*MC_TILE) -
+bx*MC_TILE`, 0..`fdim-1`), exactamente como hace `mcTerrenoChoca` para chocar al jugador. Medido sobre una
+antorcha: por celda salen macizas 4096 de 4096 subceldas; por forma, 48 —el palo, 2×12×2—. Vale para
+cualquier cosa que caiga, ruede o se pose: si no preguntas por `_geoFina`, el mundo tiene cajas invisibles.
+
+⚠️ `pinta()` repinta el grupo entero cada frame **a propósito**: `mcVoxUIGeom()` remalla *toda* la capa en
+cuanto está sucia, así que pintar gota a gota no ahorra nada. El `requestAnimationFrame` **se apaga solo**
+cuando no queda ninguna gota, y reejecutar el snippet cancela el bucle anterior (`window.__sangre`) — se puede
+retunear desde el editor sin dejar dos simulaciones vivas.
+
 ## El planificador: presupuesto por frame repartido por turnos
 
 *(movido verbatim desde `CLAUDE.md` el 2026-08-13, tope de 15 KB)*

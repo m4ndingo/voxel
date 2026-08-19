@@ -349,6 +349,31 @@ function setCarasMarcar(v){
   syncCarasVer(); render();
   return carasMarcar;
 }
+// REQ-ED3 · Guías de rejilla del lienzo de Capas: parten la capa en N×N cajas para tener a la vista las
+// mitades y los cuartos mientras dibujas. Mismo tipo de estado que `carasMarcar` de aquí arriba —de
+// VISTA: no toca el documento, NO viaja en el .vox.json y no cambia nada del Mundo—, así que ⛔ nunca
+// dentro de `state`, o la guía se guardaría en la pieza y la vería quien la abriese.
+// No es una herramienta del panel a propósito: `setTool` es excluyente y elegirla te dejaría sin pincel.
+const GRID_DIVS=[0,2,4];                 // el botón de la barra rota estos tres · 0 = sin guías
+let gridDiv=2;                           // por defecto ÷2: una capa de 16 sale partida en 4 cajas de 8×8
+try{ const s=parseInt(localStorage.getItem('vf_grid_div'),10); if(GRID_DIVS.includes(s)) gridDiv=s; }catch(e){}
+function setGridDiv(v){
+  gridDiv = GRID_DIVS.includes(v) ? v : 0;
+  try{ localStorage.setItem('vf_grid_div', String(gridDiv)); }catch(e){}
+  syncGridDiv(); drawEdit();
+  return gridDiv;
+}
+function rotaGridDiv(){ return setGridDiv(GRID_DIVS[(GRID_DIVS.indexOf(gridDiv)+1) % GRID_DIVS.length]); }
+// Las líneas interiores que parten `n` celdas en `div` partes, SOLO donde caen en un borde de celda.
+// El editor no es siempre 16³ (el tamaño se pone a mano en el panel Objeto): con n=10 y div=4 el paso
+// es 2,5 y solo vale la del medio. Dibujar las otras a mitad de celda engañaría más de lo que ayuda.
+function guias2d(n, div){
+  const out=[];
+  if(!div || div<2) return out;
+  const paso=n/div;
+  for(let i=1;i<div;i++){ const p=i*paso; if(Number.isInteger(p)) out.push(p); }
+  return out;
+}
 function applyTool(cx,cy){
   if(cx<0||cy<0||cx>=SX||cy>=SY) return;
   const z = state.layer;
@@ -567,6 +592,22 @@ function drawEdit(){
   for(let i=0;i<=SX;i++){ ectx.moveTo(px(i),originY); ectx.lineTo(px(i),originY+gy); }
   for(let j=0;j<=SY;j++){ ectx.moveTo(originX,py(j)); ectx.lineTo(originX+gx,py(j)); }
   ectx.stroke();
+  // REQ-ED3 · guías: la misma pasada de arriba pero cada SX/gridDiv celdas, en azul claro y encima de la
+  // rejilla fina para que se lean sobre ella. Solo las INTERIORES: el borde exterior ya lo pinta aquella.
+  if(gridDiv>=2){
+    const vs=guias2d(SX,gridDiv), hs=guias2d(SY,gridDiv);
+    if(vs.length || hs.length){
+      // Al medio píxel: una línea de 1 px trazada en una coordenada ENTERA se reparte entre los dos
+      // píxeles vecinos a media tinta, y según el zoom unas guías salían nítidas y otras lavadas (la
+      // vertical del centro caía en x entera y se veía a la mitad que su horizontal gemela).
+      const nit = v => Math.round(v) + 0.5;
+      ectx.strokeStyle='rgba(126,191,255,0.38)'; ectx.lineWidth=1;
+      ectx.beginPath();
+      for(const i of vs){ const x=nit(px(i)); ectx.moveTo(x,originY); ectx.lineTo(x,originY+gy); }
+      for(const j of hs){ const y=nit(py(j)); ectx.moveTo(originX,y); ectx.lineTo(originX+gx,y); }
+      ectx.stroke();
+    }
+  }
   drawPivotes2d(px,py,cell);
   // selección (compartida con la vista 3D): tinte cian en los voxels seleccionados de ESTA capa
   if(selection.size){
@@ -601,7 +642,7 @@ function drawEdit(){
       ectx.restore();
     }
   }
-  // recuadro de selección (Shift+arrastre con la herramienta Selección)
+  // recuadro de selección (arrastre con la herramienta Selección; Shift lo suma a lo ya seleccionado)
   if(marquee){
     const mx0=Math.min(marquee.x0,marquee.x1), mx1=Math.max(marquee.x0,marquee.x1)+1;
     const my0=Math.min(marquee.y0,marquee.y1), my1=Math.max(marquee.y0,marquee.y1)+1;
@@ -1634,6 +1675,7 @@ function face(ctx,pts,fill){
 // ===================== Info / UI sync =====================
 function updateInfo(){
   const n=state.voxels.size;
+  syncGridDiv();   // el rótulo cita SX×SY, que cambia al cargar otra pieza y al aplicar tamaño · antes del corte de n===0
   $('#voxel-count').textContent=n+' vox';
   if(n===0){ $('#dims').textContent='— · 0 voxels'; return; }
   // La bbox se pide a voxParsed(), que ya la calcula y la CACHEA por voxKey(). Antes esto volvía a
@@ -1660,6 +1702,19 @@ function syncCarasVer(){
   b.title = carasMarcar
     ? 'Las caras MARCADAS se ven en rojo: son las únicas que quedarán, porque en cuanto hay una marca el resto del objeto se oculta. Las demás siguen dibujadas con su color para poder clicarlas. Pulsa para ocultarlas y ver la pieza como se verá en el Mundo.'
     : 'Solo se dibujan las caras marcadas: el resto del objeto está oculto, como se verá en el Mundo. Pulsa para verlas en rojo y recuperar las que no lo están.';
+}
+// REQ-ED3 · como el de Caras: el botón dice en qué estado ESTÁ (no lo que hace al pulsarlo), que es lo
+// que se lee de un vistazo mientras dibujas. El título sí explica el gesto y avisa de las que no caben.
+function syncGridDiv(){
+  const b=$('#btn-grid'); if(!b) return;
+  b.textContent = gridDiv ? '⊞ ÷'+gridDiv : '⊞ sin guías';
+  b.classList.toggle('is-active', gridDiv>0);
+  if(!gridDiv){ b.title='Sin guías de rejilla. Pulsa para partir la capa en 2×2.'; return; }
+  const vs=guias2d(SX,gridDiv).length, hs=guias2d(SY,gridDiv).length;
+  const cabe = vs===gridDiv-1 && hs===gridDiv-1;
+  b.title = 'Guías cada '+gridDiv+' partes: la capa queda en '+gridDiv+'×'+gridDiv+' cajas de '
+    + (SX/gridDiv)+'×'+(SY/gridDiv)+' celdas. Pulsa para '+(gridDiv===4?'quitarlas':'partir en 4×4')+'.'
+    + (cabe ? '' : ' ⚠️ '+SX+'×'+SY+' no se parte en '+gridDiv+': solo se dibujan las guías que caen en un borde de celda.');
 }
 function syncColor(){
   $('#color-custom').value=/^#[0-9a-f]{6}$/i.test(state.color)?state.color:'#000000';
@@ -2045,7 +2100,9 @@ const MC_HERRAMIENTAS = [
   ['pick',   '💉 Cuentagotas'],
 ];
 function mcEtiquetaHerramienta(t){
-  const e = MC_HERRAMIENTAS.find(h => h[0] === t);
+  const h = (typeof mc !== 'undefined' && mc.herrExtra) ? mc.herrExtra[t] : null;   // REQ-TOOL8
+  if(h) return h.nombre;
+  const e = MC_HERRAMIENTAS.find(h2 => h2[0] === t);
   return e ? e[1] : t;
 }
 function galEtiquetaCategoria(cat){
@@ -2515,6 +2572,7 @@ function importJSON(file){
 
 // ===================== Toast =====================
 let toastT;
+let toastN = 0;   // cuántos avisos se han ENSEÑADO. Lo mira `snipRun` para no pisar al snippet (ver allí).
 function toast(msg, secs){                          // secs opcional = duración en segundos (def. 1.8 s)
   // REQ-OSD6 · Un menú no habla. En escaparate (?osd=1) el mundo es la PANTALLA de un OSD, y los avisos
   // que suelta al abrirse («Mundo cargado», lo que diga su autoarranque) salían encima del menú como
@@ -2523,6 +2581,7 @@ function toast(msg, secs){                          // secs opcional = duración
   // es un `let` de más abajo y hay toasts que salen antes de que exista. En la zona muerta ni siquiera
   // `typeof mc` es seguro — tira ReferenceError, y eso convertiría un aviso en una página rota.
   if(mcEsEscaparate()) return;
+  toastN++;
   const el=$('#toast'); el.textContent=msg;
   el.classList.toggle('mc-mode', !$('#mc-modal').hidden);   // en el Mundo, el toast sube por encima de la hotbar
   el.hidden=false;
@@ -2561,7 +2620,7 @@ function apply2dSelect(c){
   else selection.delete(k);
   render();
 }
-// ---- Copiar / Pegar en 2D (Ctrl+C / Ctrl+V) ----
+// ---- Copiar / Cortar / Pegar en 2D (Ctrl+C / Ctrl+X / Ctrl+V) ----
 let clipboard=null;   // {cells:[{dx,dy,dz,c}], gx,gy} — offsets relativos al mínimo + punto de agarre (centro)
 let pasting=null;     // colocación activa: copia del portapapeles que sigue al ratón hasta soltar (clic)
 let pasteHover3d=null; // en la vista 3D: celda-ancla bajo el cursor mientras se pega (fantasma), o null
@@ -2575,6 +2634,17 @@ function copySelection(){                              // Ctrl+C: guarda los vox
   clipboard={ cells:raw.map(v=>({dx:v.x-minx, dy:v.y-miny, dz:v.z-minz, c:v.c, m:caraMask(v.x,v.y,v.z)})),
               gx:Math.floor((maxx-minx)/2), gy:Math.floor((maxy-miny)/2) };
   toast(clipboard.cells.length+' voxel(s) copiados');
+  return true;
+}
+// Ctrl+X: copia al portapapeles y borra del modelo. Se compone de las dos que ya existen a propósito: así el
+// formato del portapapeles —y la máscara de caras que viaja dentro— es EXACTAMENTE el de Ctrl+C, y el borrado
+// entra en el historial como UN gesto, el de deleteSelection (que ya envuelve en edit()).
+function cutSelection(){
+  if(!selection.size){ toast('Nada que cortar'); return false; }
+  if(!copySelection()) return false;                   // selección sin voxels ocupados: no hay nada que cortar
+  const n=clipboard.cells.length;
+  if(!deleteSelection()) return false;
+  toast(n+' voxel(s) cortados');                       // pisa los avisos de copiar y borrar: para quien lo usa es un solo gesto
   return true;
 }
 function selectAll(){                                  // Ctrl+A: selecciona TODOS los voxels del modelo (Capas y 3D comparten `selection`)
@@ -2652,7 +2722,11 @@ editCv.addEventListener('pointerdown',e=>{
   if(state.tool==='orbit') return;                 // giro no aplica en la vista 2D
   if(selTool){                                     // selección por CAJA como en 3D: arrastrar marca del voxel inicial al final
     const c=cellFromEvent(e);
-    marquee={ x0:c.x, y0:c.y, x1:c.x, y1:c.y, base:new Set(selection),
+    // Una selección nueva EMPIEZA DE CERO: arrastrar sin más reemplaza lo que hubiera, que es lo que
+    // hace cualquier editor. Con Shift se acumula sobre lo ya seleccionado. El clic DERECHO (quitar)
+    // conserva la base siempre — sin ella no habría nada de lo que restar y el gesto no haría nada.
+    const acumula = e.shiftKey || e.button===2;
+    marquee={ x0:c.x, y0:c.y, x1:c.x, y1:c.y, base:acumula?new Set(selection):new Set(),
               mode:(e.button===2?'remove':'add'), moved:false,
               emptyStart:getVoxel(c.x,c.y,state.layer)===undefined };
     painting=true; hover=c; applyMarquee(); e.preventDefault(); return;
@@ -2717,6 +2791,10 @@ editCv.addEventListener('wheel',e=>{
 $('#zoom-in').onclick =()=>{ if(mode==='3d') zoom3dAt(edit3d.width/2, edit3d.height/2, 1.12); else zoomAt(editCv.width/2, editCv.height/2, 1.12); };
 $('#zoom-out').onclick=()=>{ if(mode==='3d') zoom3dAt(edit3d.width/2, edit3d.height/2, 1/1.12); else zoomAt(editCv.width/2, editCv.height/2, 1/1.12); };
 $('#zoom-reset').onclick=()=>{ if(mode==='3d'){ view3d.zoom=1; view3d.panX=0; view3d.panY=0; drawEdit3d(); } else resetView(); };
+$('#btn-grid').onclick=()=>{
+  const v=rotaGridDiv();
+  toast(v ? 'Guías: '+v+'×'+v+' cajas' : 'Guías de rejilla quitadas');
+};
 $('#btn-caras-ver').onclick=()=>{
   setCarasMarcar(!carasMarcar);
   toast(carasMarcar ? 'Caras marcadas en rojo: son las que se verán' : 'Solo las caras marcadas: así se verá en el Mundo');
@@ -3110,7 +3188,11 @@ edit3d.addEventListener('pointerdown',e=>{
     selecting = (e.button===2) ? 'remove' : 'add';      // izq añade · der quita
     if(!v){ if(selecting==='add' && selection.size){ selection.clear(); drawEdit3d(); } e.preventDefault(); return; } // clic izq fuera = deshacer
     // Arrastre = caja de A (este voxel) a B (el del arrastre). Un clic sin mover = caja A..A = 1 voxel.
-    selBox={a:v, b:v, base:new Set(selection), mode:selecting}; applySelBox();
+    // Como en Capas: un arrastre nuevo EMPIEZA DE CERO y reemplaza lo que hubiera. El derecho (quitar)
+    // conserva la base, que sin ella no habría nada que restar. Aquí Shift NO entra en el reparto: en
+    // esta vista ya está cogido por el Shift+clic de arriba (región conexa), que también acumula — así
+    // que «Shift = sumar a lo ya seleccionado» sigue siendo cierto en las dos vistas, con otro gesto.
+    selBox={a:v, b:v, base:(selecting==='remove')?new Set(selection):new Set(), mode:selecting}; applySelBox();
     hover3d=v; drawEdit3d(); e.preventDefault(); return;
   }
   if(e.button===0 && v){
@@ -3598,6 +3680,14 @@ window.addEventListener('keydown',e=>{
     if(document.pointerLockElement===mc.canvas) document.exitPointerLock();      // en el Mundo el ratón está capturado
     openSnips(); return;
   }
+  // REQ-SPLIT1 · Alt+D reparte la pantalla entre el Mundo y el código. Con el editor cerrado lo abre YA
+  // dividido: es un solo gesto para «quiero tocar esto viendo el Mundo». Mismas cautelas que Alt+C.
+  if(e.code==='KeyD' && e.altKey && !e.ctrlKey && !e.metaKey){
+    e.preventDefault(); e.stopImmediatePropagation();                            // la `d` del Mundo es andar a la derecha
+    if($('#snip-modal').hidden){ if($('#mc-modal').hidden){ toast('La pantalla dividida es para ver el Mundo: ábrelo primero'); return; }
+                                 snipModoDividido=false; openSnips().then(snipToggleDividido); return; }
+    snipToggleDividido(); return;
+  }
   // Alt+A = lo mismo para el panel de agentes: hasta ahora solo se llegaba por la pestaña del editor,
   // así que retocar un bicho obligaba a salir del Mundo. Mismas cautelas que Alt+C (e.code, sin Ctrl/⌘
   // para no pisar el Ctrl+A de seleccionar todo) y va antes del corte de Mundo por la misma razón.
@@ -3637,6 +3727,7 @@ window.addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); return; }
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='a'){ e.preventDefault(); selectAll(); return; }           // seleccionar todos los voxels (2D Capas y 3D)
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='c'){ if(copySelection()) e.preventDefault(); return; }   // copiar selección (2D Capas y 3D comparten `selection`)
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='x'){ if(cutSelection()) e.preventDefault(); return; }     // cortar selección (= Ctrl+C + borrar, un solo gesto)
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='v'){ if(startPaste()) e.preventDefault(); return; }       // pegar (modo colocación · Capas y 3D)
   if(e.key==='Delete'||e.key==='Backspace'){ if(deleteSelection()) return; }
   // flechas con selección: extruir (herramienta Extruir) o recolocar (resto)
@@ -3946,12 +4037,72 @@ build(50, 15, 50);
 `;
 async function openSnips(){
   $('#snip-modal').hidden=false;
+  snipPintaDividido();                                                           // REQ-SPLIT1 · si quedó dividido, vuelve dividido
   const prev=snipCur;                                                            // al reabrir (Alt+C) vuelve al que estabas viendo, no al primero
   await snipReload();
   if(prev && snips.some(s=>s.id===prev)) snipLoad(prev);
   else if(snips.length) snipLoad(snips[0].id); else snipNew();
 }
-function closeSnips(){ $('#snip-modal').hidden=true; }
+function closeSnips(){ $('#snip-modal').hidden=true; snipPintaDividido(); }      // …y al cerrarlo el Mundo recupera la pantalla entera
+
+// ── REQ-SPLIT1 · PANTALLA DIVIDIDA (Mundo arriba, código abajo) ─────────────────────────────────
+// Para qué: tocar la escala o la postura de algo en un snippet y ver el efecto al darle a ▶ sin cerrar
+// el editor. NO se monta un iframe: `mc` es un singleton (un iframe sería OTRO contexto WebGL vivo, el
+// problema que el OSD resuelve destruyéndolo al cerrar) y no hace falta, porque el editor ya está en la
+// misma página y los snippets corren en el ámbito global. Dividir es puro reparto de altura: ver el CSS.
+const SNIP_ALTO_MIN = 150;                       // px · menos que esto y no cabe ni la barra de botones
+let snipModoDividido = false;                    // preferencia; sobrevive a cerrar y reabrir el editor
+let snipAlto = 0;
+function snipAplicaAlto(px){
+  const max = Math.max(SNIP_ALTO_MIN, innerHeight - 140);   // …y al Mundo le quedan siempre 140 px
+  snipAlto = Math.max(SNIP_ALTO_MIN, Math.min(max, Math.round(px)));
+  document.documentElement.style.setProperty('--snip-alto', snipAlto + 'px');
+  try{ localStorage.setItem('vf_snipAlto', snipAlto); }catch(e){}
+}
+// La clase la manda el ESTADO, no el botón: dividido solo tiene sentido con el editor abierto Y el Mundo
+// abierto. Si no, `#mc-modal` seguiría encogido debajo de un editor cerrado.
+function snipPintaDividido(){
+  const on = snipModoDividido && !$('#snip-modal').hidden && !$('#mc-modal').hidden;
+  document.body.classList.toggle('snip-dividido', on);
+  const b = $('#snip-split');
+  if(b){ b.classList.toggle('is-on', on); b.textContent = on ? '⛶ Completa' : '⬍ Dividir'; }
+  if(mc.active && mc.gl) mcResize();             // el canvas cambió de caja ⇒ viewport nuevo ya, sin esperar al frame
+}
+function snipToggleDividido(){
+  if(!snipModoDividido && $('#mc-modal').hidden){ toast('La pantalla dividida es para ver el Mundo: ábrelo primero'); return; }
+  snipModoDividido = !snipModoDividido;
+  try{ localStorage.setItem('vf_snipDiv', snipModoDividido ? '1' : '0'); }catch(e){}
+  snipPintaDividido();
+  if(snipModoDividido){
+    // El foco al código: dividir es el gesto de «voy a tocar esto y mirar»; y con el ratón capturado por
+    // el Mundo no se podría ni escribir.
+    if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
+    $('#snip-code').focus();
+    toast('⬍ Pantalla dividida · Ctrl+Enter ejecuta y lo ves arriba · arrastra la barra para repartir');
+  }
+}
+// Deja el alto guardado listo antes del primer reparto (sin él, `var(--snip-alto)` cae en el 45vh del CSS).
+(function snipRestauraAlto(){
+  let g=0; try{ g=parseInt(localStorage.getItem('vf_snipAlto')||'0',10)||0; }catch(e){}
+  snipAplicaAlto(g || Math.round(innerHeight*0.45));
+  try{ snipModoDividido = localStorage.getItem('vf_snipDiv')==='1'; }catch(e){}
+})();
+window.addEventListener('resize',()=>{ if(snipAlto) snipAplicaAlto(snipAlto); });   // re-encaja el reparto al cambiar la ventana
+$('#snip-grip').addEventListener('pointerdown', e=>{
+  if(!document.body.classList.contains('snip-dividido')) return;
+  e.preventDefault();
+  const y0 = e.clientY, h0 = snipAlto;
+  const mover  = ev => snipAplicaAlto(h0 + (y0 - ev.clientY));                   // hacia arriba = más código
+  const soltar = ()=>{ window.removeEventListener('pointermove', mover); window.removeEventListener('pointerup', soltar);
+                       document.body.classList.remove('snip-arrastrando'); };
+  window.addEventListener('pointermove', mover); window.addEventListener('pointerup', soltar);
+  document.body.classList.add('snip-arrastrando');
+});
+$('#snip-grip').addEventListener('dblclick', ()=> snipAplicaAlto(Math.round(innerHeight*0.45)));
+$('#snip-split').onclick = snipToggleDividido;
+// Los atajos del Mundo se cortan cuando el editor lo TAPA, no por estar abierto: dividido el Mundo se ve
+// y se juega, y quien decide es el foco (los atajos ya excluyen `input,select,textarea`).
+function snipTapaElMundo(){ return !$('#snip-modal').hidden && !document.body.classList.contains('snip-dividido'); }
 async function snipReload(){
   const list=$('#snip-list'); list.innerHTML='<p class="snip-empty">Cargando…</p>';
   try{ snips=await fetch('/api/snippets',{cache:'no-store'}).then(r=>r.json()); }
@@ -3960,37 +4111,167 @@ async function snipReload(){
 }
 function renderSnipList(){
   const list=$('#snip-list'); list.innerHTML='';
-  if(!snips.length){ list.innerHTML='<p class="snip-empty">Sin snippets. Crea uno con «+ Nuevo».</p>'; return; }
-  for(const s of snips){
+  // La lista pinta `snipVista` cuando hay una búsqueda o unos usos en marcha, y `snips` (todos) si no.
+  // `snips` NO se pisa nunca con el resultado: es la lista completa que consulta el guardado para
+  // avisar de un id repetido, y perderla convertía cada búsqueda en un aviso de colisión de menos.
+  const datos = snipVista || snips;
+  if(!datos.length){
+    list.innerHTML='<p class="snip-empty">'+(snipVista
+      ? (snipModo && snipModo.tipo==='usos' ? 'Ningún snippet llama a «'+snipModo.id+'».' : 'Nada con ese texto.')
+      : 'Sin snippets. Crea uno con «+ Nuevo».')+'</p>';
+    return;
+  }
+  for(const s of datos){
     const b=document.createElement('button'); b.className='snip-item'+(s.id===snipCur?' is-active':'');
     b.innerHTML='<b></b><small></small>';
     b.querySelector('b').textContent=s.name||'(sin nombre)';
-    b.querySelector('small').textContent=(s.lines||1)+' líneas · '+(s.savedAt||'').replace('T',' ').slice(0,16);
+    // El id va DELANTE de todo: es lo que se teclea en `game.snippet('…')` y lo que el mapa busca
+    // ('mundo-<mapa>'), y no coincide con el rótulo siempre que éste lleve algo que el slug se come.
+    b.querySelector('small').textContent=s.id+' · '+(s.lines||1)+' líneas · '+(s.savedAt||'').replace('T',' ').slice(0,16);
+    // La línea que casa, tal cual está en el código: sin ella hay que abrir los resultados uno a uno
+    // para ver cuál era el bueno. `textContent`, nunca HTML: aquí dentro va código de quien sea.
+    if(s.muestra || s.tipo){
+      const l=document.createElement('em'); l.className='snip-hit'+(s.tipo==='mencion'?' es-mencion':'');
+      l.textContent=(s.tipo==='mencion'?'≈ ':'')+(s.linea?'L'+s.linea+': ':'')+(s.muestra||'(en el rótulo)')
+                    +(s.hits>1?'  (+'+(s.hits-1)+')':'');
+      l.title=s.tipo==='mencion' ? 'Menciona el id, pero no se le ve llamarlo: puede ser una variable, una tabla o un comentario.'
+            : s.tipo==='llamada' ? 'Lo llama con game.snippet(…)' : '';
+      b.appendChild(l);
+    }
     b.onclick=()=>snipLoad(s.id);
     list.appendChild(b);
   }
+}
+// ── Buscar dentro de los snippets y saber quién usa el abierto (REQ-SNP6) ────────────────────────
+// Las dos preguntas las contesta el servidor (`?q=` y `?usa=`), que es donde están los ficheros: el
+// listado no trae el código y bajárselo entero en cada tecla son ~1,5 MB. Aquí solo se pinta.
+let snipVista=null, snipModo=null, snipBuscaT=0, snipBuscaN=0;
+function snipModoCabecera(txt){
+  const el=$('#snip-modo');
+  if(!txt){ el.hidden=true; el.innerHTML=''; return; }
+  el.hidden=false; el.innerHTML='<span></span><button class="btn sm" title="Ver todos">✕</button>';
+  el.querySelector('span').textContent=txt;
+  el.querySelector('button').onclick=snipVerTodos;
+}
+function snipVerTodos(){ snipVista=null; snipModo=null; $('#snip-search').value=''; snipModoCabecera(''); renderSnipList(); }
+// Un `server.py` arrancado ANTES de que existiera esto ignora el `?q=` y contesta el listado ENTERO:
+// la búsqueda parecería decir que todos los snippets casan. Python no recarga el fichero solo, así que
+// se detecta por la forma de la respuesta (los resultados llevan `hits`) y se dice qué pasa.
+function snipServidorBusca(r){
+  if(!r.length || r[0].hits!==undefined) return true;
+  toast('Este servidor no tiene el buscador: reinícialo (python3 server.py 8500)');
+  return false;
+}
+async function snipBusca(txt){
+  const q=String(txt||'').trim();
+  if(q.length<2){ if(snipModo && snipModo.tipo==='busca') snipVerTodos(); return; }
+  const n=++snipBuscaN;                                  // la respuesta que llega tarde no pisa a la última
+  let r=null;
+  try{ r=await fetch('/api/snippets?q='+encodeURIComponent(q),{cache:'no-store'}).then(x=>x.json()); }catch(e){}
+  if(n!==snipBuscaN) return;
+  if(!r){ toast('No se pudo buscar'); return; }
+  if(!snipServidorBusca(r)) return;
+  snipVista=r; snipModo={tipo:'busca', q};
+  snipModoCabecera(r.length+(r.length===1?' snippet dice':' snippets dicen')+' «'+q+'»');
+  renderSnipList();
+}
+// El motor llama a ciertos snippets POR SU ID, sin que nadie los escriba en ningún código: buscar
+// referencias a 'mundo-badlands' y no encontrar ninguna no significa que no lo use nadie — lo lanza
+// app.js al entrar en /map/badlands. Esto es conocimiento del framework, no del servidor.
+function snipUsosDelMotor(id){
+  if(id===MC_AUTOARRANQUE) return 'lo ejecuta el motor al entrar en CUALQUIER mapa';
+  if(id===MC_EDITOR_AUTOARRANQUE) return 'lo ejecuta el motor al abrir el editor';
+  if(id===MC_INTRO_GENERICA) return 'lo ejecuta el motor con ?intro=1 cuando el mapa no tiene el suyo';
+  let m=/^mundo-(.+)$/.exec(id); if(m) return 'lo ejecuta el motor al entrar en /map/'+m[1];
+  m=/^arranque-(.+)$/.exec(id); if(m) return 'lo ejecuta el motor en /map/'+m[1]+'?intro=1';
+  return '';
+}
+async function snipUsos(){
+  if(!snipCur){ toast('Guarda el snippet primero: los usos se buscan por su id'); return; }
+  const id=snipCur;
+  let r=null;
+  try{ r=await fetch('/api/snippets?usa='+encodeURIComponent(id),{cache:'no-store'}).then(x=>x.json()); }catch(e){}
+  if(!r){ toast('No se pudo buscar'); return; }
+  if(!snipServidorBusca(r)) return;
+  snipVista=r; snipModo={tipo:'usos', id}; $('#snip-search').value='';
+  const motor=snipUsosDelMotor(id);
+  const llamadas=r.filter(s=>s.tipo==='llamada').length;
+  snipModoCabecera((r.length ? llamadas+' llaman a «'+id+'»'+(r.length>llamadas ? ' · '+(r.length-llamadas)+' lo mencionan' : '')
+                             : 'nadie llama a «'+id+'»') + (motor ? ' · '+motor : ''));
+  renderSnipList();
+  if(!r.length && motor) toast(motor);
 }
 async function snipLoad(id){
   let d=null;
   try{ d=await fetch('/api/snippets/'+id,{cache:'no-store'}).then(r=>r.json()); }catch(e){}
   if(!d || d.error){ toast('No se pudo abrir el snippet'); return; }
-  snipCur=d.id; $('#snip-name').value=d.name||''; $('#snip-code').value=d.code||'';
+  snipCur=d.id; $('#snip-name').value=d.name||''; $('#snip-code').value=d.code||''; $('#snip-id').value=d.id||'';
   // Los protegidos (el Mundo los ejecuta al entrar) se editan y se guardan, pero no se borran: se
   // esconde el botón para no ofrecer algo que el servidor va a rechazar. La lista trae el flag.
   const meta=snips.find(s=>s.id===d.id);
-  $('#snip-del').hidden=!!(meta && meta.protegido); renderSnipList();
+  $('#snip-del').hidden=!!(meta && meta.protegido); renderSnipList(); snipCuentaUsos();
 }
 function snipNew(){
-  snipCur=null; $('#snip-name').value=''; $('#snip-code').value=SNIP_TEMPLATE;
-  $('#snip-del').hidden=true; renderSnipList(); $('#snip-name').focus();
+  snipCur=null; $('#snip-name').value=''; $('#snip-code').value=SNIP_TEMPLATE; $('#snip-id').value='';
+  snipPistaId(); $('#snip-del').hidden=true; renderSnipList(); snipCuentaUsos(); $('#snip-name').focus();
 }
+// «¿Le llama alguien?» se contesta SOLA al abrir el snippet, sin clicar: es la pregunta que se hace
+// antes de cambiarle el id o de borrarlo, y si hay que pedirla nadie la pide. El botón la detalla.
+async function snipCuentaUsos(){
+  const b=$('#snip-usos'); if(!b) return;
+  b.textContent='🔗 Usos'; b.classList.remove('tiene-usos');
+  if(!snipCur) return;
+  const id=snipCur;
+  let r=null;
+  try{ r=await fetch('/api/snippets?usa='+encodeURIComponent(id),{cache:'no-store'}).then(x=>x.json()); }catch(e){}
+  if(!r || snipCur!==id) return;                          // llegó tarde: ya hay otro snippet abierto
+  if(r.length && r[0].hits===undefined) return;           // servidor viejo: contestó el listado entero
+  const motor=snipUsosDelMotor(id);
+  b.textContent='🔗 Usos'+(r.length?' ('+r.length+')':(motor?' (motor)':' (0)'));
+  if(r.length||motor) b.classList.add('tiene-usos');
+  b.title=(r.length ? r.map(s=>(s.tipo==='mencion'?'≈ ':'→ ')+s.id).join('\n') : 'Ningún snippet lo llama')
+         +(motor?'\n· '+motor:'');
+}
+// ── El id de un snippet (BUG-SNP5) ───────────────────────────────────────────────────────────────
+// El id NO es el nombre: es el fichero (`data/snippets/<id>.json`) y el argumento de `game.snippet()`.
+// El servidor lo deriva del rótulo con su slug (`[^a-z0-9]+`→`-`), así que «Mundo fornite_c2_island»
+// se guarda como 'mundo-fornite-c2-island' y el guión bajo desaparece **sin decirlo**: el editor no
+// enseñaba el id por ninguna parte (había que mirar las peticiones de red) y renombrar el snippet no
+// lo cambiaba, porque el POST manda el id de siempre. Ahora se ve, y se puede escribir a mano.
+// `snipIdSano` acota a lo que acepta la ruta del servidor (`^/api/snippets/([A-Za-z0-9_-]+)$`) — el
+// guión bajo SÍ cabe ahí, es el slug del rótulo el que se lo comía.
+function snipIdSano(v){ return String(v||'').trim().replace(/[^A-Za-z0-9_-]+/g,'-').replace(/^-+|-+$/g,''); }
+function snipSlugDe(n){ return String(n||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
+// Con el campo vacío, el id lo pone el servidor: se enseña cuál va a ser ANTES de guardar.
+function snipPistaId(){
+  const el=$('#snip-id'); if(!el) return;
+  el.placeholder = snipCur ? 'id…' : (snipSlugDe($('#snip-name').value) || 'id…');
+}
+$('#snip-name').addEventListener('input', snipPistaId);
 async function snipSave(){
   const name=$('#snip-name').value.trim()||'Sin nombre', code=$('#snip-code').value;
-  const body={ name, code }; if(snipCur) body.id=snipCur;
+  const idPedido=snipIdSano($('#snip-id').value);
+  const body={ name, code };
+  if(idPedido) body.id=idPedido; else if(snipCur) body.id=snipCur;
+  // Cambiar el id es MOVER el snippet de fichero, no renombrarlo: quien lo llamara por el id viejo
+  // (`game.snippet('x')`, un mapa que busca 'mundo-<mapa>') deja de encontrarlo ⇒ se pregunta siempre.
+  const mueve = snipCur && idPedido && idPedido!==snipCur;
+  if(mueve && !confirm('¿Cambiar el id de «'+snipCur+'» a «'+idPedido+'»?\n\n'
+      + 'El snippet pasa a otro fichero: quien lo llame por el id anterior (game.snippet(\''+snipCur+'\')) dejará de encontrarlo.\n'
+      + 'El antiguo se manda a la papelera del servidor.')) return;
+  const choca = snips.find(s=>s.id===idPedido && s.id!==snipCur);
+  if(choca && !confirm('Ya existe un snippet con el id «'+idPedido+'» («'+(choca.name||'sin nombre')+'»).\n¿Sobrescribirlo?')) return;
   let r=null;
   try{ r=await fetch('/api/snippets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()); }catch(e){}
   if(!r || !r.id){ toast('No se pudo guardar'); return; }
-  snipCur=r.id; await snipReload(); $('#snip-del').hidden=false; toast('Snippet guardado');
+  // El viejo se retira DESPUÉS de que el nuevo esté escrito, y solo si el servidor confirma el borrado:
+  // así un id protegido (o un DELETE que falle) deja las dos copias, nunca cero.
+  if(mueve && r.id!==snipCur){
+    let d=null; try{ d=await fetch('/api/snippets/'+encodeURIComponent(snipCur),{method:'DELETE'}); }catch(e){}
+    if(!d || !d.ok) toast('Guardado como «'+r.id+'», pero «'+snipCur+'» sigue ahí');
+  }
+  snipCur=r.id; $('#snip-id').value=r.id; await snipReload(); $('#snip-del').hidden=false; snipCuentaUsos();
+  if(!mueve) toast('Snippet guardado');
 }
 async function snipDelete(){
   if(!snipCur){ snipNew(); return; }
@@ -4111,9 +4392,14 @@ function snipMarcaLinea(linea){
 async function snipRun(){
   const code=$('#snip-code').value;
   const nombre = snipCur ? (snipCur.id || snipCur.name) : '(sin guardar, editor de snippets)';
+  const avisos = toastN;
   try{
     await mcCorreSnippet(nombre, code);
-    toast('▶ Snippet ejecutado');
+    // El «ejecutado» solo vale cuando el snippet NO ha dicho nada: si ha puesto su propio toast y
+    // sigue en pantalla, el suyo gana — es más informativo, y pisarlo lo deja ilegible (el caso que
+    // lo cazó: `efectos-demo` acaba anunciando sus siete teclas y no daba tiempo a leerlas).
+    // Si su aviso ya ha caducado (snippet largo que habló al principio), no hay nada que pisar.
+    if(toastN === avisos || $('#toast').hidden) toast('▶ Snippet ejecutado');
   }catch(err){
     // mcCorreSnippet ya ha volcado el informe al console; aquí solo queda lo que es de la interfaz.
     const linea = (err && err.vfLinea) || 0;
@@ -4127,6 +4413,16 @@ $('#snip-new').onclick=snipNew;
 $('#snip-save').onclick=snipSave;
 $('#snip-run').onclick=snipRun;
 $('#snip-del').onclick=snipDelete;
+$('#snip-usos').onclick=snipUsos;
+// Se busca al parar de teclear, no en cada tecla: cada búsqueda abre los ~40 ficheros del servidor.
+$('#snip-search').addEventListener('input',e=>{
+  clearTimeout(snipBuscaT); const v=e.target.value;
+  snipBuscaT=setTimeout(()=>snipBusca(v), 250);
+});
+$('#snip-search').addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ e.stopPropagation(); snipVerTodos(); }       // Esc en la caja: quita el filtro, no cierra el panel
+  if(e.key==='Enter'){ clearTimeout(snipBuscaT); snipBusca(e.target.value); }
+});
 $('#snip-code').addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); snipSave(); }
   else if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ e.preventDefault(); snipRun(); }
@@ -5476,8 +5772,9 @@ Object.defineProperty(game, 'showColor', { enumerable:false,
 // en cada carga, así que «no se ven de fábrica» y «no los ve el dueño» no eran la misma frase. Sin
 // clave que leer, la papeleta desaparece sola y nadie tiene que ir a limpiarla a mano.
 //
-// La salida de TÁCTIL no se pierde: es `#mc-tsalir`, dentro de `#mc-touch`, que se enciende y se apaga
-// con los mandos (`mcTouchShow`). Sin teclado no hay `Esc`, y el Mundo no puede quedarse sin puerta.
+// La salida de TÁCTIL no se pierde: es `#mc-tsalir`, dentro de `#mc-touch` —desde REQ-MOV1, dentro de
+// su menú ☰—, que se enciende y se apaga con los mandos (`mcTouchShow`). Sin teclado no hay `Esc`, y el
+// Mundo no puede quedarse sin puerta.
 
 // ── REQ-PERF1 · Profiler condicional con volcado al caer los fps ────────────────────────────
 // El motor va a 140 fps y pulsar un botón + observador lo tira a 30. Las cuatro pasadas de PERF-RS1
@@ -6871,6 +7168,9 @@ const mc={
   grid:null, dim:{x:0,y:0,z:0},   // rejilla densa Uint16Array (0=aire, >0=id de bloque); Y es vertical
   v2:false,                       // el mundo está en voxelworld-2 en el servidor → se puede guardar por trozos
   pend:{vox:new Set(), header:false, full:true},   // qué falta por guardar (ver mcDirty): celdas sueltas, cabecera, o todo
+  volatil:null,                   // celdas que viven en la malla pero NO en el fichero (ver mcPonVolatil): idx → id que había
+  capa:null,                      // alfombras achatadas CON TEXTURA (ver mcPonCapa): chunk → celdas [id, alto en 1/16].
+                                  // Tampoco son materia ni se guardan; van en la pasada del terreno. null = coste cero.
   spawn:{x:0,y:0,z:0},
   blocks:[],                      // lista MUTABLE de bloques {name,key} (arranca = MC_BLOCKS; crece desde la galería)
   palette:[], blockKey:[], name2id:{}, // paleta: por id, sus 6 rects UV; blockKey[id]=clave para serializar
@@ -6882,7 +7182,7 @@ const mc={
   structures:[],                  // instancias estampadas: {key, ox,oy,oz, rot, colVbo,colCount, texVbo,texCount, aabb} (voxeles finos, malla propia 1/16; rot=cuartos de vuelta que la orientan al jugador)
   structAtlas:null, structAtlasTex:null, // atlas de TEXTURAS de estructuras (gemelo de atlas/atlasTex) — solo claves tex: usadas por las estructuras vivas
   structUV:{},                    // clave tex: → [6 rects UV] dentro del atlas de estructuras
-  notes:{}, noteRots:{}, noteCell:null,
+  notes:{}, noteRots:{}, noteTints:{}, noteCell:null,   // noteTints: "x,y,z" → '#rrggbb' del tinte del cartel (ausente = sin tinte)
   showTool: true,
   toolPos: [0.9, -0.6, 0],
   toolRot: [-10, -80, -30],
@@ -6899,9 +7199,41 @@ const mc={
     drop: 0.20,       // bajada en golpe
     reach: 0.28       // avance hacia el bloque en golpe
   },
+  // Mismos mandos y mismas 3 fases, pero para la herramienta Seleccionar (game.showTool.selectSwing): marcar
+  // una esquina no es picar, así que el defecto es un toque corto y seco —casi nada de alzar, más retroceso
+  // que subida y menos giro— en vez del hachazo del pico. Se elige por la herramienta que disparó el gesto,
+  // no por la que esté activa al pintar el frame: cambiar de herramienta a media animación no la deforma.
+  // Valores fijados por el dueño en el mapa (2026-08-18): lento y en vertical puro. Nada de avanzar hacia
+  // el bloque ni de bajar —eso es del pico—; solo alza un poco y vuelve, casi un asentimiento de la varita.
+  toolSwingSelCfg: {
+    dur: 1.5,         // MUY lento comparado con el pico (0.32): se ve el recorrido entero
+    windupP: 0.30,
+    strikeP: 0.62,
+    windupRot: -14,   // apenas se echa hacia atrás
+    chopRot: 6,
+    lift: 0.05,
+    pull: 0,          // ni retroceso…
+    drop: 0,          // …ni bajada…
+    reach: 0          // …ni avance: el gesto es solo el alzado y el giro
+  },
+  // REQ-TOOL8 · herramientas DEFINIDAS DESDE SNIPPET (`game.herramientas.define`): id → ficha. El motor
+  // NO sabe qué hacen: lleva el dibujo en la mano, le anima el gesto y llama a la acción del snippet al
+  // hacer clic. Las cinco del código (MC_HERRAMIENTAS) siguen viviendo aparte, en `mcDoAction`.
+  herrExtra: {},
   toolBob: 10,
   toolBobRise: 0.05,    // tau arranque (s): qué tan rápido sigue la onda al empezar a andar
   toolBobDecay: 0.25,   // tau parada (s): qué tan suave es la transición al parar/saltar
+  // REQ-TOOL5 · guardarse la herramienta (rosca hasta «vacía»). NO es un gesto de trabajo como el swing, que se
+  // dispara y se agota solo: es un ESTADO con memoria (mc._guardada) y un viaje que se recorre en los dos
+  // sentidos, así que sus mandos van aparte (game.showTool.guardar).
+  toolGuardaCfg: {
+    ms: 300,        // lo que dura el viaje entero; la vuelta usa el mismo, así que sacarla cuesta lo mismo
+    baja: 1.25,     // cuánto cae en unidades de cámara. Medido: el pico sale de pantalla con 0.63, así que esto es
+                    //   el doble de margen para dibujos más grandes; pasarse hace que el final del viaje sea invisible
+    giro: 70,       // grados que la inclina apuntando al suelo mientras baja (lo que la hace parecer «guardada»)
+    aparta: 0.10,   // …y cuánto la retira hacia el costado (eje X de cámara) para que no baje en plancha
+    curva: 1.6      // >1 = arranca lenta y se va soltando (el tirón de meterla en el cinto va al final)
+  },
   toolDebug: false,
   videoCfg: { hotbar: true, fps: true, crosshair: true, badge: false },
   _heldToolMesh: null,
@@ -6944,6 +7276,9 @@ const mc={
   structGreedy:true,              // game.structGreedy: true = greedy meshing (fusiona caras coplanares de la misma textura/color → muchas menos caras) · false = una cara por voxel (como antes)
   useOldStructBuild:false,        // game.useOldStructBuildCall: true = el clic derecho vuelve a estampar SIEMPRE una pieza suelta (mcStampStruct, 1 draw call cada una). false (defecto) = lo que cabe en una celda se pone con setVoxel, dentro de la malla del chunk
   heldBtn:-1, actAt:0,            // botón de ratón mantenido (construir/romper continuo) y último instante de acción
+  ruedaTool:true,                 // REQ-TOOL6: la rosca del ratón recorre las herramientas, con la mano vacía abajo del todo (game.showTool.rueda; false = la rueda no hace nada en el Mundo, como antes)
+  ruedaUmbral:30,                 // …cuánto delta hay que acumular para saltar de peldaño: filtra la lluvia de deltas pequeños del trackpad (game.showTool.ruedaUmbral)
+  ruedaGesto:true,                // REQ-TOOL7: cambiar de herramienta con la rosca BAJA la vieja y SUBE la nueva (game.showTool.ruedaGesto; false = cambio instantáneo, como antes)
   xray:false,                     // modo rayos-X (tecla X): dibuja el volumen de colisión translúcido a través de las paredes
   rayFijo:null,                   // rayo de apuntado CONGELADO (game.rayoFijo()): desde el ojo el rayo se ve como un punto
   ovbo:null,                      // VBO reutilizable para overlays (fantasma de colocación, marcador «demasiado lejos», rayos-X)
@@ -6951,6 +7286,18 @@ const mc={
   structGhostAlpha:1,             // transparencia de la vista-previa de estructuras/habitaciones —caja de huella + malla renderizada— (game.structGhostAlpha, 0..1)
   structBias:0,                   // sesgo de profundidad de las estructuras: negativo = un pelo hacia la cámara, así su cara GANA el empate contra el terreno pegado (game.structBias; 0 = sin sesgo, lo resuelve structCull)
   structCull:true,                // culling de caras traseras en las estructuras: rompe el empate entre DOS bloques estampados vecinos, que el sesgo no puede romper (game.structCull)
+  toolAlphaFix:true,              // herramienta en mano con voxeles translúcidos: pasada muda de profundidad + LEQUAL para que sus caras salgan ordenadas (game.toolAlphaFix; false = como antes, sin ordenar)
+  selVoxeles:{ activo:true, tam:1, largo:5 },   // corchetes de la herramienta Seleccionar hechos de VOXELES (game.selVoxeles): grosor y largo del brazo en voxeles finos; activo:false vuelve a los de líneas
+  voxUI:null,                     // capa de voxeles de color plantados a mano (game.voxelesUI): Map grupo → Map "x,y,z" → [r,g,b(,1 si emite)], en voxeles finos
+  voxUIArr:null,                  // geometría cacheada de esa capa (se rehace solo cuando cambia, ver mcVoxUIGeom)
+  voxUISucio:true,                // la capa cambió desde el último mallado
+  voxUITam:1,                     // lado del cubo de esa capa, en voxeles finos (1 = 1/16 de bloque)
+  voxUIGrosor:null,               // {grupo: lado} — agranda el CUBO de un grupo sin mover nada (game.voxelesUI.grosor)
+  voxUIAlfa:1,                    // opacidad de esa capa (game.voxelesUI.alfa)
+  voxUIEncima:false,              // true = se pinta en el overlay, encima de TODO (game.voxelesUI.encima)
+  voxUIMat:null,                  // {grupo: {emite, luz, …}} — EFECTOS DE MATERIAL del grupo (game.voxelesUI.material)
+  voxUILuces:true,                // interruptor de TODA la luz de esta capa (game.voxelesUI.luces = false ⇒ ni se recorre)
+  _voxUILuz:null,                 // cache [x,y,z,nivel, …] de las luces vivas de la capa (REQ-GLOW5), en coordenadas de mundo
   preview:null,                   // instancia-malla de la vista-previa mientras se mantiene el clic derecho (habitación renderizada siguiendo la mira)
   previewKey:null,                // memo "sk|ox|oy|oz|rot" de la vista-previa actual (para no re-mallar cada frame)
   previewStructKey:null,          // clave de sala cuyas texturas deben estar en el atlas para la vista-previa
@@ -7061,6 +7408,16 @@ function mcTapaCara(x,y,z){
   const id=mc.grid[mcIdx(x,y,z)];
   if(mc._geoFina && mc._geoFina[id]) return false;   // …y una celda que se dibuja con su geometría real tampoco tapa: no es un cubo
   return !(mc.recorte && mc.recorte[id]); }
+// «¿ESTE id se dibuja con sus voxels de verdad dentro de la malla del chunk?» — la paleta lo hornea
+// (mc.finoRejilla, con mcRecFina) y el snippet manda encima (mc.finoExtra: 1 = sí, 2 = nunca). Es la
+// misma pregunta que mcEsFinaEnRejilla pero POR ID y **síncrona**: mcSetVoxel solo tiene id cuando el
+// material ya está en la paleta, así que aquí nunca hace falta esperar a mcStructCells.
+function mcFinoEnRejilla(id){
+  if(!(id>0)) return false;
+  const ex=mc.finoExtra;
+  if(ex && ex[id]) return ex[id]===1;
+  return !!(mc.finoRejilla && mc.finoRejilla[id]);
+}
 // Tabla densa `id de bloque → geometría fina horneada` (o null) = la fuente ÚNICA de «esta celda NO se dibuja
 // como un cubo, sino con sus voxels de verdad». La rehace mcMeshChunk (unas decenas de ids, microsegundos)
 // porque las tres cosas de las que sale cambian por su cuenta: la paleta (mcBuildPalette), la caché de
@@ -7072,8 +7429,7 @@ function mcTablaFina(){
   if(!auto && !ex) return (mc._geoFina=null);                 // ningún material fino en este mundo: coste cero
   const n=mc.blockKey?mc.blockKey.length:0, T=new Array(n).fill(null);
   for(let id=1; id<n; id++){
-    const modo = (ex && ex[id]) ? ex[id] : ((auto && auto[id]) ? 1 : 0);
-    if(modo!==1) continue;                                    // 2 = nunca (cubo proyectado); 0 = no aplica
+    if(!mcFinoEnRejilla(id)) continue;                        // 2 (nunca, cubo proyectado) y 0 (no aplica) se saltan
     const key=mc.blockKey[id], g=mc.finoGeom[key];
     if(g && (g.colCount || g.alphaCount)) T[id]=g; else mcCalientaFina(key);
   }
@@ -7147,6 +7503,9 @@ function mcCeldaFluida(x,y,z){
 function mcSetBlock(x,y,z,id){
   if(mcInside(x,y,z)){
     const oldId = mc.grid[mcIdx(x,y,z)];
+    // Una escritura DE VERDAD se queda la celda: si tenía nieve volátil encima, deja de ser volátil
+    // (lo que pone el dueño manda sobre lo que apuntó el clima). Ver mcPonVolatil.
+    if(mc.volatil && mc.volatil.size) mc.volatil.delete(mcIdx(x,y,z));
     if(oldId === id) return;
     mc.grid[mcIdx(x,y,z)]=id;
     // PERF-RS1: contador de topología. Cuenta cambios entre aire y sólido, o cambios entre materiales
@@ -7165,6 +7524,392 @@ function mcSetBlock(x,y,z,id){
     }
   }
 }
+
+// ── CELDAS VOLÁTILES ──────────────────────────────────────────────────────────────────────────────
+// Bloques que viven en la MALLA DEL MUNDO pero NO en el fichero: nieve cuajada, ceniza, hojarasca.
+// El porqué (idea del dueño, 2026-08-19): acumular a escala de paisaje en la capa `game.voxelesUI` es
+// imposible por construcción —se remalla ENTERA cada frame, 1,28 µs por voxel, así que 8 000 copos
+// posados son 10,8 ms/frame y ahí se van los fps—. En la rejilla del mundo el mismo copo cuesta UN
+// remallado de chunk y después 0 por frame, para siempre; da igual que sean 8 000 que 80 000.
+// Lo único que hay que impedir es que la nevada acabe en el .vox del dueño, y para eso se apunta el id
+// que HABÍA en la celda: todo lo que guarda escribe ése (mcSerialize y mcSaveWorldAhora), no el de la
+// nieve. Sin mapa (mc.volatil===null) el coste de todo esto es exactamente cero.
+//
+// Lo que NO hace a propósito:
+//   · no toca `mc.pend` (mcDirty) ⇒ una nevada no dispara autoguardados;
+//   · no toca `mc.gridGen` ⇒ mcRemeshAround ve «sin cambio de topología» y se salta el re-iluminado y
+//     el re-horneado de estructuras, que son lo caro. La firma del chunk sí hashea `mc.grid` celda a
+//     celda (ver mcMeshChunk), así que el bloque se VE igual. La contrapartida: la luz no se recalcula
+//     —debajo de la nieve no oscurece—, que es justo lo que se quiere de una capa de clima.
+// Quien las pone es responsable de llamar a mcVolatilRemalla() al terminar la ráfaga: escribir 200
+// celdas y remallar UNA vez cuesta lo mismo que escribir una.
+const mcVolChunks = new Set();   // 'cx,cz' pendientes de remallar
+function mcVolatilChunkSucio(x,z){
+  const ncx=Math.ceil(mc.dim.x/MC_CHUNK), ncz=Math.ceil(mc.dim.z/MC_CHUNK);
+  // ±1 celda: un bloque pegado al borde cambia las caras del chunk vecino.
+  const cx0=Math.max(0,Math.floor((x-1)/MC_CHUNK)), cx1=Math.min(ncx-1,Math.floor((x+1)/MC_CHUNK));
+  const cz0=Math.max(0,Math.floor((z-1)/MC_CHUNK)), cz1=Math.min(ncz-1,Math.floor((z+1)/MC_CHUNK));
+  for(let cz=cz0;cz<=cz1;cz++) for(let cx=cx0;cx<=cx1;cx++) mcVolChunks.add(cx+','+cz);
+}
+// Pone `id` en la celda sin ensuciar el guardado. Devuelve false si no se pudo (fuera, o ya estaba).
+function mcPonVolatil(x,y,z,id){
+  if(!mc.grid || !mcInside(x,y,z)) return false;
+  const i=mcIdx(x,y,z), prev=mc.grid[i];
+  if(prev===id) return false;
+  const V = mc.volatil || (mc.volatil=new Map());
+  // Solo la PRIMERA vez: lo que se apunta es el id del dueño, no el de la capa de nieve anterior.
+  if(!V.has(i)) V.set(i, prev);
+  mc.grid[i]=id;
+  mcGlowTocada(x,y,z);
+  mcVolatilChunkSucio(x,z);
+  return true;
+}
+// Devuelve la celda a lo que había. Deja de ser volátil.
+function mcQuitaVolatil(x,y,z){
+  const V=mc.volatil; if(!V || !mc.grid || !mcInside(x,y,z)) return false;
+  const i=mcIdx(x,y,z); if(!V.has(i)) return false;
+  const prev=V.get(i); V.delete(i);
+  if(mc.grid[i]!==prev){ mc.grid[i]=prev; mcGlowTocada(x,y,z); mcVolatilChunkSucio(x,z); }
+  return true;
+}
+// Id que hay que GUARDAR de esta celda: el del dueño si la de encima es volátil. Lo usan los dos
+// caminos de guardado; si alguien añade un tercero que lea mc.grid para escribir en disco, va aquí.
+function mcIdGuardado(i){
+  const V=mc.volatil; if(V){ const prev=V.get(i); if(prev!==undefined) return prev; }
+  return mc.grid[i];
+}
+// Remalla los chunks tocados desde la última llamada, COMO MUCHO `max` (0 = todos). Devuelve cuántos
+// quedan pendientes.
+// El `max` es el mando de fps de todo esto y no es cosmético: remallar un chunk cuesta ~2 ms (medido
+// en /map/test, 96×48×96), y una nevada alrededor del jugador ensucia 9 chunks a la vez. De golpe son
+// 43 ms por segundo; de uno en uno, 8. Lo único que se pierde es que un chunk tarde un par de segundos
+// en enseñar su nieve, y la nieve cae despacio de todas formas. El orden es el de llegada (Set), así
+// que ninguno se queda atrás.
+function mcVolatilRemalla(max){
+  if(!mcVolChunks.size) return 0;
+  let n = (max|0) > 0 ? (max|0) : mcVolChunks.size;
+  for(const k of mcVolChunks){
+    if(n-- <= 0) break;
+    mcVolChunks.delete(k);
+    const p=k.split(','); mcMeshChunk(+p[0], +p[1]);
+  }
+  if(typeof mcShadowDirty==='function') mcShadowDirty();
+  return mcVolChunks.size;
+}
+// ── VOXELES FINOS HORNEADOS EN EL MALLADO (1/16 de bloque) ────────────────────────────────────────
+// «El motor tiene que manejar voxeles de 1×1×1 dentro de su mallado, colocarlos tal y como se hace con
+// los de 16×16×16» (dueño, 2026-08-19), y vale para CUALQUIER partícula, no solo la nieve.
+//
+// Es la mitad fina de las celdas volátiles de arriba: un voxel de 1/16 que se ve, se queda y no se
+// guarda. La diferencia con `game.voxelesUI` —que dibuja los mismos cubos— no es el aspecto, es DÓNDE
+// vive la geometría:
+//
+//   game.voxelesUI   una sola malla para toda la capa, rehecha ENTERA en cuanto algo cambia y subida
+//                    a la GPU CADA FRAME. 1,28 µs por voxel y por frame ⇒ 8 000 copos = 10,8 ms/frame.
+//                    Perfecta para lo que se mueve (lo que vuela), imposible para lo que se acumula.
+//   aquí             troceado POR CHUNK, como el mundo: cae un copo y se rehace SOLO su chunk, una
+//                    vez; el VBO se queda en la GPU y los demás frames son un drawArrays. El coste
+//                    por frame no depende de cuántos haya.
+//
+// Nada de esto toca `mc.grid`: son adorno del mundo, no materia (no colisionan y no se guardan). Para
+// que un voxel de estos SEA mundo está `mcPonVolatil`, que es el camino de los 16³.
+// ⚠️ Se calcula al vuelo, NO en un `const` de aquí arriba: MC_VOX se declara 5 000 líneas más abajo y
+// un const que lo lea al cargar revienta el fichero entero por zona muerta.
+function mcVoxFinoN(){ return Math.round(1/MC_VOX) * MC_CHUNK; }   // voxeles finos de lado por chunk
+function mcVoxFinoCh(fx, fz, crea){
+  if(!mc.voxFino){ if(!crea) return null; mc.voxFino=new Map(); }
+  const N=mcVoxFinoN(), k = Math.floor(fx/N) + ',' + Math.floor(fz/N);
+  let ch = mc.voxFino.get(k);
+  if(!ch && crea){ ch={m:new Map(), sucio:true, vbo:null, count:0}; mc.voxFino.set(k, ch); }
+  return ch || null;
+}
+// Pone un voxel fino en (fx,fy,fz), EN UNIDADES DE 1/16 DE BLOQUE (las mismas de game.voxelesUI).
+// `col` = [r,g,b] en 0..1. Devuelve false si ya estaba igual: repetir no ensucia nada.
+//
+// `w,h,d` (opcionales, por defecto 1) lo convierten en una CAJA de w×h×d voxeles finos, con la clave
+// en su esquina mínima. No es un atajo: es lo que hace practicable tapar suelo. Un bloque de suelo
+// nevado son 16×16 celdas finas ⇒ 256 entradas y 256 cubos si van sueltas, contra UNA entrada y 12
+// triángulos si va de caja. Una alfombra a lo ancho del mapa es lo primero inviable y lo segundo no.
+function mcPonVoxFino(fx, fy, fz, col, w, h, d){
+  fx=fx|0; fy=fy|0; fz=fz|0;
+  w = w>0 ? w|0 : 1; h = h>0 ? h|0 : 1; d = d>0 ? d|0 : 1;
+  const ch = mcVoxFinoCh(fx, fz, true), k = fx+','+fy+','+fz, v = ch.m.get(k);
+  if(v && v[0]===col[0] && v[1]===col[1] && v[2]===col[2] && v[3]===w && v[4]===h && v[5]===d) return false;
+  ch.m.set(k, [col[0], col[1], col[2], w, h, d]);
+  ch.sucio = true;
+  return true;
+}
+function mcQuitaVoxFino(fx, fy, fz){
+  const ch = mcVoxFinoCh(fx|0, fz|0, false); if(!ch) return false;
+  if(!ch.m.delete((fx|0)+','+(fy|0)+','+(fz|0))) return false;
+  ch.sucio = true;
+  return true;
+}
+function mcVoxFinoHay(fx, fy, fz){
+  const ch = mcVoxFinoCh(fx, fz, false);
+  return !!(ch && ch.m.has(fx+','+fy+','+fz));
+}
+// Rehace la malla de UN chunk fino y la deja en su VBO. Solo se le llama cuando ese chunk ha cambiado.
+const MC_VOXF_DIR=[[0,-1,0],[0,1,0],[0,0,-1],[0,0,1],[1,0,0],[-1,0,0]];   // orden de MC_VOXCARA_*
+function mcVoxFinoGeom(ch){
+  const gl=mc.gl; ch.sucio=false;
+  if(!ch.m.size){ ch.count=0; return; }
+  const cap = ch.m.size*36*7;
+  let buf = mc._voxFinoBuf;
+  if(!buf || buf.length < cap) buf = mc._voxFinoBuf = new Float32Array(Math.max(cap, 4096));
+  let n=0;
+  for(const [k,c] of ch.m){
+    const q=k.split(','), x=+q[0], y=+q[1], z=+q[2], w=c[3], h=c[4], d3=c[5];
+    // Las caras pegadas a otro voxel fino no se emiten. Con la nieve tumbada en el suelo esto es media
+    // malla: cada copo tiene 4 vecinos y solo se ven la de arriba y las del borde de la mancha.
+    // ⚠️ Solo para el voxel SUELTO: el vecino de una caja no es una celda, es otra caja de otro tamaño,
+    // y mirar celda a celda costaría w·h·d consultas. Una caja emite sus 6 caras y ya.
+    let mask=0;
+    if(w===1 && h===1 && d3===1){
+      for(let f=0; f<6; f++){ const d=MC_VOXF_DIR[f];
+        if(!mcVoxFinoHay(x+d[0], y+d[1], z+d[2])) mask|=(1<<f); }
+    } else mask = 63;
+    if(mask) n = mcPushVoxCajaBuf(buf, n, x*MC_VOX, y*MC_VOX, z*MC_VOX,
+                                  w*MC_VOX, h*MC_VOX, d3*MC_VOX, c[0], c[1], c[2], mask);
+  }
+  if(!ch.vbo) ch.vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, buf.subarray(0,n), gl.STATIC_DRAW);   // STATIC: no se vuelve a subir
+  ch.count = n/7;
+}
+// Rehace los chunks finos sucios, COMO MUCHO `max` (0 = todos). Devuelve cuántos quedan.
+//
+// ⚠️ POR TURNOS, con cursor. Recorrer siempre desde el principio parece igual y NO lo es: si quien
+// pone voxeles ensucia todos los chunks en cada frame (un manto de nieve que crece por todo el mapa lo
+// hace), los `max` primeros se rehacen una y otra vez y los demás NO SE REHACEN NUNCA. Medido: 36
+// chunks sucios, `max` 6, y solo 9 llegaron a tener geometría — el resto del mapa se quedaba sin nieve
+// aunque las cajas estaban puestas.
+function mcVoxFinoRemalla(max){
+  if(!mc.voxFino) return 0;
+  const ks = [...mc.voxFino.keys()], L = ks.length;
+  if(!L) return 0;
+  const cur = (mc._voxFinoCur|0) % L;
+  let n = (max|0) > 0 ? (max|0) : L, quedan = 0;
+  for(let i = 0; i < L; i++){
+    const ch = mc.voxFino.get(ks[(cur + i) % L]);
+    if(!ch || !ch.sucio) continue;
+    if(n-- > 0){ mcVoxFinoGeom(ch); mc._voxFinoCur = (cur + i + 1) % L; }
+    else quedan++;
+  }
+  return quedan;
+}
+function mcVoxFinoTam(){
+  let n=0; if(mc.voxFino) for(const ch of mc.voxFino.values()) n+=ch.m.size;
+  return n;
+}
+function mcVoxFinoLimpia(){
+  const n=mcVoxFinoTam();
+  if(mc.voxFino && mc.gl) for(const ch of mc.voxFino.values()) if(ch.vbo) mc.gl.deleteBuffer(ch.vbo);
+  mc.voxFino=null; mc._voxFinoBuf=null;
+  return n;
+}
+
+// ── ALFOMBRAS TEXTURADAS (mc.capa) ──────────────────────────────────────────────────────────────────
+//
+//   game.volatiles.ponCapa(x,y,z, alto, 'nieve');   ← alto = 1..16, en 1/16 de bloque
+//
+// La tercera capa volátil, y existe por una razón que las otras dos NO pueden dar: que la alfombra se
+// vea CON LA TEXTURA DEL MATERIAL y no de un color plano.
+//
+// Los voxeles finos de arriba son de UN color por caja, así que copiar la textura de un bloque pide
+// 16×16 = 256 cajas por bloque. Y no se pueden fundir las del mismo color: medido en el oro, su
+// textura es ruido —248 baldosas distintas de 256—. Un mapa de 96×96 nevado serían 2 millones de
+// cajas, ~2 GB. Aquí la alfombra es UNA celda con las UV del atlas, o sea un bloque del terreno
+// ACHATADO: 1 quad arriba y los cantos que se vean (los de dentro de la mancha no se emiten). Un manto
+// que cubre el mapa entero son ~8 000 quads, menos que un chunk de terreno.
+//
+// La lámina de agua ya se dibuja exactamente así (`mcGetFluidHeight`, en el mallador); esto es lo
+// mismo sin pasar por `mc.grid`: NO es materia (no choca, no da sombra, no tapa la luz, no se guarda).
+//
+// ⚠️ Se dibuja EN LA PASADA DEL TERRENO, con su programa y su atlas ⇒ la niebla, el sol y la sombra
+// salen gratis y correctas. Ese es el otro motivo de existir: la pasada de los voxeles finos va con la
+// niebla apagada a propósito (una estrella no se difumina), y por eso un manto de los de antes se veía
+// a todo color contra el horizonte gris.
+const MC_CAPA_CARAS=[0,2,3,4,5];   // arriba y los 4 cantos; la de ABAJO nunca se ve (la alfombra se apoya en el suelo)
+function mcCapaCh(x, z, crea){
+  if(!mc.capa){ if(!crea) return null; mc.capa=new Map(); }
+  const k = Math.floor(x/MC_CHUNK) + ',' + Math.floor(z/MC_CHUNK);
+  let ch = mc.capa.get(k);
+  if(!ch && crea){ ch={m:new Map(), sucio:true, vbo:null, count:0}; mc.capa.set(k, ch); }
+  return ch || null;
+}
+function mcCapaEn(x,y,z){ const ch=mcCapaCh(x,z,false); return ch ? (ch.m.get(x+','+y+','+z)||null) : null; }
+// El canto de una alfombra deja de verse en cuanto le crece otra al lado ⇒ al tocar una celda hay que
+// ensuciar también el chunk del vecino, pero SOLO si cae en otro chunk (si no, es el mismo y ya está).
+function mcCapaVecinos(x,z){
+  const cx=Math.floor(x/MC_CHUNK), cz=Math.floor(z/MC_CHUNK);
+  for(const d of [[1,0],[-1,0],[0,1],[0,-1]]){
+    const nx=x+d[0], nz=z+d[1];
+    if(Math.floor(nx/MC_CHUNK)===cx && Math.floor(nz/MC_CHUNK)===cz) continue;
+    const ch=mcCapaCh(nx, nz, false); if(ch) ch.sucio=true;
+  }
+}
+function mcPonCapa(x,y,z, alto, material){
+  x=x|0; y=y|0; z=z|0;
+  const id = mcResolveMat(material);
+  alto = alto>16 ? 16 : alto>0 ? alto|0 : 1;
+  if(!(id>0) || !mcInside(x,y,z)) return false;
+  const ch=mcCapaCh(x,z,true), k=x+','+y+','+z, v=ch.m.get(k);
+  if(v && v[0]===id && v[1]===alto) return false;   // repetir no ensucia nada
+  ch.m.set(k, [id, alto]);
+  ch.sucio=true; mcCapaVecinos(x,z);
+  return true;
+}
+function mcQuitaCapa(x,y,z){
+  x=x|0; y=y|0; z=z|0;
+  const ch=mcCapaCh(x,z,false); if(!ch) return false;
+  if(!ch.m.delete(x+','+y+','+z)) return false;
+  ch.sucio=true; mcCapaVecinos(x,z);
+  return true;
+}
+// Rehace la malla de UN chunk de alfombras. Mismo formato de vértice que el terreno (x,y,z,u,v,shade)
+// y mismo atlas: por eso puede colarse en su pasada sin cambiar de programa.
+function mcCapaGeom(ch){
+  const gl=mc.gl; ch.sucio=false;
+  if(!ch.m.size){ ch.count=0; return; }
+  const cap = ch.m.size*5*6*6;                  // cota: 5 caras × 6 vértices × 6 floats
+  let buf = mc._capaBuf;
+  if(!buf || buf.length<cap) buf = mc._capaBuf = new Float32Array(Math.max(cap, 4096));
+  const dark=mc.interiorDark, LU=mc.light;
+  let n=0;
+  for(const [k,v] of ch.m){
+    const q=k.split(','), x=+q[0], y=+q[1], z=+q[2], id=v[0], h=v[1]/16;
+    const rects=mc.palette[id]; if(!rects) continue;
+    // La luz es la de SU celda y una sola vez para las 5 caras: una lámina de 2/16 tumbada en el aire
+    // no tiene interior que sombrear, y así el manto se apaga dentro de una cueva como el suelo que tapa.
+    let lz=1;
+    if(dark<1 && LU && mcInside(x,y,z)) lz=Math.pow(dark,(MC_MAXLIGHT-LU[mcIdx(x,y,z)])/MC_MAXLIGHT);
+    for(const f of MC_CAPA_CARAS){
+      const F=MC_FACES[f], d=F.dir;
+      if(f!==0){
+        const ax=x+d[0], az=z+d[2];
+        if(mcTapaCara(ax,y,az)) continue;               // el bloque de al lado tapa el canto
+        const nb=mcCapaEn(ax,y,az);
+        if(nb && nb[1]>=v[1]) continue;                 // …o se lo tapa otra alfombra igual de alta o más
+      }
+      const r=rects[F.tex], C=F.corners, s=F.s*lz;
+      const uv=[[r.u0,r.v0],[r.u1,r.v0],[r.u1,r.v1],[r.u0,r.v1]];
+      if(f!==0){
+        // El canto enseña las LONCHAS DE ARRIBA de la textura, no la textura entera aplastada: una
+        // alfombra de 2/16 es la rebanada superior del bloque y por el borde se ve eso. Qué coordenada
+        // de la textura lleva la altura depende de la cara (ver MC_FMETA), así que se pregunta.
+        const eje = MC_FMETA[f].tuAx===1 ? 0 : 1;
+        let arriba=0, abajo=0;
+        for(let i=0;i<4;i++){ if(C[i][1]) arriba=uv[i][eje]; else abajo=uv[i][eje]; }
+        const corte = arriba + (abajo-arriba)*h;
+        for(let i=0;i<4;i++) if(!C[i][1]) uv[i][eje]=corte;
+      }
+      for(const i of [0,1,2,0,2,3]){
+        const c=C[i];
+        buf[n++]=x+c[0]; buf[n++]=y+c[1]*h; buf[n++]=z+c[2];
+        buf[n++]=uv[i][0]; buf[n++]=uv[i][1]; buf[n++]=s;
+      }
+    }
+  }
+  if(!ch.vbo) ch.vbo=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, buf.subarray(0,n), gl.STATIC_DRAW);
+  ch.count=n/6;
+}
+// Por turnos y con cursor, por lo mismo que la capa fina: un manto que crece ensucia TODOS los chunks
+// cada frame y empezar siempre por el principio dejaría los últimos sin mallar para siempre.
+function mcCapaRemalla(max){
+  if(!mc.capa) return 0;
+  const ks=[...mc.capa.keys()], L=ks.length;
+  if(!L) return 0;
+  const cur=(mc._capaCur|0)%L;
+  let n=(max|0)>0?(max|0):L, quedan=0;
+  for(let i=0;i<L;i++){
+    const ch=mc.capa.get(ks[(cur+i)%L]);
+    if(!ch || !ch.sucio) continue;
+    if(n-- > 0){ mcCapaGeom(ch); mc._capaCur=(cur+i+1)%L; }
+    else quedan++;
+  }
+  return quedan;
+}
+function mcCapaTam(){ let n=0; if(mc.capa) for(const ch of mc.capa.values()) n+=ch.m.size; return n; }
+function mcCapaLimpia(){
+  const n=mcCapaTam();
+  if(mc.capa && mc.gl) for(const ch of mc.capa.values()) if(ch.vbo) mc.gl.deleteBuffer(ch.vbo);
+  mc.capa=null; mc._capaBuf=null;
+  return n;
+}
+// Se dibuja DENTRO de la pasada opaca del terreno (mismo programa, mismos uniformes, mismos atributos
+// ya enlazados); solo hace falta apuntar a su VBO. Devuelve los quads pintados.
+function mcDrawCapas(L, stride, cxp, czp){
+  if(!mc.capa) return 0;
+  const gl=mc.gl;
+  let quads=0;
+  for(const [key,ch] of mc.capa){
+    if(!ch.count || !ch.vbo) continue;
+    const p=key.split(',');
+    if(Math.abs(+p[0]-cxp)>mc.renderDist || Math.abs(+p[1]-czp)>mc.renderDist) continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
+    gl.enableVertexAttribArray(L.aPos);   gl.vertexAttribPointer(L.aPos,3,gl.FLOAT,false,stride,0);
+    gl.enableVertexAttribArray(L.aUV);    gl.vertexAttribPointer(L.aUV,2,gl.FLOAT,false,stride,12);
+    gl.enableVertexAttribArray(L.aShade); gl.vertexAttribPointer(L.aShade,1,gl.FLOAT,false,stride,20);
+    gl.drawArrays(gl.TRIANGLES,0,ch.count);
+    quads+=ch.count/6;
+  }
+  return quads;
+}
+
+// La puerta para los snippets (el clima vive en `efectos-demo`, no aquí). DOS tamaños, mismo trato:
+// se ven en el mundo, se pisan o no, y NUNCA se guardan.
+//
+//   BLOQUES 16³ ─ son materia de verdad (colisionan, dan sombra, tapan la luz)
+//     const id = mc.blockKey.indexOf(mcClaveDeNombre('nieve'));
+//     game.volatiles.pon(x,y,z,id); …          ← la ráfaga entera, sin remallar
+//     game.volatiles.quita(x,y,z);
+//   VOXELES 1/16 ─ adorno del mundo (no colisionan), en coordenadas de 1/16 y con color propio
+//     game.volatiles.ponFino(fx,fy,fz,[r,g,b]);
+//     game.volatiles.quitaFino(fx,fy,fz);
+//     game.volatiles.ponCajaFina(fx,fy,fz, w,h,d, [r,g,b]);   ← la MISMA capa, w×h×d celdas de golpe
+//
+//   ⚠️ Para TAPAR suelo hay que usar la caja, no el voxel suelto. Un bloque de suelo son 16×16 celdas
+//   finas: de una en una son 256 entradas y 256 cubos por bloque —una alfombra de mapa entero no cabe—;
+//   de caja es 1 entrada y 12 triángulos. El voxel suelto es para lo disperso (un copo, una chispa).
+//
+//   game.volatiles.remalla(1);                 ← al final de la ráfaga; como mucho 1 chunk por pasada
+//   game.volatiles.limpia();                   ← lo devuelve todo a como estaba (al apagar el efecto)
+game.volatiles = {
+  pon: mcPonVolatil,
+  quita: mcQuitaVolatil,
+  ponFino: mcPonVoxFino,
+  ponCajaFina(fx,fy,fz, w,h,d, col){ return mcPonVoxFino(fx,fy,fz, col, w,h,d); },
+  quitaFino: mcQuitaVoxFino,
+  hayFino: mcVoxFinoHay,
+  // Alfombra achatada CON LA TEXTURA del material (ver mc.capa): `alto` en 1/16, `material` como en
+  // setVoxel ('nieve', 'hab:oro', 'asset:assets/oro.vox.json' o un id). Es la única de las tres que
+  // enseña la textura, y la única que no cuesta por 1/16: una celda son ~2 quads.
+  ponCapa(x,y,z, alto, material){ return mcPonCapa(x,y,z, alto, material); },
+  quitaCapa: mcQuitaCapa,
+  hayCapa(x,y,z){ const v=mcCapaEn(x|0,y|0,z|0); return v ? v[1] : 0; },   // 0 = no hay; si no, su alto en 1/16
+  // Los tres remallados van juntos a propósito: quien pone voxeles no tiene por qué saber en cuál de
+  // las mitades cayeron. `max` es el tope de chunks POR CADA UNA.
+  remalla(max){ return mcVolatilRemalla(max) + mcVoxFinoRemalla(max) + mcCapaRemalla(max); },
+  get tam(){ return (mc.volatil ? mc.volatil.size : 0) + mcVoxFinoTam() + mcCapaTam(); },
+  get tamFino(){ return mcVoxFinoTam(); },
+  get tamCapa(){ return mcCapaTam(); },
+  limpia(){
+    const finos = mcVoxFinoLimpia() + mcCapaLimpia();
+    const V=mc.volatil; if(!V) return finos;
+    const n=V.size, NX=mc.dim.x, sxy=NX*mc.dim.y;   // mcIdx = x + y*NX + z*NX*dimY
+    for(const [i,prev] of V){
+      if(mc.grid[i]===prev) continue;
+      mc.grid[i]=prev;
+      const z=(i/sxy)|0, r=i-z*sxy, y=(r/NX)|0, x=r-y*NX;
+      mcGlowTocada(x,y,z); mcVolatilChunkSucio(x,z);
+    }
+    mc.volatil=null; mcVolatilRemalla();
+    return n + finos;
+  },
+};
 
 // ── SISTEMA DE FLUIDOS (REQ-FLUID1: Agua y Lava estilo Minecraft) ──────────────────────────────────
 (function(){
@@ -8344,7 +9089,7 @@ async function mcStructGeom(srcKey, rot){
   return mesh;
 }
 // Malla de una INSTANCIA estampada: traslada cada flujo fino a la celda de mundo (ox,oy,oz) y sube DOS VBO.
-async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc, noBakeLight){
+async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc, noBakeLight, tinte){
   rot=mcOriNorm(rot);                   // una de las 24 posturas; ver mcStructGeom
   const geom=await mcStructGeom(srcKey, rot);
   const gl=mc.gl;
@@ -8373,9 +9118,15 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc, noBakeLight){
   // Las estructuras finas no tienen id de bloque: van por clave (mc.sinSombraKey). mcClaveBase quita el giro,
   // que en una estructura vive en `rot` y no en la clave, pero cuesta nada y cubre a quien la escriba con giro.
   const ss = mc.sinSombraKey ? ((mc.sinSombraKey[srcKey] ?? mc.sinSombraKey[mcClaveBase(srcKey)]) | 0) : 0;
+  // Tinte de la INSTANCIA (carteles de nota, REQ-CART4): se hornea aquí, sobre la copia a coordenadas de
+  // mundo, así que no toca la caché de geometría (que es por clave+giro y la comparten todas) ni el
+  // dibujado. Solo los flujos con rgb por vértice (stride 9); una cara texturada no tiene color propio.
+  const T = tinte ? mcNoteTinteRGB(tinte) : null;
   const upload=(src,count,s,sc,shOff)=>{ if(!count) return null; const world=new Float32Array(src.length);
     for(let i=0;i<count;i++){ const b=i*s; world[b]=src[b]*E+ox; world[b+1]=src[b+1]*E+oy; world[b+2]=src[b+2]*E+oz;
       for(let j=3;j<s;j++) world[b+j]=src[b+j]; }
+    if(T && s===9) for(let i=0;i<count;i++){ const b=i*9, c=mcTintaColor(T, world[b+3], world[b+4], world[b+5]);
+      world[b+3]=c[0]; world[b+4]=c[1]; world[b+5]=c[2]; }
     if(doLight && sc && !(ss&1)){ const faces=count/6; for(let fi=0;fi<faces;fi++){ const f=faceFactor(sc,fi);
       if(f!==1){ for(let v=0;v<6;v++){ const o=(fi*6+v)*s+shOff; world[o]*=f; } } } }
     if(ss) for(let i=0;i<count;i++) world[i*s+shOff]+=2*ss;      // banderas sumadas al sombreado (MC_SHADE_LIB)
@@ -8386,7 +9137,9 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc, noBakeLight){
   const aabb=[ox,oy,oz, ox+geom.ext.x*E, oy+geom.ext.y*E, oz+geom.ext.z*E];
   // sinProyectar viaja en la instancia (siempre, también en false: se aplica con Object.assign al re-mallar y
   // tiene que poder volver a proyectar). mcRenderShadow se salta la pieza entera en vez de recortar sus vértices.
-  return {key:srcKey, ox,oy,oz, rot, esc:E, colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitCells:geom.emitCells, emitDir:geom.emitDir, emitCol:geom.emitCol, sinProyectar:!!(ss&2)};
+  // `tinte` viaja en la instancia (también vacío) porque está HORNEADO en el VBO: quien la re-malle
+  // tiene que volver a pasarlo o el cartel perdería el color al editar un bloque al lado.
+  return {key:srcKey, ox,oy,oz, rot, esc:E, tinte:(T?mcNoteTinteNorm(tinte):''), colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitCells:geom.emitCells, emitDir:geom.emitDir, emitCol:geom.emitCol, sinProyectar:!!(ss&2)};
 }
 // Atlas de TEXTURAS de estructuras (gemelo de mcBuildPalette/mcUploadAtlas): compone las 6 caras de cada
 // CLAVE `tex:` distinta usada por las estructuras vivas (6 cols × Nclaves filas, NEAREST, medio téxel de
@@ -8735,13 +9488,27 @@ float dynLuz(vec3 w){
   float m=0.0;
   for(int i=0;i<${MC_DYN_MAX};i++){ if(i>=uDynN) continue;
     vec3 P=uDynPos[i].xyz; float d=distance(w, P);
-    float rad=clamp((uDynPos[i].w - d)*${(1/MC_MAXLIGHT).toFixed(5)}, 0.0, 1.0);
-    if(rad<=0.0) continue;
+    // BUG-GLOW4 · el haz ENCARECE el camino, NO lo corta. Es la misma ley que la siembra estática de
+    // mcComputeBlockLight (paso a favor del haz = 1 nivel, de lado = 1+NARROW, con NARROW=glowFocus*5), y por eso
+    // se escribe como coste por bloque recorrido en vez de como factor. Antes era pow(cos, 1+foco*8), que ANULA
+    // todo lo que cae fuera del cono: el mismo dibujo alumbraba de una manera plantado en el suelo (BFS, la luz da
+    // la vuelta y llega debilitada) y de otra en la mano (cono duro, nada detrás) — que es justo lo que el dueño
+    // no quiere. Sin haz (|dir|≈0, una antorcha que asoma por todas las caras) o con foco 0 ⇒ coste 1: isótropo.
     vec3 bd=uDynDir[i].xyz; float foco=uDynDir[i].w; float bl=length(bd);
-    if(foco>0.0 && bl>0.5 && d>1e-4){                       // cono: solo delante del haz, tanto más fino cuanto mayor el foco
-      float c=dot((w-P)/d, bd/bl);                          // >0 = fragmento en el hemisferio delantero
-      rad *= pow(max(c,0.0), 1.0+foco*8.0);
+    float coste=1.0;
+    if(foco>0.0 && bl>0.5 && d>1e-4){
+      float c=dot((w-P)/d, bd/bl);                          // 1 = a favor del haz · 0 = de costado · -1 = detrás
+      coste=1.0+foco*5.0*(1.0-max(c,0.0));                  // a favor cuesta 1; de lado y detrás, hasta 1+foco*5
     }
+    // La caída es RELATIVA AL ALCANCE de la luz, no una rampa fija de ${MC_MAXLIGHT} bloques: se apaga justo a
+    // los uDynPos[i].w bloques y reparte el degradado por todo ese camino. Con el alcance normal (${MC_MAXLIGHT})
+    // es LA MISMA CUENTA de antes —(${MC_MAXLIGHT}-d)/${MC_MAXLIGHT} == 1-d/${MC_MAXLIGHT}—, o sea que la ley del BFS
+    // estatico que exige BUG-GLOW4 se conserva exacta. Solo cambia para alcances mayores, y ahi arregla que el mando
+    // fuera inservible: con la rampa fija, una estrella a 34 bloques pasaba de NADA (luz 34) a SATURADA (luz 49) en
+    // 15 unidades, todo el margen util apretado en una ventana estrecha y lejos del origen. Queja del dueno: «en 40
+    // veo mucha luz, en 30 nada, en 35 un poco, el ajuste es complejo».
+    float rad=clamp(1.0 - d*coste/max(uDynPos[i].w, 1e-3), 0.0, 1.0);
+    if(rad<=0.0) continue;
     m=max(m, rad); }
   return m;
 }
@@ -10313,15 +11080,21 @@ function mcDynSync(){
   for(const s of mc.structures){ const ec=s.emitCells; if(!ec||!ec.length) continue;
     const seg=mcEmisorSeguido(s);
     if(seg){ const m=s.model, ed=s.emitDir;   // posición VIVA de cada celda emisiva = centro de la celda estampada por s.model (col-major, como el vértice)
+      // BUG-GLOW4 · el ancla que hay que meter en la matriz es con la que se HORNEÓ LA MALLA, que no siempre es `s.ox`.
+      // Una estructura estampada hornea sus vértices ya en su celda ⇒ los dos coinciden. La HERRAMIENTA EN MANO no: su
+      // malla se hornea en 0,0,0 (mcSyncHeldToolStruct) y luego se le pisa `s.ox` con `mc.pos` para el culling, así que
+      // sumarlo aquí rotaba y sumaba el ancla dos veces y mandaba su luz a 55 bloques de distancia. `mox` lo dice cuando
+      // difiere; quien no lo ponga se comporta exactamente igual que antes.
+      const gx=s.mox!=null?s.mox:s.ox, gy=s.moy!=null?s.moy:s.oy, gz=s.moz!=null?s.moz:s.oz;
       for(let k=0;k<ec.length;k+=3){
-        const ax=s.ox+ec[k]+0.5, ay=s.oy+ec[k+1]+0.5, az=s.oz+ec[k+2]+0.5;
+        const ax=gx+ec[k]+0.5, ay=gy+ec[k+1]+0.5, az=gz+ec[k+2]+0.5;
         const wx=m[0]*ax+m[4]*ay+m[8]*az+m[12], wy=m[1]*ax+m[5]*ay+m[9]*az+m[13], wz=m[2]*ax+m[6]*ay+m[10]*az+m[14];
         // haz emisivo (normal neta de la cara del voxel) rotado por la pose ⇒ la dirección gira con la pieza; el shader lo normaliza
         let bx=0, by=0, bz=0;
         if(ed){ const ex=ed[k], ey=ed[k+1], ez=ed[k+2];
           bx=m[0]*ex+m[4]*ey+m[8]*ez; by=m[1]*ex+m[5]*ey+m[9]*ez; bz=m[2]*ex+m[6]*ey+m[10]*ez; }
         const dx=wx-eye[0], dy=wy-eye[1], dz=wz-eye[2];
-        cand.push(dx*dx+dy*dy+dz*dz, wx, wy, wz, bx, by, bz);   // plano: [d²,x,y,z, hazx,hazy,hazz, …]
+        cand.push(dx*dx+dy*dy+dz*dz, wx, wy, wz, bx, by, bz, lvl);   // plano: [d²,x,y,z, hazx,hazy,hazz, nivel, …]
       }
     }
     // transición de membresía (montado↔quieto): al cambiar, acumula el halo ESTAMPADO para re-sembrar/re-mallar.
@@ -10338,14 +11111,22 @@ function mcDynSync(){
       if(e0<bx0)bx0=e0; if(g0<bz0)bz0=g0; if(e1>bx1)bx1=e1; if(g1>bz1)bz1=g1; cambio=true;
     }
   }
+  // REQ-GLOW5 · la capa game.voxelesUI compite por las mismas plazas, con las mismas reglas: son cuerpos del mundo
+  // que emiten, y aquí ya no importa si vienen de una estructura o de una partícula. Sin haz (0,0,0 ⇒ isótropas:
+  // una llama alumbra a todos lados) y con su propio alcance por grupo.
+  const vl=mcVoxUILuces();
+  for(let k=0;k<vl.length;k+=4){
+    const dx=vl[k]-eye[0], dy=vl[k+1]-eye[1], dz=vl[k+2]-eye[2];
+    cand.push(dx*dx+dy*dy+dz*dz, vl[k], vl[k+1], vl[k+2], 0, 0, 0, vl[k+3]);
+  }
   // las MC_DYN_MAX celdas más cercanas al ojo → uniforms (índices ordenados por d², sin reordenar el array plano)
-  const arr=mc._dynArr||(mc._dynArr=new Float32Array(MC_DYN_MAX*4)), dir=mc._dynDir||(mc._dynDir=new Float32Array(MC_DYN_MAX*4)), nC=cand.length/7;
+  const arr=mc._dynArr||(mc._dynArr=new Float32Array(MC_DYN_MAX*4)), dir=mc._dynDir||(mc._dynDir=new Float32Array(MC_DYN_MAX*4)), nC=cand.length/8;
   const foco=Math.max(0, Math.min(1, mc.glowFocus!=null?mc.glowFocus:0));
   const idx=mc._dynIdx||(mc._dynIdx=[]); idx.length=nC; for(let i=0;i<nC;i++) idx[i]=i;
-  idx.sort((a,b)=>cand[a*7]-cand[b*7]);
+  idx.sort((a,b)=>cand[a*8]-cand[b*8]);
   const n=Math.min(nC, MC_DYN_MAX);
-  for(let i=0;i<n;i++){ const c=idx[i]*7;
-    arr[i*4]=cand[c+1]; arr[i*4+1]=cand[c+2]; arr[i*4+2]=cand[c+3]; arr[i*4+3]=lvl;
+  for(let i=0;i<n;i++){ const c=idx[i]*8;
+    arr[i*4]=cand[c+1]; arr[i*4+1]=cand[c+2]; arr[i*4+2]=cand[c+3]; arr[i*4+3]=cand[c+7];
     dir[i*4]=cand[c+4]; dir[i*4+1]=cand[c+5]; dir[i*4+2]=cand[c+6]; dir[i*4+3]=foco; }
   mc._dynN=n;
   if(cambio){   // solo al arrancar/parar de seguir: re-siembra la luz de bloque (sin las montadas) y re-malla su halo estampado
@@ -10381,9 +11162,17 @@ function mcResizeWorld(nx,ny,nz){
   mc.chunks.clear();
   mc.dim={x:nx,y:ny,z:nz}; mc.grid=ng;
   for(const s of mc.structures){ s.ox+=dx; s.oz+=dz; }   // las estructuras se desplazan con el terreno para no descuadrarse
-  const nn={}; for(const k in mc.notes){ const p=k.split(','), x=+p[0]+dx, y=+p[1], z=+p[2]+dz;   // las notas siguen a su bloque (mismo desplazamiento centrado)
-    if(x>=0&&x<nx&&y>=0&&y<ny&&z>=0&&z<nz) nn[x+','+y+','+z]=mc.notes[k]; }
-  mc.notes=nn;
+  const nn={}, nr={}, nt={};
+  for(const k in mc.notes){ const p=k.split(','), x=+p[0]+dx, y=+p[1], z=+p[2]+dz;   // las notas siguen a su bloque (mismo desplazamiento centrado)
+    if(x<0||x>=nx||y<0||y>=ny||z<0||z>=nz) continue;
+    const nk=x+','+y+','+z; nn[nk]=mc.notes[k];
+    // Giro y tinte viven en mapas aparte con la MISMA clave: si no se desplazan con la nota, el cartel
+    // se replanta con los ajustes por defecto y el dueño ve cómo su nota pierde postura y color al
+    // redimensionar el mundo.
+    if(mc.noteRots && mc.noteRots[k]!==undefined) nr[nk]=mc.noteRots[k];
+    if(mc.noteTints && mc.noteTints[k]!==undefined) nt[nk]=mc.noteTints[k];
+  }
+  mc.notes=nn; mc.noteRots=nr; mc.noteTints=nt;
   const clamp=(v,hi)=>Math.max(0,Math.min(v,hi));
   mc.spawn={x:clamp((mc.spawn.x|0)+dx,nx-1), y:Math.min(mc.spawn.y|0,ny-1), z:clamp((mc.spawn.z|0)+dz,nz-1)};   // spawn con el mundo
   if(mc.pos){ mc.pos[0]=Math.max(0.5,Math.min(mc.pos[0]+dx,nx-0.5)); mc.pos[2]=Math.max(0.5,Math.min(mc.pos[2]+dz,nz-0.5));
@@ -10394,6 +11183,26 @@ function mcResizeWorld(nx,ny,nz){
   mcDirtyAll();                   // cambia la dim: la rejilla entera se remapea, no vale enumerar celdas
   mcScheduleSave();
   return mc.dim;
+}
+// La caja de una ráfaga de ediciones `{x,y,z,before,after}`, en el formato que pide mcRemeshAround.
+// Las herramientas que editan EN BLOQUE (Volumen, y Seleccionar al pegar/cortar/rotar/reemplazar) llamaban
+// a `mcMeshAll` — el mundo ENTERO — aunque la ráfaga fuese de un solo bloque: en /map/fps eso era una
+// congelación de ~617 ms por plantar un cubo (medido 2026-08-18). El pico ya no lo hacía: usa
+// `mcRemeshAround`, que toca los chunks de la caja y nada más. Esto es para que las demás hagan lo mismo.
+// Devuelve null si no hay ediciones, para que quien llame no re-malle por nada.
+function mcCajaDeEdiciones(edits){
+  if(!edits || !edits.length) return null;
+  let x0=Infinity, z0=Infinity, x1=-Infinity, z1=-Infinity;
+  for(const e of edits){
+    if(e.x<x0)x0=e.x; if(e.x>x1)x1=e.x;
+    if(e.z<z0)z0=e.z; if(e.z>z1)z1=e.z;
+  }
+  return [x0,z0,x1,z1];
+}
+function mcRemeshEdiciones(edits){
+  const c=mcCajaDeEdiciones(edits);
+  if(c) mcRemeshAround(c[0],c[1],c[2],c[3]);
+  return !!c;
 }
 // Re-mesha el chunk que contiene (x,z) y, si la celda toca borde, el vecino (para que las caras del borde cuadren).
 // Con (x1,z1) re-malla la CAJA (x,z)..(x1,z1) de una ráfaga entera en una sola pasada.
@@ -10444,7 +11253,7 @@ async function mcRebakeStructsNear(x,z,x1,z1){
   const affected=mc.structures.filter(s=>{ const a=s.aabb; return x1>=a[0]-R&&x<=a[3]+R&&z1>=a[2]-R&&z<=a[5]+R; });
   for(const s of affected){
     if(mc.structures.indexOf(s)<0) continue;                 // se retiró mientras se reconstruía otra
-    const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot, s.esc);   // s.esc o la instancia se re-mallaría a tamaño 1
+    const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot, s.esc, false, s.tinte);   // s.esc/s.tinte o la instancia se re-mallaría a tamaño 1 y sin color
     const j=mc.structures.indexOf(s);
     if(j>=0){ mcFreeStruct(s); mc.structures[j]=mcCarryEfimera(s,rebuilt); } else mcFreeStruct(rebuilt);
   }
@@ -11124,6 +11933,9 @@ function mcRender(){
     gl.drawArrays(gl.TRIANGLES,0,ch.count);
     quads+=ch.count/6;
   }
+  // Alfombras volátiles (mc.capa): mismo formato de vértice, mismo atlas y mismos uniformes que el
+  // terreno ⇒ se cuelan aquí sin cambiar de programa, y con eso heredan la niebla y la sombra del sol.
+  quads+=mcDrawCapas(L, stride, cxp, czp);
   // Agentes (NPC): su cuerpo es un cubo suelto con el MISMO formato de vértice que el terreno (x,y,z,u,v,shade)
   // y el mismo atlas, así que se dibuja aquí sin cambiar de programa. No vive en mc.grid (ver mcAgentSetBlock).
   for(const a of mc.agents.values()){
@@ -11150,6 +11962,11 @@ function mcRender(){
   } else {
     mcReflTexDummy();
   }
+
+  // La capa game.voxelesUI (partículas, sangre, estrellas) es OPACA y del MUNDO: va aquí, entre lo opaco y
+  // el translúcido, NO al final con el overlay. Fuera del `if` de abajo a propósito: ese bloque (y con él
+  // el cielo) se salta entero cuando no hay estructuras, y las partículas tienen que salir igual.
+  mcDrawVoxUI(pj, view);
 
   if(mc.structures.length || finoOp || finoAl){
     mcStructGL(true);
@@ -11211,9 +12028,17 @@ function mcRender(){
       }
     }
     mcRenderSky(gl, pj.m, view);
+    // BUG-FLUID6 · mcRenderSky apaga el CULL_FACE y NO lo repone (sí repone depthMask y depthFunc), así que
+    // la pasada 3 se dibujaba con las traseras puestas mientras las 1 y 2 iban culladas. En un opaco no se
+    // nota —la de delante tapa a la de detrás—, pero en el agua las DOS pieles de la masa se mezclaban: la
+    // de delante (+Z, sombreado 0.52) sobre la de detrás (-Z, 0.92), y como la pasada no ordena, el
+    // resultado dependía de quién iba antes en el VBO ⇒ el mosaico de «caras de bloque» dentro de la masa.
+    // Con una pared detrás no pasaba porque entonces la piel trasera ya la culla tapadasFluido.
+    mcStructGL(true);
 
     // 3) Translúcido (voxeles #rrggbbaa) — pasada con blend SIN escribir profundidad (sin ordenar: pixel-art,
     //    order-independent, barato). Va después de TODO lo opaco (terreno + estructuras) para mezclarse encima.
+    //    Las traseras las quita el CULL_FACE (mcStructGL), no el orden: por eso «sin ordenar» sale bien.
     if(mc.structProg){
       let any=!!finoAl; for(const s of mc.structures){ if(s.alphaCount && mcStructVisible(s,pv)){ any=true; break; } }
       if(any){
@@ -11247,8 +12072,10 @@ function mcRender(){
         // El sesgo (puesto arriba, para las tres pasadas) también hace falta aquí: sin él la cara de cristal
         // pegada a una opaca pierde el empate y se ve el fondo pelado en vez del cristal compuesto encima.
         gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+        let heldAlpha = null;   // BUG-TOOL3: la herramienta en la mano sale del montón y se dibuja aparte, abajo
         for(const s of mc.structures){
           if(!s.alphaCount || !mcStructVisible(s,pv)) continue;
+          if(s._isHeldTool){ heldAlpha = s; continue; }
           gl.uniformMatrix4fv(SL.uModel,false,mcModelOf(s));
           gl.bindBuffer(gl.ARRAY_BUFFER, s.alphaVbo);
           mcStructAttrib(SL, sstr);
@@ -11264,6 +12091,30 @@ function mcRender(){
             gl.drawArrays(gl.TRIANGLES,0,ch.finoACount);
             quads+=ch.finoACount/6;
           }
+        }
+        // BUG-TOOL3 · La pasada de arriba no ordena y NO escribe profundidad: en un cristal del mapa eso apenas
+        // se nota, pero la herramienta en la mano se ve a 1 m del ojo y ocupando media pantalla, así que sus
+        // caras se pintan en el orden en que están en el VBO y las de detrás acaban tapando a las de delante
+        // (el dueño: «algunas caras traseras parecen estar por delante»). Ordenarlas por distancia cada frame
+        // costaría una reconstrucción del VBO por frame; se hace lo barato y exacto para UN objeto suelto:
+        //   1) pasada muda (colorMask apagado) que SOLO escribe profundidad ⇒ gana la cara más cercana;
+        //   2) pasada de color con LEQUAL ⇒ solo sobrevive esa, una capa de mezcla y ya.
+        // Es lo mismo que haría una ordenación, sin ordenar nada, y da igual cuál sea el dibujo: aquí no se
+        // supone qué lleva el jugador en la mano (un pico, una caja de volumen o un pulpo).
+        if(heldAlpha){
+          gl.uniformMatrix4fv(SL.uModel,false,mcModelOf(heldAlpha));
+          gl.bindBuffer(gl.ARRAY_BUFFER, heldAlpha.alphaVbo);
+          mcStructAttrib(SL, sstr);
+          if(mc.toolAlphaFix){
+            gl.colorMask(false,false,false,false); gl.depthMask(true);
+            gl.drawArrays(gl.TRIANGLES,0,heldAlpha.alphaCount);
+            gl.colorMask(true,true,true,true); gl.depthMask(false); gl.depthFunc(gl.LEQUAL);
+            gl.drawArrays(gl.TRIANGLES,0,heldAlpha.alphaCount);
+            gl.depthFunc(gl.LESS);          // el resto del frame lo da por hecho (mcRenderSky es el otro que lo toca)
+          } else {
+            gl.drawArrays(gl.TRIANGLES,0,heldAlpha.alphaCount);   // game.toolAlphaFix=false: como antes, una sola pasada
+          }
+          quads+=heldAlpha.alphaCount/6;    // se dibuja dos veces, pero geometría hay una: contarla dos engañaría al HUD
         }
         gl.depthMask(true); gl.disable(gl.BLEND);
       }
@@ -11342,6 +12193,73 @@ function mcMat4RotZ(out, rad){
   return out;
 }
 
+// ── REQ-TOOL8 · herramientas de snippet ──────────────────────────────────────────────────────────
+// La ficha que el snippet registró para `t`, o null si `t` es una de las cinco del motor.
+function mcHerrDef(t){ return (t && mc.herrExtra) ? (mc.herrExtra[t] || null) : null; }
+
+// Normaliza lo que da el snippet. Todo es opcional MENOS el dibujo: sin dibujo no hay nada que llevar en
+// la mano, y una herramienta invisible no se distingue de la mano vacía (que ya existe, es la rosca abajo).
+function mcHerrNormaliza(id, cfg){
+  cfg = cfg || {};
+  const tres = (v, d) => (Array.isArray(v) && v.length === 3 && v.every(n => isFinite(+n))) ? v.map(Number) : d;
+  const num  = (v, d) => isFinite(+v) ? +v : d;
+  // El gesto parte del hachazo del pico y encima va lo que pida el snippet: así una ficha con
+  // `gesto:{dur:0.18}` ya tiene las 9 fases bien puestas sin copiarlas. `gesto:false` = no se mueve.
+  const gesto = (cfg.gesto === false) ? null
+    : Object.assign({}, mc.toolSwingCfg, (cfg.gesto && typeof cfg.gesto === 'object') ? cfg.gesto : null);
+  let botones = Array.isArray(cfg.gestoBotones) ? cfg.gestoBotones.map(Number) : (gesto ? [0] : []);
+  return {
+    id: String(id),
+    dibujo:  String(cfg.dibujo || cfg.key || cfg.asset || ''),
+    nombre:  String(cfg.nombre || cfg.etiqueta || id),
+    ayuda:   cfg.ayuda ? String(cfg.ayuda) : '',
+    mira:    (cfg.mira === undefined || cfg.mira === null || cfg.mira === '') ? null : String(cfg.mira),
+    pos:     tres(cfg.pos, null),
+    rot:     tres(cfg.rot, null),
+    escala:  num(cfg.escala !== undefined ? cfg.escala : cfg.scale, null),
+    alcance: num(cfg.alcance, null),
+    gesto: gesto,
+    gestoBotones: botones,
+    anima:      (typeof cfg.anima === 'function') ? cfg.anima : null,
+    izquierdo:  (typeof cfg.izquierdo === 'function') ? cfg.izquierdo : null,
+    derecho:    (typeof cfg.derecho === 'function') ? cfg.derecho : null,
+    enRueda: cfg.enRueda !== false
+  };
+}
+
+// Lo que recibe la acción del snippet al hacer clic. Todo masticado: la celda apuntada, su clave, la celda
+// de delante (donde se pondría algo) y de dónde sale el rayo. Es una FOTO: modificarla no toca el mundo.
+function mcHerrCtx(btn, shift, hit){
+  const def = mcHerrDef(mc.tool);
+  const cel = hit ? hit.cell : null;
+  const nor = hit ? (hit.normal || [0, 0, 0]) : null;
+  const id  = cel ? mcGetVoxel(cel[0], cel[1], cel[2]) : 0;
+  return {
+    boton: btn, izquierdo: btn === 0, derecho: btn === 2, shift: !!shift,
+    herramienta: mc.tool, ficha: def,
+    mira: hit || null,
+    celda: cel ? cel.slice() : null,                                    // el bloque apuntado
+    clave: id ? ((mc.blockKey && mc.blockKey[id]) || null) : null,      // su material, ya con nombre
+    normal: nor ? nor.slice() : null,
+    delante: (cel && nor) ? [cel[0] + nor[0], cel[1] + nor[1], cel[2] + nor[2]] : null,
+    punto: (hit && hit.point) ? hit.point.slice() : null,
+    dist: hit ? hit.dist : null,
+    pos: mc.pos.slice(), yaw: mc.yaw, pitch: mc.pitch,
+    ojo: [mc.pos[0], mc.pos[1] + MC_EYE * mc.scale, mc.pos[2]],
+    ranura: mc.sel, bloque: (mc.hotbar && mc.hotbar[mc.sel]) || 0
+  };
+}
+
+// Lanza el gesto de la herramienta activa (el mismo viaje de 3 fases del pico). `cfg` opcional = tabla suelta.
+function mcHerrGolpe(cfg){
+  const def = mcHerrDef(mc.tool);
+  mc._toolSwingSel = (!cfg && !def && mc.tool === 'select');
+  mc._toolSwingCfg = (cfg && typeof cfg === 'object') ? Object.assign({}, mc.toolSwingCfg, cfg)
+                   : (def ? def.gesto : null);
+  mc._toolSwingT = performance.now();
+  return true;
+}
+
 function mcGetActiveToolAsset(){
   const t = mc.tool || 'build';
   const k = mcHerramientaKey(t);
@@ -11356,10 +12274,48 @@ function mcGetActiveToolAsset(){
 }
 
 
+// REQ-TOOL5 · guardarse la herramienta / volver a sacarla. Sin argumento alterna; `false` la saca siempre,
+// que es lo que hace falta al cambiar de herramienta estando guardada. NO dibuja ni mueve nada: solo mueve
+// el destino, y el viaje lo recorre mcBuildToolTransform frame a frame.
+function mcGuardarTool(v){
+  const dest = (v === undefined) ? !mc._guardada : !!v;
+  if(dest === !!mc._guardada) return dest;
+  // REQ-TOOL7 · sacarla a mano (rosca hacia arriba, tecla, consola) en mitad de un relevo lo CANCELA: vuelve
+  // la que se estaba bajando. El relevo bueno limpia el destino ANTES de llegar aquí: esto solo pilla al que
+  // interrumpe.
+  if(!dest){ mc._toolPend = null; mc._toolSelPend = null; }
+  mc._guardada = dest;
+  // El reloj se pone a cero AQUÍ: mientras estuvo guardada del todo no se dibujaba, así que nadie avanzaba
+  // `_guardaLastT` y el primer frame de la vuelta se habría comido de golpe el tope de 100 ms del salto.
+  mc._guardaLastT = performance.now();
+  // Guardarla la deja SIN HERRAMIENTA ACTIVA, y eso es «cambiar a una herramienta nula, que no hace nada»
+  // (dueño, 2026-08-18) ⇒ se descarta lo que hubiera a medias en pantalla, exactamente lo mismo que hace
+  // mcSetPlayerTool al cambiar de herramienta: la caja del volumen a medio definir con sus guías, la
+  // esquina suelta de Seleccionar, el pegado cargado, el cartel que se estaba plantando, el fantasma de
+  // colocar y el botón mantenido (si no, al sacarla seguiría rompiendo sin haber vuelto a pulsar).
+  if(dest){
+    mc.heldBtn = -1;
+    // Aquí se va TAMBIÉN la caja confirmada de Seleccionar, que un cambio de herramienta sí conserva (para
+    // el Ctrl+C). Guardarse la herramienta no es cambiar de herramienta: es quedarse sin ninguna, y el dueño
+    // la seguía viendo dibujada. Sin `mcSelectClear()` para no soltar su aviso en cada guardado.
+    mc.selA = null; mc.selBox = null;
+    mcBoxClear();
+    if(mc.pasteActive) mcPasteCancel();
+    if(mc.notePlacing) mcCancelNotePlace();
+    mcClearPreview();
+  }
+  mcPintaSlotHerramienta();
+  return dest;
+}
 function mcBuildToolTransform(eye, yaw, pitch){
-  const tPos = mc.toolPos || [0.9, -0.6, 0];
-  const tRot = mc.toolRot || [-10, -80, -30];
-  const esc = (mc.toolScale !== undefined ? +mc.toolScale : 0.8) * mc.scale;
+  // REQ-TOOL8 · una herramienta de snippet puede traer su propia postura en la mano; lo que no traiga cae
+  // en los mandos globales de siempre (game.showTool.pos/rot/scale), que siguen valiendo para las cinco.
+  const hDef = mcHerrDef(mc.tool);
+  const tPos = (hDef && hDef.pos) || mc.toolPos || [0.9, -0.6, 0];
+  const tRot = (hDef && hDef.rot) || mc.toolRot || [-10, -80, -30];
+  const escBase = (hDef && hDef.escala != null) ? hDef.escala
+                : (mc.toolScale !== undefined ? +mc.toolScale : 0.8);
+  const esc = escBase * mc.scale;
 
   // Balanceo natural al caminar (view bobbing) con amortiguación suave
   const sp = mc.vel ? Math.hypot(mc.vel[0], mc.vel[2]) : 0;
@@ -11387,14 +12343,20 @@ function mcBuildToolTransform(eye, yaw, pitch){
   mc._bobRX = (mc._bobRX || 0) + (targetBobRX - (mc._bobRX || 0)) * alpha;
   mc._bobRZ = (mc._bobRZ || 0) + (targetBobRZ - (mc._bobRZ || 0)) * alpha;
 
-  // Animación de picar con clic izquierdo (solo para el pico / build)
+  // Animación de clic izquierdo: el hachazo del pico (build) y el toque de Seleccionar. Misma máquina de
+  // 3 fases; lo único que cambia es de qué tabla de mandos lee, y eso lo fijó el disparo (mc._toolSwingSel).
   let swX = 0, swY = 0, swZ = 0;
   let swRotX = 0, swRotY = 0, swRotZ = 0;
+  let swP = -1;                      // REQ-TOOL8 · en qué punto del gesto va (0..1); -1 = quieta
   if(mc._toolSwingT > 0){
     const elapsed = (now - mc._toolSwingT) / 1000;
-    const cfg = mc.toolSwingCfg || {};
+    // REQ-TOOL8 · `_toolSwingCfg` es la tabla suelta que congeló el disparo (la de la ficha del snippet);
+    // sin ella se decide como siempre, por la herramienta que lo lanzó.
+    const cfg = mc._toolSwingCfg || (mc._toolSwingSel ? mc.toolSwingSelCfg : mc.toolSwingCfg) || {};
     const dur = (isFinite(+cfg.dur) && +cfg.dur > 0) ? +cfg.dur : 0.32;
-    const windupP = (isFinite(+cfg.windupP) && +cfg.windupP > 0) ? Math.min(0.8, +cfg.windupP) : 0.25;
+    // `windupP: 0` es válido y significa «sin impulso»: la fase 1 no llega a entrar (p nunca es < 0) y la 2
+    // arranca desde el reposo. No divide por cero porque abajo se exige strikeP > windupP.
+    const windupP = (isFinite(+cfg.windupP) && +cfg.windupP >= 0) ? Math.min(0.8, +cfg.windupP) : 0.25;
     const strikeP = (isFinite(+cfg.strikeP) && +cfg.strikeP > windupP) ? Math.min(0.95, +cfg.strikeP) : 0.58;
     const windupRot = isFinite(+cfg.windupRot) ? +cfg.windupRot : -35;
     const chopRot = isFinite(+cfg.chopRot) ? +cfg.chopRot : 15;
@@ -11405,6 +12367,7 @@ function mcBuildToolTransform(eye, yaw, pitch){
 
     if(elapsed < dur){
       const p = elapsed / dur; // 0..1
+      swP = p;
       if(p < windupP){
         // Fase 1: Coger impulso (el pico se alza, retrocede y se inclina hacia atrás)
         const u = p / windupP;
@@ -11437,10 +12400,53 @@ function mcBuildToolTransform(eye, yaw, pitch){
     }
   }
 
+  // REQ-TOOL8 · animación PROPIA de una herramienta de snippet. Se la llama con lo ya calculado y devuelve
+  // desplazamientos que se SUMAN a lo de arriba, en espacio de cámara (x derecha, y arriba, z hacia el
+  // jugador) y grados: así una ficha puede añadir un vaivén de reposo sin renunciar al bob ni al gesto.
+  // Si revienta se anula la función y el mundo sigue: una herramienta rota no puede tumbar el frame.
+  if(hDef && hDef.anima){
+    try{
+      const r = hDef.anima({
+        t: now / 1000, dt: dt, golpe: swP, moviendo: moviendo, vel: sp,
+        herramienta: mc.tool, ficha: hDef, guardada: mc._guardaT || 0,
+        pos: [swX, swY, swZ], rot: [swRotX, swRotY, swRotZ]
+      });
+      if(r){
+        if(Array.isArray(r.pos)){ swX += +r.pos[0] || 0; swY += +r.pos[1] || 0; swZ += +r.pos[2] || 0; }
+        if(Array.isArray(r.rot)){ swRotX += +r.rot[0] || 0; swRotY += +r.rot[1] || 0; swRotZ += +r.rot[2] || 0; }
+      }
+    }catch(e){
+      console.warn('[herramienta '+mc.tool+'] anima():', e);
+      hDef.anima = null;
+    }
+  }
+
+  // REQ-TOOL5 · guardar/sacar: se avanza AQUÍ, con el reloj del propio frame, y no en un temporizador
+  // aparte, porque este es el único sitio que se ejecuta justo cuando hay que dibujarla — si el mundo va
+  // a 20 fps el viaje sigue durando lo mismo, solo que con menos pasos. `mc._guardada` es el DESTINO
+  // y `mc._guardaT` dónde va (0 = en la mano, 1 = fuera de pantalla): por eso cambiar de
+  // idea a mitad de camino no reinicia nada, la deja volver desde donde estaba.
+  const gcfg = mc.toolGuardaCfg || {};
+  const gMs = (isFinite(+gcfg.ms) && +gcfg.ms > 0) ? +gcfg.ms : 300;
+  const gDt = Math.min(now - (mc._guardaLastT || now), 100);   // un salto de pestaña no la teletransporta
+  mc._guardaLastT = now;
+  const gDest = mc._guardada ? 1 : 0;
+  if(mc._guardaT === undefined) mc._guardaT = gDest;
+  if(mc._guardaT !== gDest){
+    const paso = gDt / gMs;
+    mc._guardaT = (gDest > mc._guardaT) ? Math.min(1, mc._guardaT + paso) : Math.max(0, mc._guardaT - paso);
+  }
+  const gCurva = (isFinite(+gcfg.curva) && +gcfg.curva > 0) ? +gcfg.curva : 1.6;
+  const G = Math.pow(mc._guardaT, gCurva);            // 0 en la mano → 1 guardada
+  const gBaja = isFinite(+gcfg.baja) ? +gcfg.baja : 1.9;
+  const gGiro = isFinite(+gcfg.giro) ? +gcfg.giro : 70;
+  const gApart = isFinite(+gcfg.aparta) ? +gcfg.aparta : 0.10;
+
   // En espacio de cámara (WebGL view space: +X der, +Y arr, -Z del):
-  const posX = tPos[0] + mc._bobX + swX;
-  const posY = tPos[1] - mc._bobY + swY;
+  const posX = tPos[0] + mc._bobX + swX + gApart * G;
+  const posY = tPos[1] - mc._bobY + swY - gBaja * G;
   const posZ = -(1.2 + tPos[2]) - swZ;
+  swRotX += gGiro * G;                                 // la punta cae hacia el suelo según baja
 
   // 1. Matriz de la cámara en el mundo = T(eye) * Ry(yaw) * Rx(pitch)
   const mCam = mat4.mul(mat4.translate(eye[0], eye[1], eye[2]),
@@ -11478,7 +12484,22 @@ const mcHeldToolCache = new Map();
 let mcHeldToolLoading = false;
 
 async function mcSyncHeldToolStruct(){
-  if(!mc.active || !mc.showTool){
+  // `mc.osdSinTool` es el velo temporal de una pantalla OSD con `showTool:false`; se mira aquí, en la ÚNICA
+  // puerta donde la herramienta entra y sale de `mc.structures`, para que todo lo de abajo (dibujo, debug,
+  // volcado) la vea desaparecer sin enterarse de que hay un menú delante.
+  // REQ-TOOL5 · guardada del todo (el viaje ya terminó) = como si no hubiera herramienta: sale de
+  // mc.structures y deja de costar. Se exige `_guardaT>=1` y no solo el destino para que la bajada se VEA;
+  // al sacarla basta con que el destino cambie para que vuelva a entrar y suba desde donde estaba.
+  // REQ-TOOL7 · el RELEVO de la rosca: la vieja acaba de salir de pantalla (`_guardaT>=1`) ⇒ se cambia de
+  // herramienta y se ordena la vuelta AQUÍ, en el mismo frame y antes del portazo de abajo, para que no haya
+  // ni un frame de mano vacía entre la bajada y la subida.
+  if(mc._toolPend && mc._guardada && mc._guardaT >= 1){
+    const t = mc._toolPend, sel = mc._toolSelPend;
+    mc._toolPend = null; mc._toolSelPend = null;
+    mcSetPlayerTool(t);          // saca sola la nueva (mcGuardarTool(false)) ⇒ sube desde el suelo
+    if(sel) mc.selBox = sel;     // …y la caja confirmada sobrevive, como en cualquier otro cambio de herramienta
+  }
+  if(!mc.active || !mc.showTool || mc.osdSinTool || (mc._guardada && mc._guardaT >= 1)){
     if(mc._heldToolStruct){
       const idx = mc.structures.indexOf(mc._heldToolStruct);
       if(idx >= 0) mc.structures.splice(idx, 1);
@@ -11511,6 +12532,10 @@ async function mcSyncHeldToolStruct(){
           : [0.5, 0.5, 0.5];
         s = Object.assign({
           key: reqKey, ox: 0, oy: 0, oz: 0, rot: 0, esc: 1.0,
+          // BUG-GLOW4 · `mox/moy/moz` = ancla con la que se hornea la malla, que aquí es el origen y NO se mueve nunca.
+          // Hace falta decirlo aparte porque `ox` se pisa cada frame con `mc.pos` (abajo) para el culling: quien componga
+          // la matriz con el ancla —hoy la luz dinámica de mcDynSync— tiene que usar ésta o suma la posición dos veces.
+          mox: 0, moy: 0, moz: 0,
           efimera: true, _isHeldTool: true, model: MC_IDENT,
           assetPivot: pivNorm,
           assetPivotVoxel: pvs ? pvs.slice() : null
@@ -11602,7 +12627,9 @@ function mcDrawPreview(pj, view){
 }
 // Renderiza los bloques reales con textura o geometría fina en la herramienta Volumen con cache y zero-alloc
 function mcDrawVolumeBlocks(pj, view){
-  if(mc.tool !== 'box' || mc.escaparate) return;
+  // `mc._guardada` (REQ-TOOL5): el bloque de vista previa de Volumen son geometría de verdad, y va por aquí
+  // y no por las guías de `mcDrawOverlays` ⇒ hay que apagarlo aparte o con la mano vacía se sigue viendo.
+  if(mc.tool !== 'box' || mc.escaparate || mc._guardada) return;
   const near = mcRaycast(mcReach(), true);
   let x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0, hasBox = false;
   if(!mc.boxStep || mc.boxStep === 0){
@@ -11870,7 +12897,8 @@ function mcDrawPasteBlocks(pj, view){
   const gl = mc.gl;
   const cacheKey = [bx, by, bz, org.ori, clipboard.cells.length, (clipboard.cells[0] ? clipboard.cells[0].c : '')].join(':');
 
-  if(!mc._pasteCache || mc._pasteCache.key !== cacheKey){
+  // `pend` = alguna pieza fina se está horneando todavía ⇒ se reconstruye cada frame hasta que llegue
+  if(!mc._pasteCache || mc._pasteCache.key !== cacheKey || mc._pasteCache.pend){
     const totalFloats = clipboard.cells.length * 6 * 36;
     if(!mc._pasteBuf || mc._pasteBuf.length < totalFloats) mc._pasteBuf = new Float32Array(Math.max(totalFloats, 2048));
     const out = mc._pasteBuf;
@@ -11878,16 +12906,35 @@ function mcDrawPasteBlocks(pj, view){
 
     const occ = new Set();
     const cellCoords = [];
+    let pend = false, fCol = 0, fAlpha = 0;
     for(let i=0; i<clipboard.cells.length; i++){
       const cel = clipboard.cells[i];
       const q = mueve(cel.dx, cel.dz, cel.dy);   // portapapeles: dy es profundidad y dz altura; mcOriMove va en ejes del mundo
       const wx = bx + q[0], wy = by + q[1], wz = bz + q[2];
-      occ.add(wx + ',' + wy + ',' + wz);
-      cellCoords.push({ wx, wy, wz, c: cel.c });
+      const v = cel.c;
+      let key = '', mat = 0;
+      if(typeof v === 'string' && v.slice(0, 4) === 'tex:'){
+        key = v.slice(4);
+        mat = mc.blockKey ? mc.blockKey.indexOf(key) : 0;
+      }
+      // Pieza FINA (repetidor, flor, antorcha…): NO llena la celda ⇒ ni se dibuja como cubo ni tapa la cara
+      // del vecino; va con su geometría de verdad, igual que la herramienta volumen (foto #53).
+      // La clave del portapapeles ya trae su postura (`flor@7`), que es la que se planta: no se re-gira aquí.
+      const fino = mat > 0 && !!(mc.finoRejilla && mc.finoRejilla[mat]);
+      let g = null;
+      if(fino){
+        g = (mc.finoGeom && mc.finoGeom[key]) || null;
+        if(g){ fCol += g.colCount || 0; fAlpha += g.alphaCount || 0; }
+        else { if(typeof mcCalientaFina === 'function') mcCalientaFina(key); pend = true; }
+      } else {
+        occ.add(wx + ',' + wy + ',' + wz);   // solo lo macizo tapa la cara del vecino
+      }
+      cellCoords.push({ wx, wy, wz, c: v, fino, g });
     }
 
     for(let i=0; i<cellCoords.length; i++){
       const item = cellCoords[i];
+      if(item.fino) continue;                  // lo fino se junta en la pasada de abajo
       const wx = item.wx, wy = item.wy, wz = item.wz, v = item.c;
       let mat = 0;
       if(typeof v === 'string' && v.slice(0, 4) === 'tex:'){
@@ -11917,45 +12964,114 @@ function mcDrawPasteBlocks(pj, view){
     if(!mc.pasteVbo) mc.pasteVbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, mc.pasteVbo);
     gl.bufferData(gl.ARRAY_BUFFER, out.subarray(0, ptr), gl.DYNAMIC_DRAW);
-    mc._pasteCache = { key: cacheKey, vertCount: ptr / 6 };
+
+    // Las piezas finas se copian TAL CUAL (9 floats por vértice), solo desplazadas a su celda: es la misma
+    // receta de `mcDrawVolumeBlocks`, y se dibujan con el shader de estructuras, no con el atlas.
+    const copiaFina = (campoLocal, campoCount, buf) => {
+      let p = 0;
+      for(const it of cellCoords){
+        const g = it.g; if(!g) continue;
+        const src = g[campoLocal], len = (g[campoCount] || 0) * 9;
+        if(!src || !len) continue;
+        for(let i = 0; i < len; i += 9){
+          buf[p++] = it.wx + src[i]; buf[p++] = it.wy + src[i+1]; buf[p++] = it.wz + src[i+2];
+          buf[p++] = src[i+3];       buf[p++] = src[i+4];         buf[p++] = src[i+5];
+          buf[p++] = src[i+6];       buf[p++] = src[i+7];         buf[p++] = src[i+8];
+        }
+      }
+      return p;
+    };
+    if(fCol){
+      const n = fCol * 9;
+      if(!mc._pasteFcol || mc._pasteFcol.length < n) mc._pasteFcol = new Float32Array(Math.max(n, 2048));
+      copiaFina('colLocal', 'colCount', mc._pasteFcol);
+      if(!mc.pasteFinoVbo) mc.pasteFinoVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, mc.pasteFinoVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, mc._pasteFcol.subarray(0, n), gl.DYNAMIC_DRAW);
+    }
+    if(fAlpha){
+      const n = fAlpha * 9;
+      if(!mc._pasteFalpha || mc._pasteFalpha.length < n) mc._pasteFalpha = new Float32Array(Math.max(n, 2048));
+      copiaFina('alphaLocal', 'alphaCount', mc._pasteFalpha);
+      if(!mc.pasteFinoAVbo) mc.pasteFinoAVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, mc.pasteFinoAVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, mc._pasteFalpha.subarray(0, n), gl.DYNAMIC_DRAW);
+    }
+    mc._pasteCache = { key: cacheKey, vertCount: ptr / 6, finoCol: fCol, finoAlpha: fAlpha, pend };
   }
 
-  if(!mc._pasteCache || !mc._pasteCache.vertCount) return;
+  const PC = mc._pasteCache;
+  if(!PC || (!PC.vertCount && !PC.finoCol && !PC.finoAlpha)) return;
+  if(PC.vertCount){
 
-  const opaque = !mc.atlasHasAlpha && mc.progOpaque;
-  const TP = opaque ? mc.progOpaque : mc.prog, L = opaque ? mc.locOpaque : mc.loc;
-  gl.useProgram(TP);
-  mcAttribs([L.aPos, L.aUV, L.aShade]);
-  if(L.uClipY) gl.uniform1f(L.uClipY, -1000.0);
-  gl.uniformMatrix4fv(L.uProj, false, pj.m);
-  gl.uniformMatrix4fv(L.uView, false, view);
-  gl.uniform3f(L.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
-  gl.uniform1f(L.uFogMin, mcFogMin());
-  gl.uniform1f(L.uFogNear, mcFogNear(pj.far));
-  gl.uniform1f(L.uFogFar, mcFogFar(pj.far));
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, mc.atlasTex);
-  gl.uniform1i(L.uTex, 0);
-  mcSunUniforms(L, null);
+    const opaque = !mc.atlasHasAlpha && mc.progOpaque;
+    const TP = opaque ? mc.progOpaque : mc.prog, L = opaque ? mc.locOpaque : mc.loc;
+    gl.useProgram(TP);
+    mcAttribs([L.aPos, L.aUV, L.aShade]);
+    if(L.uClipY) gl.uniform1f(L.uClipY, -1000.0);
+    gl.uniformMatrix4fv(L.uProj, false, pj.m);
+    gl.uniformMatrix4fv(L.uView, false, view);
+    gl.uniform3f(L.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
+    gl.uniform1f(L.uFogMin, mcFogMin());
+    gl.uniform1f(L.uFogNear, mcFogNear(pj.far));
+    gl.uniform1f(L.uFogFar, mcFogFar(pj.far));
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, mc.atlasTex);
+    gl.uniform1i(L.uTex, 0);
+    mcSunUniforms(L, null);
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, mc.pasteVbo);
-  const stride = 6 * 4;
-  gl.vertexAttribPointer(L.aPos, 3, gl.FLOAT, false, stride, 0);
-  gl.vertexAttribPointer(L.aUV, 2, gl.FLOAT, false, stride, 12);
-  gl.vertexAttribPointer(L.aShade, 1, gl.FLOAT, false, stride, 20);
+    gl.bindBuffer(gl.ARRAY_BUFFER, mc.pasteVbo);
+    const stride = 6 * 4;
+    gl.vertexAttribPointer(L.aPos, 3, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribPointer(L.aUV, 2, gl.FLOAT, false, stride, 12);
+    gl.vertexAttribPointer(L.aShade, 1, gl.FLOAT, false, stride, 20);
 
-  gl.depthMask(true);
-  gl.disable(gl.BLEND);
-  gl.frontFace(gl.CW);
-  gl.enable(gl.CULL_FACE);
-  gl.cullFace(gl.BACK);
-  gl.enable(gl.POLYGON_OFFSET_FILL);
-  gl.polygonOffset(-1.0, -1.0);
-  gl.drawArrays(gl.TRIANGLES, 0, mc._pasteCache.vertCount);
-  gl.polygonOffset(0, 0);
-  gl.disable(gl.POLYGON_OFFSET_FILL);
-  gl.disable(gl.CULL_FACE);
-  gl.frontFace(gl.CCW);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+    gl.frontFace(gl.CW);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.polygonOffset(-1.0, -1.0);
+    gl.drawArrays(gl.TRIANGLES, 0, mc._pasteCache.vertCount);
+    gl.polygonOffset(0, 0);
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+    gl.disable(gl.CULL_FACE);
+    gl.frontFace(gl.CCW);
+  }
+
+  // Piezas finas del cúmulo: shader de estructuras (9 floats/vértice), misma pasada que la herramienta volumen
+  if((PC.finoCol || PC.finoAlpha) && mc.structProg && mc.structLoc){
+    const SL = mc.structLoc, sstr = 9 * 4;
+    gl.useProgram(mc.structProg);
+    gl.uniformMatrix4fv(SL.uProj, false, pj.m);
+    gl.uniformMatrix4fv(SL.uView, false, view);
+    gl.uniformMatrix4fv(SL.uModel, false, MC_IDENT);
+    gl.uniform3f(SL.uSky, mcCieloEf[0], mcCieloEf[1], mcCieloEf[2]);
+    gl.uniform1f(SL.uFogMin, mcFogMin());
+    gl.uniform1f(SL.uFogNear, mcFogNear(pj.far));
+    gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
+    if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
+    mcSunUniforms(SL, null);                    // el fantasma es una ayuda: ni proyecta ni recibe sombra
+    mcAttribs([SL.aPos, SL.aColor, SL.aShade, SL.aEmit, SL.aAlpha]);
+    mcStructGL(true);
+    if(PC.finoCol && mc.pasteFinoVbo){
+      gl.bindBuffer(gl.ARRAY_BUFFER, mc.pasteFinoVbo);
+      mcStructAttrib(SL, sstr);
+      gl.drawArrays(gl.TRIANGLES, 0, PC.finoCol);
+    }
+    if(PC.finoAlpha && mc.pasteFinoAVbo){
+      gl.bindBuffer(gl.ARRAY_BUFFER, mc.pasteFinoAVbo);
+      mcStructAttrib(SL, sstr);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      gl.drawArrays(gl.TRIANGLES, 0, PC.finoAlpha);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+    }
+    mcStructGL(false);
+  }
 }
 
 // Libera la vista-previa de estructura (VBO) y olvida su memo. Se llama al soltar, al perder el foco o al cerrar.
@@ -11975,7 +13091,8 @@ async function mcUpdatePreview(){
   const isNotePlace = !!mc.notePlacing;
   const cfg = mcCartelCfg();
   const sk = isNotePlace ? (cfg.palo ? MC_NOTE_SIGN : MC_NOTE_SIGN_PLANO) : mc.slotStruct[mc.sel];
-  const on = mc.active && (isNotePlace || (!mcToolPasiva() && sk)) && document.pointerLockElement===mc.canvas && mc.structGhostAlpha>0;
+  // `!mc._guardada` (REQ-TOOL5): con la herramienta guardada no hay nada que colocar, así que tampoco su fantasma
+  const on = mc.active && !mc._guardada && (isNotePlace || (!mcToolPasiva() && sk)) && mcMandoActivo() && mc.structGhostAlpha>0;   // REQ-MOV1 · «manda» ya no es solo el pointer-lock: en táctil mandan los botones
   if(!on){ if(mc.preview||mc.previewKey||mc.previewStructKey) mcClearPreview(); return; }
   const hit=mcRaycast(mcReach(), true); if(!hit){ if(mc.preview) mcClearPreview(); return; }   // el fantasma se ancla también a caras de estructura (lo que ves = lo que colocas)
   const isPaint = !isNotePlace && (mc.tool === 'paint');
@@ -12059,6 +13176,412 @@ function mcPushGridDividers(out, x0,y0,z0, x1,y1,z1, r,g,b){
     mcPushLine(out, x1, y0, z, x1, y1, z, r, g, b);
   }
 }
+// ── Voxeles de color: primitiva de dibujo, reutilizable ───────────────────────────────────────────
+// Un bloque del mundo mide 16×16×16 voxeles finos. Lo que sigue planta CUBOS de ese tamaño (o del que
+// se pida) en el overlay: color plano por cara, sin textura, sin material, sin celda en la rejilla y
+// sin guardarse. Es lo contrario de setVoxel —no toca el mundo, se va con el frame—, y sirve para
+// dibujar guías «de voxeles» en vez de líneas: hoy los corchetes de la selección (game.selVoxeles) y
+// lo que pida un snippet por game.voxelesUI.
+const MC_VOX = 1/16;                                                 // lado de un voxel fino, en unidades de mundo
+// Caras en el orden [-Y, +Y, -Z, +Z, +X, -X] = bits 0..5 de la máscara. Los triángulos son los de
+// mcPushBoxTris troceados por cara; el sombreado copia MC_FACES para que un cubo suelto se lea como un
+// voxel del mundo (arriba claro, abajo oscuro). Aquí el color va EMISIVO (aEmit=1 en el overlay ⇒ el
+// shader ignora vShade), así que la cara se aclara/oscurece multiplicando el propio rgb.
+const MC_VOXCARA_TRIS=[[0,3,2,0,2,1],[4,5,6,4,6,7],[0,1,5,0,5,4],[2,3,7,2,7,6],[1,2,6,1,6,5],[3,0,4,3,4,7]];
+const MC_VOXCARA_LUZ =[0.40, 1.12, 0.92, 0.52, 0.64, 0.82];
+const MC_VOXCARA_OP  =[1, 0, 3, 2, 5, 4];        // cara opuesta
+const MC_VOXCARA_EJE =[[5,4],[0,1],[2,3]];       // [eje 0=X,1=Y,2=Z][signo −, signo +] → cara
+function mcPushVoxCubo(out, x,y,z, s, r,g,b, caras){                  // un voxel de color; `caras` = máscara opcional
+  const x1=x+s, y1=y+s, z1=z+s;
+  const P=[[x,y,z],[x1,y,z],[x1,y,z1],[x,y,z1],[x,y1,z],[x1,y1,z],[x1,y1,z1],[x,y1,z1]];
+  const m=(caras==null?63:caras);
+  for(let f=0; f<6; f++){
+    if(!(m & (1<<f))) continue;
+    const k=MC_VOXCARA_LUZ[f], T=MC_VOXCARA_TRIS[f];
+    const cr=Math.min(1,r*k), cg=Math.min(1,g*k), cb=Math.min(1,b*k);
+    for(let i=0;i<6;i++){ const p=P[T[i]]; out.push(p[0],p[1],p[2], cr,cg,cb, 1); }
+  }
+}
+// Los 8 vértices del cubo unidad, en el MISMO orden que la `P` de mcPushVoxCubo, y aplanados por cara
+// y vértice (6 caras × 6 vértices × 3). Se derivan de MC_VOXCARA_TRIS al cargar a propósito: una
+// segunda copia escrita a mano sería otra tabla que mantener, y las dos rutas dejarían de coincidir.
+const MC_VOXCARA_ESQ=[[0,0,0],[1,0,0],[1,0,1],[0,0,1],[0,1,0],[1,1,0],[1,1,1],[0,1,1]];
+const MC_VOXCARA_OFF=(function(){ const t=new Float32Array(6*6*3);
+  for(let f=0;f<6;f++) for(let i=0;i<6;i++){ const e=MC_VOXCARA_ESQ[MC_VOXCARA_TRIS[f][i]], o=(f*6+i)*3;
+    t[o]=e[0]; t[o+1]=e[1]; t[o+2]=e[2]; }
+  return t; })();
+// Lo mismo que mcPushVoxCubo, vértice por vértice, pero escribiendo POR ÍNDICE en un Float32Array ya
+// reservado y devolviendo el hueco siguiente. Misma geometría exacta: sale de la misma tabla de caras.
+// ⚠️ Existe por VELOCIDAD, y la diferencia no es sutil: los 36 `out.push()` por voxel más la `P` de 8
+// arrays intermedios costaban 2,15 ms por frame con los 420 copos de la nieve —el 85 % de remallar la
+// capa—, y luego `mcDrawArr` copiaba el array entero a un Float32Array otra vez (0,58 ms más). Sin
+// asignar nada y subiendo el búfer tal cual, el mismo trabajo baja a una fracción. Quien pinte una vez
+// y se quede quieto (los corchetes, las filas) no gana nada con esto y sigue con la versión de arriba.
+function mcPushVoxCuboBuf(buf, n, x,y,z, s, r,g,b, caras){
+  const m=(caras==null?63:caras);
+  for(let f=0; f<6; f++){
+    if(!(m & (1<<f))) continue;
+    const k=MC_VOXCARA_LUZ[f];
+    const cr=Math.min(1,r*k), cg=Math.min(1,g*k), cb=Math.min(1,b*k);
+    let o=f*18;
+    for(let i=0;i<6;i++,o+=3){
+      buf[n]=x+MC_VOXCARA_OFF[o]*s; buf[n+1]=y+MC_VOXCARA_OFF[o+1]*s; buf[n+2]=z+MC_VOXCARA_OFF[o+2]*s;
+      buf[n+3]=cr; buf[n+4]=cg; buf[n+5]=cb; buf[n+6]=1;
+      n+=7;
+    }
+  }
+  return n;
+}
+// Igual que el de arriba pero con los tres lados por separado: una CAJA, no un cubo. Lo pide la capa
+// fina (mcVoxFinoGeom) para las alfombras —una loncha de 16×1×16 finos es una caja de 12 triángulos en
+// vez de 256 cubos—. Se mantienen los dos porque el del cubo es el camino caliente y no se le va a
+// meter dos multiplicaciones más por vértice por una comodidad que solo usa la alfombra.
+function mcPushVoxCajaBuf(buf, n, x,y,z, sx,sy,sz, r,g,b, caras){
+  const m=(caras==null?63:caras);
+  for(let f=0; f<6; f++){
+    if(!(m & (1<<f))) continue;
+    const k=MC_VOXCARA_LUZ[f];
+    const cr=Math.min(1,r*k), cg=Math.min(1,g*k), cb=Math.min(1,b*k);
+    let o=f*18;
+    for(let i=0;i<6;i++,o+=3){
+      buf[n]=x+MC_VOXCARA_OFF[o]*sx; buf[n+1]=y+MC_VOXCARA_OFF[o+1]*sy; buf[n+2]=z+MC_VOXCARA_OFF[o+2]*sz;
+      buf[n+3]=cr; buf[n+4]=cg; buf[n+5]=cb; buf[n+6]=1;
+      n+=7;
+    }
+  }
+  return n;
+}
+// Fila de `n` cubos desde (x,y,z) por el eje `ax` (0=X,1=Y,2=Z) en el sentido `sg`. Las caras que
+// quedan pegadas entre dos cubos de la fila no se emiten: no se ven y son la mitad de los vértices.
+function mcPushVoxFila(out, x,y,z, ax, sg, n, s, r,g,b){
+  const adelante=MC_VOXCARA_EJE[ax][sg>0?1:0], atras=MC_VOXCARA_OP[adelante];
+  const d=[0,0,0]; d[ax]=sg*s;
+  for(let i=0;i<n;i++){
+    let m=63;
+    if(i>0)   m &= ~(1<<atras);        // pegado al cubo anterior
+    if(i<n-1) m &= ~(1<<adelante);     // pegado al siguiente
+    mcPushVoxCubo(out, x+d[0]*i, y+d[1]*i, z+d[2]*i, s, r,g,b, m);
+  }
+}
+// Corchetes de esquina hechos de voxeles: mismo papel que mcPushCornerBrackets (que los dibuja con
+// líneas), pero con cubos de verdad. En cada una de las 8 esquinas, un cubo BLANCO apoyado por FUERA
+// de la caja —para no tapar lo seleccionado— y tres brazos del color pedido corriendo hacia dentro por
+// las tres aristas. `cfg` = {tam, largo} en voxeles finos (game.selVoxeles). Los brazos se recortan
+// para que los de dos esquinas opuestas no lleguen a tocarse: si se juntan, deja de leerse el corchete.
+// `marcas` = {índice de esquina → [r,g,b]} repinta el cubo de vértice de esa esquina (así se señalan A y
+// B SIN plantar un segundo corchete encima: dos cuerpos sólidos en el mismo sitio se pelean por el píxel).
+// Índice de esquina: bit 0 = está en la cara x1, bit 1 = en y1, bit 2 = en z1 (0 = lado mínimo).
+function mcPushVoxCorchetes(out, x0,y0,z0, x1,y1,z1, cfg, r,g,b, marcas){
+  const s = MC_VOX * Math.max(1, (cfg && cfg.tam|0) || 1);
+  const max = Math.max(0, (cfg && cfg.largo|0) || 0);
+  const cabe = (L) => Math.max(0, Math.min(max, Math.floor((Math.abs(L)/s - 1)/2)));
+  const nx=cabe(x1-x0), ny=cabe(y1-y0), nz=cabe(z1-z0);
+  for(let i=0;i<8;i++){
+    const enX0=!(i&1), enY0=!(i&2), enZ0=!(i&4);
+    const bx=enX0? x0-s : x1, by=enY0? y0-s : y1, bz=enZ0? z0-s : z1;   // cubo de vértice, por fuera de la caja
+    const sx=enX0?1:-1, sy=enY0?1:-1, sz=enZ0?1:-1;                     // «hacia dentro» en cada eje
+    const v=(marcas && marcas[i]) || null;                              // esquina señalada (A/B): su cubo va de otro color
+    mcPushVoxCubo(out, bx,by,bz, s, v?v[0]:1, v?v[1]:1, v?v[2]:1);
+    if(nx) mcPushVoxFila(out, bx+sx*s, by, bz, 0, sx, nx, s, r,g,b);
+    if(ny) mcPushVoxFila(out, bx, by+sy*s, bz, 1, sy, ny, s, r,g,b);
+    if(nz) mcPushVoxFila(out, bx, by, bz+sz*s, 2, sz, nz, s, r,g,b);
+  }
+}
+// ── game.voxelesUI: plantar voxeles de color a mano ───────────────────────────────────────────────
+// Capa de adorno persistente construida con la primitiva de arriba. Coordenadas ENTERAS en la rejilla del
+// propio cubo: con el tamaño por defecto (game.voxelesUI.tam = 1 voxel fino) eso son 16 pasos por bloque,
+// o sea fino = Math.floor(mundo*16); subir `tam` agranda el cubo Y el paso a la vez. Van agrupadas por
+// nombre para poder borrar una tanda sin tocar las demás. No es mundo: no colisiona, no se guarda, no
+// sale en la foto del mapa, y se pierde al recargar.
+const MC_VOXUI_GRUPO='ui';
+// REQ-GLOW5 · un efecto de material NO se declara metiéndolo dentro del color. El color es el color; lo que el
+// voxel HACE (emitir hoy; alpha, metal… mañana) va en CLAVES, sueltas del dibujo, para que añadir la siguiente no
+// obligue a inventar otro prefijo ni a tocar una sola llamada existente (petición del dueño, 2026-08-19).
+//
+//   U.pon(x,y,z, '#ffaa00', g)                      color y ya
+//   U.pon(x,y,z, [r,g,b], g)                        color y ya
+//   U.pon(x,y,z, {col:'#ffaa00', emite:true}, g)    ← LA PUERTA: color + claves de material
+//   U.material(g, {emite:true})                      ← y lo mismo para TODO el grupo, que es lo barato
+//
+// El prefijo '*' de siempre ('*#ffaa00' = emisivo, isGlow en app.js:272) se sigue entendiendo: es la marca que ya
+// usan los dibujos y el pincel del editor, y romperla sería gratis para nadie. Pero solo vale sobre un COLOR EN
+// TEXTO: '*'+[0.6,0.7,0.9] concatena un array y sale '*0.6,0.7,0.9', que no es ningún color → antes se comía el
+// tinte y lo pintaba blanco. Ahora eso avisa por consola en vez de callarse.
+//
+// ⚠️ AUTOILUMINARSE ≠ ALUMBRAR. Toda la capa se dibuja con aEmit=1: una estrella blanca se ve blanca a medianoche
+// sin pedir NADA. `emite` es lo otro —que le caiga luz al terreno—, y a 40 bloques de altura no sirve de nada.
+const MC_VOXUI_CLAVES=['emite'];              // efectos de material reconocidos (crecerá: alfa, metal…)
+function mcVoxUIColor(c){                     // → [r,g,b] con un hueco por clave de MC_VOXUI_CLAVES detrás
+  if(Array.isArray(c)) return c[3] ? [+c[0]||0, +c[1]||0, +c[2]||0, 1] : [+c[0]||0, +c[1]||0, +c[2]||0];
+  if(c && typeof c==='object'){
+    const base = (c.col!==undefined || c.color!==undefined) ? mcVoxUIColor(c.col!==undefined?c.col:c.color)
+                                                            : [+c.r||0, +c.g||0, +c.b||0];
+    const rgb=[base[0], base[1], base[2]];
+    if(c.emite!==undefined ? c.emite : base[3]) rgb.push(1);
+    return rgb;
+  }
+  let t=String(c==null?'#ffffff':c).trim(), emite=0;
+  if(t[0]==='*'){ emite=1; t=t.slice(1).trim(); }
+  const s=t.replace(/^#/,'');
+  const rgb = /^[0-9a-f]{6}$/i.test(s) ? [parseInt(s.slice(0,2),16)/255, parseInt(s.slice(2,4),16)/255, parseInt(s.slice(4,6),16)/255]
+            : /^[0-9a-f]{3}$/i.test(s) ? [parseInt(s[0]+s[0],16)/255, parseInt(s[1]+s[1],16)/255, parseInt(s[2]+s[2],16)/255]
+            : null;
+  if(!rgb){                                   // color ilegible: DECIRLO. Callarse y pintar blanco borra el tinte sin avisar.
+    if(!mc._voxUIQueja || mc._voxUIQueja!==t){ mc._voxUIQueja=t;
+      console.warn('game.voxelesUI: color no entendido «'+t+'» → blanco. ¿Un array concatenado a una cadena? '+
+                   'Para color+efecto usa {col:[r,g,b], emite:true} o U.material(grupo,{emite:true}).'); }
+    return emite ? [1,1,1,1] : [1,1,1];
+  }
+  if(emite) rgb.push(1);
+  return rgb;
+}
+function mcVoxUIMapa(grupo, crear){
+  if(!mc.voxUI){ if(!crear) return null; mc.voxUI=new Map(); }
+  const g=String(grupo||MC_VOXUI_GRUPO);
+  let m=mc.voxUI.get(g);
+  if(!m && crear){ m=new Map(); mc.voxUI.set(g, m); }
+  return m||null;
+}
+function mcVoxUIPon(x,y,z,color,grupo){
+  const m=mcVoxUIMapa(grupo, true);
+  m.set((x|0)+','+(y|0)+','+(z|0), mcVoxUIColor(color));
+  mc.voxUISucio=true;
+}
+// Rehace la geometría de TODA la capa. Solo cuando algo cambió (mc.voxUISucio): la capa está pensada
+// para quedarse quieta muchos frames, así que se paga una vez y luego es un dibujado y ya. Las caras
+// entre dos voxeles pegados —aunque sean de grupos distintos— no se emiten.
+// El GROSOR de un grupo (game.voxelesUI.grosor) agranda SOLO EL CUBO, no el paso: un voxel sigue
+// estando donde estaba, pero se dibuja más gordo. Es lo que permite un cielo de estrellas grandes
+// costando UNA estrella = UN voxel; apilarlas para engordarlas multiplica por `grosor³` la geometría
+// que se sube a la GPU cada frame, y eso sí se come los fps (grosor 16 = 4096 voxeles por estrella).
+function mcVoxUIGrosor(grupo){
+  const g = mc.voxUIGrosor ? mc.voxUIGrosor[grupo] : 0;
+  return Math.max(1, Math.min(64, (g|0) || 1));
+}
+// REQ-GLOW5 · ALCANCE EN BLOQUES de lo que emite este grupo (0 = apagado). Por defecto, el mismo `game.glowLevel`
+// que cualquier emisivo del mundo, para que una partícula alumbre igual que el dibujo del que salió.
+//
+// ⚠️ AQUÍ NO SE TOPA EN MC_MAXLIGHT, y no es un descuido. Ese 15 es el tope de la SIEMBRA ESTÁTICA: el BFS pierde
+// un nivel por bloque y el nivel viaja en la textura de luz, así que subirlo invalida mallas cacheadas y está
+// prohibido a propósito (ver MC_MAXLIGHT). La vía DINÁMICA no pasa por ahí: es aritmética por fragmento en el
+// shader —`rad = clamp((nivel − d*coste)/15, 0, 1)`— y un nivel de 40 significa exactamente lo que parece, 40
+// bloques de alcance, con la misma fórmula y sin trucos. Topar esto en 15 era una analogía mal traída que dejaba
+// **imposible** lo que el dueño pidió: que unas estrellas a 34 bloques de altura alumbren el suelo (2026-08-19).
+const MC_VOXUI_LUZMAX=255;                    // tope de cordura, no físico: el shader normaliza /MC_MAXLIGHT y satura
+function mcVoxUIMat(grupo){ return (mc.voxUIMat && mc.voxUIMat[grupo]) || null; }
+function mcVoxUINivel(grupo){
+  const M = mcVoxUIMat(grupo), v = M ? M.luz : undefined;
+  const n = (v===undefined || v===null) ? (mc.glowLevel!=null?mc.glowLevel:MC_MAXLIGHT) : +v;
+  return Math.max(0, Math.min(MC_VOXUI_LUZMAX, isFinite(n)?n:0));
+}
+// ¿emite ESTE voxel? Manda lo que diga el voxel; si no dice nada, lo que diga el material del GRUPO. Poner
+// `emite` en el grupo es lo barato y lo normal (un sistema de partículas entero); por voxel es la excepción.
+function mcVoxUIEmite(c, mat){ return c[3] ? true : !!(mat && mat.emite); }
+function mcVoxUIGeom(){
+  if(!mc.voxUISucio && mc.voxUIArr) return mc.voxUIArr;
+  const paso=MC_VOX*Math.max(1, mc.voxUITam|0);
+  const DIR=[[0,-1,0],[0,1,0],[0,0,-1],[0,0,1],[1,0,0],[-1,0,0]];   // mismo orden que MC_VOXCARA_*
+  // Las caras pegadas solo se comen entre voxeles del MISMO grosor: un cubo gordo no tapa la cara del
+  // fino de al lado. Con todo a grosor 1 (lo de siempre) esto es exactamente el conjunto único de antes.
+  const ocupaPor=new Map();
+  if(mc.voxUI) for(const [nombre,m] of mc.voxUI){
+    const g=mcVoxUIGrosor(nombre);
+    let s=ocupaPor.get(g); if(!s){ s=new Set(); ocupaPor.set(g,s); }
+    for(const k of m.keys()) s.add(k);
+  }
+  // Un Float32Array REUTILIZADO, del tamaño del peor caso (6 caras × 6 vértices × 7 flotantes), y se
+  // devuelve una VISTA de lo escrito. No es solo ahorrarse el `push`: `mcDrawArr` puede subir esto a la
+  // GPU tal cual, sin volver a copiarlo. El búfer no encoge —crece hasta el máximo que se haya pedido
+  // nunca y ahí se queda—: son 420 copos ≈ 0,4 MB, y así ningún frame asigna memoria.
+  let total=0;
+  if(mc.voxUI) for(const m of mc.voxUI.values()) total+=m.size;
+  const cap=total*36*7;
+  let buf=mc._voxUIBuf;
+  if(!buf || buf.length<cap) buf=mc._voxUIBuf=new Float32Array(Math.max(cap, 4096));
+  let n=0;
+  if(mc.voxUI) for(const [nombre,m] of mc.voxUI){
+    const lado=paso*mcVoxUIGrosor(nombre), ocupa=ocupaPor.get(mcVoxUIGrosor(nombre));
+    for(const [k,c] of m){
+      const q=k.split(','), x=+q[0], y=+q[1], z=+q[2];
+      let mask=0;
+      for(let f=0; f<6; f++){ const d=DIR[f];
+        if(!ocupa.has((x+d[0])+','+(y+d[1])+','+(z+d[2]))) mask|=(1<<f); }
+      if(mask) n=mcPushVoxCuboBuf(buf, n, x*paso, y*paso, z*paso, lado, c[0], c[1], c[2], mask);
+    }
+  }
+  mc.voxUISucio=false; mc.voxUIArr=buf.subarray(0,n);
+  return mc.voxUIArr;
+}
+// REQ-GLOW5 · las luces que aporta la capa, en coordenadas de MUNDO. Solo los voxeles marcados emisivos ('*#hex').
+//
+// Van por la vía DINÁMICA (mcDynSync → uDynPos, por fragmento), NUNCA por la siembra estática de bloque: una
+// partícula se mueve cada frame y mcComputeBlockLight es un BFS + re-mallado de chunk (BUG-GLOW3, la misma razón
+// por la que un emisor montado en un agente tampoco se hornea). El fuego puede parpadear a 60 fps sin coste.
+//
+// AGRUPADAS POR BLOQUE, no una luz por voxel: 200 voxeles de fuego son 200 partículas de 1/16 de bloque pegadas,
+// y sin agrupar se comerían las MC_DYN_MAX plazas con ocho luces prácticamente en el mismo punto —dejando fuera
+// la antorcha de al lado y sin alumbrar más—. Una luz por celda de mundo, en el centroide de sus voxeles.
+function mcVoxUILuces(){
+  if(!mc.voxUISucio && mc._voxUILuz) return mc._voxUILuz;          // ⚠️ NO limpia voxUISucio: eso es de mcVoxUIGeom
+  const out=[];
+  if(mc.voxUI && mc.voxUILuces!==false){
+    const paso=MC_VOX*Math.max(1, mc.voxUITam|0), celdas=new Map();
+    for(const [nombre,m] of mc.voxUI){
+      const nivel=mcVoxUINivel(nombre); if(!(nivel>0)) continue;   // grupo con la luz apagada: ni se recorre
+      const mat=mcVoxUIMat(nombre);
+      const medio=paso*mcVoxUIGrosor(nombre)*0.5;
+      for(const [k,c] of m){
+        if(!mcVoxUIEmite(c, mat)) continue;                        // este voxel no emite: es adorno brillante y ya
+        const q=k.split(','), wx=+q[0]*paso+medio, wy=+q[1]*paso+medio, wz=+q[2]*paso+medio;
+        const ck=Math.floor(wx)+','+Math.floor(wy)+','+Math.floor(wz);
+        let a=celdas.get(ck); if(!a){ a=[0,0,0,0,0]; celdas.set(ck,a); }
+        a[0]+=wx; a[1]+=wy; a[2]+=wz; a[3]++; if(nivel>a[4]) a[4]=nivel;
+      }
+    }
+    for(const a of celdas.values()) out.push(a[0]/a[3], a[1]/a[3], a[2]/a[3], a[4]);
+  }
+  mc._voxUILuz=out;
+  return out;
+}
+// Los cubos de game.voxelesUI son CUERPOS SÓLIDOS DEL MUNDO (partículas, sangre, estrellas), no adorno de
+// interfaz ⇒ se dibujan CON EL MUNDO: después de todo lo opaco y ANTES de la pasada translúcida y del cielo.
+// Iban al final, en mcDrawOverlays, y ahí el agua y el cristal ya se habían pintado SIN escribir profundidad
+// (pasada 3, `depthMask(false)`): un voxel que estuviera detrás pasaba el test de profundidad contra lo que
+// hubiera *tras* el agua y se pintaba encima de ella. Con las estrellas altas no se veía nunca; el dueño lo
+// cazó al bajarlas a la altura de la escena. Aquí el agua se mezcla ENCIMA, que es lo correcto.
+// Mismos uniformes que el overlay (sin niebla y `aEmit=1` ⇒ SIN LUZ: una estrella blanca sigue siendo blanca
+// a medianoche) y mismo enrollado que los corchetes de selección (mcPushBoxTris va hacia DENTRO ⇒ frontFace CW).
+function mcDrawVoxUI(pj, view){
+  const gl=mc.gl, SL=mc.structLoc;
+  if(!mc.structProg) return;
+  // Dos capas, mismo material y mismo sitio del frame: la VIVA (game.voxelesUI, una malla que se sube
+  // cada frame) y la HORNEADA (voxeles finos por chunk, un VBO que ya está en la GPU). Comparten esta
+  // función porque comparten los uniformes y el manoseo del estado de GL, que es lo delicado.
+  const arr = (mc.voxUI && mc.voxUIAlfa>0 && !mc.voxUIEncima) ? mcVoxUIGeom() : null;
+  const viva = !!(arr && arr.length);
+  let horneada = false;
+  if(mc.voxFino) for(const ch of mc.voxFino.values()) if(ch.count){ horneada=true; break; }
+  if(!viva && !horneada) return;
+  gl.useProgram(mc.structProg);
+  gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
+  gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
+  gl.uniform3f(SL.uSky,mcCieloEf[0],mcCieloEf[1],mcCieloEf[2]);
+  gl.uniform1f(SL.uFogMin, 0); gl.uniform1f(SL.uFogNear, pj.far*8); gl.uniform1f(SL.uFogFar, pj.far*10);
+  mcSunUniforms(SL, null);
+  if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);
+  if(SL.aEmit  >= 0) gl.vertexAttrib1f(SL.aEmit,  1.0);
+  if(SL.aAlpha >= 0) gl.vertexAttrib1f(SL.aAlpha, 1.0);
+  mcAttribs([SL.aPos, SL.aColor, SL.aShade]);
+  // Esta pasada va EN MEDIO del frame, no al final: se deja el estado exactamente como estaba o la pasada
+  // translúcida hereda el culling/offset de aquí (es el mismo pisotón que BUG-FLUID6, por el otro lado).
+  const cullOn=gl.isEnabled(gl.CULL_FACE), ff=gl.getParameter(gl.FRONT_FACE),
+        poOn=gl.isEnabled(gl.POLYGON_OFFSET_FILL), blOn=gl.isEnabled(gl.BLEND);
+  gl.disable(gl.POLYGON_OFFSET_FILL);
+  gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
+  gl.frontFace(gl.CW); gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA); gl.blendColor(0,0,0,mc.voxUIAlfa);
+  if(viva) mcDrawArr(SL, arr, gl.TRIANGLES);
+  // Lo horneado va OPACO (alfa 1): no es adorno que se atenúe con `game.voxelesUI.alfa`, es lo que ya
+  // se quedó en el mundo. Un drawArrays por chunk y ni un byte subido a la GPU.
+  if(horneada){
+    gl.blendColor(0,0,0,1);
+    // …y CON NIEBLA, al revés que la capa viva. Lo horneado se quedó en el suelo: es paisaje, y un
+    // manto a 80 bloques tiene que irse al gris del horizonte como el terreno que hay debajo. Sin esto
+    // se veía a todo color contra la niebla, que es lo que cazó el dueño en la nevada de oro.
+    // ⚠️ La niebla NO basta con ponerla: en el shader va multiplicada por (1-emit), así que mientras
+    // `aEmit` valga 1 (a pleno brillo, lo que quieren las estrellas de la capa viva) la niebla sale 0.
+    // Las dos cosas son el mismo interruptor y por eso viajan juntas.
+    gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
+    if(SL.aEmit >= 0) gl.vertexAttrib1f(SL.aEmit, 0.0);
+    for(const ch of mc.voxFino.values()){
+      if(!ch.count || !ch.vbo) continue;
+      gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
+      gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,7*4,0);
+      gl.vertexAttribPointer(SL.aColor,3,gl.FLOAT,false,7*4,12);
+      gl.vertexAttribPointer(SL.aShade,1,gl.FLOAT,false,7*4,24);
+      gl.drawArrays(gl.TRIANGLES,0,ch.count);
+    }
+  }
+  if(blOn) gl.enable(gl.BLEND); else gl.disable(gl.BLEND);
+  gl.frontFace(ff); if(cullOn) gl.enable(gl.CULL_FACE); else gl.disable(gl.CULL_FACE);
+  if(poOn) gl.enable(gl.POLYGON_OFFSET_FILL);
+}
+game.voxelesUI = {
+  // pon(x,y,z, color, grupo) — coordenadas en voxeles finos (16 por bloque)
+  // `color` = '#rrggbb' | '*#rrggbb' | [r,g,b] | {col:…, emite:true} (efectos de material por CLAVE, ver material())
+  pon(x,y,z,color,grupo){ mcVoxUIPon(x,y,z,color,grupo); return this; },
+  quita(x,y,z,grupo){ const m=mcVoxUIMapa(grupo,false); if(m && m.delete((x|0)+','+(y|0)+','+(z|0))) mc.voxUISucio=true; return this; },
+  limpia(grupo){ if(!mc.voxUI) return this;
+    if(grupo==null) mc.voxUI.clear(); else mc.voxUI.delete(String(grupo));
+    mc.voxUISucio=true; return this; },
+  // grosor(grupo) lee · grosor(grupo, n) agranda el CUBO de ese grupo a n voxeles finos SIN moverlo:
+  // 240 estrellas de grosor 16 siguen siendo 240 voxeles, no 983 040. Es ajuste del grupo, así que
+  // sobrevive a limpia() y basta con ponerlo una vez.
+  grosor(grupo, n){
+    const g=String(grupo);
+    if(n===undefined) return mcVoxUIGrosor(g);
+    if(!mc.voxUIGrosor) mc.voxUIGrosor={};
+    mc.voxUIGrosor[g]=Math.max(1, Math.min(64, (+n|0)||1));
+    mc.voxUISucio=true; return this;
+  },
+  // REQ-GLOW5 · material(grupo) lee · material(grupo, {…}) fija los EFECTOS DE MATERIAL de todo el grupo.
+  // Es la puerta por claves que pidió el dueño: mañana entran `alfa`, `metal`… sin inventar otro prefijo de color
+  // ni tocar una sola llamada a pon(). Se mezcla con lo que hubiera (no lo reemplaza) y sobrevive a limpia(),
+  // igual que grosor(): se pone una vez al montar el sistema de partículas y ya.
+  //   emite : true/false — ¿alumbra el terreno? (autoiluminarse es GRATIS y ya lo hace toda la capa; esto es lo otro)
+  //   luz   : ALCANCE EN BLOQUES de lo que emite; 0 lo apaga. Por defecto game.glowLevel (15). NO topa en 15: una
+  //           estrella a 34 bloques necesita `luz: 40` para llegar al suelo, y es la misma fórmula, sin trucos.
+  material(grupo, obj){
+    const g=String(grupo);
+    if(obj===undefined) return Object.assign({ emite:false, luz:mcVoxUINivel(g) }, mcVoxUIMat(g));
+    if(!mc.voxUIMat) mc.voxUIMat={};
+    const M = mc.voxUIMat[g] || (mc.voxUIMat[g]={});
+    if(obj===null){ delete mc.voxUIMat[g]; mc._voxUILuz=null; return this; }
+    for(const k in obj){
+      if(k==='luz'){ M.luz=Math.max(0, Math.min(MC_VOXUI_LUZMAX, (+obj.luz|0)||0)); continue; }
+      if(k==='emite'){ M.emite=!!obj.emite; continue; }
+      console.warn('game.voxelesUI.material: clave desconocida «'+k+'» (hoy: '+MC_VOXUI_CLAVES.join(', ')+', luz)');
+    }
+    mc._voxUILuz=null; return this;
+  },
+  // Atajo de material(grupo,{luz:n}): alcance en bloques de lo que ya emite. NO decide quién emite.
+  luz(grupo, n){
+    if(n===undefined) return mcVoxUINivel(String(grupo));
+    return this.material(grupo, { luz:n });
+  },
+  linea(x0,y0,z0, x1,y1,z1, color, grupo){          // recta de voxeles (paso entero, sin huecos)
+    const dx=(x1|0)-(x0|0), dy=(y1|0)-(y0|0), dz=(z1|0)-(z0|0);
+    const n=Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz));
+    for(let i=0;i<=n;i++){ const t=n?i/n:0;
+      mcVoxUIPon(Math.round(x0+dx*t), Math.round(y0+dy*t), Math.round(z0+dz*t), color, grupo); }
+    return this;
+  },
+  caja(x0,y0,z0, x1,y1,z1, color, grupo){           // las 12 aristas de una caja, en voxeles
+    const ax=Math.min(x0,x1), bx=Math.max(x0,x1), ay=Math.min(y0,y1), by=Math.max(y0,y1), az=Math.min(z0,z1), bz=Math.max(z0,z1);
+    for(const y of [ay,by]) for(const z of [az,bz]) this.linea(ax,y,z, bx,y,z, color, grupo);
+    for(const x of [ax,bx]) for(const z of [az,bz]) this.linea(x,ay,z, x,by,z, color, grupo);
+    for(const x of [ax,bx]) for(const y of [ay,by]) this.linea(x,y,az, x,y,bz, color, grupo);
+    return this;
+  },
+  info(){ const g={}; let t=0;
+    if(mc.voxUI) for(const [k,m] of mc.voxUI){ g[k]=m.size; t+=m.size; }
+    return { total:t, grupos:g, tam:mc.voxUITam, alfa:mc.voxUIAlfa,
+             grosores:Object.assign({}, mc.voxUIGrosor), verts:(mc.voxUIArr?mc.voxUIArr.length/7:0),
+             luces:(mc.voxUILuces!==false), materiales:Object.assign({}, mc.voxUIMat),
+             focosVivos:(mcVoxUILuces().length/4) }; },
+  get tam(){ return mc.voxUITam; },
+  set tam(v){ mc.voxUITam=Math.max(1, Math.min(16, (+v|0)||1)); mc.voxUISucio=true; },
+  get alfa(){ return mc.voxUIAlfa; },
+  set alfa(v){ mc.voxUIAlfa=Math.max(0, Math.min(1, isFinite(+v)?+v:1)); },
+  // encima: false (por defecto) = la capa se dibuja con el mundo y la tapa lo que tenga delante, agua y
+  // cristal incluidos. true = se dibuja al final, encima de todo, sin que nada la tape (marcadores que se
+  // quieren ver a través de las paredes). Es solo DÓNDE se dibuja: no cambia ni el coste ni la geometría.
+  get encima(){ return !!mc.voxUIEncima; },
+  set encima(v){ mc.voxUIEncima=!!v; },
+  // REQ-GLOW5 · interruptor de TODA la luz de la capa, para medir fps o quitarla de en medio sin borrar nada.
+  get luces(){ return mc.voxUILuces!==false; },
+  set luces(v){ mc.voxUILuces=!!v; mc._voxUILuz=null; },
+};
 function mcGetSelectedBlockRGB(){
   const sk = mc.slotStruct ? mc.slotStruct[mc.sel] : null;
   const mat = mc.hotbar ? mc.hotbar[mc.sel] : null;
@@ -12099,7 +13622,9 @@ function mcDrawArr(SL, arr, mode){   // sube arr (7 floats/vért) al VBO de over
   if(!arr.length) return;
   const gl=mc.gl; if(!mc.ovbo) mc.ovbo=gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, mc.ovbo);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.DYNAMIC_DRAW);
+  // Si ya viene en typed array (la capa de game.voxelesUI), se sube TAL CUAL: copiarlo otra vez eran
+  // 0,58 ms por frame con la nieve puesta, y es una copia de 105 840 flotantes para no cambiar nada.
+  gl.bufferData(gl.ARRAY_BUFFER, (arr instanceof Float32Array) ? arr : new Float32Array(arr), gl.DYNAMIC_DRAW);
   gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,7*4,0);
   gl.vertexAttribPointer(SL.aColor,3,gl.FLOAT,false,7*4,12);
   gl.vertexAttribPointer(SL.aShade,1,gl.FLOAT,false,7*4,24);
@@ -12209,7 +13734,9 @@ function mcPushVisionCones(out){
 }
 function mcDrawOverlays(pj, view){
   const gl=mc.gl, SL=mc.structLoc; if(!mc.structProg) return;
-  const playing=(document.pointerLockElement===mc.canvas);
+  // `!mc._guardada` (REQ-TOOL5): guardada = herramienta nula ⇒ no dibuja NADA suyo. `playing` gobierna las
+  // guías de Pintar, el fantasma de Construir y las cajas de Seleccionar/Pegar, así que basta con apagarlo.
+  const playing=mcMandoActivo() && !mc._guardada;   // REQ-MOV1 · en táctil no hay pointer-lock que valga (y la pantalla completa lo suelta): manda mcMandoActivo
   const lines=[], structLines=[], xray=[];   // lines/structLines: fantasma de bloque (game.ghostAlpha) vs. huella de estructura (game.structGhostAlpha)
   const paintLines=[];                       // guías activas de la herramienta Pintar (opacas con corchetes en esquina)
   // 1) Herramienta Pintar: guías sobre el bloque apuntado
@@ -12263,12 +13790,28 @@ function mcDrawOverlays(pj, view){
   if(mc.noteAlpha>0) for(const k in mc.notes){ const q=k.split(','), x=+q[0], y=+q[1], z=+q[2];
     if(conCartel.has(k)) continue;
     if(Math.abs(x+0.5-p[0])>R || Math.abs(z+0.5-p[2])>R) continue;
-    mcPushBoxTris(notes, x+0.34,y+1.16,z+0.44, x+0.66,y+1.5,z+0.5, 1,0.84,0.22);   // hoja del post-it (cara amarilla)
+    // El tinte de la nota manda también aquí: el post-it es lo que se ve cuando el cartel no cabe
+    // (pasado MC_NOTE_SIGN_MAX) o están apagados, y un marcador que ignore el color mentiría.
+    const T=mcNoteTinteRGB(mcNoteTinte(k));
+    const hoja=T?mcTintaColor(T, 1,0.84,0.22):[1,0.84,0.22];
+    mcPushBoxTris(notes, x+0.34,y+1.16,z+0.44, x+0.66,y+1.5,z+0.5, hoja[0],hoja[1],hoja[2]);   // hoja del post-it
     mcPushBoxTris(notes, x+0.47,y+1.0,z+0.47,  x+0.53,y+1.18,z+0.53, 0.55,0.4,0.12); // «pincho» que lo clava al bloque
   }
   // 4) Herramienta Seleccionar: caja CIAN viva de la selección confirmada + previa ámbar con corchetes y rejilla
   const selLines=[];
-  if(mc.tool==='select' && !mc.escaparate){
+  const selVox=[];   // los corchetes de esta herramienta van en VOXELES (triángulos), no en líneas
+  // Único sitio donde se elige con qué se dibuja un corchete de selección: cubos (por defecto) o las
+  // líneas de siempre si el dueño apaga game.selVoxeles. `L` solo lo usa la variante de líneas y
+  // `marcas` solo la de voxeles (en líneas, señalar una esquina es plantarle otro corchete pequeño).
+  const vox=!!(mc.selVoxeles && mc.selVoxeles.activo);
+  const corchete=(x0,y0,z0, x1,y1,z1, L, r,g,b, marcas)=> vox
+    ? mcPushVoxCorchetes(selVox, x0,y0,z0, x1,y1,z1, mc.selVoxeles, r,g,b, marcas)
+    : mcPushCornerBrackets(selLines, x0,y0,z0, x1,y1,z1, L, r,g,b);
+  // Qué esquina de la caja es esta celda (mismo índice que usa mcPushVoxCorchetes).
+  const iEsquina=(p, x0,y0,z0)=> (p[0]===x0?0:1) | (p[1]===y0?0:2) | (p[2]===z0?0:4);
+  // En modo Pegar la caja del Ctrl+C se calla: los corchetes tienen que estar donde va a caer el cúmulo
+  // (los pinta 4b), no donde se copió — si no, se ven dos selecciones y la marcada es la de atrás.
+  if(mc.tool==='select' && !mc.escaparate && !mc.pasteActive && !mc._guardada){   // guardada: ni la caja confirmada (REQ-TOOL5)
     const cyan = [0.15, 0.95, 1.0];
     const amb = [1.0, 0.88, 0.15];
     if(mc.selBox){
@@ -12277,11 +13820,20 @@ function mcDrawOverlays(pj, view){
       const y0=Math.min(a[1],b[1]), y1=Math.max(a[1],b[1])+1;
       const z0=Math.min(a[2],b[2]), z1=Math.max(a[2],b[2])+1;
       mcPushBoxEdges(selLines, x0, y0, z0, x1, y1, z1, cyan[0], cyan[1], cyan[2]);
-      mcPushCornerBrackets(selLines, x0, y0, z0, x1, y1, z1, 0.65, cyan[0], cyan[1], cyan[2]);
+      // Las esquinas extremas A y B son DOS DE LAS OCHO de esta misma caja: en voxeles se señalan
+      // repintando su cubo de vértice de ámbar, no plantándoles otro corchete encima (que es lo que
+      // se hacía con líneas, donde solaparse no costaba nada).
+      // Se marcan las DOS puntas de la arista vertical de esa esquina (`i` e `i^2`, el bit de altura):
+      // el corchete correcto de una celda a ras de suelo cae en la punta de ABAJO, enterrada en el
+      // terreno, y desde arriba —que es desde donde se selecciona— no se vería ni una.
+      const marcas={}; const amarillo=[1.0,0.85,0.2];
+      for(const p of [a,b]){ const i=iEsquina(p, x0,y0,z0); marcas[i]=amarillo; marcas[i^2]=amarillo; }
+      corchete(x0, y0, z0, x1, y1, z1, 0.65, cyan[0], cyan[1], cyan[2], marcas);
       mcPushGridDividers(selLines, x0, y0, z0, x1, y1, z1, 0.25, 0.85, 0.95);
-      // Marcador de las esquinas extremas
-      mcPushCornerBrackets(selLines, a[0], a[1], a[2], a[0]+1, a[1]+1, a[2]+1, 0.35, 1.0, 0.85, 0.2);
-      mcPushCornerBrackets(selLines, b[0], b[1], b[2], b[0]+1, b[1]+1, b[2]+1, 0.35, 1.0, 0.85, 0.2);
+      if(!vox){
+        mcPushCornerBrackets(selLines, a[0], a[1], a[2], a[0]+1, a[1]+1, a[2]+1, 0.35, 1.0, 0.85, 0.2);
+        mcPushCornerBrackets(selLines, b[0], b[1], b[2], b[0]+1, b[1]+1, b[2]+1, 0.35, 1.0, 0.85, 0.2);
+      }
     }
     if(mc.selA && playing){
       const near=mcRaycast();
@@ -12291,11 +13843,13 @@ function mcDrawOverlays(pj, view){
         const y0=Math.min(a[1],c[1]), y1=Math.max(a[1],c[1])+1;
         const z0=Math.min(a[2],c[2]), z1=Math.max(a[2],c[2])+1;
         mcPushBoxEdges(selLines, x0, y0, z0, x1, y1, z1, amb[0], amb[1], amb[2]);
-        mcPushCornerBrackets(selLines, x0, y0, z0, x1, y1, z1, 0.55, amb[0], amb[1], amb[2]);
+        // Esquina A fija: mismo criterio que arriba (cubo de vértice cian, sin corchete duplicado)
+        const marcaA={}, iA=iEsquina(a, x0,y0,z0);
+        marcaA[iA]=marcaA[iA^2]=[cyan[0], cyan[1], cyan[2]];
+        corchete(x0, y0, z0, x1, y1, z1, 0.55, amb[0], amb[1], amb[2], marcaA);
         mcPushGridDividers(selLines, x0, y0, z0, x1, y1, z1, 0.9, 0.8, 0.3);
-        // Esquina A fija
         mcPushBoxEdges(selLines, a[0], a[1], a[2], a[0]+1, a[1]+1, a[2]+1, cyan[0], cyan[1], cyan[2]);
-        mcPushCornerBrackets(selLines, a[0], a[1], a[2], a[0]+1, a[1]+1, a[2]+1, 0.4, cyan[0], cyan[1], cyan[2]);
+        if(!vox) mcPushCornerBrackets(selLines, a[0], a[1], a[2], a[0]+1, a[1]+1, a[2]+1, 0.4, cyan[0], cyan[1], cyan[2]);
       }
     } else if(!mc.selBox && playing){
       // Hover inicial sobre el bloque para marcar esquina A
@@ -12303,7 +13857,7 @@ function mcDrawOverlays(pj, view){
       if(near && near.cell[1]>=0 && mcSolid(near.cell[0], near.cell[1], near.cell[2])){
         const c=near.cell;
         mcPushBoxEdges(selLines, c[0], c[1], c[2], c[0]+1, c[1]+1, c[2]+1, cyan[0], cyan[1], cyan[2]);
-        mcPushCornerBrackets(selLines, c[0], c[1], c[2], c[0]+1, c[1]+1, c[2]+1, 0.4, cyan[0], cyan[1], cyan[2]);
+        corchete(c[0], c[1], c[2], c[0]+1, c[1]+1, c[2]+1, 0.4, cyan[0], cyan[1], cyan[2]);
       }
     }
   }
@@ -12315,7 +13869,7 @@ function mcDrawOverlays(pj, view){
       const { ox, oy, oz, rw, rh, rd } = org;
       const cyan = [0.2, 0.9, 1.0];
       mcPushBoxEdges(selLines, ox, oy, oz, ox + rw, oy + rh, oz + rd, cyan[0], cyan[1], cyan[2]);
-      mcPushCornerBrackets(selLines, ox, oy, oz, ox + rw, oy + rh, oz + rd, 0.45, cyan[0], cyan[1], cyan[2]);
+      corchete(ox, oy, oz, ox + rw, oy + rh, oz + rd, 0.45, cyan[0], cyan[1], cyan[2]);
       mcPushGridDividers(selLines, ox, oy, oz, ox + rw, oy + rh, oz + rd, 0.25, 0.85, 0.95);
       // Con Ctrl pulsado: la celda que señalas dentro del cúmulo se pinta en ÁMBAR y será el agarre al
       // soltar. Mismo código de color que la herramienta volumen, para que el gesto se lea igual.
@@ -12336,14 +13890,21 @@ function mcDrawOverlays(pj, view){
 
   // 5) Herramienta Volumen (tool === 'box'): caja, rejilla y guías de esquina verdes/blancas
   const boxLines=[];
-  if(mc.tool==='box' && !mc.escaparate){
+  // …salvo los corchetes, que van en VOXELES como los de Seleccionar (orden del dueño, 2026-08-18) y por
+  // eso comparten interruptor: `game.selVoxeles` manda en las dos herramientas. Aquí no hay `marcas` —
+  // el ancla del Ctrl ya se señala con su propio corchete ámbar, que también sale de cubos.
+  const boxVox=[];
+  const corcheteBox=(x0,y0,z0, x1,y1,z1, L, r,g,b)=> vox
+    ? mcPushVoxCorchetes(boxVox, x0,y0,z0, x1,y1,z1, mc.selVoxeles, r,g,b, null)
+    : mcPushCornerBrackets(boxLines, x0,y0,z0, x1,y1,z1, L, r,g,b);
+  if(mc.tool==='box' && !mc.escaparate && !mc._guardada){   // guardada: sin caja, sin guías y sin el cubo del punto de mira (REQ-TOOL5)
     const near=mcRaycast(mcReach(), true);
     const grn=[0.15, 0.98, 0.3];
     if(!mc.boxStep || mc.boxStep===0){
       if(near){
         const n=near.normal, px=near.cell[0]+n[0], py=near.cell[1]+n[1], pz=near.cell[2]+n[2];
         mcPushBoxEdges(boxLines, px,py,pz, px+1,py+1,pz+1, grn[0],grn[1],grn[2]);
-        mcPushCornerBrackets(boxLines, px,py,pz, px+1,py+1,pz+1, 0.35, grn[0],grn[1],grn[2]);
+        corcheteBox(px,py,pz, px+1,py+1,pz+1, 0.35, grn[0],grn[1],grn[2]);
       }
     } else if(mc.boxStep===1){
       const a=mc.boxA;
@@ -12355,7 +13916,7 @@ function mcDrawOverlays(pj, view){
         const ay=a[1];
         mcPushBoxEdges(boxLines, x0,ay,z0, x1+1,ay+1,z1+1, grn[0],grn[1],grn[2]);
         mcPushGridDividers(boxLines, x0,ay,z0, x1+1,ay+1,z1+1, 0.25, 0.85, 0.4);
-        mcPushCornerBrackets(boxLines, x0,ay,z0, x1+1,ay+1,z1+1, 0.55, grn[0],grn[1],grn[2]);
+        corcheteBox(x0,ay,z0, x1+1,ay+1,z1+1, 0.55, grn[0],grn[1],grn[2]);
       }
     } else if(mc.boxStep===2){
       const a=mc.boxA, b=mc.boxB;
@@ -12366,7 +13927,7 @@ function mcDrawOverlays(pj, view){
         const z0=Math.min(a[2],b[2]), z1=Math.max(a[2],b[2]);
         mcPushBoxEdges(boxLines, x0,y0,z0, x1+1,y1Max+1,z1+1, grn[0],grn[1],grn[2]);
         mcPushGridDividers(boxLines, x0,y0,z0, x1+1,y1Max+1,z1+1, 0.25, 0.85, 0.4);
-        mcPushCornerBrackets(boxLines, x0,y0,z0, x1+1,y1Max+1,z1+1, 0.55, grn[0],grn[1],grn[2]);
+        corcheteBox(x0,y0,z0, x1+1,y1Max+1,z1+1, 0.55, grn[0],grn[1],grn[2]);
       }
     } else if(mc.boxStep===3 && mc.boxDims){
       const [w,h,d] = mc.boxDims;
@@ -12388,7 +13949,7 @@ function mcDrawOverlays(pj, view){
         const ox = basePos[0] - rax, oy = basePos[1] - ray, oz = basePos[2] - raz;
         mcPushBoxEdges(boxLines, ox,oy,oz, ox+rw,oy+rh,oz+rd, grn[0],grn[1],grn[2]);
         mcPushGridDividers(boxLines, ox,oy,oz, ox+rw,oy+rh,oz+rd, 0.25, 0.85, 0.4);
-        mcPushCornerBrackets(boxLines, ox,oy,oz, ox+rw,oy+rh,oz+rd, 0.55, grn[0],grn[1],grn[2]);
+        corcheteBox(ox,oy,oz, ox+rw,oy+rh,oz+rd, 0.55, grn[0],grn[1],grn[2]);
         if(mc.boxCtrlHeld){
           const hover = mcBoxRaycastLocal(ox, oy, oz, rw, rh, rd);
           if(hover) mc.boxAnchorHover = hover;
@@ -12396,7 +13957,7 @@ function mcDrawOverlays(pj, view){
           if(hTarget){
             const [hx, hy, hz] = hTarget;
             mcPushBoxEdges(boxLines, ox+hx, oy+hy, oz+hz, ox+hx+1, oy+hy+1, oz+hz+1, 1.0, 0.85, 0.1);
-            mcPushCornerBrackets(boxLines, ox+hx, oy+hy, oz+hz, ox+hx+1, oy+hy+1, oz+hz+1, 0.35, 1.0, 0.85, 0.1);
+            corcheteBox(ox+hx, oy+hy, oz+hz, ox+hx+1, oy+hy+1, oz+hz+1, 0.35, 1.0, 0.85, 0.1);
           }
         } else if(rax !== 0 || ray !== 0 || raz !== 0){
           mcPushBoxEdges(boxLines, ox+rax, oy+ray, oz+raz, ox+rax+1, oy+ray+1, oz+raz+1, 0.2, 0.85, 0.95);
@@ -12445,7 +14006,10 @@ function mcDrawOverlays(pj, view){
 
   const showGhost=lines.length && mc.ghostAlpha>0;
   const showStruct=structLines.length && mc.structGhostAlpha>0;
-  if(!showGhost && !showStruct && !paintLines.length && !xray.length && !xrayLines.length && !notes.length && !selLines.length && !boxLines.length && !toolDebugLines.length) return;
+  // La capa game.voxelesUI solo cae aquí si se pidió `encima` (ver mcDrawVoxUI): por defecto se dibuja con el
+  // mundo, para que el agua y el cristal la tapen en vez de quedar ella pintada encima.
+  const voxUI=(mc.voxUI && mc.voxUIAlfa>0 && mc.voxUIEncima) ? mcVoxUIGeom() : null;   // (geometría cacheada)
+  if(!showGhost && !showStruct && !paintLines.length && !xray.length && !xrayLines.length && !notes.length && !selLines.length && !selVox.length && !boxLines.length && !boxVox.length && !toolDebugLines.length && !(voxUI && voxUI.length)) return;
 
   gl.useProgram(mc.structProg);
   gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
@@ -12486,6 +14050,22 @@ function mcDrawOverlays(pj, view){
   if(paintLines.length){gl.blendColor(0,0,0,0.95);                mcDrawArr(SL, paintLines,  gl.LINES); }
   if(notes.length){     gl.blendColor(0,0,0,mc.noteAlpha);        mcDrawArr(SL, notes,       gl.TRIANGLES); }   // t1 · post-its (relleno, ocluidos por muros)
   if(selLines.length){  gl.blendColor(0,0,0,0.98);                mcDrawArr(SL, selLines,    gl.LINES); }    // herramienta Seleccionar: caja(s) de selección
+  // Cubos de color (corchetes de selección + capa game.voxelesUI). Son CUERPOS SÓLIDOS, no rayas, y por
+  // eso son los únicos del overlay que quieren las dos cosas que el resto no:
+  //   · culling — sin descartar las caras traseras, y sin z entre las caras del propio cubo, el píxel se
+  //     lo queda la última cara enviada y el cubo sale plano. Enrollado el de mcPushBoxTris (producto
+  //     vectorial hacia DENTRO) ⇒ frontFace(CW).
+  //   · ESCRIBIR PROFUNDIDAD — el resto del overlay va con depthMask(false) porque son líneas sueltas que
+  //     no se tapan entre sí; aquí manda el orden de dibujado, y como los brazos se envían después del
+  //     cubo de vértice, un brazo que pasa por DETRÁS repintaba el cubo blanco de delante: se veía «a
+  //     través» de sus caras (lo cazó el dueño en la foto 47). Con z propio, cada cubo tapa lo que debe.
+  if(selVox.length || boxVox.length || (voxUI && voxUI.length)){
+    gl.frontFace(gl.CW); gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); gl.depthMask(true);
+    if(selVox.length){         gl.blendColor(0,0,0,0.98);         mcDrawArr(SL, selVox, gl.TRIANGLES); }   // corchetes de esquina en voxeles (game.selVoxeles)
+    if(boxVox.length){         gl.blendColor(0,0,0,0.98);         mcDrawArr(SL, boxVox, gl.TRIANGLES); }   // ídem los de la herramienta Volumen
+    if(voxUI && voxUI.length){ gl.blendColor(0,0,0,mc.voxUIAlfa); mcDrawArr(SL, voxUI,  gl.TRIANGLES); }   // voxeles plantados a mano (game.voxelesUI)
+    gl.depthMask(false); gl.disable(gl.CULL_FACE); gl.frontFace(gl.CCW);
+  }
   if(boxLines.length){  gl.blendColor(0,0,0,0.95);                mcDrawArr(SL, boxLines,    gl.LINES); }    // herramienta Volumen: caja y guías de esquina
   gl.disable(gl.BLEND);
   gl.depthMask(true); gl.enable(gl.DEPTH_TEST);   // restaura estado para el próximo frame
@@ -12886,7 +14466,7 @@ async function mcRestampAll(){
   // Reconstruye cada instancia en un objeto NUEVO y solo entonces libera la vieja y la sustituye en su sitio: así
   // ninguna estructura desaparece del render mientras se re-hornea (evita el parpadeo de ~1s al colocar emisivos).
   for(const s of insts){
-    const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot, s.esc);   // s.esc o la instancia se re-mallaría a tamaño 1
+    const rebuilt=await mcBuildStructMesh(s.key, s.ox, s.oy, s.oz, s.rot, s.esc, false, s.tinte);   // s.esc/s.tinte o la instancia se re-mallaría a tamaño 1 y sin color
     const j=mc.structures.indexOf(s);
     if(j>=0){ mcFreeStruct(s); mc.structures[j]=mcCarryEfimera(s,rebuilt); } else mcFreeStruct(rebuilt);   // se retiró mientras se reconstruía
   }
@@ -12917,6 +14497,18 @@ async function mcRefreshSaved(key){
   mc.catalog=null; try{ await mcBuildCatalog(); }catch(e){}   // el selector lee mc.catalog una sola vez y lo cachea
   if(!mc.gl) return;                          // el Mundo no se ha abierto en esta sesión: no hay nada horneado que tocar
   mcClearPreview();                           // el fantasma de colocación está memoizado por clave+destino+giro
+  // La herramienta EN LA MANO se hornea aparte (mcHeldToolCache) y se cierra con un candado por clave
+  // (mc._heldToolKey): nada de lo de arriba los tocaba, así que tras re-guardar el pico el mapa ya se veía
+  // nuevo pero el jugador seguía empuñando la malla vieja hasta recargar la página. Se compara por NOMBRE
+  // PELADO porque el editor guarda por una puerta ('hab:pico-de-piedra') y el catálogo pudo armar la
+  // herramienta por la otra ('asset:assets/pico-de-piedra.vox.json'): mismo dibujo, otra clave (BUG-AG3).
+  // Aquí SÍ se libera el VBO; mcSyncHeldToolStruct solo desengancha, porque allí la caché sigue siendo dueña.
+  const nomHT=mcNombreMat(key);
+  for(const k of [...mcHeldToolCache.keys()]) if(mcNombreMat(k)===nomHT){ mcFreeStruct(mcHeldToolCache.get(k)); mcHeldToolCache.delete(k); }
+  if(mc._heldToolStruct && mcNombreMat(mc._heldToolKey||'')===nomHT){
+    const iHT=mc.structures.indexOf(mc._heldToolStruct); if(iHT>=0) mc.structures.splice(iHT,1);
+    mc._heldToolStruct=null; mc._heldToolKey=null;   // candado abierto: la próxima pasada de mcSyncHeldToolStruct la re-hornea
+  }
   // Material de terreno: el atlas NO cambia de tamaño al reeditar (solo crece al AÑADIR bloques), así que las UV de
   // la rejilla siguen valiendo y basta rehacerlo y resubirlo. La hotbar pinta el icono de cada ranura desde él.
   if(mc.blockKey.indexOf(key)>0){ await mcBuildPalette(); mcUploadAtlas(); mcBuildHotbar(); }
@@ -12947,7 +14539,9 @@ async function mcApplyHist(en, forward){
   mc.histLock=true;
   try{
     if(en.t==='b'){ const id=forward?en.after:en.before; mcSetBlock(en.x,en.y,en.z,id); mcRemeshAround(en.x,en.z); }
-    else if(en.t==='bb'){ for(const e of en.edits) mcSetBlock(e.x,e.y,e.z, forward?e.after:e.before); mcMeshAll(); }   // pegado en bloque (Ctrl+V): deshace/rehace de una
+    // Ráfaga en bloque (pegado, volumen, reemplazo…): se deshace/rehace de una, y se re-malla SOLO su caja
+    // igual que la acción original — deshacer un cubo no puede costar más que ponerlo.
+    else if(en.t==='bb'){ for(const e of en.edits) mcSetBlock(e.x,e.y,e.z, forward?e.after:e.before); mcRemeshEdiciones(en.edits); }
     else { const add=((en.t==='s+')===forward);   // s+ hacia delante = estampar; s- hacia delante = retirar
       if(add) await mcStampStruct(en.sp.key, en.sp.ox, en.sp.oy, en.sp.oz, en.sp.rot, true);
       else { const s=mcFindStruct(en.sp); if(s) mcRemoveStruct(s, true); }
@@ -13123,22 +14717,46 @@ function mcUseRight(){ if(mc.tool==='paint') mcPickBlock(); else mcPlace(); }
 // Herramientas PASIVAS: no rompen, no colocan y no estampan. Las rutas de estructura
 // y la repetición al mantener pulsado tienen que preguntar por esto y no
 // por `tool!=='select'`, o cada herramienta nueva vuelve a colocar bloques por la puerta de atrás.
-function mcToolPasiva(){ return mc.tool==='select' || mc.tool==='pick' || mc.tool==='box' || !!mc.pasteActive; }
+// REQ-TOOL8 · una herramienta de snippet es PASIVA: el motor no rompe ni pone nada con ella. Si el snippet
+// quiere romper o poner, lo hace él desde su acción (`setVoxel`, `game.stamp`…), que es justo la idea.
+function mcToolPasiva(){ return mc.tool==='select' || mc.tool==='pick' || mc.tool==='box' || !!mc.pasteActive || !!mcHerrDef(mc.tool); }
 // Acción de un botón de ratón (para el clic inicial y la repetición al mantener pulsado).
 function mcDoAction(btn, shift){
+  // REQ-TOOL5 · guardada = mano vacía, y mano vacía no hace nada: ni romper, ni poner, ni pintar, ni
+  // seleccionar (orden del dueño: «cuando se guarde la tool con boton de enmedio, no tiene que haber tool
+  // activa»). Se corta AQUÍ y no en el `mousedown` porque por aquí pasan las dos puertas: el clic y su
+  // repetición al mantener pulsado (mcTick). El botón central (redstone) ni llega a esta función.
+  if(mc._guardada) return;
   // Modo Pegar (Ctrl+V): clic DERECHO (2) planta los bloques previsualizados, clic izquierdo (0) cancela.
   // Van al revés que el resto del Mundo a propósito (2026-08-18, orden del dueño): pegar es «colocar», y
   // colocar es el botón derecho en todo lo demás —poner un bloque, estampar una estructura—, así que el
   // izquierdo (el que rompe) aquí solo puede significar «quita eso de en medio».
   if(mc.pasteActive){
-    if(btn===2) mcPasteConfirm();
+    // Plantar el pegado ES la acción de Seleccionar, así que hace su mismo gesto (orden del dueño,
+    // 2026-08-18) aunque venga del botón derecho: la excepción al «el derecho no anima» de abajo. Se
+    // anima solo al CONFIRMAR; cancelar (izquierdo) no mueve nada porque no planta nada.
+    if(btn===2){ mc._toolSwingSel = true; mc._toolSwingT = performance.now(); mcPasteConfirm(); }
     else if(btn===0) mcPasteCancel();
     mcRevealHotbar();
     return;
   }
-  // Solo la herramienta pico ('build') con clic izquierdo (0) realiza la animación de picar
-  if((mc.tool === 'build' || !mc.tool) && btn === 0){
+  // Clic izquierdo (0): el pico ('build') hace el hachazo y Seleccionar su toque. Cada una lee su propia
+  // tabla de mandos, y la elección se congela AQUÍ (mc._toolSwingSel) porque el gesto puede seguir vivo
+  // después de cambiar de herramienta. El clic derecho no anima en ninguna de las dos (salvo el pegado).
+  if(btn === 0 && (mc.tool === 'build' || !mc.tool || mc.tool === 'select')){
+    mc._toolSwingSel = (mc.tool === 'select');
+    mc._toolSwingCfg = null;
     mc._toolSwingT = performance.now();
+  }
+  // REQ-TOOL8 · la de snippet trae su PROPIA tabla de mandos (`gesto`) y decide con qué botones se anima
+  // (`gestoBotones`, por defecto solo el izquierdo). Se congela aquí, igual que la elección de arriba.
+  {
+    const hd = mcHerrDef(mc.tool);
+    if(hd && hd.gesto && hd.gestoBotones.indexOf(btn) >= 0){
+      mc._toolSwingSel = false;
+      mc._toolSwingCfg = hd.gesto;
+      mc._toolSwingT = performance.now();
+    }
   }
 
   // REQ-OSD4 · en una pantalla incrustada (?osd=1) el clic izquierdo PULSA el bloque, no lo rompe: un
@@ -13158,6 +14776,24 @@ function mcDoAction(btn, shift){
       mcOpenNote(cell, rot);
     }
     return;
+  }
+  // REQ-TOOL8 · herramienta de snippet: el motor no sabe qué hace, solo le pasa el clic ya masticado. Va
+  // ANTES de las cinco del código porque su id no es ninguno de ellos, pero también antes que cualquier
+  // futuro «si no es ninguna, construye»: una espada no puede acabar poniendo bloques por descarte.
+  {
+    const hd = mcHerrDef(mc.tool);
+    if(hd){
+      const fn = (btn===0) ? hd.izquierdo : (btn===2 ? hd.derecho : null);
+      if(fn){
+        // El rayo se tira UNA vez y se le da hecho: que cada acción de cada snippet se monte su raycast
+        // es el camino corto a tres rayos por clic y a que cada una apunte a un sitio distinto.
+        const hit = mcRaycast(hd.alcance || mcReach(), true);
+        try{ fn(mcHerrCtx(btn, shift, hit)); }
+        catch(e){ console.warn('[herramienta '+mc.tool+'] clic '+(btn===0?'izquierdo':'derecho')+':', e); }
+      }
+      mcRevealHotbar();
+      return;
+    }
   }
   if(mc.tool==='select'){ if(btn===0) mcSelectClick(); else if(btn===2) mcSelectPickFill(shift); mcRevealHotbar(); return; }   // Seleccionar: izq marca esquinas, dcho pilla material y reemplaza (shift o sin caja: limpia). NO rompe/pone
   if(mc.tool==='pick'){ mcPickBlock(); mcRevealHotbar(); return; }   // Cuentagotas: los DOS botones pillan; ninguno rompe ni pone
@@ -13345,7 +14981,9 @@ function mcBoxStampVolume(px, py, pz, w, h, d){
   if(edits.length > 0 || sk){
     if(edits.length > 0) mcPushHist({ t:'bb', edits });
     if(mcBuildT){ clearTimeout(mcBuildT); mcBuildT=0; }
-    mcMeshAll();
+    // Solo los chunks del volumen plantado. Si no hubo ediciones de rejilla (`sk`: todo fueron estructuras
+    // estampadas) no hay caja que sacar de `edits`, y ahí sí toca el mundo entero — mcRestampAll manda.
+    if(!mcRemeshEdiciones(edits)) mcMeshAll();
     mcRestampAll();
     mcShadowDirty();
     mcScheduleSave();
@@ -13443,7 +15081,7 @@ function mcSelectFillId(id, yaHecha){
     edits.push({x,y,z,before,after:id});
   }
   if(!edits.length){ toast('Nada que reemplazar'); return true; }
-  mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave();
+  mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
   toast(edits.length+' bloque(s) → '+mcNombreMat(mc.blockKey[id]||''));
   return true;
 }
@@ -13491,7 +15129,7 @@ function mcCutSelection(){
   if(!raw.length){ toast('Nada que cortar'); return false; }
   clipboard={ cells:raw.map(v=>({ dx:v.x-minx, dy:v.z-miny, dz:v.y-minz, c:'tex:'+v.key })),
               gx:Math.floor((maxx-minx)/2), gy:Math.floor((maxy-miny)/2) };
-  if(edits.length){ mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave(); }
+  if(edits.length){ mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave(); }
   toast(raw.length+' bloque(s) cortados al portapapeles — Ctrl+V para pegar');
   return true;
 }
@@ -13548,7 +15186,7 @@ function mcRotateSelBox(){
         mc.grid[mcIdx(x,y,z)]=after; mcDirty(x,y,z); mcGlowTocada(x,y,z); edits.push({x,y,z,before,after});
       }
   if(!edits.length){ toast('Nada que rotar'); return false; }
-  mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave();
+  mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
   mc.selBox={a:[x0,y0,z0], b:[nx1,y1,nz1]};
   toast('Selección rotada 90°');
   return true;
@@ -13607,7 +15245,7 @@ async function mcPasteConfirm(){
     if(isColor) fellBack++;
   }
   if(minx===Infinity){ toast('Nada colocado (fuera del mapa o sin material)'); return; }
-  if(edits.length){ mcMeshAll(); mcPushHist({t:'bb', edits}); mcScheduleSave(); }
+  if(edits.length){ mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave(); }
   mc.selBox={a:[minx,miny,minz], b:[maxx,maxy,maxz]}; mc.selA=null;
   // El pegado NO se desarma al plantar: queda cargado como si acabaras de pulsar Ctrl+V, para poder
   // sembrar la misma pieza varias veces sin repetir el gesto. Se conservan cara y giro —desandar la
@@ -13616,6 +15254,33 @@ async function mcPasteConfirm(){
   // mientras `pasteActive`, y la repetición de `mc.heldBtn` pregunta por ella antes de repetir.
   mc._pasteCache = null;
   toast((edits.length||'0')+' bloque(s) plantados'+(fellBack?' · '+fellBack+' de color al material más parecido':'')+' · sigue cargado · clic izq. suelta');
+}
+
+// Tecla 1-9 mientras se pega: repinta el CÚMULO DEL PORTAPAPELES con el material de esa ranura, que es
+// lo que el jugador está mirando y va a plantar. Sin esto el número caía en mcSelectFill y le cambiaba
+// el material a la selección del Ctrl+C —lo de atrás, a su espalda—, que ya no es la caja que ve.
+// Vale para todas las copias siguientes: el portapapeles sigue cargado tras plantar.
+function mcPasteMaterial(i){
+  if(!mc.pasteActive || !clipboard || !clipboard.cells || !clipboard.cells.length) return false;
+  const sk = (mc.slotStruct && mc.slotStruct[i]) || mc.hotbar[i];
+  if(sk===undefined || sk===null || sk==='') return false;
+  // Una pieza solo sirve de material si CABE EN UNA CELDA (misma regla y mismo motivo que
+  // mcSelectFillPieza: lo que no cabe se estampa, y estampar no es cambiar de material).
+  let vk = sk;
+  if(mc.structs[sk] || (mc.slotStruct && mc.slotStruct.indexOf(sk)>=0)){
+    if(!mcCabeEnRejilla(sk)){ toast('«'+sk+'» ocupa más de un bloque: no sirve para reemplazar'); return true; }
+    vk = mcClaveConOri(sk, mcEsFinaEnRejilla(sk) ? mcPreviewOri() : 0);
+  } else if(typeof sk === 'number'){
+    vk = mc.blockKey[sk];            // ranura normal: el cúmulo guarda CLAVES (`tex:…`), no ids de paleta
+    if(!vk) return false;
+  }
+  for(const cel of clipboard.cells) cel.c = 'tex:'+vk;
+  mc._pasteCache = null;             // el material va DENTRO de la geometría de la vista previa: a rehacerla
+  // La vista previa pinta buscando la clave en la paleta (mc.blockKey); una pieza que aún no está de alta
+  // se vería con el material de relleno hasta plantarla. Se da de alta ya y se repinta al llegar.
+  if(mc.blockKey.indexOf(vk) < 0) mcAddBlock(vk).then(()=>{ mc._pasteCache = null; }).catch(()=>{});
+  toast('Pegado: material '+mcNombreMat(vk));
+  return true;
 }
 
 function mcPasteCancel(){
@@ -13652,6 +15317,48 @@ const MC_NOTE_SIGN_ROT=1;                               // canto en Z: la tabla 
 const MC_NOTE_SIGN_MAX=64;                              // tope de carteles: cada uno es una malla y una llamada de dibujo
 const MC_NOTE_SIGN_LOTE=8;                              // cuántos se plantan por repaso (ver mcSyncNoteSignsRun)
 
+// ── El TINTE del cartel (por nota) ───────────────────────────────────────────────────────────────
+// Los seis de la paleta son los colores de los post-it de toda la vida; el panel de la N además deja
+// elegir cualquier RGB. El tinte se guarda en `mc.noteTints` (mapa aparte, ver mcLoadDoc) y se
+// HORNEA en la malla del cartel al plantarlo (mcBuildStructMesh), no es un uniforme: el programa de
+// estructuras lo comparten media docena de pasadas —terreno fino, sombras, previa, mano— y un
+// uniforme nuevo que alguna se olvidase de poner saldría en NEGRO (los uniformes arrancan a 0).
+const MC_NOTE_TINTES=[
+  { hex:'#ffe066', nom:'Amarillo' }, { hex:'#ffb3c1', nom:'Rosa' },
+  { hex:'#b7e778', nom:'Verde'    }, { hex:'#8fd3ff', nom:'Azul' },
+  { hex:'#ffc078', nom:'Naranja'  }, { hex:'#d0bfff', nom:'Violeta' },
+];
+// '#rgb', '#rrggbb' o nada. Devuelve '#rrggbb' en minúsculas, o '' si no es un color (= sin tinte).
+function mcNoteTinteNorm(v){
+  if(typeof v!=='string') return '';
+  let h=v.trim().toLowerCase();
+  if(/^[0-9a-f]{6}$/.test(h) || /^[0-9a-f]{3}$/.test(h)) h='#'+h;
+  if(/^#[0-9a-f]{3}$/.test(h)) h='#'+h[1]+h[1]+h[2]+h[2]+h[3]+h[3];
+  return /^#[0-9a-f]{6}$/.test(h) ? h : '';
+}
+// Tinte de un color en [0..1]: se conserva la LUMINANCIA del original y se le pone el color del
+// tinte. Multiplicar sin más (rgb×tinte) apagaría el cartel —madera oscura por pastel = barro—; así
+// un tablón claro sale amarillo post-it claro y el poste, más oscuro, amarillo oscuro: se sigue
+// leyendo el relieve del dibujo, que es lo que se pierde si se pinta plano.
+function mcNoteTinteRGB(hex){
+  const h=mcNoteTinteNorm(hex); if(!h) return null;
+  const r=parseInt(h.slice(1,3),16)/255, g=parseInt(h.slice(3,5),16)/255, b=parseInt(h.slice(5,7),16)/255;
+  const lt=Math.max(0.08, 0.299*r+0.587*g+0.114*b);     // suelo: un tinte casi negro no puede dividir por ~0
+  return [r,g,b,lt];
+}
+// El tinte de una nota, ya normalizado ('' = sin tinte). Es la única puerta: cualquiera puede escribir
+// mc.noteTints a mano (snippet, agente) y aquí se limpia lo que no sea un color.
+function mcNoteTinte(k){ return mc.noteTints ? mcNoteTinteNorm(mc.noteTints[k]) : ''; }
+// MC_TINTE_RELIEVE comprime esa diferencia de luminancia hacia la del propio tinte: a 1 el cartel
+// conserva el contraste del dibujo (madera oscura ⇒ verde oliva apagado, «no parece verde») y a 0
+// saldría plano, sin relieve. 0.6 es el punto donde se lee el color que se eligió Y se siguen viendo
+// las tablas y el poste.
+const MC_TINTE_RELIEVE=0.6;
+function mcTintaColor(t, r,g,b){
+  const l=0.299*r+0.587*g+0.114*b, f=Math.pow(Math.max(0,l)/t[3], MC_TINTE_RELIEVE);
+  return [Math.min(1,t[0]*f), Math.min(1,t[1]*f), Math.min(1,t[2]*f)];
+}
+
 // REQ-CART3 · Cómo se planta el cartel. Son cuatro ajustes GLOBALES (no por nota): un mundo-menú los
 // quiere todos iguales, y meterlos por nota obligaría a que mc.notes dejase de ser "clave → texto",
 // que es el formato que ya está escrito en todos los mundo.json. mcCartelFirma es lo que hace que
@@ -13675,7 +15382,7 @@ function mcNoteSignsDesfasados(){
   const quiere=mc.noteSigns!==false, c=mcCartelCfg(), firma=mcCartelFirma(); let n=0;
   for(const s of mc.structures) if(s.nota){
     const wantedRot = (mc.noteRots && mc.noteRots[s.nota] !== undefined) ? mc.noteRots[s.nota] : c.rot;
-    if(!quiere || !mc.notes[s.nota] || s.cartel!==firma || (s.rot|0)!==wantedRot) return true;
+    if(!quiere || !mc.notes[s.nota] || s.cartel!==firma || (s.rot|0)!==wantedRot || (s.tinte||'')!==mcNoteTinte(s.nota)) return true;
     n++;
   }
   return n!==(quiere ? Math.min(Object.keys(mc.notes).length, MC_NOTE_SIGN_MAX) : 0);
@@ -13693,8 +15400,8 @@ async function mcSyncNoteSignsRun(){
   const quiere=mc.noteSigns!==false, c=mcCartelCfg(), firma=mcCartelFirma(), tienen=new Map();
   for(const s of mc.structures.slice()) if(s.nota){
     const wantedRot = (mc.noteRots && mc.noteRots[s.nota] !== undefined) ? mc.noteRots[s.nota] : c.rot;
-    if(quiere && mc.notes[s.nota] && s.cartel===firma && (s.rot|0)===wantedRot && !tienen.has(s.nota)) tienen.set(s.nota, s);
-    else mcRemoveStruct(s, true);                       // nota borrada, carteles apagados, ajustes cambiados o duplicado
+    if(quiere && mc.notes[s.nota] && s.cartel===firma && (s.rot|0)===wantedRot && (s.tinte||'')===mcNoteTinte(s.nota) && !tienen.has(s.nota)) tienen.set(s.nota, s);
+    else mcRemoveStruct(s, true);                       // nota borrada, carteles apagados, ajustes o tinte cambiados, o duplicado
   }
   if(!quiere) return;
   // Se plantan por tandas: estampar construye malla (y a veces re-hornea el atlas), así que un
@@ -13708,9 +15415,10 @@ async function mcSyncNoteSignsRun(){
     const o=mcNoteSignOrigin(k);
     if(!mcInside(o[0],o[1],o[2])) continue;
     const rot = (mc.noteRots && mc.noteRots[k] !== undefined) ? mc.noteRots[k] : c.rot;
-    const s=await mcStampStruct(c.palo?MC_NOTE_SIGN:MC_NOTE_SIGN_PLANO, o[0],o[1],o[2], rot, true, c.esc);
+    const tinte = mcNoteTinte(k);
+    const s=await mcStampStruct(c.palo?MC_NOTE_SIGN:MC_NOTE_SIGN_PLANO, o[0],o[1],o[2], rot, true, c.esc, tinte);
     if(!s) continue;
-    s.efimera=true; s.nota=k; s.cartel=firma; s.noteRot=rot;           // marcar DESPUÉS del await: antes no hay instancia viva
+    s.efimera=true; s.nota=k; s.cartel=firma; s.noteRot=rot; s.tinte=tinte;   // marcar DESPUÉS del await: antes no hay instancia viva
     tienen.set(k, s); plantados++;
   }
 }
@@ -14017,6 +15725,41 @@ function mcSetNoteRotUI(r, livePreview){
     }
   }
 }
+// ── Tinte en el panel de la N ────────────────────────────────────────────────────────────────────
+// Se gestiona igual que el giro (mcSetNoteRotUI): vista previa EN VIVO —el cartel se replanta con el
+// color mientras el panel sigue abierto— y Cancelar devuelve el que había. Sin la previa habría que
+// guardar y reabrir para ver si el verde era el verde que uno quería.
+let mcCurNoteTint = '', mcOrigNoteTint = '';
+function mcNoteTintBotones(){
+  const bar=$('#mc-note-tint-bar'); if(!bar || bar.dataset.listo) return;
+  const nada=bar.querySelector('.mc-note-tint-btn[data-tint=""]');
+  for(const t of MC_NOTE_TINTES){                                   // los 6 de post-it salen de la tabla, no del HTML
+    const b=document.createElement('button');
+    b.type='button'; b.className='btn sm ghost mc-note-tint-btn';
+    b.dataset.tint=t.hex; b.title=t.nom; b.style.setProperty('--tint', t.hex);
+    bar.insertBefore(b, nada);
+  }
+  bar.addEventListener('click', e=>{ const b=e.target.closest('.mc-note-tint-btn'); if(!b) return;
+    mcSetNoteTintUI(b.dataset.tint, true); });
+  const inp=$('#mc-note-tint-color');
+  if(inp) inp.addEventListener('input', ()=>mcSetNoteTintUI(inp.value, true));
+  bar.dataset.listo='1';
+}
+function mcSetNoteTintUI(hex, livePreview){
+  mcCurNoteTint = mcNoteTinteNorm(hex);
+  document.querySelectorAll('.mc-note-tint-btn').forEach(b=>{
+    b.classList.toggle('active', mcNoteTinteNorm(b.dataset.tint)===mcCurNoteTint);
+  });
+  const inp=$('#mc-note-tint-color');
+  if(inp && mcCurNoteTint && inp.value.toLowerCase()!==mcCurNoteTint) inp.value=mcCurNoteTint;
+  if(livePreview && mc.noteCell){
+    const k=mcNoteKey(mc.noteCell);
+    if(mc.notes[k]){
+      if(mcCurNoteTint) mc.noteTints[k]=mcCurNoteTint; else delete mc.noteTints[k];
+      mcSyncNoteSigns();                                            // replanta el cartel: el tinte va horneado en su malla
+    }
+  }
+}
 function mcStartNotePlace(){
   mc.notePlacing = true;
   const playerRot = Math.round(((mc.yaw * 180 / Math.PI) % 360 + 360) / 90 + 1) % 4;
@@ -14057,6 +15800,10 @@ function mcOpenNote(cellOverride, rotOverride){
   mcOrigNoteRot = curRot;
   mcSetNoteRotUI(curRot, false);
 
+  mcNoteTintBotones();
+  mcOrigNoteTint = mcNoteTinte(k);
+  mcSetNoteTintUI(mcOrigNoteTint, false);
+
   const hasTrace = (typeof game !== 'undefined' && game.noteTraces && (game.noteTraces[k] || game.noteTraces[cell[0] + ',' + (cell[1]-1) + ',' + cell[2]] || game.noteTraces[cell[0] + ',' + (cell[1]+1) + ',' + cell[2]]));
   const traceBtn = $('#mc-note-trace');
   if (traceBtn) traceBtn.hidden = !hasTrace;
@@ -14070,10 +15817,15 @@ function mcCloseNote(cancelar){
   if(noteEl) noteEl.hidden = true;
   if(cancelar && mc.noteCell){
     const k = mcNoteKey(mc.noteCell);
-    if(mc.notes[k] && mc.noteRots[k] !== mcOrigNoteRot){
-      mc.noteRots[k] = mcOrigNoteRot;
-      mcSyncNoteSigns();
+    let deshacer = false;
+    if(mc.notes[k] && mc.noteRots[k] !== mcOrigNoteRot){ mc.noteRots[k] = mcOrigNoteRot; deshacer = true; }
+    // El tinte también se previsualiza en vivo ⇒ Cancelar tiene que devolverlo, o el «me lo pensaba»
+    // dejaría el cartel del color que solo se estaba probando.
+    if(mc.notes[k] && mcNoteTinte(k) !== mcOrigNoteTint){
+      if(mcOrigNoteTint) mc.noteTints[k] = mcOrigNoteTint; else delete mc.noteTints[k];
+      deshacer = true;
     }
+    if(deshacer) mcSyncNoteSigns();
   }
   mc.noteCell = null;
 }
@@ -14082,11 +15834,13 @@ function mcSaveNote(){
     if(txt){
       mc.notes[k]=txt.slice(0,MC_NOTE_MAX);
       mc.noteRots[k]=mcCurNoteRot & 3;
+      if(mcCurNoteTint) mc.noteTints[k]=mcCurNoteTint; else delete mc.noteTints[k];
       toast('Nota guardada');
     }
     else if(mc.notes[k]){
       delete mc.notes[k];
       delete mc.noteRots[k];
+      delete mc.noteTints[k];
       toast('Nota borrada');
     }   // guardar en blanco = borrar
     mcDirtyHeader();
@@ -14095,7 +15849,7 @@ function mcSaveNote(){
   }
   mcCloseNote(false);
 }
-function mcDeleteNote(){ if(mc.noteCell){ const k=mcNoteKey(mc.noteCell); delete mc.notes[k]; if(mc.noteRots) delete mc.noteRots[k]; mcDirtyHeader(); mcScheduleSave(); mcSyncNoteSigns(); toast('Nota borrada'); } mcCloseNote(false); }
+function mcDeleteNote(){ if(mc.noteCell){ const k=mcNoteKey(mc.noteCell); delete mc.notes[k]; if(mc.noteRots) delete mc.noteRots[k]; if(mc.noteTints) delete mc.noteTints[k]; mcDirtyHeader(); mcScheduleSave(); mcSyncNoteSigns(); toast('Nota borrada'); } mcCloseNote(false); }
 
 function mcShowTraceModal(){
   if(!mc.noteCell) return;
@@ -14181,6 +15935,8 @@ function mcCopyFallback(txt){
 //                                                                          fondo y el html de botones
 //   …, sitio:'abajo-derecha')                                            ← dónde cae el html (REQ-OSD10):
 //                                                                          centro|arriba|abajo|izquierda|derecha
+//   …, showTool:false)                                                   ← esconde la herramienta en mano
+//                                                                          mientras esta pantalla esté abierta
 // El estado vive en `mc` y no en un closure, como el resto del Mundo: el dueño reejecuta snippets en
 // vivo y no puede quedarse con un menú abierto que ya nadie sabe cerrar.
 mc.osdPantallas = {};     // nombre → cfg
@@ -14188,6 +15944,10 @@ mc.osdAbierta   = null;   // nombre de la pantalla abierta, o null
 mc.osdAcciones  = {};     // TEXTO del botón → función (lo comparten el HTML y los bloques-nota de REQ-OSD4)
 mc.osdListo     = null;   // REQ-OSD6 · descubre la pantalla-mapa cuando el iframe avisa de que ya está
 mc._osdEsperaT  = 0;      // …y el reloj que la descubre igual si no avisa nunca
+// `showTool:false` en el define (2026-08-18): la herramienta en mano estorba delante de un menú, pero es
+// un ajuste DEL DUEÑO que vive en localStorage (`vf_mcShowTool`) ⇒ la pantalla no lo pisa, pone este velo
+// aparte y lo retira al cerrar. Así «si estaba activa antes, se restaura sola» sale gratis: nadie la apagó.
+mc.osdSinTool   = false;  // ¿la pantalla abierta tapa la herramienta en mano? (REQ-HELDTOOL × REQ-OSD12)
 // El ENTORNO de cada acción: los ayudantes de los que depende, que viven dentro del snippet que la
 // registró y por tanto no existen en la consola. Sin esto, el código que enseña `dump()` se lee pero no
 // se puede tocar —copiarlo da «intro is not defined»—, que es exactamente lo que le pasó al dueño. Se
@@ -14345,6 +16105,8 @@ function mcOsdAbrir(nombre){
   // razón: con `hidden` no bastaría, porque `mcUpdateHotbar` la re-enseña sola en el siguiente frame.
   // `hud:true` en el define lo deja puesto, para una pantalla que sea un panel sobre la partida viva.
   document.body.classList.toggle('mc-osd-puesto', !cfg.hud);
+  // Solo el `false` explícito tapa la herramienta: sin la clave, la pantalla no opina y se ve lo de siempre.
+  mc.osdSinTool = (cfg.showTool === false);
   // …salvo la salida en táctil: ahí no hay Esc, así que esconderla deja al visitante encerrado en el
   // menú si su pantalla no trae botón de salir. El CSS usa esta clase para devolver `#mc-touch` (y de
   // ella solo el ✕) por encima del panel; ver `body.mc-osd-tactil` en style.css.
@@ -14386,6 +16148,7 @@ function mcOsdCerrar(){
   // que morir con él, o descubren una pantalla que ya no existe (y la siguiente hereda el temporizador).
   clearTimeout(mc._osdEsperaT); mc.osdListo = null;
   document.body.classList.remove('mc-osd-puesto');   // REQ-OSD12 · el HUD del juego vuelve con el menú fuera
+  mc.osdSinTool = false;   // …y la herramienta en mano también, con el valor que tuviera game.showTool
   const era = mc.osdAbierta;
   mc.osdAbierta = null;
   return era;
@@ -15470,10 +17233,11 @@ async function mcStructTexKeys(srcKey){
   for(const k in vox){ const v=vox[k]; if(typeof v==='string' && v.slice(0,4)==='tex:') out.add(v.slice(4)); }
   return [...out];
 }
-async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet, esc){
+async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet, esc, tinte){
   rot=mcOriNorm(rot);                   // una de las 24 posturas; ver mcStructGeom
   const E=(esc>0?+esc:1);               // escala libre de la instancia (REQ-AGESC1); 1 = el camino de siempre
-  const s={key:srcKey, ox,oy,oz, rot, esc:E, colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[ox,oy,oz,ox,oy,oz]};
+  const TT=mcNoteTinteNorm(tinte);      // tinte horneado en la malla (carteles de nota); '' = el dibujo tal cual
+  const s={key:srcKey, ox,oy,oz, rot, esc:E, tinte:TT, colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[ox,oy,oz,ox,oy,oz]};
   mc.structures.push(s);                                        // en la lista ya (el render la ignora sin malla; el atlas la ve)
   // ¿aparece alguna clave tex: nueva? ⇒ recomponer el atlas de estructuras. Con filas fijas y altura escalonada eso
   // NO mueve las UV de las demás casi nunca, así que solo hay que re-mallarlo todo cuando el atlas sube de escalón
@@ -15484,7 +17248,7 @@ async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet, esc){
   if(grow && mc.structUVMoved){
     await mcRestampAll();                                       // el atlas creció de escalón → re-malla todas (ya recomputa luz de bloque)
   } else {
-    Object.assign(s, await mcBuildStructMesh(srcKey, ox, oy, oz, rot, E));   // cachea también el bitset de colisión fina
+    Object.assign(s, await mcBuildStructMesh(srcKey, ox, oy, oz, rot, E, false, TT));   // cachea también el bitset de colisión fina
     if(s.emitCells && s.emitCells.length){                      // la nueva estructura tiene voxeles emisivos:
       mc.hasGlow=true; mcComputeBlockLight();                   // …enciende su luz de bloque…
       if(mc.structures.length>1) await mcRestampAll(); else mcMeshAll();   // …y re-oscurece/ilumina terreno (y estructuras vecinas vía restamp)
@@ -15510,6 +17274,7 @@ const MC_SLOTS=9;                                     // ranuras de la hotbar (t
 // Así que manda el dibujo: el que lleve `categoria:'herramienta'` y `herramienta:'build'` ES el pico,
 // venga por donde venga.
 function mcHerramientaKey(tool){
+  const h=mcHerrDef(tool); if(h) return h.dibujo || null;   // REQ-TOOL8 · la de snippet trae su dibujo en la ficha
   const c=(mc.catalog||[]).find(x => x.categoria==='herramienta' && x.herramienta===tool);
   return c ? c.key : null;
 }
@@ -15590,7 +17355,9 @@ function mcPintaSlotHerramienta(slot){
     mc._catPend=1;
     mcBuildCatalog().then(()=>{ mc._catPend=0; mcPintaSlotHerramienta(); }).catch(()=>{ mc._catPend=0; });
   }
-  const k=mcHerramientaKey(mc.tool);
+  // REQ-TOOL5 · guardada = la ranura se ve VACÍA, como debe verse una mano sin herramienta. No se toca
+  // `mc.tool` (al sacarla vuelve la misma), solo lo que se enseña; el `title` sigue diciendo cuál es.
+  const k=mc._guardada ? null : mcHerramientaKey(mc.tool);
   const cx=cv.getContext('2d'); cx.clearRect(0,0,cv.width,cv.height);
   slot.classList.toggle('empty', !k);
   // Sin dibujo asignado la ranura se queda VACÍA, igual que una de bloque sin bloque: aquí no se
@@ -15599,7 +17366,7 @@ function mcPintaSlotHerramienta(slot){
   if(!k) return;
   // `getRoomData` es asíncrono: si mientras llega el dibujo el dueño ha vuelto a cambiar de
   // herramienta, lo que vuelve ya no vale y pintarlo dejaría el icono equivocado puesto.
-  getRoomData(k).then(d=>{ if(mc.tool===mcToolDe(k)) drawThumbRanura(cv, d); }).catch(()=>{});
+  getRoomData(k).then(d=>{ if(mcHerramientaKey(mc.tool)===k) drawThumbRanura(cv, d); }).catch(()=>{});
 }
 // Qué herramienta representa una clave del catálogo (la vuelta de `mcHerramientaKey`).
 function mcToolDe(key){
@@ -15875,11 +17642,34 @@ function mcRemoveSlot(){
 function mcLockPointer(){ if(!mc.active || mc.osdAbierta || mc.escaparate || document.pointerLockElement===mc.canvas) return;
   try{ const p=mc.canvas.requestPointerLock(); if(p&&p.catch) p.catch(()=>{}); }catch(e){} }
 function mcRelock(){ mcLockPointer(); }                // elegir un bloque/estructura devuelve el foco al juego
+// REQ-MOV1 · «¿manda el jugador en el Mundo?». Con ratón la respuesta es el pointer-lock, y así estaba
+// escrita —`document.pointerLockElement===mc.canvas`— repetida por media docena de sitios: la repetición
+// de mantener pulsado, el fantasma de lo que vas a colocar, la herramienta de la mano. En TÁCTIL no hay
+// ratón que capturar, y sobre todo: **entrar en pantalla completa suelta el pointer-lock**, así que en el
+// móvil esos sitios se apagaban justo cuando el dueño hacía lo que pidió en este ticket. Con los mandos
+// táctiles puestos, quien manda son ellos.
+// ⚠️ No vale para el `mousedown` del canvas: ahí el pointer-lock sigue siendo obligatorio a propósito
+// (el primer clic solo captura el ratón, no rompe nada).
+function mcMandoActivo(){ return mc.active && (document.pointerLockElement===mc.canvas || (MC_TOUCH && mcTouchOn)); }
 
 // --- F6 · persistencia en el servidor (/api/mundo) ---
 // Mapa elegido por URL: /map/<nombre> selecciona un mundo persistente propio; sin /map/ (o /map/default) = el
 // mundo «sagrado» de siempre. mcWorldUrl() añade ?map=<nombre> a /api/mundo para cargar/guardar ESE mundo.
-function mcMapName(){ const m=location.pathname.match(/^\/map\/([^\/?#]+)/); return m ? decodeURIComponent(m[1]) : 'default'; }
+// ⚠️ El nombre se CANONIZA con el MISMO slug que `server.py:world_file_for` (`[^a-z0-9]+`→`-`), y esa
+// es la única forma de que cliente y servidor hablen del mismo mapa (BUG-SNP5). El servidor ya guardaba
+// /map/fornite_c2_island en `data/worlds/fornite-c2-island.json`; aquí se devolvía el tramo de la URL
+// crudo, así que el snippet por mapa se pedía como 'mundo-fornite_c2_island' —que el POST del editor
+// nunca escribe, porque él también slugifica— y el mapa entraba SIN su autoarranque, con el mensaje
+// «este mapa no tiene» como única pista. Slugificar aquí arregla de paso el resto (intro, meta de vídeo).
+function mcMapName(){
+  const m=location.pathname.match(/^\/map\/([^\/?#]+)/);
+  if(!m) return 'default';
+  const crudo=decodeURIComponent(m[1]);
+  const s=crudo.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+  if(s && s!==crudo && !mcMapName._aviso){ mcMapName._aviso=1;   // propiedad de la función: `mc` aún puede estar en TDZ
+    console.log('[map] «'+crudo+'» es el mapa «'+s+'» (el servidor guarda por slug): sus snippets son «mundo-'+s+'» y «arranque-'+s+'».'); }
+  return s || 'default';
+}
 function mcMundoUrl(sufijo){                    // '' | '/vox' | '/edits' | '/cabecera'
   const n=mcMapName();
   return '/api/mundo'+(sufijo||'') + ((n && n.toLowerCase()!=='default') ? '?map='+encodeURIComponent(n) : '');
@@ -15910,12 +17700,13 @@ function mcCuentaVoxels(doc){
 // Serializa la rejilla densa a mapa disperso autocontenido (como el editor). Los bloques son todos assets
 // servidos (asset:…) → no hace falta embeber texturas.
 function mcSerialize(){
-  const dim=mc.dim, g=mc.grid, vox={};
+  const dim=mc.dim, vox={};
   for(let z=0;z<dim.z;z++) for(let y=0;y<dim.y;y++) for(let x=0;x<dim.x;x++){
-    const id=g[mcIdx(x,y,z)]; if(!id) continue;
+    // mcIdGuardado, NO mc.grid: las celdas volátiles (nieve cuajada) se guardan como lo que había debajo.
+    const id=mcIdGuardado(mcIdx(x,y,z)); if(!id) continue;
     vox[x+','+y+','+z]='tex:'+mc.blockKey[id];
   }
-  return { format:'voxelworld-1', dim:{x:dim.x,y:dim.y,z:dim.z}, spawn:mc.spawn, voxels:vox, structures:mcStructuresDoc(), notes:{...mc.notes}, noteRots:{...(mc.noteRots||{})} };   // t1 · notas post-it "x,y,z"→texto
+  return { format:'voxelworld-1', dim:{x:dim.x,y:dim.y,z:dim.z}, spawn:mc.spawn, voxels:vox, structures:mcStructuresDoc(), notes:{...mc.notes}, noteRots:{...(mc.noteRots||{})}, noteTints:{...(mc.noteTints||{})} };   // t1 · notas post-it "x,y,z"→texto
 }
 // Estructuras: sala + posición + giro (se re-mallan al cargar). Lo usan el doc completo y la
 // cabecera del guardado incremental, así que vive en un solo sitio.
@@ -15934,6 +17725,8 @@ function mcBake(doc){                          // hornea un mundo guardado a la 
   // (servidor viejo, mundo todavía en v1), el primer guardado va entero — y aterriza en v2.
   mc.v2 = !!doc.voxBuf;
   mc.pend={vox:new Set(), header:false, full:!mc.v2};
+  mc.volatil=null; mcVolChunks.clear();   // la rejilla es otra: los índices apuntados ya no valen
+  mcVoxFinoLimpia(); mcCapaLimpia();      // …y los voxeles finos y las alfombras eran del mundo anterior
   const key2id={}; for(let id=1;id<mc.blockKey.length;id++) key2id[mc.blockKey[id]]=id;
   if(doc.voxBuf){
     // voxelworld-2: la rejilla llega como bytes con el MISMO layout que mcIdx, así que esto es
@@ -15958,6 +17751,9 @@ function mcBake(doc){                          // hornea un mundo guardado a la 
   // t1 · notas: solo pares "x,y,z"→texto dentro de los límites (una nota sobre un bloque que ya no existe se conserva igual: es del bloque, no exige sólido)
   mc.notes={}; const dn=doc.notes; if(dn && typeof dn==='object') for(const k in dn){ const p=k.split(','); if(p.length===3 && typeof dn[k]==='string') mc.notes[k]=dn[k]; }
   mc.noteRots={}; const dr=doc.noteRots; if(dr && typeof dr==='object') for(const k in dr){ if(typeof dr[k]==='number') mc.noteRots[k]=dr[k]&3; }
+  // Tinte del cartel: va en su propio mapa por lo mismo que el giro — `notes` es "clave → TEXTO" en
+  // todos los mundo.json escritos hasta hoy, y meterle un objeto dentro cambiaría el formato para todos.
+  mc.noteTints={}; const dt=doc.noteTints; if(dt && typeof dt==='object') for(const k in dt){ const h=mcNoteTinteNorm(dt[k]); if(h) mc.noteTints[k]=h; }
   mcMeshAll();
   // re-hornear estructuras (malla fina) — apila las instancias y deja que mcRestampAll componga el atlas UNA vez
   // y malle todo (evita la carrera de estampar N a la vez, cada una recomponiendo el atlas). El render las dibuja
@@ -16395,6 +18191,21 @@ function mcSetVoxel(x,y,z,material){
   // pieza y sigue costando 0 draw calls: es una celda de rejilla, no una instancia.
   if(id) mcAvisaSiFino(material, id);   // solo para lo que de verdad no cabe: la transparencia real
   if(mcQuitaPiezaEn(x,y,z) && !mc.batching){ clearTimeout(mcStampT); mcStampT=setTimeout(mcFlushStamp, 80); }
+  // Dentro del AGUA una pieza fina NO puede escribirse en la rejilla: hay un id por celda, así que la
+  // escritura se lleva por delante el voxel de agua y abre un hueco en la superficie del lago (foto #46 a
+  // mano, foto #59 desde script: el badlands siembra `hierba-alta` en charcos de 1 de hondo y el agua
+  // desaparecía debajo de cada mata). La MANO ya lo resolvía cayendo al estampado —mcPlace y mcPaint, con
+  // su `&& !mcCeldaFluida(...)`—, pero el scripting seguía escribiendo a pelo. Esto trae la MISMA regla
+  // aquí, y es un desvío del MOTOR a propósito: así un script que siembra un prado no tiene que saber si
+  // está mojado (orden del dueño: los scripts generados no crecen para distinguir los dos caminos).
+  // Se desvía SOLO lo fino: un macizo (roca, arena) escrito en el agua la sustituye, que es lo que se
+  // espera, y un fluido tampoco (poner agua sobre agua es el motor de fluidos propagándose, REQ-FLUID4).
+  // Precio, el mismo que paga la mano: cada pieza sumergida es un draw call y una línea de mundo.json.
+  if(mcFinoEnRejilla(id) && !mcIsReplaceable(id,x,y,z) && mcCeldaFluida(x,y,z)){
+    const k=mc.blockKey[id];
+    game.stamp(mcClaveBase(k), x, y, z, mcClaveOri(k));   // async como el camino de material pendiente: el script no espera
+    return true;
+  }
   mcSetBlock(x,y,z, id); mcBuildN++; mcMarcaBuild(x,z);
   // En modo lote (beginBatch/endBatch) NO se re-malla por bloque; endBatch() dispara un único mcFlushBuild al cerrar.
   if(!mc.batching){ clearTimeout(mcBuildT); mcBuildT=setTimeout(mcFlushBuild, 80); }   // re-malla+guarda una vez al acabar la ráfaga
@@ -16543,7 +18354,7 @@ async function mcSaveWorldAhora(){
   for(const k of cells){
     const c=k.split(','), x=+c[0], y=+c[1], z=+c[2];
     if(!mcInside(x,y,z)) continue;
-    const id=mc.grid[mcIdx(x,y,z)];
+    const id=mcIdGuardado(mcIdx(x,y,z));   // volátil (nieve cuajada) ⇒ se manda lo que había, no la nieve
     edits.push([x,y,z, id ? mc.blockKey[id] : '']);              // '' = aire
   }
   if(!edits.length && !header) return true;                      // nada que guardar
@@ -16559,7 +18370,7 @@ async function mcSaveWorldAhora(){
     if(header){
       const r=await fetch(mcMundoUrl('/cabecera'),
         {method:'POST',headers:{'Content-Type':'application/json'},
-         body:JSON.stringify({spawn:mc.spawn, structures:mcStructuresDoc(), notes:{...mc.notes}, noteRots:{...(mc.noteRots||{})}})});
+         body:JSON.stringify({spawn:mc.spawn, structures:mcStructuresDoc(), notes:{...mc.notes}, noteRots:{...(mc.noteRots||{})}, noteTints:{...(mc.noteTints||{})}})});
       if(r.status===409){ mc.v2=false; mcDirtyAll(); return mcSaveWorldFull(); }
       if(!r.ok) throw new Error('cabecera '+r.status);
     }
@@ -16620,7 +18431,7 @@ function mcTick(now){
   if(mc.grid) mcDynSync();   // BUG-GLOW3 · luz dinámica de agente por-fragmento (tras escribirse s.model en mcUpdate)
   // Construir/romper CONTINUO: mientras se mantiene el botón (y el puntero está bloqueado), repite la acción
   // a intervalos (no cada frame). El estampado de estructuras NO se repite (una pieza por pulsación).
-  if(mc.heldBtn>=0 && document.pointerLockElement===mc.canvas && now-mc.actAt>=MC_ACT_MS){
+  if(mc.heldBtn>=0 && mcMandoActivo() && now-mc.actAt>=MC_ACT_MS){   // REQ-MOV1 · el botón táctil también pica en cadena mientras se mantiene
     if(!mcToolPasiva() && !(mc.heldBtn===2 && mc.slotStruct[mc.sel])) mcDoAction(mc.heldBtn);   // Seleccionar y Cuentagotas NO se repiten: cada clic es un gesto suelto
     mc.actAt=now;
   }
@@ -16767,7 +18578,7 @@ function mcShowLoading(txt){ if(mc.escaparate) return; const el=$('#mc-loading')
 function mcHideLoading(){ const el=$('#mc-loading'); if(el) el.hidden=true; }
 async function openWorld(){
   $('#mc-modal').hidden=false;
-  mcSetCrosshair(MC_HERRAMIENTA_MIRA[mc.tool] || '+');
+  mcSetCrosshair(mcMiraDe(mc.tool));
   // REQ-EDIT1 · …y con el modal ya puesto se quita la tapa del arranque: en /map/<x> la página estuvo
   // tapada hasta aquí justo para que no se viera el editor de fondo mientras se pedía el índice de assets.
   // Va DESPUÉS del `hidden=false` y en la misma tarea: entre las dos líneas no hay ningún pintado.
@@ -16828,9 +18639,21 @@ async function openWorld(){
     mcLoadPhase('Hotbar: construir UI');
     mcBuildHotbar();
     mcLoadStop();
-    const hasVox = !!(doc && doc.voxels && Object.keys(doc.voxels).length);
-    mcShowLoading(hasVox ? 'Construyendo el mundo…' : (doc && doc.fresh ? 'Generando terreno…' : 'Cargando mundo vacío…')); await mcYield();
-    mcLoadPhase(hasVox ? 'Bake del mundo guardado + mallado' : (doc && doc.fresh ? 'Generar terreno + mallado' : 'Bake de mundo vacío'));
+    // ⚠️ Esto miraba solo `doc.voxels`, el campo del formato v1 ⇒ un mundo guardado en binario (`doc.voxBuf`,
+    // que es lo normal desde los `.vox`) daba FALSO y entraba por la rama «vacío»: `/map/empty` anunciaba
+    // «mundo vacío» mientras horneaba sus 139 185 voxels. `mcCuentaVoxels` ya entiende los dos formatos y es
+    // quien cuenta para la nota del informe, así que decide también aquí y no puede volver a discrepar.
+    const nVox = mcCuentaVoxels(doc);
+    const hasVox = nVox > 0;
+    // «Cargando mundo vacío…» era verdad solo del FICHERO, y el cartel se quedaba puesto durante todo el
+    // autoarranque —que es donde el mapa se llena de voxels y donde se van los segundos—, así que mentía
+    // justo cuando más se le miraba (orden del dueño, 2026-08-18). Ahora dice de dónde sale cada voxel:
+    // del fichero guardado, del generador de terreno, o de un snippet que aún no ha corrido.
+    mcShowLoading(hasVox ? 'Horneando '+nVox.toLocaleString('es')+' voxels guardados…'
+      : (doc && doc.fresh ? 'Generando terreno…'
+      : 'El mundo guardado está vacío: lo que haya lo pondrá su snippet…')); await mcYield();
+    mcLoadPhase(hasVox ? 'Bake de '+nVox.toLocaleString('es')+' voxels guardados + mallado'
+      : (doc && doc.fresh ? 'Generar terreno + mallado' : 'Bake de mundo vacío'));
     if(hasVox) mcBake(doc);              // conserva lo construido
     else if(doc && doc.fresh) { mcGenFlat(); mcMeshAll(); mcForceUnstick(); }   // mundo recién nacido (sin fichero) → terreno plano y desatasca
     else mcBake(doc || {voxels:{}});     // vacío GUARDADO (p.ej. wipeMap) → vacío total, sin voxels
@@ -16868,12 +18691,40 @@ async function openWorld(){
 // comportamiento, atajos de teclado…), igual que es agnóstico a cómo se comportan los agentes.
 // Fallar es inocuo: sin snippet, el Mundo se comporta exactamente como antes.
 const MC_AUTOARRANQUE = 'mundo-autoarranque';
+// Un mapa que tarda no se distingue de uno colgado si el cartel no dice quién está trabajando. En `/map/fps`
+// el fichero del mundo está vacío y TODO lo que se ve lo levanta 'mundo-fps' con el cartel puesto; en
+// `/map/empty` no hay snippet propio y por eso entra en un suspiro. Esa es la diferencia entera, y hasta
+// 2026-08-18 no se veía por ningún sitio. El nombre va en el cartel mientras corre, y lo que costó —ms y
+// voxels puestos— queda apuntado para `game.loadReport()`.
+// Contar la rejilla entera es un barrido de 442 368 celdas (~1 ms): se paga dos veces por snippet y solo
+// durante la carga, a cambio de la única cifra que explica la espera.
+function mcVoxelsEnRejilla(){
+  if(!mc.grid) return 0;
+  let n=0; for(let i=0;i<mc.grid.length;i++) if(mc.grid[i]) n++;
+  return n;
+}
+async function mcCorreArranqueVisible(nombre, code){
+  const antes=mcVoxelsEnRejilla(), t0=performance.now();
+  // El cartel solo se ACTUALIZA, nunca se enciende: openWorld corre el autoarranque TAMBIÉN al volver del
+  // editor con el mundo ya hecho, y allí encenderlo tapaba de azul un mapa que ya se veía renderizado —
+  // mundo, fogonazo azul, mundo otra vez (el dueño, 2026-08-18). Durante la carga de verdad el overlay ya
+  // está puesto desde openWorld/mcVolverAIntro, así que ahí sigue contándose quién construye el mundo.
+  const el=$('#mc-loading'), tapado=!!(el && !el.hidden);
+  if(tapado){ mcShowLoading('Ejecutando «'+nombre+'»… (el mundo lo construye este snippet)'); await mcYield(); }
+  mcLoadPhase('Snippet «'+nombre+'»');
+  // Un autoarranque que falla no puede impedir entrar al mapa: se avisa y se sigue, como siempre.
+  try{ await mcCorreSnippet(nombre, code); }
+  catch(e){ console.warn(nombre+' falló:', e && e.message ? e.message : e); }
+  mcLoadStop();
+  const puestos=mcVoxelsEnRejilla()-antes;
+  mcLoadNote('Snippet «'+nombre+'»: '+(performance.now()-t0).toFixed(0)+' ms, '
+    +(puestos>=0?'+':'')+puestos.toLocaleString('es')+' voxels en la rejilla.');
+}
 async function mcAutoarranque(){
   let s=null;
   try{ s=await fetch('/api/snippets/'+MC_AUTOARRANQUE,{cache:'no-store'}).then(r=>r.ok?r.json():null); }catch(e){}
   if(s && s.code){                                // sin snippet global no hay nada que hacer, pero el del mapa sigue
-    try{ await mcCorreSnippet(MC_AUTOARRANQUE, s.code); }
-    catch(e){ console.warn(MC_AUTOARRANQUE+' falló:', e && e.message ? e.message : e); }
+    await mcCorreArranqueVisible(MC_AUTOARRANQUE, s.code);
   }
   await mcAutoarranqueMapa();
 }
@@ -16895,9 +18746,10 @@ async function mcAutoarranqueMapa(){
   const nombre = mcNombreAutoarranqueMapa();
   if(nombre === MC_AUTOARRANQUE) return;          // /map/autoarranque: sería correr el global dos veces
   const s = await mcPideSnippet(nombre);
-  if(!s || !s.code) return;                       // lo normal: este mapa no tiene snippet propio
-  try{ await mcCorreSnippet(nombre, s.code); }
-  catch(e){ console.warn(nombre+' falló:', e && e.message ? e.message : e); }
+  // Que no exista es lo normal y es EL motivo de que un mapa entre rápido ⇒ se apunta, para que en el
+  // informe se lea «empty no tiene snippet propio» en vez de un hueco sin explicar.
+  if(!s || !s.code){ mcLoadNote('Snippet «'+nombre+'»: este mapa no tiene, no se construye nada al entrar.'); return; }
+  await mcCorreArranqueVisible(nombre, s.code);
 }
 
 // PUNTO DE EXTENSIÓN DEL EDITOR — el gemelo del de arriba para la entrada por `/`.
@@ -17033,9 +18885,11 @@ Object.defineProperty(game,'playerReach',{ enumerable:true, get:()=>mc.reach,
   set:v=>{ v=Math.max(1,Math.min(64,+v||16)); mc.reach=v; try{localStorage.setItem('vf_mcReach',v);}catch(e){} return v; } });
 // game.crosshair / game.mira = cambia el punto de mira del modo mapa ('+', '⛶', '☉', '⌞⌝', '👁', '🎯', etc.).
 const MC_HERRAMIENTA_MIRA = { build:'+', box:'⛶', paint:'☉', select:'⌞⌝', pick:'👁' };
+// REQ-TOOL8 · la mira de una herramienta: la de su ficha si es de snippet, si no la de la tabla de arriba.
+function mcMiraDe(t){ const h=mcHerrDef(t); return (h && h.mira) || MC_HERRAMIENTA_MIRA[t] || '+'; }
 mc.crosshair = MC_HERRAMIENTA_MIRA[mc.tool] || '+';
 function mcSetCrosshair(v){
-  const s = (v == null || v === '') ? (MC_HERRAMIENTA_MIRA[mc.tool] || '+') : String(v);
+  const s = (v == null || v === '') ? mcMiraDe(mc.tool) : String(v);
   mc.crosshair = s;
   try{ localStorage.setItem('vf_mcCrosshair', s); }catch(e){}
   const el = document.getElementById('mc-crosshair');
@@ -17062,6 +18916,28 @@ try{ const a=parseFloat(localStorage.getItem('vf_mcStructGhostAlpha')); if(isFin
 // clic derecho) (0..1): 0 = sin vista-previa, 1 = opaca. Separada de game.ghostAlpha (bloque suelto).
 Object.defineProperty(game,'structGhostAlpha',{ enumerable:true, get:()=>mc.structGhostAlpha,
   set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:1)); mc.structGhostAlpha=v; try{localStorage.setItem('vf_mcStructGhostAlpha',v);}catch(e){} return v; } });
+try{ const a=localStorage.getItem('vf_mcToolAlphaFix'); if(a!=null) mc.toolAlphaFix=(a==='1'); }catch(e){}
+// game.toolAlphaFix = la parte TRANSLÚCIDA de la herramienta que se lleva en la mano se dibuja con una pasada muda
+// de profundidad y otra de color con LEQUAL, así solo se ve su cara más cercana (BUG-TOOL3). Ponerlo a false la
+// devuelve al montón sin ordenar del resto del cristal del mapa: sirve para comparar y para medir su coste (2 draw
+// calls de un objeto pequeño). No afecta a las herramientas opacas, que no pasan por ahí.
+Object.defineProperty(game,'toolAlphaFix',{ enumerable:true, get:()=>mc.toolAlphaFix,
+  set:v=>{ v=!!v; mc.toolAlphaFix=v; try{localStorage.setItem('vf_mcToolAlphaFix', v?'1':'0');}catch(e){} return v; } });
+try{ const g=JSON.parse(localStorage.getItem('vf_mcSelVoxeles')||'null'); if(g && typeof g==='object') Object.assign(mc.selVoxeles, g); }catch(e){}
+// game.selVoxeles = corchetes de esquina de las herramientas Seleccionar y Volumen dibujados con VOXELES en vez
+// de con líneas (orden del dueño, 2026-08-18): un cubo blanco por vértice, apoyado por fuera de la caja, y tres brazos
+// del color de la selección corriendo por las aristas. {tam, largo} van en voxeles finos (16 = un bloque);
+// `false` o {activo:false} devuelve los corchetes de líneas de siempre. Se ve en vivo y persiste.
+// Ej.: game.selVoxeles = {tam:3, largo:6}  ·  game.selVoxeles = false
+Object.defineProperty(game,'selVoxeles',{ enumerable:true, get:()=>mc.selVoxeles,
+  set:v=>{ if(v===false || v===true) v={activo:v};
+    if(v && typeof v==='object'){
+      if('activo' in v) mc.selVoxeles.activo=!!v.activo;
+      if('tam'    in v) mc.selVoxeles.tam=Math.max(1, Math.min(16, (+v.tam|0)||1));
+      if('largo'  in v) mc.selVoxeles.largo=Math.max(0, Math.min(64, (+v.largo|0)||0));
+    }
+    try{ localStorage.setItem('vf_mcSelVoxeles', JSON.stringify(mc.selVoxeles)); }catch(e){}
+    return mc.selVoxeles; } });
 try{ const a=parseFloat(localStorage.getItem('vf_mcStructBias')); if(isFinite(a)) mc.structBias=Math.max(-8,Math.min(0,a)); }catch(e){}
 // game.structBias = sesgo de profundidad de las estructuras estampadas (0..-8, def. 0 = sin sesgo). Una cara de
 // estructura pegada a un bloque del terreno cae en el mismo plano y el z-test empata: el reparto de píxeles lo
@@ -17229,16 +19105,20 @@ Object.defineProperty(game,'playerScale',{ enumerable:true, get:()=>mc.scale,
 // y volver con el pico habría parecido un fallo. Se arranca siempre igual y no hay nada que explicar.
 try{ localStorage.removeItem('vf_mcTool'); }catch(e){}   // limpia lo que dejaron las versiones anteriores
 function mcSetPlayerTool(v, announce){    // centraliza mc.tool (setter de consola + atajos B/P); persiste
-  v=(v==='box'||v==='paint'||v==='select'||v==='pick')?v:'build'; mc.tool=v;
+  // REQ-TOOL8 · un id registrado por snippet vale igual que las cinco del código; uno desconocido (o el de
+  // una herramienta que ya no existe, p. ej. al recargar antes de que corra su snippet) cae en 'build'.
+  v=(v==='box'||v==='paint'||v==='select'||v==='pick'||mcHerrDef(v))?v:'build'; mc.tool=v;
+  mcGuardarTool(false);              // REQ-TOOL5: cambiar de herramienta estando guardada la SACA (el viaje de vuelta), nunca deja la mano vacía
   mcPintaSlotHerramienta();          // la ranura 10 se entera aquí, venga el cambio de P, de la galería o de consola
-  mcSetCrosshair(MC_HERRAMIENTA_MIRA[v] || '+');
+  mcSetCrosshair(mcMiraDe(v));
   mc.selA=null;                                      // al cambiar de herramienta, olvida la esquina a medio marcar (la caja confirmada se conserva para Ctrl+C)
   if(v!=='box') mcBoxClear();
   if(mc.pasteActive) mcPasteCancel();
   if(announce && mc.active) toast(v==='box' ? 'Volumen: arrastra base con clic izq · fija altura con clic izq · clic dcho planta · clic izq reinicia'
                                 : v==='select' ? 'Seleccionar: clic marca 2 esquinas · Ctrl+C copia · clic dcho limpia'
                                 : v==='pick' ? 'Cuentagotas: clic sobre un bloque y su material va a la ranura'
-                                : 'Clic derecho: '+(v==='paint'?'Pintar bloque':'Construir'));
+                                : mcHerrDef(v) ? (mcHerrDef(v).ayuda || mcEtiquetaHerramienta(v))
+             : 'Clic derecho: '+(v==='paint'?'Pintar bloque':'Construir'));
   return v;
 }
 // Herramientas disponibles en la rotación: solo aquellas que tengan un asset marcado como tal en el catálogo
@@ -17262,7 +19142,113 @@ function mcRotaHerramienta(grupo){
   return mcSetPlayerTool(next, true);
 }
 
+// REQ-TOOL6 · La ROSCA del ratón recorre las herramientas como una escalera, con la MANO VACÍA de peldaño de
+// abajo (dueño: «*si tengo pico y hago rosca hacia abajo pasa a vacia, si estoy en volumen, rosca hacia abajo
+// seria pico, otra rosca mas vacia*»). O sea: no es un anillo, tiene suelo y techo; llegar abajo del todo es
+// guardarse la herramienta, que ya es un estado de verdad (REQ-TOOL5) y no un hueco.
+// El orden es el de la hotbar de herramientas, no el de las teclas `e`/`E`: aquí se recorren TODAS de una
+// tacada, así que principales y secundarias van en la misma escalera.
+const MC_ORDEN_RUEDA = ['build', 'box', 'select', 'paint', 'pick'];
+function mcEscaleraHerramientas(){    // de abajo arriba, sin la vacía (que es el índice -1)
+  const disp = mc.catalog ? MC_ORDEN_RUEDA.filter(t => mcHerramientaKey(t)) : MC_ORDEN_RUEDA.slice();
+  // REQ-TOOL8 · las de snippet se añaden ARRIBA del todo (detrás de las del motor) y en el orden en que se
+  // definieron: así la rosca no cambia de significado a mitad de mundo para quien ya se sabe los peldaños.
+  for(const id in (mc.herrExtra||{})) if(mc.herrExtra[id].enRueda && mcHerramientaKey(id)) disp.push(id);
+  return disp.length ? disp : ['build'];
+}
+// REQ-TOOL7 · cambiar de herramienta con la rosca es un GESTO, no un salto (dueño: «*el cambio de herramienta
+// con la whell debe de ser realista, tendria que bajarla como cuando se oculta con el boton de enmedio, y luego
+// subir con la nueva*»): la vieja hace el MISMO viaje de guardarse (REQ-TOOL5) y la nueva sube detrás. Aquí solo se
+// apunta el destino; el relevo lo hace mcSyncHeldToolStruct en el frame en que la vieja sale de pantalla.
+function mcCambiaToolConGesto(t){
+  // Ya hay un relevo en vuelo (dos roscas seguidas, que es lo normal al buscar una herramienta): se RE-APUNTA
+  // el destino y se deja seguir la misma bajada. Sin esto, la segunda rosca vería `_guardada` y cambiaría de
+  // golpe a media bajada, que es justo el salto que el dueño no quiere ver.
+  if(mc._toolPend){ mc._toolPend = t; return t; }
+  // Cambio directo si el gesto está apagado, o si no hay nada que bajar: ya guardada (la subida con la nueva
+  // YA es el movimiento correcto), sin herramienta en mano, o tapada por una pantalla OSD.
+  if(!mc.ruedaGesto || mc._guardada || !mc.showTool || mc.osdSinTool || !mc._heldToolStruct) return mcSetPlayerTool(t);
+  mc._toolSelPend = mc.selBox;   // guardarse la herramienta tira la caja confirmada; cambiar de herramienta no ⇒ se rescata
+  mc._toolPend = t;
+  mcGuardarTool(true);
+  return t;
+}
+// Un peldaño arriba (+1) o abajo (-1). Devuelve dónde se ha quedado ('vacía' o la herramienta).
+function mcRuedaHerramienta(paso){
+  const lista = mcEscaleraHerramientas();
+  // El peldaño de partida es el DESTINO si hay un relevo en vuelo: la vieja sigue en la mano mientras baja, y
+  // mirando `mc.tool` dos roscas seguidas se pisarían la una a la otra.
+  const actual = mc._toolPend || (mc._guardada ? null : mc.tool);
+  const i0 = actual ? lista.indexOf(actual) : -1;                // -1 = mano vacía, el peldaño de abajo
+  let i = i0 + (paso < 0 ? -1 : 1);
+  if(i < -1) i = -1;                                             // topes, no vuelta: la escalera tiene suelo…
+  if(i >= lista.length) i = lista.length - 1;                    // …y techo
+  if(i === i0) return actual || 'vacía';                         // ya estaba en el extremo: ni toast ni trabajo
+  if(i < 0){ mc._toolPend = null; mc._toolSelPend = null; mcGuardarTool(true); return 'vacía'; }
+  mcCambiaToolConGesto(lista[i]);                                // baja la vieja y sube la nueva (o cambio seco si el gesto está apagado)
+  return lista[i];
+}
+
 Object.defineProperty(game,'playerTool',{ enumerable:true, get:()=>mc.tool, set:v=>mcSetPlayerTool(v) });
+
+// ── REQ-TOOL8 · herramientas nuevas DESDE SNIPPET ────────────────────────────────────────────────
+// Dueño (2026-08-18): «*necesito a nivel de snippet poder definir una herramienta nueva que no exista y
+// seleccionarla para ponerla en la mano del jugador, tambien que se la pueda definir la animacion y la
+// accion que ocurre cuando se hace clic izquierdo o derecho*».
+//
+// El motor sigue siendo AGNÓSTICO: no sabe qué es una espada. Solo sabe llevar un dibujo en la mano,
+// animarlo y avisar al snippet de que se ha hecho clic. Lo que pase entonces es del snippet.
+//
+//   game.herramientas.define('espada', {
+//     dibujo: 'hab:espada',                 // cualquier clave del catálogo ('hab:x' o 'asset:assets/x.vox.json')
+//     nombre: '🗡️ Espada',                  // rótulo de la ranura 10
+//     mira: '·',                            // punto de mira (opcional)
+//     pos:[0.9,-0.6,0], rot:[-10,-80,-30], escala:0.8,   // postura en la mano (opcional)
+//     gesto: { dur:0.18, chopRot:45, reach:0.5 },        // mandos del golpe; `false` = no se mueve
+//     gestoBotones: [0, 2],                 // con qué botones se anima (por defecto solo el izquierdo)
+//     izquierdo(c){ ... }, derecho(c){ ... },
+//     anima(e){ return { pos:[0,Math.sin(e.t)*0.02,0], rot:[0,0,0] }; }   // movimiento propio (opcional)
+//   });
+//   game.playerTool = 'espada';             // …y ya está en la mano
+//
+// `c` trae la celda apuntada, su clave, la de delante, el punto exacto, la postura del jugador y la ranura.
+game.herramientas = {
+  define(id, cfg){
+    id = String(id || '').trim();
+    if(!id) throw new Error('game.herramientas.define: hace falta un id');
+    // Los cinco ids del motor son intocables: dejar que un snippet redefina 'build' sería apagar el pico
+    // desde fuera sin que nada lo diga, y encima de forma no reversible al recargar.
+    if(MC_HERRAMIENTAS.some(h => h[0] === id)) throw new Error("game.herramientas.define: '"+id+"' es una herramienta del motor");
+    const ficha = mcHerrNormaliza(id, cfg);
+    if(!ficha.dibujo) throw new Error('game.herramientas.define: falta `dibujo` (la clave del catálogo que se lleva en la mano)');
+    mc.herrExtra[id] = ficha;
+    // Si ya estaba puesta, se re-aplica en caliente: cambiar el dibujo o el gesto y verlo sin cambiar de
+    // herramienta y volver es media gracia de poder definirla desde la consola.
+    if(mc.tool === id){ mc._heldToolKey = null; mcSetCrosshair(mcMiraDe(id)); }
+    mcPintaSlotHerramienta();
+    return ficha;
+  },
+  quita(id){
+    id = String(id || '');
+    if(!mc.herrExtra[id]) return false;
+    delete mc.herrExtra[id];
+    if(mc.tool === id) mcSetPlayerTool('build');   // nadie se queda con una herramienta que ya no existe
+    else mcPintaSlotHerramienta();
+    return true;
+  },
+  activa(id){ return mcSetPlayerTool(String(id), true); },
+  golpea(cfg){ return mcHerrGolpe(cfg); },         // lanza el gesto a mano (sin clic)
+  lista(){ return Object.keys(mc.herrExtra); },
+  info(id){
+    if(id === undefined) return Object.keys(mc.herrExtra).map(k => this.info(k));
+    const h = mc.herrExtra[String(id)];
+    if(!h) return null;
+    return { id:h.id, nombre:h.nombre, dibujo:h.dibujo, mira:h.mira, pos:h.pos, rot:h.rot, escala:h.escala,
+             alcance:h.alcance, enRueda:h.enRueda, gesto:h.gesto ? Object.assign({}, h.gesto) : null,
+             gestoBotones:h.gestoBotones.slice(), tieneIzquierdo:!!h.izquierdo, tieneDerecho:!!h.derecho,
+             tieneAnima:!!h.anima, activa:(mc.tool === h.id) };
+  }
+};
 try{ const t=localStorage.getItem('vf_mcStructTex'); if(t!==null) mc.structTextures=(t!=='0'); }catch(e){}
 // Textureado de las estructuras estampadas. true (por defecto) = textura COMPLETA por voxel como el editor 3D,
 // vía atlas + shader del terreno (coste de geometría de nivel 1, sin tope aunque la sala sea la Taberna).
@@ -17380,6 +19366,8 @@ try{ const tb = parseFloat(localStorage.getItem('vf_mcToolBob')); if(isFinite(tb
 try{ const td = parseFloat(localStorage.getItem('vf_mcToolBobDecay')); if(isFinite(td)&&td>=0) mc.toolBobDecay=td; }catch(e){}
 try{ const tr = parseFloat(localStorage.getItem('vf_mcToolBobRise'));  if(isFinite(tr)&&tr>0)  mc.toolBobRise=tr;  }catch(e){}
 try{ const sw = JSON.parse(localStorage.getItem('vf_mcToolSwingCfg')); if(sw&&typeof sw==='object') Object.assign(mc.toolSwingCfg, sw); }catch(e){}
+try{ const sw = JSON.parse(localStorage.getItem('vf_mcToolSwingSelCfg')); if(sw&&typeof sw==='object') Object.assign(mc.toolSwingSelCfg, sw); }catch(e){}
+try{ const gu = JSON.parse(localStorage.getItem('vf_mcToolGuardaCfg')); if(gu&&typeof gu==='object') Object.assign(mc.toolGuardaCfg, gu); }catch(e){}
 
 game.showTool = function(v){
   if(v === undefined) return mc.showTool;
@@ -17429,33 +19417,119 @@ Object.defineProperty(game.showTool, 'bobRise', {
   get: () => mc.toolBobRise,
   set: (v) => { if(isFinite(+v)&&+v>0){ mc.toolBobRise=+v; try{localStorage.setItem('vf_mcToolBobRise',String(mc.toolBobRise));}catch(e){} } }
 });
-// game.showTool.swing: tunables de la animación de picar en 3 fases (dur, windupP, strikeP, windupRot, chopRot, lift, pull, drop, reach)
-function mcSaveSwingCfg(){ try{ localStorage.setItem('vf_mcToolSwingCfg', JSON.stringify(mc.toolSwingCfg)); }catch(e){} }
-Object.defineProperty(game.showTool, 'swing', {
-  enumerable: true,
-  get: () => Object.assign({}, mc.toolSwingCfg),
-  set: (v) => {
-    if(v && typeof v === 'object'){
-      if(isFinite(+v.dur) && +v.dur > 0) mc.toolSwingCfg.dur = +v.dur;
-      if(isFinite(+v.windupP) && +v.windupP > 0) mc.toolSwingCfg.windupP = Math.min(0.8, +v.windupP);
-      if(isFinite(+v.strikeP) && +v.strikeP > 0) mc.toolSwingCfg.strikeP = Math.min(0.95, +v.strikeP);
-      if(isFinite(+v.windupRot)) mc.toolSwingCfg.windupRot = +v.windupRot;
-      if(isFinite(+v.chopRot)) mc.toolSwingCfg.chopRot = +v.chopRot;
-      if(isFinite(+v.lift)) mc.toolSwingCfg.lift = +v.lift;
-      if(isFinite(+v.pull)) mc.toolSwingCfg.pull = +v.pull;
-      if(isFinite(+v.drop)) mc.toolSwingCfg.drop = +v.drop;
-      if(isFinite(+v.reach)) mc.toolSwingCfg.reach = +v.reach;
-      mcSaveSwingCfg();
-    }
-  }
-});
-['dur', 'windupP', 'strikeP', 'windupRot', 'chopRot', 'lift', 'pull', 'drop', 'reach'].forEach(prop => {
-  const cap = prop.charAt(0).toUpperCase() + prop.slice(1);
-  Object.defineProperty(game.showTool, 'swing' + cap, {
+// game.showTool.swing (pico) y game.showTool.selectSwing (Seleccionar): tunables de la animación de clic en
+// 3 fases (dur, windupP, strikeP, windupRot, chopRot, lift, pull, drop, reach). Las DOS salen de la misma
+// fábrica para que validen y persistan igual: si mañana se añade un mando, se añade una vez.
+const MC_SWING_MANDOS = ['dur', 'windupP', 'strikeP', 'windupRot', 'chopRot', 'lift', 'pull', 'drop', 'reach'];
+// El nombre que escribe el dueño se normaliza antes de mirarlo: minúsculas (`winduprot`) y la `dd` de más
+// (`winddupRot`), que es su errata habitual. Ganó a rechazarlo porque un mando ignorado no se nota: el
+// gesto sigue moviéndose con el valor viejo y parece que sí caló (orden del dueño, 2026-08-18).
+const MC_SWING_ALIAS = (() => {
+  const m = {};
+  for(const k of MC_SWING_MANDOS){ const l = k.toLowerCase(); m[l] = k; m[l.replace('windup', 'winddup')] = k; }
+  return m;
+})();
+function mcSwingMando(k){ return MC_SWING_ALIAS[String(k).toLowerCase()] || null; }
+function mcDefSwing(nombre, cfg, clave){
+  const guarda = () => { try{ localStorage.setItem(clave, JSON.stringify(cfg)); }catch(e){} };
+  // Un mando suelto: `dur` y las dos fracciones son las únicas con tope; el resto es geometría libre
+  // (un `chopRot` negativo o un `reach` hacia atrás son gestos válidos, solo raros).
+  const pon = (k, val) => {
+    if(!isFinite(+val)) return;
+    if(k === 'dur'){ if(+val > 0) cfg.dur = +val; return; }   // dur 0 sí se rechaza: dividiría por cero
+    if(k === 'windupP'){ if(+val >= 0) cfg.windupP = Math.min(0.8, +val); return; }  // 0 = sin impulso
+    if(k === 'strikeP'){ if(+val > 0) cfg.strikeP = Math.min(0.95, +val); return; }
+    cfg[k] = +val;
+  };
+  Object.defineProperty(game.showTool, nombre, {
     enumerable: true,
-    get: () => mc.toolSwingCfg[prop],
-    set: (val) => { if(isFinite(+val)){ mc.toolSwingCfg[prop] = +val; mcSaveSwingCfg(); } }
+    // Instantánea, no vista viva: así se imprime entera en F12 de un vistazo. El precio es que
+    // `game.showTool.swing.dur = 0.5` no cala —para un mando suelto están los atajos planos de abajo—.
+    get: () => Object.assign({}, cfg),
+    // Se recorren las claves QUE VIENEN (no las válidas) para poder normalizarlas con mcSwingMando y avisar
+    // de la que no cuadre con ninguna: un mando ignorado en silencio no se nota, el gesto sigue con el valor
+    // viejo y parece aplicado.
+    set: (v) => { if(v && typeof v === 'object'){
+      for(const k of Object.keys(v)){
+        const m = mcSwingMando(k);
+        if(m) pon(m, v[k]);
+        else console.warn('game.showTool.' + nombre + ': mando desconocido «' + k + '», IGNORADO. Válidos: ' + MC_SWING_MANDOS.join(', '));
+      }
+      guarda(); } }
   });
+  for(const prop of MC_SWING_MANDOS){                       // atajos planos: game.showTool.swingDur = 0.5
+    const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+    Object.defineProperty(game.showTool, nombre + cap(prop), {
+      enumerable: true, get: () => cfg[prop], set: (val) => { pon(prop, val); guarda(); } });
+    // …y el mismo atajo con la `dd` de la errata (selectSwingWinddupRot), oculto del volcado (enumerable
+    // false) para que el atajo bueno siga siendo el que se ve. Si no, el objeto perdona y el plano no.
+    if(prop.startsWith('windup'))
+      Object.defineProperty(game.showTool, nombre + cap(prop.replace('windup', 'winddup')), {
+        enumerable: false, get: () => cfg[prop], set: (val) => { pon(prop, val); guarda(); } });
+  }
+}
+mcDefSwing('swing',       mc.toolSwingCfg,    'vf_mcToolSwingCfg');
+mcDefSwing('selectSwing', mc.toolSwingSelCfg, 'vf_mcToolSwingSelCfg');
+
+// game.showTool.guardar (REQ-TOOL5) = tunables de guardarse la herramienta con el botón CENTRAL. No sale de la
+// fábrica de arriba porque no comparte ni un mando con el gesto de clic: aquello es un golpe que va y vuelve
+// solo, esto es un viaje de ida y vuelta con memoria (game.showTool.guardada).
+const MC_GUARDA_MANDOS = ['ms', 'baja', 'giro', 'aparta', 'curva'];
+{
+  const cfg = mc.toolGuardaCfg;
+  const guarda = () => { try{ localStorage.setItem('vf_mcToolGuardaCfg', JSON.stringify(cfg)); }catch(e){} };
+  // `ms` y `curva` dividen o van al exponente: un 0 congelaría el viaje a medio camino, con la herramienta
+  // colgando fuera de sitio y sin manera de sacarla. El resto es geometría libre (giro negativo = la levanta).
+  const pon = (k, val) => {
+    if(!isFinite(+val)) return;
+    if(k === 'ms' || k === 'curva'){ if(+val > 0) cfg[k] = +val; return; }
+    cfg[k] = +val;
+  };
+  Object.defineProperty(game.showTool, 'guardar', {
+    enumerable: true,
+    get: () => Object.assign({}, cfg),
+    set: (v) => { if(v && typeof v === 'object'){
+      for(const k of Object.keys(v)){
+        const m = MC_GUARDA_MANDOS.indexOf(String(k).toLowerCase()) >= 0 ? String(k).toLowerCase() : null;
+        if(m) pon(m, v[k]);
+        else console.warn('game.showTool.guardar: mando desconocido «' + k + '», IGNORADO. Válidos: ' + MC_GUARDA_MANDOS.join(', '));
+      }
+      guarda(); } }
+  });
+  for(const prop of MC_GUARDA_MANDOS)                       // atajos planos: game.showTool.guardarBaja = 2.4
+    Object.defineProperty(game.showTool, 'guardar' + prop.charAt(0).toUpperCase() + prop.slice(1), {
+      enumerable: true, get: () => cfg[prop], set: (val) => { pon(prop, val); guarda(); } });
+}
+// game.showTool.rueda (REQ-TOOL6) = la rosca recorre las herramientas; .ruedaUmbral, cuánto delta cuesta un
+// peldaño (más alto = hace falta girar más). Persisten los dos.
+try{ const r=localStorage.getItem('vf_mcRuedaTool'); if(r!==null) mc.ruedaTool=(r==='1'); }catch(e){}
+try{ const u=parseFloat(localStorage.getItem('vf_mcRuedaUmbral')); if(isFinite(u) && u>0) mc.ruedaUmbral=u; }catch(e){}
+Object.defineProperty(game.showTool, 'rueda', {
+  enumerable: true,
+  get: () => !!mc.ruedaTool,
+  set: (v) => { mc.ruedaTool = !!v; try{ localStorage.setItem('vf_mcRuedaTool', mc.ruedaTool?'1':'0'); }catch(e){} }
+});
+Object.defineProperty(game.showTool, 'ruedaUmbral', {
+  enumerable: true,
+  get: () => mc.ruedaUmbral,
+  set: (v) => { if(!(isFinite(+v) && +v > 0)) return;    // 0 haría saltar un peldaño por cada temblor del trackpad
+    mc.ruedaUmbral = +v; try{ localStorage.setItem('vf_mcRuedaUmbral', String(mc.ruedaUmbral)); }catch(e){} }
+});
+// game.showTool.ruedaGesto (REQ-TOOL7) = el cambio con la rosca baja la vieja y sube la nueva. false = cambio
+// instantáneo (como REQ-TOOL6 recién salido), que es además la forma de medir lo que cuesta el gesto. Persiste.
+try{ const g=localStorage.getItem('vf_mcRuedaGesto'); if(g!==null) mc.ruedaGesto=(g==='1'); }catch(e){}
+Object.defineProperty(game.showTool, 'ruedaGesto', {
+  enumerable: true,
+  get: () => !!mc.ruedaGesto,
+  set: (v) => { mc.ruedaGesto = !!v; try{ localStorage.setItem('vf_mcRuedaGesto', mc.ruedaGesto?'1':'0'); }catch(e){} }
+});
+// …y el ESTADO, aparte de los tunables: `game.showTool.guardada = true` la guarda desde consola igual que el
+// rosca hasta el suelo, y sin argumento `mcGuardarTool()` alterna. NO se persiste: empezar una partida con la mano
+// vacía y sin saber por qué es un fallo, no una preferencia.
+Object.defineProperty(game.showTool, 'guardada', {
+  enumerable: true,
+  get: () => !!mc._guardada,
+  set: (v) => { mcGuardarTool(!!v); }
 });
 
 // game.showTool.debug: muestra la cruz amarilla en el pivote "1" del asset, ejes RGB y caja del modelo
@@ -17480,6 +19554,12 @@ game.showTool.info = function(){
     pos: mc.toolPos, rot: mc.toolRot, scale: mc.toolScale,
     bob: mc.toolBob, bobDecay: mc.toolBobDecay, bobRise: mc.toolBobRise,
     swing: Object.assign({}, mc.toolSwingCfg),
+    selectSwing: Object.assign({}, mc.toolSwingSelCfg),
+    guardar: Object.assign({}, mc.toolGuardaCfg),
+    guardada: !!mc._guardada,
+    rueda: !!mc.ruedaTool, ruedaUmbral: mc.ruedaUmbral, ruedaGesto: !!mc.ruedaGesto,
+    cambiandoA: mc._toolPend || null,          // REQ-TOOL7: relevo en vuelo (la vieja está bajando)
+    escalera: ['vacía'].concat(mcEscaleraHerramientas()),   // el orden que recorre la rosca, de abajo arriba
     debug: !!mc.toolDebug
   };
 };
@@ -17491,6 +19571,8 @@ Object.defineProperty(game, 'toolBob',      { enumerable:true, get:()=>mc.toolBo
 Object.defineProperty(game, 'toolBobDecay', { enumerable:true, get:()=>mc.toolBobDecay, set:v=>{ game.showTool.bobDecay=v; } });
 Object.defineProperty(game, 'toolBobRise',  { enumerable:true, get:()=>mc.toolBobRise,  set:v=>{ game.showTool.bobRise=v; } });
 Object.defineProperty(game, 'toolSwing',    { enumerable:true, get:()=>game.showTool.swing, set:v=>{ game.showTool.swing=v; } });
+Object.defineProperty(game, 'toolGuardar',  { enumerable:true, get:()=>game.showTool.guardar,  set:v=>{ game.showTool.guardar=v; } });
+Object.defineProperty(game, 'toolGuardada', { enumerable:true, get:()=>game.showTool.guardada, set:v=>{ game.showTool.guardada=v; } });
 Object.defineProperty(game, 'toolDebug',    { enumerable:true, get:()=>game.showTool.debug, set:d=>{ game.showTool.debug=d; } });
 
 
@@ -17571,7 +19653,7 @@ game.toast=game.showToast=function(msg, secs){ toast(String(msg), secs); return 
 game.dumpVars=function(){
   const keys=['nearClip','perspStrength','playFill','playZoom','playLift',   // edición 3D / modo jugar
     'fov','renderDist','renderScale','mouseSpeed','yaw','pitch','hotbarHide','reach','crosshair',   // Mundo (WebGL)
-    'ghostAlpha','structGhostAlpha','noteAlpha','noteSigns','noteText','noteTextDist','noteFont','noteWidth','structBias','structCull','playerSpeed','playerScale','playerTool',
+    'ghostAlpha','structGhostAlpha','noteAlpha','noteSigns','noteText','noteTextDist','noteFont','noteWidth','structBias','structCull','toolAlphaFix','toolGuardar','playerSpeed','playerScale','playerTool',
     'airControl','airAccel','airCap','autoUnstick',
     'structTextures','structGreedy','useOldStructBuildCall','interiorDark','sunShade','shadowSize','glowLevel','glowFocus','worldSize',
     'viento','uvInset',
@@ -17594,12 +19676,13 @@ function closeWorld(){
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
   if(mc.raf){ cancelAnimationFrame(mc.raf); mc.raf=0; }
   $('#mc-modal').hidden=true;
+  snipPintaDividido();   // REQ-SPLIT1 · sin Mundo no hay nada que dividir: el editor recupera la pantalla
   mcDestapaApp();   // REQ-EDIT1 · CONSTRUIR sale al editor sin recargar: la tapa no puede seguir puesta
   mcMarcaSync();
 }
-// La salida táctil. Es un `mc-tbtn` de `#mc-touch`, no el «✕ Cerrar» de la esquina (quitado en
-// REQ-OSD1): en escritorio no existe, y aquí no hace falta guardarlo de nada porque su contenedor ya
-// se enciende y se apaga con `mcTouchShow`.
+// La salida táctil. Desde REQ-MOV1 es una LÍNEA del menú ☰ de `#mc-touch` (antes un ✕ suelto), no el
+// «✕ Cerrar» de la esquina (quitado en REQ-OSD1): en escritorio no existe, y aquí no hace falta
+// guardarlo de nada porque su contenedor ya se enciende y se apaga con `mcTouchShow`.
 if($('#mc-tsalir')) $('#mc-tsalir').onclick=closeWorld;
 // REQ-INTRO2 · la marca «VOXELFORGE» del editor devuelve al Mundo en modo intro, sin recargar. Solo se
 // ve pulsable cuando de verdad hay un mundo en memoria al que volver (si no, el editor a secas y la
@@ -17695,13 +19778,15 @@ document.addEventListener('mousemove',e=>{
   // Reemerge la hotbar si el jugador está PARADO y mueve el ratón (gesto de «volver a mirar el inventario»).
   if(mc.hbTarget===0 && Math.hypot(mc.vel[0],mc.vel[2])<0.6 && (Math.abs(e.movementX)+Math.abs(e.movementY))>1) mcRevealHotbar();
 });
-window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || !$('#mc-note').hidden || !$('#snip-modal').hidden || !$('#ag-modal').hidden || (e.target && e.target.matches && e.target.matches('input,select,textarea'))) return;   // selector/editor de nota/código/agentes abierto ⇒ no mover/seleccionar
+window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || !$('#mc-note').hidden || snipTapaElMundo() || !$('#ag-modal').hidden || (e.target && e.target.matches && e.target.matches('input,select,textarea'))) return;   // selector/editor de nota/código/agentes abierto ⇒ no mover/seleccionar (dividido NO tapa: manda el foco)
   if(/^[1-9]$/.test(e.key)){ const i=+e.key-1;
     // Alt+número: abre el selector de esa ranura (sin Esc+clic derecho); si no, selecciona la ranura.
     // Con la herramienta Seleccionar y una caja marcada, ADEMÁS reemplaza lo seleccionado por ese
     // material (mcSelectFill). Se hace después de activar la ranura, no en vez de: así el gesto de
     // toda la vida —elegir ranura— nunca se pierde, ni con una caja marcada delante.
-    if(i<mc.hotbar.length){ if(e.altKey) mcOpenPicker(i); else { mc.sel=i; mcSelectSlot(); mcSelectFill(i); } }
+    // Pegando (Ctrl+V), el material va al CÚMULO que se previsualiza (mcPasteMaterial), no a la caja
+    // del Ctrl+C que quedó detrás: es lo que el jugador mira y lo que va a plantar.
+    if(i<mc.hotbar.length){ if(e.altKey) mcOpenPicker(i); else { mc.sel=i; mcSelectSlot(); if(!mcPasteMaterial(i)) mcSelectFill(i); } }
     e.preventDefault(); return; }
   const k=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey) && k==='c'){ mcCopySelection(); e.preventDefault(); return; }   // Ctrl+C: copia la selección (tool=select) al portapapeles compatible con el editor
@@ -17781,7 +19866,12 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   // evita que mantener S pulsado parpadee entre modos.
   if(k==='s' && !e.repeat && mc.heldBtn===2 && mc.slotStruct[mc.sel]){ mc.stampCenter=!mc.stampCenter; toast('Pegado: '+(mc.stampCenter?'centrado':'canto')); e.preventDefault(); return; }
   if(k==='z'){ if(e.shiftKey) mcRedo(); else mcUndo(); e.preventDefault(); return; }   // z = deshacer · Z (mayús) = rehacer (romper/poner/pintar/estampar/retirar)
-  if(mcUserKeys[k]){ try{ mcUserKeys[k](e); }catch(err){ console.error('game.onKey("'+k+'"):', err); } e.preventDefault(); return; }   // atajos del usuario (game.onKey)
+  // Atajos del usuario (game.onKey). ⛔ NUNCA con Alt/Ctrl/⌘: esos son los atajos de la aplicación
+  // (Alt+C editor de código, Alt+A agentes, Alt+D partir, Alt+F foto) y no hay forma de ligarlos, así
+  // que una tecla suelta ligada aquí NO puede ser también la letra de uno de ellos. Sin este filtro,
+  // Alt+C abría el editor Y disparaba el `game.onKey('c')` del snippet de turno (BUG: efectos-demo
+  // encendía las estrellas al ir a programar).
+  if(mcUserKeys[k] && !e.altKey && !e.ctrlKey && !e.metaKey){ try{ mcUserKeys[k](e); }catch(err){ console.error('game.onKey("'+k+'"):', err); } e.preventDefault(); return; }
   if(e.key==='Control' && !e.repeat && mc.tool==='box' && mc.boxStep===3 && !mc.boxCtrlHeld){
     mc.boxCtrlHeld = true;
     const near = mcRaycast(mcReach(), true);
@@ -17817,7 +19907,7 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   }
 });
 window.addEventListener('keyup',e=>{
-  if(!mc.active || !$('#snip-modal').hidden || !$('#ag-modal').hidden) return;
+  if(!mc.active || snipTapaElMundo() || !$('#ag-modal').hidden) return;
   const k = e.key.toLowerCase();
   mc.keys[k]=false;
   if(e.key==='Control' && mc.tool==='box' && mc.boxCtrlHeld){
@@ -17853,15 +19943,18 @@ window.addEventListener('keyup',e=>{
 // Así todo lo que depende del movimiento —colisión, agentes que te persiguen, la hotbar que se hunde
 // al correr— sigue funcionando igual sin enterarse de que no hay teclado.
 //
-// A propósito NO hay botones de romper/poner: un toque de más sería una edición de verdad, con su
-// autoguardado en mundo.json. Mirar y andar no escriben nada, y lo que faltaba era andar.
+// Aquí ponía «a propósito NO hay botones de romper/poner: un toque de más sería una edición de verdad,
+// con su autoguardado en mundo.json». El dueño lo revirtió en REQ-MOV1 —«faltarían controles/botones
+// como tiene el ratón […] botón izquierdo, derecho y central»— y ahora están los tres. El riesgo que
+// decía aquel comentario NO era falso y sigue en pie: por eso los de acción van arriba, fuera del sitio
+// donde descansa el pulgar que anda, y por eso soltar el dedo corta la picada en cadena (mcTouchSuelta).
 const MC_TOUCH=matchMedia('(pointer:coarse)').matches || navigator.maxTouchPoints>0;
 const MC_LOOK_BASE=0.006;      // rad/px del arrastre; el ratón usa 0.000625, que en un dedo sería nada
 // El recorrido del pulgar sale del ANCHO REAL del aro, no de una constante: el CSS encoge el
 // joystick en apaisado (@media max-height) y con un número fijo el pomo se saldría del dibujo y la
 // zona muerta dejaría de coincidir. 0.39 reproduce los 46 px de siempre en el aro de 118.
 const MC_STICK_F=0.39;         // recorrido = ancho del aro × esto
-let mcLookSens=MC_LOOK_BASE, mcStickId=-1, mcLookId=-1, mcJumpId=-1, mcLookX=0, mcLookY=0;
+let mcLookSens=MC_LOOK_BASE, mcStickId=-1, mcLookId=-1, mcJumpId=-1, mcAccionId=-1, mcLookX=0, mcLookY=0;
 try{ const s=parseFloat(localStorage.getItem('vf_mcTouchLook')); if(isFinite(s)&&s>0) mcLookSens=MC_LOOK_BASE*s; }catch(e){}
 // game.touchLook = múltiplo de la sensibilidad del arrastre (1 = normal), como game.mouseSpeed.
 Object.defineProperty(game,'touchLook',{ enumerable:true, get:()=>+(mcLookSens/MC_LOOK_BASE).toFixed(2),
@@ -17875,7 +19968,27 @@ Object.defineProperty(game,'touchControls',{ enumerable:true, get:()=>mcTouchOn,
            // `#mc-touch`, así que `mcTouchShow` la trae y se la lleva con el resto de los mandos.
            return mcTouchOn; } });
 
-function mcTouchShow(on){ const z=$('#mc-touch'); if(z) z.hidden=!(on && mcTouchOn); if(!on) mcStickSuelta(); }
+function mcTouchShow(on){ const z=$('#mc-touch'); if(z) z.hidden=!(on && mcTouchOn); if(!on) mcStickSuelta();
+  if(!on){ const p=$('#mc-tmenu-panel'); if(p) p.hidden=true; }   // el menú no sobrevive a salir del Mundo
+}
+// REQ-MOV1 · pantalla completa. Va sobre `documentElement` y no sobre el canvas: el Mundo es la MISMA
+// página que el editor (hotbar, mira, mandos y modales son hermanos del canvas), y poniendo el canvas a
+// pantalla completa el resto se queda fuera. Se conmuta, para poder volver sin buscar el gesto de Android.
+// ⚠️ Entrar en pantalla completa SUELTA el pointer-lock; de eso se ocupa mcMandoActivo(), que es lo que
+// mira el resto del juego para saber si el jugador manda.
+function mcPantallaCompleta(){
+  const d=document, el=d.documentElement;
+  const puesta = d.fullscreenElement || d.webkitFullscreenElement;
+  try{
+    if(puesta){ (d.exitFullscreen||d.webkitExitFullscreen).call(d); }
+    else{ const pide = el.requestFullscreen||el.webkitRequestFullscreen;
+          if(!pide){ toast('Este navegador no tiene pantalla completa'); return false; }
+          const r=pide.call(el); if(r && r.catch) r.catch(()=>toast('El navegador no ha dejado poner pantalla completa'));
+    }
+  }catch(e){ toast('El navegador no ha dejado poner pantalla completa'); return false; }
+  return true;
+}
+game.pantallaCompleta=mcPantallaCompleta;   // por si el dueño la quiere desde un snippet o desde la consola
 function mcStickSuelta(){    // el pulgar levantado deja de andar: si no, te quedas caminando solo
   mcStickId=-1; mc.keys['w']=mc.keys['a']=mc.keys['s']=mc.keys['d']=false;
   const k=$('#mc-stick-knob'); if(k) k.style.transform='translate(-50%,-50%)';
@@ -17901,13 +20014,36 @@ function mcStickSuelta(){    // el pulgar levantado deja de andar: si no, te que
   salto.addEventListener('pointerdown',e=>{ if(!mc.active) return;
     mcJumpId=e.pointerId; mc.keys[' ']=true; try{ salto.setPointerCapture(e.pointerId); }catch(err){} e.preventDefault(); });
 
+  // REQ-MOV1 · los tres botones del ratón. Cada uno manda SU número de botón y nada más: qué hace el
+  // izquierdo lo decide la herramienta que lleves puesta, igual que con ratón, y por eso se entra por
+  // mcDoAction —la puerta común del clic— en vez de llamar a mcBreak/mcPlace y duplicar el reparto.
+  // El CENTRAL es la excepción: quien lo atiende es redstone, que vive fuera de app.js y escucha
+  // 'mousedown' en window; se le manda ese mismo evento en vez de inventarle un contrato nuevo.
+  // En DOWN, no en up como la foto: mantener pulsado tiene que picar en cadena, como el ratón.
+  document.querySelectorAll('#mc-touch .mc-tbtn.accion').forEach(b=>{
+    const btn=+b.dataset.btn;
+    b.addEventListener('pointerdown',e=>{ if(!mcMandoActivo()) return;
+      if(btn===1){ dispatchEvent(new MouseEvent('mousedown',{button:1,buttons:4,bubbles:true})); }
+      else { mcAccionId=e.pointerId; mc.heldBtn=btn; mc.actAt=performance.now(); mcDoAction(btn,false); mcRevealHotbar(); }
+      try{ b.setPointerCapture(e.pointerId); }catch(err){} e.preventDefault(); });
+  });
+
+  // El menú ☰ (REQ-MOV1). Sustituye al ✕: sin teclado no hay Esc, así que de aquí cuelga la única
+  // salida del Mundo que tiene el móvil, y por eso el panel se cierra solo tras cada opción menos esa.
+  const menuBtn=$('#mc-tmenu'), menuPanel=$('#mc-tmenu-panel');
+  function mcTouchMenu(abrir){
+    if(!menuPanel) return;
+    const v = abrir===undefined ? menuPanel.hidden : !!abrir;
+    menuPanel.hidden=!v; if(menuBtn) menuBtn.setAttribute('aria-expanded', v?'true':'false');
+  }
+  if(menuBtn) menuBtn.addEventListener('pointerup',e=>{ mcTouchMenu(); e.preventDefault(); });
+  const menuOpc=(sel,fn)=>{ const el=$(sel); if(el) el.addEventListener('pointerup',e=>{ mcTouchMenu(false); fn(); e.preventDefault(); }); };
   // La foto se dispara en pointerUP y no en down como el salto: un botón que dispara al tocarlo se
   // activa al rozarlo mientras se busca el pulgar, y esto escribe un fichero. Nada de estado que
   // soltar, así que mcTouchSuelta no tiene que saber de él.
-  const foto=$('#mc-tfoto');
-  if(foto) foto.addEventListener('pointerup',e=>{ if(!mc.active) return; mcFoto(); e.preventDefault(); });
-  const tvideo=$('#mc-tvideo');
-  if(tvideo) tvideo.addEventListener('pointerup',e=>{ if(!mc.active) return; mcToggleGrabarVideo(); e.preventDefault(); });
+  menuOpc('#mc-tfoto', ()=>{ if(mc.active) mcFoto(); });
+  menuOpc('#mc-tvideo', ()=>{ if(mc.active) mcToggleGrabarVideo(); });
+  menuOpc('#mc-tfull', ()=>mcPantallaCompleta());
   // Desatasco (BUG-AG7). Va aquí con los demás mandos pero NO dentro de #mc-touch: en el escritorio
   // también hace falta. También en pointerup, por lo mismo que la foto. Lo esconde el propio mcUpdate
   // en cuanto quedas libre; no hace falta apagarlo a mano.
@@ -17933,6 +20069,9 @@ function mcTouchSuelta(id){          // un dedo concreto, o TODOS si no se pasa 
   if(id===undefined || id===mcStickId) mcStickSuelta();
   if(id===undefined || id===mcLookId) mcLookId=-1;
   if(id===undefined || id===mcJumpId){ mcJumpId=-1; if(mc.keys) mc.keys[' ']=false; }
+  // REQ-MOV1 · y el botón de acción: soltarlo tiene que parar la picada en cadena. Un `up` perdido
+  // aquí no te deja andando, te deja PICANDO solo — que en el Mundo sí escribe en mundo.json.
+  if(id===undefined || id===mcAccionId){ mcAccionId=-1; mc.heldBtn=-1; }
 }
 addEventListener('pointerup',e=>mcTouchSuelta(e.pointerId),true);
 addEventListener('pointercancel',e=>mcTouchSuelta(e.pointerId),true);
@@ -17962,6 +20101,8 @@ $('#mc-canvas').addEventListener('pointermove',e=>{
 //   game.onKey('t', ()=> throwAndExplodeTNT(...game.aim(), {radius:8, fuseTimeMs:500, tntMat:'roca'}));
 // Re-registrar la misma tecla la REEMPLAZA (no acumula listeners); game.onKey('t', null) la quita.
 // Las teclas del motor (WASD, espacio, shift, 1-9, e/p/b/x/u/n/r/z/f, Esc) están reservadas. game.keys() lista las tuyas.
+// Tu función solo salta con la tecla SOLA: con Alt/Ctrl/⌘ delante manda la aplicación (Alt+C código,
+// Alt+A agentes, Alt+D partir, Alt+F foto), así que ligar 'c' no te roba el Alt+C.
 game.onKey=function(tecla, fn){
   const k=String(tecla==null?'':tecla).toLowerCase();
   if(k.length!==1 && k!=='escape'){ console.warn('game.onKey: indica UNA tecla, p.ej. game.onKey("t", fn)'); return; }
@@ -18535,6 +20676,13 @@ Object.defineProperty(game,'agentSaveMs',{ enumerable:true, get:()=>mcAgentSaveM
 // Mantener el botón repite la acción (mcTick, cada MC_ACT_MS) → construir/romper en fila arrastrando la mira.
 $('#mc-canvas').addEventListener('mousedown',e=>{
   if(!mc.active || document.pointerLockElement!==mc.canvas) return;
+  // El central ni rompe ni pone: en el Mundo es el de REDSTONE (conmuta palancas y botones), y eso vive en
+  // `redstone/redstone-piezas.js`, que lo caza antes en fase de captura. Aquí solo se le corta el paso —sin
+  // tocar mc.heldBtn, que mantenerlo pulsado no repite nada— y se le quita al navegador el desplazamiento
+  // automático. Guardarse la herramienta fue suya entre REQ-TOOL5 y 2026-08-18; ahora eso es la ROSCA
+  // (bajar hasta el peldaño «vacía», REQ-TOOL6), orden del dueño: «*el boton central vuelva a ser el de
+  // activar botones / palancas / etc de redstone… la herramienta se mostrara y ocultara con la wheel*».
+  if(e.button===1){ e.preventDefault(); return; }
   if(e.button!==0 && e.button!==2) return;
   mc.heldBtn=e.button; mc.actAt=performance.now();
   mcDoAction(e.button, e.shiftKey);
@@ -18543,6 +20691,20 @@ window.addEventListener('mouseup',e=>{ if(!mc.active) return;
   if(mc.tool==='box' && mc.heldBtn===0 && mc.boxStep===1 && document.pointerLockElement===mc.canvas) mcBoxMouseUp();
   mc.heldBtn=-1; });
 $('#mc-canvas').addEventListener('contextmenu',e=>{ if(mc.active) e.preventDefault(); });
+// REQ-TOOL6 · la rosca sube y baja por las herramientas. En el Mundo la rueda no hacía NADA (la hotbar se
+// elige con los números), así que no pisa ningún mando. Se acumula el delta y solo se salta de peldaño al
+// pasar un umbral: un ratón manda ~100 por muesca, pero un trackpad manda una lluvia de deltas pequeños y
+// sin esto un gesto suave recorrería la escalera entera de golpe.
+$('#mc-canvas').addEventListener('wheel',e=>{
+  if(!mc.active || document.pointerLockElement!==mc.canvas || !mc.ruedaTool) return;
+  e.preventDefault();
+  mc._ruedaAcum = (mc._ruedaAcum || 0) + e.deltaY;
+  const umbral = (isFinite(+mc.ruedaUmbral) && +mc.ruedaUmbral > 0) ? +mc.ruedaUmbral : 30;
+  if(Math.abs(mc._ruedaAcum) < umbral) return;
+  const paso = mc._ruedaAcum > 0 ? -1 : 1;   // deltaY > 0 = rosca hacia abajo = bajar en la escalera
+  mc._ruedaAcum = 0;
+  mcRuedaHerramienta(paso);
+}, {passive:false});
 
 buildPalette();
 // En /map/<nombre> el Mundo se abre ENCIMA del editor y lo tapa entero, pero hasta ahora el editor

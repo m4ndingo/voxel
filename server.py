@@ -187,6 +187,65 @@ def list_snips():
     out.sort(key=lambda s: s.get('savedAt', ''), reverse=True)   # más recientes primero
     return out
 
+# ---- Buscar DENTRO de los snippets (REQ-SNP6) --------------------------------------------------
+# El listado de arriba no lleva el código (son ~1,5 MB entre todos: 'mundo-autoarranque' solo son
+# 300 KB), así que buscar en el cliente obligaba a bajárselos TODOS en cada tecla. Se busca aquí, que
+# es donde están los ficheros, y se devuelve lo mismo que el listado + dónde está la coincidencia.
+# Dos preguntas distintas, un solo recorrido:
+#   ?q=<texto>  · «¿qué snippets dicen esto?» (literal, sin distinguir mayúsculas; también en rótulo/id)
+#   ?usa=<id>   · «¿quién llama a este snippet?» — `game.snippet('<id>')` es LLAMADA; el id suelto entre
+#                 comillas es MENCIÓN (un `game.snippet` guardado en una variable, una tabla de nombres,
+#                 un comentario). La diferencia importa: renombrar rompe las dos, pero solo la primera
+#                 se ve ejecutar. NO se busca el id a pelo: 'redstone' saldría en media docena de
+#                 palabras que no son referencias.
+def _muestra(linea):
+    s = (linea or '').strip()
+    return s[:120] + ('…' if len(s) > 120 else '')
+
+def buscar_snips(q=None, usa=None):
+    if usa:
+        # IGNORECASE y sin anclar por delante a propósito: la llamada se escribe `game.snippet('x')`,
+        # pero también `ejecutarSnippet('x')` (el ayudante de 'redstone-arranque') o `mcCorreSnippet('x',…)`.
+        # Todas ejecutan; pedir el nombre exacto las contaba como simples menciones.
+        rx_llama = re.compile(r'snippet\s*\(\s*[\'"`]' + re.escape(usa) + r'[\'"`]', re.I)
+        rx_menta = re.compile(r'[\'"`]' + re.escape(usa) + r'[\'"`]')
+    ql = (q or '').lower()
+    out = []
+    for s in list_snips():
+        if usa and s['id'] == usa:                               # nadie se «usa» a sí mismo
+            continue
+        try:
+            d = json.load(open(os.path.join(SNIPS, s['id'] + '.json'), encoding='utf-8'))
+        except Exception:
+            continue
+        code = d.get('code', '') or ''
+        r = dict(s)
+        if usa:
+            hits = [(i + 1, ln, bool(rx_llama.search(ln))) for i, ln in enumerate(code.split('\n'))
+                    if rx_menta.search(ln)]
+            if not hits:
+                continue
+            r['tipo'] = 'llamada' if any(h[2] for h in hits) else 'mencion'
+            prim = next((h for h in hits if h[2]), hits[0])
+        else:
+            if not ql:
+                continue
+            # El rótulo y el id también cuentan: buscar «fornite» y no ver el snippet que se llama así
+            # sería absurdo. Se marca de dónde viene la coincidencia para que la ficha lo enseñe.
+            hits = [(i + 1, ln, False) for i, ln in enumerate(code.split('\n')) if ql in ln.lower()]
+            en_rotulo = ql in (s['name'] or '').lower() or ql in s['id'].lower()
+            if not hits and not en_rotulo:
+                continue
+            r['donde'] = 'codigo' if hits else 'rotulo'
+            prim = hits[0] if hits else (0, '', False)
+        r['hits'] = len(hits)
+        r['linea'] = prim[0]
+        r['muestra'] = _muestra(prim[1])
+        out.append(r)
+    # Primero lo que de verdad ejecuta / lo que más veces sale; el orden por fecha se queda de desempate.
+    out.sort(key=lambda r: (0 if r.get('tipo') == 'llamada' else 1, -r.get('hits', 0)))
+    return out
+
 # Un agente es un DOCUMENTO (qué piezas, dónde van, cómo articulan), no código: el motor vive en el
 # snippet «mundo-autoarranque» y lo único que se guarda aquí es la descripción del bicho. El listado
 # enseña solo lo que necesita un selector; para animarlo hace falta el fichero entero.
@@ -631,7 +690,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if par:
                     return self._send_bytes(200, 'application/json; charset=utf-8', par[0], par[1])
             return self._send(200, {**DEFAULT_WORLD, 'fresh': True})   # sin fichero = mundo recién nacido → terreno plano (un vacío guardado NO lleva fresh)
-        if self.path == '/api/snippets':                         # gestor de snippets: lista
+        if path_only == '/api/snippets':                         # gestor de snippets: lista
+            # ?q=<texto> busca dentro del código; ?usa=<id> dice quién llama a ese snippet (REQ-SNP6).
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            q, usa = qs.get('q', [''])[0], qs.get('usa', [''])[0]
+            if q or usa:
+                return self._send(200, buscar_snips(q, usa))
             return self._send(200, list_snips())
         sid = self._snip_id()
         if sid:
@@ -829,7 +893,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             d = self._read()
             if not isinstance(d, dict) or 'code' not in d:       # validación mínima
                 return self._send(400, {'error': 'snippet inválido'})
-            sid = d.get('id') or slugify(d.get('name'))          # id estable = del cliente o slug del nombre
+            # Id estable = el que manda el cliente (ahora se puede teclear en el editor, BUG-SNP5) o el
+            # slug del nombre. Se acota a lo MISMO que la ruta de lectura (`^/api/snippets/([A-Za-z0-9_-]+)$`)
+            # o se guardaría un fichero que ninguna GET puede volver a pedir; y como acaba en un
+            # os.path.join, sin acotar un id con `../` escribiría fuera de data/snippets/.
+            sid = re.sub(r'[^A-Za-z0-9_-]+', '-', str(d.get('id') or '')).strip('-') or slugify(d.get('name'))
             rec = {'id': sid, 'name': d.get('name', '(sin nombre)'), 'code': d.get('code', ''),
                    'savedAt': now_iso()}
             to_trash(self._snip_path(sid), move=False)           # respaldo de la versión anterior

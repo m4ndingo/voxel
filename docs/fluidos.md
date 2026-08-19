@@ -300,3 +300,29 @@ terreno cercano, nubes de lana, montañas, construcciones, estructuras y agentes
 **Guardián:** `node tests/test_req_env5_reflejo_entorno.js` (`@area: render`).
 
 
+
+---
+
+## 🌾 Plantar dentro del agua: `setVoxel` se desvía solo (BUG-FLUID7)
+
+Una celda de `mc.grid` es **UN id**, así que una pieza fina escrita donde hay agua **no convive** con ella:
+la sustituye, y en un charco de 1 de hondo eso es un agujero en la superficie del lago debajo de cada mata
+(foto #59: el script del badlands sembrando `hierba-alta`). El estampado sí convive —una estructura no está
+en la rejilla—, y por eso la **mano** ya lo tenía resuelto: `mcPlace` y `mcPaint` llevan su
+`&& !mcCeldaFluida(...)` y caen a `mcStampStruct`.
+
+Desde [BUG-FLUID7](../PLAN_ARCHIVO.md#-bug-fluid7) esa misma regla vive **en el motor**, dentro de
+`mcSetVoxel`, para que **ningún script tenga que saber si está mojado** (orden del dueño: los scripts
+generados no crecen para distinguir los dos caminos). Tres condiciones, ninguna sobra:
+
+| condición | por qué |
+|---|---|
+| `mcFinoEnRejilla(id)` | solo lo que NO llena su celda. Es `mcEsFinaEnRejilla` **por id y síncrona** — `mcSetVoxel` solo tiene `id` con el material ya en paleta, y la paleta hornea esa respuesta con `mcRecFina`. `mcTablaFina` la usa también: una sola fuente de la regla |
+| `!mcIsReplaceable(id,…)` | un fluido **nunca** se desvía: poner agua sobre agua es el motor propagándose, y el agua entra en `finoRejilla` por translúcida |
+| `mcCeldaFluida(x,y,z)` | **fuera del agua no cambia nada**: el prado normal sigue siendo rejilla, a 0 draw calls |
+
+Un macizo (roca, arena) escrito en el agua **la sustituye**, como siempre. El precio del desvío es el mismo
+que paga la mano: cada pieza sumergida es un draw call y una línea de `mundo.json` — y solo dentro del agua.
+
+Medido con un charco de 9×9 y 1 de hondo sembrado con 6 `setVoxel`: **6 celdas de agua perdidas antes, 0
+ahora** (y 6 piezas estampadas en su sitio).

@@ -197,6 +197,32 @@ que ya existían:
 `encender(x,y,z,on)` sí protesta (una vez) si la celda no es `manual` — porque ahí sí es un error de
 quien escribe el circuito.
 
+#### Apuntar: `miraFina`, y por qué **no** vale `game.aim()`
+
+El rayo del motor trabaja en **celdas**: da por sólida la celda entera en cuanto tiene bloque, y aquí casi
+todo son láminas de 1/16 — un cable plano tapa su celda de arriba abajo aunque el rayo le pase un palmo por
+encima. Medido a dos bloques de la palanca del ejemplo 1: el cable de delante se comía el cabeceo de −50° a
+−24° y la palanca solo respondía en una ventana de 8°. De ahí el «no sé cómo darle». `miraFina` marcha el rayo
+a resolución fina contra `mc._geoFina` (`bitsAim||bits`), el mismo bitset con el que choca el jugador.
+`game.redstone.apuntada()` lo enseña — `game.aim()` contesta con la celda gorda, que es justo la que engaña.
+
+⚠️ **Las piezas manuales se miden finas como el resto, sin excepción**
+([BUG-RS26](../PLAN_ARCHIVO.md#-bug-rs26)). Tuvieron una («a una palanca le vale la celda entera») y eso
+convertía cada botón en una **caja invisible**: su dibujo ocupa 88 subceldas de 4096 (**el 2 %**) y el otro
+98 % se tragaba el clic, así que con dos botones pegados el de delante se comía siempre el de detrás. Orden
+del dueño: **apuntar al aire de la caja de un botón no lo activa**, haya o no algo detrás.
+
+Lo que justificaba la excepción era que la varilla de la palanca es de 1/16 y **se mueve al girarla** ⇒
+apuntando al voxel exacto la enciendes y a la siguiente el rayo se cuela por el hueco que ella acaba de
+dejar. **Ya no hace falta**, y se comprobó pieza a pieza antes de quitarla: `palanca`/`palanca-on` comparten
+**92 de 108** voxeles (la base, `z 0..3` entera) y `boton`/`boton-on` **72 de 88**, así que apuntando al
+cuerpo siempre hay materia en los dos estados; la `placa` no comparte ninguno pero solo **se hunde 1/16
+dentro de su misma celda** (`z 1` → `z 0`), y el rayo que bajaba hacia ella le sigue dando.
+
+⚠️ Tocar `miraFina` obliga a **subir `VERSION`** (`piezas-1.x`): el envoltorio de `mcUseRight` se salta si
+`mcUseRight._redstone === VERSION`, así que re-ejecutando el snippet con la misma versión sigue vivo el
+closure viejo y el cambio no llega.
+
 ⚠️ **Una pieza se identifica por su NOMBRE, no por el espacio de nombres.** La tabla `CIRCUITOS` va
 por nombre pelado (`piston-pegajoso-on`) y el bucle de registro la da de alta **dos veces**, en
 `hab:<n>` y en `asset:assets/<n>.vox.json`, traduciendo `encendida`/`apagada` al mismo espacio (las

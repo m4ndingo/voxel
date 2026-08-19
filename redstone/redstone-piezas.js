@@ -725,7 +725,7 @@
   }
 
   // ── 3. el gesto ────────────────────────────────────────────────────────────────────────────
-  var VERSION = 'piezas-1.5';
+  var VERSION = 'piezas-1.7';   // 1.7: miraFina respeta la forma fina de las manuales, sin excepción (BUG-RS26)
   var ALCANCE = 6;
 
   // ⚠️ Apuntar a una palanca NO se puede dejar en manos de game.aim(). El rayo del motor trabaja en
@@ -744,7 +744,7 @@
     for (var i = 1; i <= n; i++) {
       var t = i * paso, x = ox + dx * t, y = oy + dy * t, z = oz + dz * t;
       var cx = Math.floor(x), cy = Math.floor(y), cz = Math.floor(z);
-      if (!mcInside(cx, cy, cz)) return null;
+      if (!mcInside(cx, cy, cz)) break;
       var id = mc.grid[mcIdx(cx, cy, cz)];
       if (!id) continue;
       // El agua y la lava NO paran el rayo. Desde REQ-FLUID4 un fluido es un macizo 16³ que se dibuja
@@ -752,22 +752,19 @@
       // primera celda de líquido que cruza el rayo se lleva el impacto y una pieza sumergida deja de
       // poder conmutarse. Es la misma pregunta que ya se hacen mcRaycast, mcBreak y mcPlace en app.js.
       if (typeof mcIsCellReplaceable === 'function' && mcIsCellReplaceable(cx, cy, cz)) continue;
-      // Manga ancha para las ENTRADAS: a una palanca, un botón o una placa les vale la celda entera.
-      // Es la distinción de Minecraft entre el «hitbox» y la malla, y aquí no es un capricho: la
-      // varilla de la palanca es de 1/16 y encima SE MUEVE al girarla (se inclina al otro lado), así
-      // que apuntando al voxel exacto la enciendes y a la siguiente ya no le das — el rayo se cuela
-      // por el hueco que acaba de dejar. Lo demás (el cable, que es lo que estorba) sigue midiéndose
-      // fino, que es de lo que iba todo esto.
-      if (game.redstone.esManual(cx, cy, cz)) return [cx, cy, cz];
-      var g = GEO && GEO[id];
-      if (g && g.bits) {
-        // La celda es fina: solo cuenta si el rayo cruza un voxel LLENO. Si pasa por el hueco, sigue.
+      // TODAS las celdas se miden FINAS, también las manuales (BUG-RS26, foto #58), y sin red de
+      // seguridad: apuntar al AIRE de la caja de un botón NO lo activa, aunque no haya nada detrás.
+      // Un botón ocupa 6×3×6 de 16³ —el 2 % de su celda—, así que dar por buena la celda entera
+      // convertía cada pieza manual en una CAJA INVISIBLE que se comía el clic del de al lado.
+      var g = GEO && GEO[id], bits = g && (g.bitsAim || g.bits);   // `bitsAim` = ocupación real, como el resto del apuntado
+      if (bits) {
         var d = g.fdim;
         var fx = Math.floor(x * T) - cx * T, fy = Math.floor(y * T) - cy * T, fz = Math.floor(z * T) - cz * T;
         if (fx < 0 || fy < 0 || fz < 0 || fx >= d[0] || fy >= d[1] || fz >= d[2]) continue;
-        if (!g.bits[(fy * d[2] + fz) * d[0] + fx]) continue;
+        if (!bits[(fy * d[2] + fz) * d[0] + fx]) continue;        // el rayo pasa por el HUECO: como si no hubiera nada
       }
-      return [cx, cy, cz];
+      if (game.redstone.esManual(cx, cy, cz)) return [cx, cy, cz];   // materia de VERDAD de una manual: a eso apuntaba
+      break;                                                         // materia que no se conmuta: el rayo se para aquí
     }
     return null;
   }
@@ -801,19 +798,31 @@
 
   // Y el botón CENTRAL, que es el que pidió el dueño: solo conmuta, nunca pone un bloque. El derecho
   // hace las dos cosas (si no hay palanca, construye), así que a un palmo de un circuito montado un
-  // fallo de puntería te deja un bloque encima del cable. app.js ignora el botón 1 a propósito
-  // (`if(e.button!==0 && e.button!==2) return`, app.js:10259), así que aquí no se pisa nada suyo.
-  var cv = document.getElementById('mc-canvas');
-  if (cv) {
-    if (cv._redstoneMedio) cv.removeEventListener('mousedown', cv._redstoneMedio);
-    var medio = function (e) {
-      if (e.button !== 1 || !mc.active || document.pointerLockElement !== mc.canvas) return;
-      e.preventDefault();                       // si no, el navegador entra en autoscroll
-      if (!conmutarApuntada() && typeof toast === 'function') toast('ahí no hay nada que conmutar');
-    };
-    cv.addEventListener('mousedown', medio);
-    cv._redstoneMedio = medio;
-  }
+  // fallo de puntería te deja un bloque encima del cable.
+  //
+  // Ese botón fue COMPARTIDO con app.js entre REQ-TOOL5 y el 2026-08-18 (guardarse la herramienta). Ya no:
+  // el dueño lo devolvió entero a redstone —«*el boton central vuelva a ser el de activar botones / palancas
+  // / etc de redstone*»— y guardar/sacar la herramienta pasó a la ROSCA (peldaño «vacía», REQ-TOOL6/7). Así
+  // que aquí ya no hay reparto por puntería ni excepción por `mc._guardada`: se conmuta y punto.
+  // Sigue escuchando en `window` en fase de CAPTURA porque en el propio canvas mandaría el orden de registro
+  // y app.js registra primero; `stopPropagation` ya no hace falta (app.js solo se come el clic para que el
+  // navegador no entre en autoscroll), pero llegar antes sí, para conmutar aunque el Mundo esté en pausa de
+  // acciones. Se sigue callando cuando no hay nada que conmutar: el aviso «ahí no hay nada que conmutar» lo
+  // quitó el dueño el 2026-08-18 y no vuelve.
+  if (window._redstoneMedio) window.removeEventListener('mousedown', window._redstoneMedio, true);
+  var medio = function (e) {
+    // REQ-MOV1 · el botón central táctil manda este mismo evento (no hay contrato nuevo que inventar),
+    // pero en el móvil no hay pointer-lock que exigir —y la pantalla completa lo suelta—, así que la
+    // pregunta pasa a ser la de app.js: ¿manda el jugador? Sin el `mcMandoActivo` (motor viejo) se
+    // sigue exigiendo el pointer-lock, como toda la vida.
+    var manda = (typeof mcMandoActivo === 'function') ? mcMandoActivo()
+                                                      : (mc.active && document.pointerLockElement === mc.canvas);
+    if (e.button !== 1 || !manda) return;
+    e.preventDefault();                         // si no, el navegador entra en autoscroll
+    conmutarApuntada();                         // si no hay pieza manual donde apunto, calladita
+  };
+  window.addEventListener('mousedown', medio, true);
+  window._redstoneMedio = medio;
 
   console.log('[redstone] piezas: ' + Object.keys(CIRCUITOS).length
     + ' (cable, palanca, botón, placa, puerta, repetidor, inversor, pistón, pistón pegajoso, bloque de redstone, observador)'

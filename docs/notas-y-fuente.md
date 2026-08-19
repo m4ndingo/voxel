@@ -165,6 +165,38 @@ game.carteles.info();              // el descubridor: qué hay puesto y cuántos
   por el setter y no replanta nada.
 - Persistidos en `localStorage.vf_mcCarteles`. Guardián: **`tests/test_carteles.js`**.
 
+### El TINTE, ése sí por nota (REQ-CART4)
+
+Petición del dueño: «entre las propiedades de los carteles […] me gustaría una que fuese el *tinte*
+[…] pon unos tintes por defecto que sean los de los posits y que haya un picker para elegir un color
+rgb arbitrario». O sea justo lo contrario que `game.carteles`: aquí **cada cartel su color**.
+
+- **Mapa propio, `mc.noteTints` (`"x,y,z" → '#rrggbb'`), igual que `mc.noteRots`.** No se mete dentro
+  de `mc.notes` por la razón de arriba: sigue siendo `"x,y,z" → TEXTO` en todos los `mundo.json`
+  escritos hasta hoy. Viaja en el documento (`noteTints`) y por la cabecera incremental — está en la
+  lista blanca de `servidor/voxfmt.py` (`guardar_cabecera`), que si no lo tira sin decir nada.
+- **El color va HORNEADO en el VBO de la instancia**, no en un `uniform`. `mc.structProg` lo comparten
+  ~6 pasadas de dibujo (estructuras opacas y con alfa, geometría fina de chunk, sombras, vista previa,
+  herramienta en mano); un `uTint` que una sola pasada se olvidara de poner dibujaría esa pasada en
+  **NEGRO** (los uniforms arrancan a 0). Se tinta en `mcBuildStructMesh(..., tinte)`, dentro de
+  `upload`, sobre el color ya calculado.
+- **Tintar conserva el relieve**, que si no el cartel sale un recorte de cartulina: gamma sobre la
+  luminancia, `f = (luma(rgb)/luma(tinte))^MC_TINTE_RELIEVE` con **`MC_TINTE_RELIEVE=0.6`** — a 1.0
+  sale un verde oliva embarrado, a 0 sale plano. `mcNoteTinteRGB` guarda `lt=max(0.08, luma)` para no
+  dividir por cero con un tinte casi negro.
+- **Cambiar el tinte REPLANTA el cartel**, por la misma vía que la escala: `(s.tinte||'')` contra
+  `mcNoteTinte(s.nota)` en `mcNoteSignsDesfasados`. Y como está horneado, **tiene que sobrevivir a
+  `mcRestampAll`** (BUG-AG3): los dos sitios que re-mallan pasan `s.esc` **y** `s.tinte`, o la
+  instancia vuelve a madera y tamaño 1 en cuanto se edite un bloque al lado.
+- **Las muestras salen de `MC_NOTE_TINTES`** (los seis del post-it), no de una copia en el HTML: el
+  panel las construye en `mcNoteTintBotones`. Más `∅` (sin tinte, que es *borrar* la entrada) y un
+  `<input type=color>`. Previsualiza **en vivo** y `Cancelar` devuelve el que había — sin eso, probar
+  un color dejaría el cartel pintado aunque el dueño se lo pensara.
+- ⚠️ El CSS de las muestras necesita el selector **`.mc-note-tint-bar .mc-note-tint-btn`** (0,2,0):
+  `.btn.ghost{background:transparent}` gana a un `.mc-note-tint-btn` suelto (0,1,0) y las deja todas
+  en blanco.
+- Guardián: **`tests/test_notas_tinte.js`**.
+
 ### El panel DOM de la nota (≠ el cartel 3D)
 
 Lo de arriba es el **cartel del mundo**. El diálogo de la tecla `N` (`#mc-note`) y el visor que sale

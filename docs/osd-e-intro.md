@@ -18,7 +18,8 @@ El enunciado literal y las cuatro decisiones que lo cerraron están en
 
 ## 🛫 Modo vuelo (`F`) — REQ-FLY1
 
-**`F` = volar. La foto pasó a `Alt+F`** (y el botón táctil `#mc-tfoto` sigue siendo la foto).
+**`F` = volar. La foto pasó a `Alt+F`** (y `#mc-tfoto` sigue siendo la foto: desde REQ-MOV1 es una
+línea del menú ☰ de los mandos táctiles, no un botón del pad — [`movil-y-tactil.md`](movil-y-tactil.md)).
 
 Es «como estar dentro de un fluido pero sin caída»: la dirección sale de la vista (mirar hacia abajo y
 avanzar te hunde), pero la vertical no la toca la gravedad.
@@ -377,12 +378,14 @@ sale pronto, así que la hotbar y la mira no hacen nada. La clase es `body.mc-os
 
 - **Por CSS y no con `hidden`**: `mcUpdateHotbar` la volvería a enseñar en el siguiente frame.
 - **`hud:true`** en el `define` lo deja puesto, para una pantalla que sea un panel sobre la partida viva.
-- ⚠️ **En táctil vuelve la capa de mandos, y de ella SOLO el ✕ de salir** (`body.mc-osd-tactil`): allí no
+- ⚠️ **En táctil vuelve la capa de mandos, y de ella SOLO el ☰** (`body.mc-osd-tactil`): allí no
   hay `Esc`, y una pantalla que no traiga botón de salida dejaría al visitante encerrado en el menú. Antes
   esa excepción la sostenía «✕ Cerrar» de la esquina; desde que se quitó (REQ-OSD1), la salida táctil vive
-  **dentro de `#mc-touch`**, así que esconder la capa entera se la llevaba por delante.
+  **dentro de `#mc-touch`**, así que esconder la capa entera se la llevaba por delante. Y desde REQ-MOV1
+  ya no es un ✕ suelto sino una **línea del menú ☰**, de ahí que el selector sea `:not(.tmenu)` (ver
+  [`movil-y-tactil.md`](movil-y-tactil.md)).
 - ⚠️ Y esa excepción sube el `z-index` de `.mc-touch` de **7 a 30**, por encima de `.mc-osd` (25). Sin eso
-  el ✕ se ve pero no se puede pulsar: está debajo de una capa a pantalla completa. Un botón de salida
+  el ☰ se ve pero no se puede pulsar: está debajo de una capa a pantalla completa. Un botón de salida
   decorativo es peor que ninguno.
 
 **Los botones «🧩 Código» y «✕ Cerrar» de la esquina ya no existen** (REQ-OSD1, quitados 2026-08-13), ni

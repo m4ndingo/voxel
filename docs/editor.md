@@ -332,8 +332,9 @@ y `game.showVoxels(true)`/`=true` muestran/ocultan los medidores de FPS y de vox
 uno el suyo, y en los tres modos** (editor 3D `#e3-*`, Play `#play-*`, Mundo `#mc-*`); persistidos.
 Los dos botones de la esquina del Mundo (🧩 Código y ✕ Cerrar) y su interruptor
 `game.showOSDbuttons` **ya no existen** (quitados 2026-08-13, REQ-OSD1): se llega a lo mismo con `Esc`
-y `Alt+C`, y estorbaban en todas las capturas. La salida de **táctil** es `#mc-tsalir`, un botón
-dentro de `#mc-touch` — allí no hay `Esc`, así que el Mundo no puede quedarse sin puerta, y vivir
+y `Alt+C`, y estorbaban en todas las capturas. La salida de **táctil** es `#mc-tsalir`, una línea del
+menú ☰ dentro de `#mc-touch` ([`movil-y-tactil.md`](movil-y-tactil.md); hasta REQ-MOV1 era un ✕
+suelto) — allí no hay `Esc`, así que el Mundo no puede quedarse sin puerta, y vivir
 dentro de la capa de mandos hace que se encienda y se apague con ellos (`mcTouchShow`), sin un segundo
 sitio que mantener en sincronía. `game.nearClip` (nº) y `game.nearClip = 8` regulan el umbral de zoom del recorte de cercanía (ver arriba). `project3d` hace **culling por visor** (descarta voxels con el centro fuera del
 lienzo; `occupied` se deja completo), por eso `game.voxels` baja al acercar el zoom. La pisabilidad usa cuerpo ~28 y **erosión** de obstáculos r=3

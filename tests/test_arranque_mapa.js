@@ -46,7 +46,8 @@ async function abre(ctx, mapa, codigoMapa, opciones) {
     return r.fulfill(codigoMapa === null ? noHay
       : snip('mundo-' + mapa, 'window.__ini=1;\n' + codigoMapa));
   });
-  await p.goto('http://localhost:8500/map/' + mapa + (o.query || ''), { waitUntil: 'load', timeout: 120000 });
+  // `o.url` = lo que se teclea en la barra cuando NO coincide con el nombre canónico del mapa (§5).
+  await p.goto('http://localhost:8500/map/' + (o.url || mapa) + (o.query || ''), { waitUntil: 'load', timeout: 120000 });
   await p.waitForFunction('typeof mc !== "undefined" && mc.prog && mc.grid', null, { timeout: 180000 });
   await pedidoListo;
   if (codigoMapa !== null) await p.waitForFunction('window.__ini===1', null, { timeout: 30000 });
@@ -101,6 +102,17 @@ async function abre(ctx, mapa, codigoMapa, opciones) {
     test('se avisa del fallo con el nombre del snippet',
       () => assert(r.avisos.some(a => /mundo-test/.test(a) && /boom de prueba/.test(a)),
         'avisos=' + JSON.stringify(r.avisos)));
+  }
+
+  console.log('\n§5 · el nombre del mapa se CANONIZA: /map/te_st es el mapa «te-st» (BUG-SNP5)');
+  {
+    // El servidor guarda por slug desde siempre (`world_file_for`: /map/te_st → data/worlds/te-st.json),
+    // pero `mcMapName()` devolvía el tramo de la URL CRUDO ⇒ se pedía 'mundo-te_st', un id que el POST del
+    // editor no puede escribir (slugifica el rótulo) ⇒ 404 seguro y mapa sin autoarranque, sin avisar.
+    const r = await abre(ctx, 'te-st', 'window.__orden.push("mapa:" + mcMapName());', { url: 'te_st' });
+    test('mcMapName() da el slug, no el tramo crudo de la URL', () => assert(r.mapa === 'te-st', 'mapa=' + r.mapa));
+    test('pide «mundo-te-st», que es el id que el editor sí puede guardar',
+      () => assert(r.orden && r.orden[1] === 'mapa:te-st', 'orden=' + JSON.stringify(r.orden)));
   }
 
   await ctx.close();
