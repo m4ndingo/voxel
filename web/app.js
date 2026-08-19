@@ -5373,7 +5373,7 @@ function agAnadirPieza(){
 }
 // Plantarlo es cosa del Mundo: aquí solo se pide. Si no hay Mundo montado no hay dónde ponerlo.
 // Plantar es IRSE al Mundo: se cierra el panel y, si veníamos del editor, se abre el Mundo — antes
-// de crear el bicho, porque openWorld() reanuda los agentes y relanza el autoarranque.
+// de crear el bicho, porque openWorld() reanuda los agentes (el autoarranque ya no se relanza: REQ-SNP7).
 async function agPlantar(){
   if(!agDoc){ return; }
   if(typeof mc==='undefined' || !mc || !mc.gl || !window.game || !game.esqueletos){
@@ -18599,6 +18599,10 @@ async function openWorld(){
   if(!mc.structProg) mcBuildStructProgram();
   if(!mc.stexProg) mcBuildStructTexProgram();
   mcLoadStop();
+  // REQ-SNP7 · ¿es la PRIMERA entrada a este mundo, o una vuelta desde el editor? Editor y Mundo son la
+  // misma página, así que volver no pierde nada: ni el contexto GL (arriba se reusa), ni la rejilla, ni lo
+  // que dejaran montado los snippets (closeWorld solo pausa). Lo único que se rehacía era el autoarranque.
+  const mcPrimeraEntrada = !mc.grid;
   if(!mc.grid){                       // primera entrada: paleta+atlas, hotbar y mundo (guardado o terreno plano)
     mcShowLoading('Descargando el mundo…'); await mcYield();   // pinta el overlay antes del trabajo pesado (evita el «solo cielo»)
     mcLoadPhase('Red: descargar mundo');
@@ -18677,8 +18681,17 @@ async function openWorld(){
   mcAplicaEscaparate(); // REQ-OSD3: si esto es la PANTALLA de un menú (?osd=1), quitar de encima todo lo de jugar
   mcResumeAgents();     // reanudar agentes pausados al volver del editor
 
-  // Autoarranque y comportamientos se ejecutan MIENTRAS el overlay de carga sigue puesto
-  if(!mc.escaparate || !mcEscaparatePostal()) await mcAutoarranque();
+  // Autoarranque y comportamientos se ejecutan MIENTRAS el overlay de carga sigue puesto.
+  // REQ-SNP7 · …pero SOLO en la primera entrada. Volver del editor 2D/3D re-ejecutaba 'mundo-autoarranque'
+  // y 'mundo-<mapa>' enteros, y eso no es «arrancar»: es plantar otra vez lo que ya está plantado, montar
+  // otra vez el bucle que ya corre y volver a ligar la tecla que ya estaba ligada. Nota del dueño en
+  // /map/bugfinder (50,14,40): «*volver al juego no tendria que recargar el snippet del mapa*».
+  // Lo que un snippet SÍ quiera hacer al volver se registra con `game.alVolverAlMundo(clave, fn)` al arrancar:
+  // así app.js sigue sin saber qué hace ninguno, y quien necesite distinguir «arranco» de «vuelvo» puede.
+  if(!mc.escaparate || !mcEscaparatePostal()){
+    if(mcPrimeraEntrada) await mcAutoarranque();
+    else await mcAvisaVueltaAlMundo();
+  }
   await mcIntroArranque(true);
   mcEscaparateListo();
 
@@ -18728,6 +18741,32 @@ async function mcCorreArranqueVisible(nombre, code){
   mcLoadNote('Snippet «'+nombre+'»: '+(performance.now()-t0).toFixed(0)+' ms, '
     +(puestos>=0?'+':'')+puestos.toLocaleString('es')+' voxels en la rejilla.');
 }
+// REQ-SNP7 · LA OTRA MITAD DE NO RE-ARRANCAR. Desde REQ-SNP7, volver del editor al Mundo ya no vuelve a
+// ejecutar 'mundo-autoarranque' ni 'mundo-<mapa>': lo que montaron sigue montado (closeWorld solo pausa).
+// Pero hay snippets que sí quieren hacer algo AL VOLVER —recolocar un menú, reanudar su propio bucle,
+// repintar su HUD—, y antes lo conseguían de rebote porque se les re-ejecutaba entero. Esto es ese hueco,
+// hecho a propósito: se registra AL ARRANCAR y se llama en cada vuelta.
+//
+//   game.alVolverAlMundo('mi-menu', ()=>{ … });   // registra o REEMPLAZA
+//   game.alVolverAlMundo('mi-menu', null);        // lo quita
+//
+// Va por CLAVE, no por función suelta, justo para que re-ejecutar el snippet a mano (Alt+C) reemplace su
+// callback en vez de encadenar otro: es el mismo trato que `game.bloques.define(clave, cfg)`. Fallar es
+// inocuo y se avisa: un menú que peta no puede impedirte volver al mundo.
+const mcVueltasAlMundo=new Map();
+function mcRegistraVuelta(clave, fn){
+  const k=String(clave||'');
+  if(!k){ console.warn('game.alVolverAlMundo: hace falta una clave'); return null; }
+  if(fn==null){ mcVueltasAlMundo.delete(k); return null; }
+  if(typeof fn!=='function'){ console.warn('game.alVolverAlMundo("'+k+'"): eso no es una función'); return null; }
+  mcVueltasAlMundo.set(k, fn); return fn;
+}
+async function mcAvisaVueltaAlMundo(){
+  for(const [k,fn] of Array.from(mcVueltasAlMundo)){
+    try{ await fn(); }catch(e){ console.warn('game.alVolverAlMundo("'+k+'"):', e && e.message ? e.message : e); }
+  }
+}
+game.alVolverAlMundo=mcRegistraVuelta;
 async function mcAutoarranque(){
   let s=null;
   try{ s=await fetch('/api/snippets/'+MC_AUTOARRANQUE,{cache:'no-store'}).then(r=>r.ok?r.json():null); }catch(e){}

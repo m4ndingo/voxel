@@ -540,8 +540,10 @@ galerías enteras. El circuito, ninguno de cuyos tramos navega:
   editor a secas es un rótulo y no debe prometer un camino que no existe.
 - **La URL no se toca** (nada de `history.replaceState`): `mcMapName()` la lee para saber en qué mundo
   está, y cambiarla haría que el mundo se guardara en otro fichero.
-- Al volver se vuelve a ejecutar `mundo-autoarranque` (es reejecutable a propósito), y por eso la vuelta
-  también lleva su `mcShowLoading('Preparando el mundo…')` hasta que la intro está montada.
+- **Al volver ya NO se re-ejecuta `mundo-autoarranque`** (REQ-SNP7, 2026-08-20): arranca solo en la
+  primera entrada (`mcPrimeraEntrada = !mc.grid` en `openWorld`). Lo que un snippet quiera hacer en la
+  vuelta lo registra él con `game.alVolverAlMundo(clave, fn)` → [`bloques-comportamiento.md`](bloques-comportamiento.md).
+  La vuelta sigue llevando su `mcShowLoading('Preparando el mundo…')` hasta que la intro está montada.
 
 Guardián: `tests/test_intro.js`. Corre sobre `/map/test?intro=1` porque `fps` es 512×512×40 (20 MB) y
 bajo SwiftShader no carga, pero **no simula nada**: `/map/test` no tiene snippet propio, así que lo que

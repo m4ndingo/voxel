@@ -53,6 +53,20 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
   normal y **no se avisa**; que falle se avisa y es inocuo. ⚠️ **No confundir con `arranque-<mapa>`**,
   que es la **intro** y solo la dispara `?intro=1` ([`osd-e-intro.md`](osd-e-intro.md)).
 
+- ⚠️ **El autoarranque corre UNA VEZ, en la primera entrada al mapa** (REQ-SNP7, 2026-08-20). Antes,
+  `openWorld()` lo relanzaba también al volver del editor 2D/3D (Alt+C y vuelta), y eso no es arrancar:
+  es plantar otra vez lo plantado y montar otro bucle encima del que ya corre. Lo que un snippet
+  necesite hacer **al volver** —repintar su HUD, releer un ajuste— lo registra al arrancar:
+
+  ```js
+  game.alVolverAlMundo('mi-menu', () => { pintaHUD(); });   // clave propia, como game.bloques.define
+  game.alVolverAlMundo('mi-menu', null);                     // darse de baja
+  ```
+
+  La **clave** es lo que hace que reejecutar el snippet a mano REEMPLACE su callback en vez de
+  encadenar otro. Fallar es inocuo (se avisa por consola): un menú roto no puede impedirte volver al
+  Mundo. Guardián: `tests/test_snp7_vuelta_sin_recargar.js`. Lo que ya estaba montado **sigue vivo**:
+  `closeWorld()` solo pausa (`mc.active=false`), no tira la rejilla ni el contexto GL.
 - **Caché densa `id → cfg`** invalidada por `mc.blockKey.length` (mismo truco que `mcXnameCache`,
   `app.js:5429`) ⇒ la consulta por frame es un índice de array.
 - **Una sola costura**: envoltorio sobre `mcUpdate` (`app.js:5053`, única llamada en `app.js:6323`).
