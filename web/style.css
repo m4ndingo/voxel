@@ -959,10 +959,15 @@ body.mc-escaparate .mc-modal{background:transparent}
   box-shadow:0 12px 40px rgba(0,0,0,.5); backdrop-filter:blur(4px)}
 .mc-note[hidden]{display:none}
 .mc-note-head{font-size:14px; font-weight:600; color:var(--text)}
-/* Alto: 10 líneas del cuerpo actual (line-height 1.8 ⇒ ×18), pero sin comerse la pantalla en un móvil
-   apaisado. El tirador de la esquina sigue ahí para estirarlo a mano. */
+/* Alto: 7 líneas del cuerpo actual (line-height 1.8 ⇒ ×12.6), sin comerse la pantalla en un móvil
+   apaisado. El tirador de la esquina sigue ahí para estirarlo a mano.
+   REQ-CART6 · eran 10 líneas (×18 / 46vh) desde REQ-CART2 y el dueño las bajó al 70 % —«*la altura de
+   la nota no deberia de ser tan alta, total, no se puede llenar hasta el final de texto*»—: el
+   `maxlength` del textarea son 280 caracteres, que a 18px en 720px de ancho no pasan de 4 líneas, o
+   sea que las 3 últimas eran hueco imposible de llenar. Los DOS números van al 70 % (10→7 líneas,
+   46→32vh) o el móvil apaisado se quedaría con el recorte viejo. */
 .mc-note textarea{width:100%; resize:vertical; box-sizing:border-box;
-  min-height:min(calc(var(--note-fs,18px) * 18), 46vh);
+  min-height:min(calc(var(--note-fs,18px) * 12.6), 32vh);
   padding:8px 10px; border-radius:8px; border:1px solid var(--line);
   background:rgba(0,0,0,.35); color:var(--text); font:inherit; font-size:13px; line-height:1.4}
 .mc-note textarea:focus{outline:none; border-color:var(--accent)}

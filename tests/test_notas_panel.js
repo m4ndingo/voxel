@@ -62,9 +62,13 @@ const casi = (a, b, tol) => Math.abs(a - b) <= (tol || 1);
   ok('…y múltiplo de 9 (o Pixeloid sale borrosa)', d.fs % 9 === 0);
   ok('la cabecera va al mismo cuerpo', d.fsCabecera === 18, d.fsCabecera + 'px');
   ok('el diálogo mide 720px', casi(d.ancho, 720, 2), Math.round(d.ancho) + 'px');
-  // Lo que de verdad se pedía: la captura del ticket enseñaba 4,5 líneas.
-  ok('el textarea enseña ~10 líneas sin desplazar', d.lineas >= 9.5, d.lineas.toFixed(1) + ' líneas');
-  ok('y eso es más del doble que antes del ticket', d.lineas > 4.5 * 2, '4,5 → ' + d.lineas.toFixed(1));
+  // Lo que de verdad se pedía: la captura del ticket enseñaba 4,5 líneas. REQ-CART2 lo subió a 10 y
+  // REQ-CART6 lo dejó en 7 (el 70 %), porque los 280 caracteres del `maxlength` no llegaban ni a
+  // llenar la mitad de las 10. El suelo sigue siendo la queja original: más de las 4,5 de la captura.
+  ok('el textarea enseña ~7 líneas sin desplazar', d.lineas >= 6.5 && d.lineas < 8, d.lineas.toFixed(1) + ' líneas');
+  ok('y sigue siendo más de las 4,5 del ticket original', d.lineas > 4.5, '4,5 → ' + d.lineas.toFixed(1));
+  ok('caben los 280 caracteres del maxlength', d.lineas * (d.ancho / (d.fs * 0.6)) > 280,
+     Math.round(d.lineas * (d.ancho / (d.fs * 0.6))) + ' caracteres de sitio');
   ok('el visor de nota también sube a 18px', d.fsVisor === 18, d.fsVisor + 'px');
   ok('…y se ensancha con el panel', casi(d.anchoVisor, 432, 2), Math.round(d.anchoVisor) + 'px');
 
@@ -74,8 +78,8 @@ const casi = (a, b, tol) => Math.abs(a - b) <= (tol || 1);
   console.log('\nMóvil (390×844) — no puede empeorar: ya estaba a 18px');
   ok('sigue a 18px', m.fs === 18, m.fs + 'px');
   ok('el diálogo cabe en el viewport', m.ancho <= 390 && m.ancho >= 340, Math.round(m.ancho) + 'px');
-  ok('sigue enseñando ~10 líneas', m.lineas >= 9.5, m.lineas.toFixed(1) + ' líneas');
-  ok('y el textarea no se come la pantalla (tope 46vh)', m.altoTextarea <= 844 * 0.46 + 1,
+  ok('sigue enseñando ~7 líneas', m.lineas >= 6.5 && m.lineas < 8, m.lineas.toFixed(1) + ' líneas');
+  ok('y el textarea no se come la pantalla (tope 32vh, REQ-CART6)', m.altoTextarea <= 844 * 0.32 + 1,
      Math.round(m.altoTextarea) + 'px de ' + m.vpH);
 
   // ── 3 · el tunable, en vivo y redondeando ──────────────────────────────────────────────────────
