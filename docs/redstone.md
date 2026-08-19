@@ -16,7 +16,7 @@ código por `/api/snippets/<id>` y lo corría con `AsyncFunction` en el ámbito 
 |---|---|
 | `redstone/redstone.js` | el **motor**: mueve señal. No sabe qué es una antorcha. |
 | `redstone/redstone-arranque.js` | lo que **carga solo** el mundo: motor + tabla `DEFECTOS` de circuitos de serie. |
-| `redstone/redstone-piezas.js` | las **piezas** (cable, palanca, placa, puerta, repetidor, inversor, pistón, bloque de redstone): circuito + física + clic derecho. |
+| `redstone/redstone-piezas.js` | las **piezas** (cable, palanca, placa, puerta, repetidor, inversor, pistón, bloque de redstone): circuito + física + el botón central que las acciona. |
 | `redstone/redstone-demo-antorcha.js` | el **circuito** de ejemplo: planta la antorcha y te da el bloque rojo. |
 | `redstone/redstone-ejemplos.js` | monta las **nueve parcelas** de `/map/redstone`, cada una con su cartel. |
 | `redstone/montar_ejemplos.js` | lo lanza en un navegador de verdad, lo **acciona y lo comprueba**, y guarda. |
@@ -190,9 +190,14 @@ que ya existían:
 - **circuito** → `game.redstone.define(...)`, todas con `precargar:false`.
 - **física** → `game.bloques.define(k, { atravesable:true })` y `alPisar` (v1.29) para que la placa se
   hunda al pisarla.
-- **gesto** → un envoltorio de `mcUseRight` **dentro del snippet**. `conmutar()` devuelve `false` sin
-  protestar cuando la celda no es manual, así que el clic derecho **no se pierde nunca**: si no había
-  palanca debajo, se pone bloque como siempre.
+- **gesto** → un oyente del **botón CENTRAL** (`mousedown`, fase de captura) **dentro del snippet**.
+  `conmutar()` devuelve `false` sin protestar cuando la celda no es manual, así que apuntar mal se
+  queda en nada en vez de en un error.
+  ⛔ **El clic derecho NO conmuta** (BUG-RS27, 2026-08-20): construye, y solo construye. Hubo un
+  envoltorio de `mcUseRight` que probaba a conmutar primero; el dueño lo quitó porque repartir un
+  mismo botón entre construir y accionar deja un bloque encima del cable a cada fallo de puntería.
+  El snippet **desenvuelve** `mcUseRight` al arrancar, para que una pestaña con la versión vieja
+  cargada vuelva sola al comportamiento de `app.js` sin recargar.
 
 `encender(x,y,z,on)` sí protesta (una vez) si la celda no es `manual` — porque ahí sí es un error de
 quien escribe el circuito.
@@ -219,9 +224,10 @@ dejar. **Ya no hace falta**, y se comprobó pieza a pieza antes de quitarla: `pa
 cuerpo siempre hay materia en los dos estados; la `placa` no comparte ninguno pero solo **se hunde 1/16
 dentro de su misma celda** (`z 1` → `z 0`), y el rayo que bajaba hacia ella le sigue dando.
 
-⚠️ Tocar `miraFina` obliga a **subir `VERSION`** (`piezas-1.x`): el envoltorio de `mcUseRight` se salta si
-`mcUseRight._redstone === VERSION`, así que re-ejecutando el snippet con la misma versión sigue vivo el
-closure viejo y el cambio no llega.
+Ya **no hay `VERSION`** en `redstone-piezas.js`: servía para no re-envolver `mcUseRight` en cada
+ejecución, y desde BUG-RS27 el clic derecho no se envuelve. El único oyente que queda —el central— se
+quita y se vuelve a poner por `window._redstoneMedio`, así que re-ejecutar el snippet siempre deja
+viva la `miraFina` recién cargada.
 
 ⚠️ **Una pieza se identifica por su NOMBRE, no por el espacio de nombres.** La tabla `CIRCUITOS` va
 por nombre pelado (`piston-pegajoso-on`) y el bucle de registro la da de alta **dos veces**, en

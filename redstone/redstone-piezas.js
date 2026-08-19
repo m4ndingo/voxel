@@ -10,7 +10,7 @@
 //   ───────────  ────────────────────────────────   ─────────────────────────────────────────────
 //   cable        lleva la señal y pierde 1 por      redstone: conduce
 //                bloque
-//   palanca      la enciende el jugador y se queda  redstone: manual  +  clic derecho (aquí abajo)
+//   palanca      la enciende el jugador y se queda  redstone: manual  +  clic CENTRAL (aquí abajo)
 //   botón        igual pero se suelta sola          redstone: manual + pulso
 //   placa        se enciende al pisarla             redstone: manual + pulso  +  bloques: alPisar
 //   puerta       se abre con señal y se cruza; son  redstone: alRecibirSeñal (aquí abajo)
@@ -35,6 +35,19 @@
   'use strict';
 
   if (typeof window.game === 'undefined' || !game.redstone) return;
+
+  // BUG-RS27 · el clic DERECHO ya no conmuta. Aquí abajo hubo un envoltorio de `mcUseRight` que
+  // probaba primero a conmutar y solo construía si no había pieza manual; el dueño lo quitó —«*los
+  // botones de redstone se estan activando con boton derecho y deberia de ser solamente con boton
+  // central*»— y no vuelve: el derecho CONSTRUYE, y punto. Repartir un mismo botón entre construir y
+  // accionar es lo que hace que dentro de un circuito montado nunca sepas cuál de las dos va a pasar.
+  //
+  // Se DESENVUELVE en vez de borrar el código y ya: una pestaña que tenga cargada la versión vieja
+  // sigue con su envoltorio vivo hasta que recargue, y re-publicar el snippet no lo tocaría. Va lo
+  // PRIMERO del snippet a propósito: si algo de más abajo falla, esto ya está hecho.
+  if (typeof window.mcUseRight === 'function' && window.mcUseRight._redstone && window.mcUseRight._orig) {
+    window.mcUseRight = window.mcUseRight._orig;
+  }
 
   var MS_PULSO = 1200;   // lo que aguantan pisada la placa y pulsado el botón
 
@@ -725,7 +738,9 @@
   }
 
   // ── 3. el gesto ────────────────────────────────────────────────────────────────────────────
-  var VERSION = 'piezas-1.7';   // 1.7: miraFina respeta la forma fina de las manuales, sin excepción (BUG-RS26)
+  // Ya no hay `VERSION`: servía para no re-envolver `mcUseRight` en cada ejecución, y desde BUG-RS27
+  // el clic derecho no se envuelve. El único oyente que queda (el central) se quita y se vuelve a
+  // poner por `window._redstoneMedio`, que no necesita saber de versiones.
   var ALCANCE = 6;
 
   // ⚠️ Apuntar a una palanca NO se puede dejar en manos de game.aim(). El rayo del motor trabaja en
@@ -781,24 +796,8 @@
   // saber por qué un clic no coge la palanca es a ojo.
   game.redstone.apuntada = function (alcance) { return miraFina(alcance); };
 
-  // Clic derecho: se envuelve mcUseRight en vez de tocar app.js (el motor del Mundo es agnóstico a
-  // lo que planten los snippets, y esto es un snippet).
-  if (typeof window.mcUseRight === 'function' && window.mcUseRight._redstone !== VERSION) {
-    var orig = window.mcUseRight._orig || window.mcUseRight;
-    var envuelto = function () {
-      // conmutar() no protesta cuando la celda no es manual, así que el clic derecho no se pierde
-      // nunca: si no había palanca, se pone bloque como siempre.
-      if (conmutarApuntada()) return;
-      return orig.apply(this, arguments);
-    };
-    envuelto._redstone = VERSION;
-    envuelto._orig = orig;
-    window.mcUseRight = envuelto;
-  }
-
-  // Y el botón CENTRAL, que es el que pidió el dueño: solo conmuta, nunca pone un bloque. El derecho
-  // hace las dos cosas (si no hay palanca, construye), así que a un palmo de un circuito montado un
-  // fallo de puntería te deja un bloque encima del cable.
+  // El botón CENTRAL, que es el que pidió el dueño y desde BUG-RS27 el ÚNICO: solo conmuta, nunca
+  // pone un bloque.
   //
   // Ese botón fue COMPARTIDO con app.js entre REQ-TOOL5 y el 2026-08-18 (guardarse la herramienta). Ya no:
   // el dueño lo devolvió entero a redstone —«*el boton central vuelva a ser el de activar botones / palancas
@@ -826,5 +825,5 @@
 
   console.log('[redstone] piezas: ' + Object.keys(CIRCUITOS).length
     + ' (cable, palanca, botón, placa, puerta, repetidor, inversor, pistón, pistón pegajoso, bloque de redstone, observador)'
-    + ' · clic derecho o CENTRAL conmuta las manuales');
+    + ' · el clic CENTRAL conmuta las manuales (el derecho construye, BUG-RS27)');
 })();

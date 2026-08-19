@@ -127,7 +127,7 @@ const ok = (nom, cond, extra) => {
     // Una nota planta SOLA el cartel del dueño encima de su bloque. Solo se escribe la MÍA: las notas
     // del mundo son la bandeja del dueño y aquí no se toca ninguna que no sea de este poste.
     mc.notes[X + 1 + ',' + SUELO + ',' + Z] =
-      'PISTÓN · dale a la palanca (clic derecho, o el botón CENTRAL). El pistón empuja el ladrillo '
+      'PISTÓN · dale a la palanca con el botón CENTRAL. El pistón empuja el ladrillo '
       + 'UNA celda hacia donde mira su placa de madera, y al soltar recoge solo su cabeza: no tira de '
       + 'lo que empujó. Si no tiene hueco delante, no se abre. Gíralo con R para cambiar hacia dónde empuja.';
     if (typeof mcDirtyHeader === 'function') mcDirtyHeader();

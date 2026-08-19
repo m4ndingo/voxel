@@ -126,7 +126,7 @@
   // ── 1 · lo básico: entrada, cable, salida ──────────────────────────────────────────────────
   parcela(0);
   cartel('1 · INTERRUPTOR Y LÁMPARA. Lo mínimo que es un circuito: una ENTRADA (la palanca), un '
-       + 'CABLE que lleva la señal y una SALIDA (la lámpara). Clic derecho en la palanca para '
+       + 'CABLE que lleva la señal y una SALIDA (la lámpara). Botón CENTRAL en la palanca para '
        + 'subirla. El cable se enciende por donde pasa la corriente, así que se ve viajar.');
   pon(4, 8, 'hab:palanca');
   fila(5, 9, 8, 'hab:cable');
@@ -318,7 +318,7 @@
   carteles.push([EX, SUELO, EZ, 'MUNDO REDSTONE · diez circuitos que se pueden tocar. Delante del '
     + 'cartel: 10 observador. Detrás, de izquierda a derecha y de delante a atrás: 1 lámpara · 2 el '
     + 'cable se gasta · 3 puerta con placa · 4 NOR · 5 reloj · 6 memoria · 7 AND · 8 XOR · 9 la '
-    + 'señal sube. Cada uno tiene su cartel. Clic derecho (o el botón CENTRAL) para accionar '
+    + 'señal sube. Cada uno tiene su cartel. Botón CENTRAL del ratón para accionar '
     + 'palancas y botones.']);
 
   endBatch();

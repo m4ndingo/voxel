@@ -900,7 +900,7 @@
     // ── entradas del circuito ───────────────────────────────────────────────────────────────────
     // Una palanca no es «otro tipo de bloque»: es un material `manual` con pareja apagada/encendida,
     // igual que la lámpara. La única diferencia es QUIÉN decide su estado — aquí, quien llame a esto.
-    // Por eso el gesto (clic derecho, pisar, un temporizador) vive FUERA del motor: el motor solo
+    // Por eso el gesto (el botón central, pisar, un temporizador) vive FUERA del motor: el motor solo
     // sabe girar la celda y avisar a las vecinas.
     encender: function (x, y, z, on) {
       x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
@@ -946,7 +946,7 @@
     },
 
     // Como encender(), pero al revés y SIN protestar: conmutar() es «gírala si se puede», que es lo
-    // que quiere quien engancha un clic derecho a todas las celdas del mundo. Devolver false calladita
+    // que quiere quien engancha un clic a todas las celdas del mundo. Devolver false calladita
     // deja al que llama seguir con su comportamiento normal.
     conmutar: function (x, y, z) {
       x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
