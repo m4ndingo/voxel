@@ -32,6 +32,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[BUG-SPLIT2](#-bug-split2)~~ | ~~en la **pantalla dividida** del editor de código (Alt+C) el cielo pierde las estrellas~~ | ✅ resuelto 2026-08-19 | **Nació cerrado.** Se abrió a las pocas horas de arreglar el Alt+C que **además disparaba el `game.onKey('c')`** del snippet, y el dueño confirma que era eso: el atajo apagaba las estrellas de `efectos-demo` al ir a programar. La pantalla dividida no tenía nada que ver. Lección: un «ya no se ve X» abierto el mismo día que se toca el teclado, mírese primero el teclado |
 | ~~[BUG-IMP1](#-bug-imp1)~~ | ~~**crash al importar objetos**: `TypeError: hex.slice is not a function` en `shade` → el editor no pinta el modelo importado~~ | ✅ resuelto 2026-08-18 | **Cerrado: el dueño confirma que los colores importados salen bien.** el color venía como **entero empaquetado**, no `'#rrggbb'`. **Arreglado el crash** en `hex6`/`shade`: un entero se recupera como su hex (`0xff8844`→`#ff8844`), y cualquier otro tipo raro → magenta de error sin tumbar el editor. `test_importar_color.js`. **Pendiente:** que el dueño confirme que los colores importados salen BIEN (si el entero no fuera `0xRRGGBB` sino otro empaquetado, saldría mal; entonces mande el fichero) |
 | ~~[REQ-FLUID4](#-req-fluid4)~~ | ~~**«ilusión de agua»**: un lago se ve como cubos transparentes con caras internas, no como una masa continua~~ | ✅ resuelto 2026-08-18 | **Cerrado: la fase 4 (reflejos) aterrizó por [REQ-ENV5](#-req-env5).** **fases 1-2 (culling en el camino fino) y 3 (vista subacuática) hechas** — `test_caras_fluido.js` + `test_vista_subacuatica.js`. Queda la **fase 4 (reflejos)**, aplazada por el dueño ⇒ [REQ-FLUID5](#-req-fluid5) |
 | ~~[REQ-ENV1](#-req-env1)~~ | ~~**ambientes realistas**: presets de iluminación (amanecer, mediodía, atardecer, noche, niebla, tormenta, invierno, verano) aplicables con un mando, `game.entorno(nombre)`~~ | ✅ resuelto 2026-08-18 | **Cerrado: probado y afinado con el dueño, los 8 presets valen.** hecho como **snippet** (`data/snippets/ambientes.json`, `game.entorno`), no `app.js`: compone los mandos que ya existen (`cieloColor` + `reflejoAgua` + `vistaAgua` + `sunShade`) con transición suave. Los 8 presets aplican y transicionan. Fase de **probar y afinar** con el dueño; lo que la iteración destape sale a [REQ-ENV2](#-req-env2)/[REQ-ENV3](#-req-env3) |
@@ -77,6 +78,15 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 | [BUG-RS22](#-bug-rs22) | el **observador mirando una placa de presión pisada** emite **1 pulso cada ~1 s** aunque la placa no cambie de estado (el flanco de subida sí es correcto) | ✅ resuelto 2026-08-10 | la sospecha era buena y se quedó corta: la placa SÍ parpadeaba (`pulso` vencía y el despachador la re-encendía), y además `encender()` avisaba a los observadores aunque no cambiara el bloque. Capacidad nueva `alSeguirPisando` + sin cambio de bloque no hay flanco. `test_placa_observador.js` |
 | [BUG-RS23](#-bug-rs23) | una pieza **exportada de otra instancia e importada aquí** deja de ser circuito: llega como `asset:assets/piston-pegajoso-on.vox.json` y la tabla solo conocía `hab:piston-pegajoso-on` | ✅ resuelto 2026-08-10 | las piezas se identifican por NOMBRE y se registran en los dos espacios de nombres; el espacio se arrastra a las parejas (cabeza, hoja alta, variante -on). `test_piezas_importadas.js` |
 | [BUG-FLUID3](#-bug-fluid3) | un **fluido exportado de otra instancia** (`hab:agua`) se importa aquí como `asset:assets/agua.vox.json` y **no se ve bien**; pasa igual con la lava | ✅ resuelto 2026-08-10 | no era el motor de fluidos: era que `setFluid` y `mcMatKey` tenían `hab:agua`/`hab:lava` escritos a mano, así que los niveles copiaban la paleta de un material inexistente → **roca**. `mcNombreMat` + `mcClaveDeNombre` en `app.js`. `test_fluido_importado.js` |
+| [BUG-TOOL2](#-bug-tool2) | editas una pieza en el editor 2D/3D, la guardas, y el Mundo la enseña ya cambiada **salvo la herramienta que el jugador lleva en la mano**, que sigue con el dibujo viejo hasta recargar la página | ✅ resuelto 2026-08-18 | la herramienta empuñada se hornea en su **propia** caché (`mcHeldToolCache`) con candado por clave (`mc._heldToolKey`), y `mcRefreshSaved` no tocaba ninguna de las dos. Ahora las invalida comparando por **nombre pelado** (`mcNombreMat`), no por clave. `/tmp/heldtool.js` |
+| [BUG-TOOL3](#-bug-tool3) | la herramienta en la mano con voxeles **translúcidos** (la caja de volumen) se dibuja mal: **caras traseras por delante** | ✅ resuelto 2026-08-18 | la pasada de cristal no ordena ni escribe profundidad (order-independent, barato). A 1 m del ojo eso canta. Para la herramienta —y solo para ella— pasada muda de profundidad + color con `LEQUAL`: una capa, la más cercana. Conmutable: `game.toolAlphaFix` |
+| [BUG-LOAD1](#-bug-load1) | al volver al mapa desde el editor (botón 🌍) **parpadea el cartel azul de carga** sobre un mundo que ya se veía renderizado | ✅ resuelto 2026-08-18 | `openWorld` relanza el autoarranque también al volver, y el cartel que se le puso el 2026-08-18 lo encendía sobre el mapa ya hecho. Ahora **solo actualiza el texto si el cartel ya estaba puesto**. `/tmp/flash2.js`: 3 muestras tapando → 0 |
+| [REQ-SPLIT1](#-req-split1) | **ver el script y el juego a la vez**: tocar la escala o la postura de algo en un snippet, darle a ▶ y ver el cambio en el Mundo sin cerrar el editor. Con un **agarre** para repartir la pantalla | ✅ resuelto 2026-08-18 | **cero contextos WebGL nuevos**: el editor ya vive en la misma página que el Mundo y los snippets corren en el ámbito global, así que dividir es solo dejar de tapar `#mc-modal` y encogerlo (`body.snip-dividido`, alto en `--snip-alto`). `mcRender` llama a `mcResize` cada frame y todo el HUD es `absolute` dentro del modal ⇒ el juego se reencuadra solo. Botón «⬍ Dividir», `Alt+D`, agarre arrastrable (doble clic = a la mitad), alto y modo en `localStorage`. Dividido manda el código: cabecera/barra/lista compactadas y fuera el subtítulo y la chuleta del pie ⇒ **162 → 235 px de código** en una franja de 315. `/tmp/split_editor.js`, `/tmp/split_compacto.js` |
+| [REQ-TOOL8](#-req-tool8) | poder **definir una herramienta nueva desde un snippet** (una espada, p. ej.), ponérsela en la mano, darle animación y decir en JavaScript qué pasa al hacer clic izquierdo/derecho | ✅ resuelto 2026-08-18 | `game.herramientas.define(id, ficha)` + registro `mc.herrExtra`. El motor sigue siendo agnóstico: lleva el dibujo, anima el gesto (la misma máquina de 3 fases del pico, con la tabla de la ficha) y llama a `izquierdo`/`derecho` con el rayo ya tirado. `anima(e)` para movimiento propio. Es **pasiva**: no rompe ni pone nada por su cuenta. Snippet de demo `herramienta-espada`. `/tmp/herramienta_snippet.js`, `/tmp/snippet_espada.js` |
+| [BUG-PASTE1](#-bug-paste1) | la vista previa del pegado (`Ctrl`+`V`) dibuja **un cubo macizo** donde va una pieza fina (repetidor, flor, antorcha…) | ✅ resuelto 2026-08-18 | `mcDrawPasteBlocks` solo sabía emitir cubos del atlas; ahora, celda a celda, mira `mc.finoRejilla` y saca la **geometría de verdad** de `mc.finoGeom`, copiada tal cual (9 floats/vértice, solo desplazada) y pintada con `mc.structProg` — la misma receta de `mcDrawVolumeBlocks`. Lo fino además **no tapa** la cara del vecino. `/tmp/pegar_fino3.js` |
+| [REQ-TOOL7](#-req-tool7) | cambiar de herramienta con la rosca tiene que ser **realista**: bajar la vieja como al guardarla y subir con la nueva. Y (mismo día) el **botón central vuelve a ser el de redstone**: guardar/sacar pasa a la rosca | ✅ resuelto 2026-08-18 | relevo diferido: `mcCambiaToolConGesto` apunta `mc._toolPend` y lanza la bajada de [REQ-TOOL5](#-req-tool5); el cambio se aplica **en el frame** en que `_guardaT>=1`, dentro de `mcSyncHeldToolStruct` y antes de su portazo, así que no hay ni un frame de mano vacía. Roscas encadenadas re-apuntan el destino, no encadenan viajes. `game.showTool.ruedaGesto`. `/tmp/rueda_gesto.js`, `/tmp/rueda_gesto2.js`, `/tmp/medio_redstone.js` |
+| [REQ-TOOL6](#-req-tool6) | la **rosca del ratón** recorre las herramientas, y el peldaño de abajo del todo es la **mano vacía** | ✅ resuelto 2026-08-18 | escalera con suelo y techo (no anillo): `mcRuedaHerramienta(±1)` sobre `['build','box','select','paint','pick']` filtrada por catálogo, con el índice `-1` = guardada de [REQ-TOOL5](#-req-tool5). En el Mundo la rueda no hacía nada, así que no pisa ningún mando. Delta acumulado con umbral (trackpad). `game.showTool.rueda` / `.ruedaUmbral` / `.escalera`. `/tmp/rueda.js` |
+| [REQ-TOOL5](#-req-tool5) | **guardarse la herramienta** con el botón central del ratón: que baje apuntando al suelo hasta salir de pantalla, con transición suave y tunable, y que vuelva con otro clic o al cambiar de herramienta | ✅ resuelto 2026-08-18 | no es un gesto que se agota como el golpe de clic: es un **estado con memoria** (`mc._guardada`) y un viaje de ida y vuelta (`mc._guardaT`, 0→1) que recorre `mcBuildToolTransform` con reloj de frame. Mandos aparte: `game.showTool.guardar` (`ms/baja/giro/aparta/curva`) + `game.showTool.guardada`. `/tmp/guardar.js`, `/tmp/guardar_click.js` |
 | [REQ-SHADOW2](#-req-shadow2) | materiales **sin sombra**: que `white-wool` (y el que se elija) no **reciba** ni **proyecte** sombra, para nubes semirrealistas | ✅ resuelto 2026-08-10 | `define(clave,{recibeSombra:false,proyectaSombra:false})` desde el autorun; banderas sumadas al `aShade`. `test_sin_sombra.js` |
 | [BUG-SH2](#-bug-sh2) | las nubes con `proyectaSombra:false` **siguen dejando pegote** de sombra debajo | ✅ resuelto 2026-08-11 | era la otra sombra: la SIEMBRA de skylight cortaba la columna en todo lo que no fuera aire. `mcTablaCielo()` la abre solo para `proyectaSombra:false`; `luz:'pasa'` sigue sin abrirla. Cierra la mitad que le faltaba a [REQ-SHADOW2](#-req-shadow2) |
 | ~~[REQ-FLUID6](#-req-fluid6)~~ | ~~**hundirse despacio**: dentro de un líquido la gravedad y la velocidad terminal se reducen~~ | ✅ cerrado 2026-08-11 | cifras tomadas como **RELATIVAS**: fuera no cambia ni un float, dentro gravedad **×1/16** + rozamiento exponencial (la terminal la da el rozamiento, no un tope). **Una sola `mcCaidaPaso` y tres puntos de llamada**, así los agentes caen por donde cae el jugador. Lava más espesa con una sola perilla. `test_hundirse.js` |
@@ -109,6 +119,16 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 | ~~[REQ-DOC1](#-req-doc1)~~ | ~~`CLAUDE.md` está documentado pero **no es navegable** (239 KB sin índice ni TOC)~~ | ✅ resuelto 2026-08-08 | Mapa de Navegación del Documento (TOC) en cabecera + sección `🧪 Batería de Pruebas` |
 | ~~[REQ-AG13](#-req-ag13)~~ | ~~**dibujar el cono de visión** de un agente: hoy no hay forma de VERLO, solo la tabla~~ | ✅ resuelto 2026-08-08 | `mcPushVisionCones` proyecta conos 3D de `seguir.vision` (ámbar) y `mirar.limites` (cian); activable con `game.verConos = true` o `game.conosVision` o `mc.xray` |
 | [BUG-AG16](#-bug-ag16) | el **cono de visión cian** (`mirar.limites`) se ve como un plano: ajustar pirámide/proyección 3D | 🟡 archivado 2026-08-08 | ticket anotado a petición del usuario para resolver más adelante |
+| [BUG-AG19](#-bug-ag19) | la **herramienta no detecta a los agentes articulados**: la espada dice «tajo al aire» teniendo el bicho delante (captura #54), y debería saber además **en qué punto** recibe la acción | ✅ resuelto 2026-08-18 | **chocar y apuntar son DOS caminos**: el snippet envolvía tres sondas y ninguna estaba en el de la mira (`mcRaycast→mcStructRayHit→mcAimSolidAt→mcAimBoxHit`). Cuarta envoltura `envAim` reusando `golpe()` con un parámetro `mirar`, y ficha del impacto en `game.esqueletos.enLaMira()`/`.enPunto()` con el **voxel local**. Cero líneas de `app.js` |
+| [REQ-SANGRE1](#-req-sangre1) | que al espadazo **salte sangre del punto exacto del golpe**: voxeles rojos de 1×1×1 que caigan al suelo y se queden tirados **al menos 30 s** | ✅ resuelto 2026-08-18 | continuación de BUG-AG19: el punto ya lo daba `enLaMira().punto`. Motor de partículas `game.sangre` **entero en el snippet** `herramienta-espada`, pintando en `game.voxelesUI` (grupo propio, `tam:1` = 1/16 de bloque). Tres trampas medidas: la sonda del suelo hay que pedirla **sin envolver** (`mcFineBoxHit._orig`) o la sangre se posa en el propio bicho; el **vuelo** se cuenta en tiempo simulado y el **descanso** en el de reloj; y salida de emergencia para la gota atascada en un rincón. Cero líneas de `app.js` |
+| [REQ-SNP-LIB1](#-req-snp-lib1) | el snippet `herramienta-espada` **se ha vuelto muy grande**: qué se puede externalizar a otro snippet llamado con `game.snippet(...)` para dejarlo más ligero y entendible | ✅ resuelto 2026-08-19 | lo reutilizable no era «la sangre», eran **dos capas distintas**: preguntarle al mundo por FORMA (`sondas-mundo`) y simular partículas (`particulas-voxel`). La espada baja de **271 a 125 líneas (−54 %)** y se queda solo con lo suyo. Cero líneas de `app.js` |
+| [REQ-SNP-LIB2](#-req-snp-lib2) | qué sale gratis del motor una vez fuera: **chispas, polvo al romper, hojas, humo** — y además **estrellas autoiluminadas, nieve y lluvia** | ✅ resuelto 2026-08-19 | `efectos-demo`: siete efectos, **ni una línea de física**, ~8 líneas de configuración cada uno. Los tres «prácticos» pidieron una capacidad nueva en el motor (`porSegundo`/`radio`/`alto`: siembra continua sobre una caja que **viaja con el jugador**, no sobre el mapa). Las estrellas ni siquiera son partículas: `game.voxelesUI` se dibuja **sin luz**, así que salen autoiluminadas por construcción |
+| [REQ-VOXUI1](#-req-voxui1) | estrellas **grandes** en el cielo sin que caiga «ni un solo fps»: a grosor 16 apilando eran 983 040 voxeles | ✅ resuelto 2026-08-19 | **grosor por GRUPO** en `game.voxelesUI` (`grosor(grupo, n)`): agranda el CUBO y deja el voxel donde está ⇒ **una estrella = un voxel, mida lo que mida**. 983 040 voxeles y ~1 640 ms/frame → **240 voxeles y 2,1 ms**; de grosor 1 a 16 el coste es el mismo (−0,07 fps, ruido). Culling ahora por grosor: con todo a 1 (lo de siempre) es exactamente el conjunto único de antes |
+| [BUG-VOXUI1](#-bug-voxui1) | al bajar las estrellas de altura se pintaban **por delante** de los objetos de la escena, sin respetar la profundidad | ✅ resuelto 2026-08-19 | la capa iba en `mcDrawOverlays` (al final), y la **pasada translúcida va con `depthMask(false)`** ⇒ el agua, el cristal, los carteles y la herramienta en la mano **no dejan profundidad** y la capa se les pintaba encima. Ahora se dibuja **con el mundo** (`mcDrawVoxUI`, antes del cielo y del translúcido). `game.voxelesUI.encima = true` recupera lo de antes. Medido: 103 662 → **60 624** px de cortina sin tapar |
+| [REQ-SNP6](#-req-snp6) | el editor de snippets: **buscar un texto dentro del código** de todos, y ver **qué snippets usan** el que tengo abierto | ✅ resuelto 2026-08-19 | el panel no tenía buscador de ninguna clase. Se busca en el **servidor** (`?q=`, `?usa=`): el listado no trae el código y bajárselo entero en cada tecla son ~1,5 MB. La clave del panel «Usos» es **llamada vs mención** (`game.snippet('x')` ejecuta; el id en un comentario o una tabla, no), y que el nombre de la función **no se ancla** (`ejecutarSnippet('x')` también llama). Lo que el servidor no puede saber —los que llama el motor por convención, `mundo-<mapa>`— lo pone el cliente. Contador `🔗 Usos (N)` al abrir, sin clicar. Guardián `test_snippets_buscador.js` |
+| [BUG-SNP5](#-bug-snp5) | el **id** de un snippet no se veía, no cuadraba con el rótulo (`Mundo fornite_c2_island` → `mundo-fornite-c2-island`) y no se podía cambiar | ✅ resuelto 2026-08-19 | y no era solo incómodo: `mcMapName()` devolvía el tramo de la URL **crudo** mientras el servidor guarda por slug, así que `/map/fornite_c2_island` pedía `mundo-fornite_c2_island` (404 mudo, por diseño) y **entraba sin su autoarranque**. Ahora el cliente canoniza con el mismo slug; el editor **enseña el id** (campo propio + ficha de la lista) y deja escribirlo (`_` incluido); cambiarlo es **mover** (pregunta, guarda el nuevo y solo luego manda el viejo a la papelera). El POST acota el id: sin eso un `../` escribía fuera de `data/snippets/` |
+| [BUG-FLUID7](#-bug-fluid7) | `setVoxel` de una pieza **fina dentro del agua borraba el agua** (foto #59: el badlands siembra `hierba-alta` en charcos de 1 de hondo y sale un hueco bajo cada mata) | ✅ resuelto 2026-08-19 | la **mano** ya lo tenía resuelto (`mcPlace`/`mcPaint` caen al estampado con `!mcCeldaFluida`), el **scripting** no. El desvío pasa al MOTOR, dentro de `mcSetVoxel`: si la celda tiene fluido y el material es fino (`mcFinoEnRejilla`, nueva, síncrona por id) se estampa y el agua se queda. Orden del dueño: **los scripts generados no crecen** para distinguir los dos caminos. Un macizo sí sustituye al agua; un fluido no se desvía |
+| [BUG-RS26](#-bug-rs26) | con **dos botones lado a lado**, el clic choca contra la **caja invisible** de uno aunque se apunte al de detrás o al de al lado (foto #58) | ✅ resuelto 2026-08-19 | no era el rayo del motor (ése ya va fino): era `miraFina` en `redstone-piezas.js`, que daba por buena la **celda entera** de toda pieza manual («manga ancha»). Un botón ocupa **6×3×6 de 16³ = 2 %** de su celda. Ahora las manuales se miden **finas como el resto** y la manga ancha **se quitó entera** (orden del dueño: apuntar al aire de la caja no activa nada, haya o no algo detrás). Comprobado antes de quitarla que ninguna pieza se queda inconmutable: `palanca`/`palanca-on` comparten 92 de 108 voxeles y `boton`/`boton-on` 72 de 88 |
 | ~~[BUG-PICK2](#-bug-pick2)~~ | ~~la detección de componentes **redstone** en el picker usa una lista de palabras clave hardcodeada (`rsTerms`): debería basarse en una **propiedad del dato**~~ | ✅ resuelto 2026-08-08 | `meta.categoria: "redstone"` en 21 habitantes + 1 asset; `list_all()` y `index.json` propagan `categoria`; `mcRenderPickerGrid` usa `c.categoria === 'redstone'` sin hardcodeo |
 | [REQ-ED1](#-req-ed1) | permitir ver y cambiar la **categoría de un bloque a redstone** desde el editor 3D/2D y mostrarla en su ficha | ✅ done 2026-08-09 | Añadido selector `<select id="meta-categoria">` en el panel de Objeto, sincronizado con `state.meta.categoria`, y mostrado en la Ficha del Material (`mcShowItemCard`) |
 | [REQ-PICK3](#-req-pick3) | filtrar las fichas de la galería del mapa exclusivamente por **categoría del objeto** (`categoria`: "general" / "redstone"), eliminando el filtrado por tipo ("bloques", "texturas", "estructuras") | ✅ done 2026-08-09 | Simplificados los botones de filtro a `Todos`, `General` y `⚡ Redstone`. La lógica de `mcRenderPickerGrid` filtra ahora por `c.categoria === 'redstone'` vs `general` |
@@ -142,6 +162,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 | ~~[BUG-RS2](#-bug-rs2)~~ | ~~los repetidores de redstone girados no funcionan~~ | ✅ resuelto 2026-08-06 | el giro estaba BIEN; lo que fallaba era que el repetidor emitía por 5 lados, y los 3 «rotos» miraban a otro lado |
 | ~~[REQ-CART2](#-req-cart2)~~ | ~~la ventana de editar nota (tecla `N`) es diminuta y su letra también~~ | ✅ resuelto 2026-08-06 | 720px y 18px de serie + `game.noteFont`/`game.noteWidth` por consola |
 | ~~[REQ-CART3](#-req-cart3)~~ | ~~los carteles de las notas, que ahora son botones de menú, apenas se configuran (escala, palo, sitio) y su rótulo se desvanece~~ | ✅ resuelto 2026-08-12 | `game.carteles` (escala/palo/desvío/giro) replantando por firma; `noteTextDist` 14 → **21** y **sin límite** en pantalla-menú; `test_carteles.js` **26 ok** |
+| ~~[REQ-CART4](#-req-cart4)~~ | ~~a la nota (tecla `N`) le falta una propiedad **tinte**: teñir el cartel entero de un color~~ | ✅ resuelto 2026-08-18 | `mc.noteTints` (mapa propio, como el giro), color **horneado** en la malla con relieve conservado, las 6 muestras del post-it + selector RGB; `test_notas_tinte.js` **26 ok** |
 | ~~[REQ-ARR1](#-req-arr1)~~ | ~~definir comportamientos **por mapa**: el único autoarranque que hay es global y avisa en los mapas donde la pieza no está~~ | ✅ resuelto 2026-08-13 | **`mundo-<mapa>`** corre justo después del global, hereda lo suyo y no se avisa si no existe. NO es `arranque-<mapa>` (la intro, atada a `?intro=1`). `tests/test_arranque_mapa.js` **11 ok** |
 | ~~[REQ-SNIP1](#-req-snip1)~~ | ~~depurar un snippet que revienta es una caza a ciegas: el navegador dice «VM2571» y una línea que no es la del panel~~ | ✅ resuelto 2026-08-13 | informe con la línea **del panel**, su texto y el contexto; la línea viaja en `err.vfLinea` y el panel **lleva el cursor** hasta ella. El desfase del preámbulo se **mide**, no se cablea. `tests/test_snippet_depurar.js` **13 ok** |
 | ~~[REQ-RS4](#-req-rs4)~~ | ~~un bloque que recibe energía debe **energizarse** y alimentar lo que tenga pegado~~ | ✅ resuelto 2026-08-06 | r1.2: fuerte/débil, `aislante()`, `test_redstone_bloques.js` |
@@ -156,6 +177,34 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 ---
 
 
+
+<a id="-bug-split2"></a>
+
+### ✅ BUG-SPLIT2 · En la pantalla dividida del editor no se ven las estrellas — ✅ resuelto 2026-08-19
+
+**De dónde salió.** Nota `53,14,40` de **`/map/bugfinder`**: «*teniendo un cielo lleno de estrellas, voy
+al editor de codigo alt+C y en la pantalla dividida, las estrellas no aparecen y deberian*».
+
+**No era la pantalla dividida: era el propio Alt+C.** El reparto de teclas de `game.onKey`
+(`app.js`, dentro del `keydown` del Mundo) no miraba los modificadores, así que **Alt+C** abría el
+editor **y además** llamaba al `game.onKey('c', …)` que tuviera ligado el snippet en marcha — en
+`efectos-demo` ése es justo el que enciende y apaga las estrellas ✨. O sea que las estrellas no
+«desaparecían al partir la pantalla»: las apagaba el mismo atajo con el que iba a programar.
+
+**El arreglo** (2026-08-19, ya en el árbol): los atajos del usuario solo saltan con la tecla **sola**;
+con Alt/Ctrl/⌘ manda la aplicación, que es de quien son Alt+C (código), Alt+A (agentes), Alt+D (partir)
+y Alt+F (foto). Una línea en el reparto de `mcUserKeys`, más la regla escrita en el comentario de
+`game.onKey`. Vale para **todos** los snippets a la vez, sin tocar ninguno — que es el orden de siempre:
+el framework no se parchea por agente, pero esto era del framework.
+
+**Cerrado por el dueño el mismo día**: «*marcar como cerrado y archivado BUG-SPLIT2 ya que era por el
+alt+c que pulsaba también c*».
+
+**Lo que deja para la próxima:** cuando un ticket diga «ya no se ve X» y ese mismo día se haya tocado el
+teclado, mírese primero el teclado. Y ligar una tecla suelta que sea también la letra de un atajo de la
+aplicación ya **no** es un problema: `game.onKey('c', …)` y Alt+C conviven.
+
+---
 
 <a id="-req-fluid5"></a>
 
@@ -4534,6 +4583,969 @@ Dos cosas que costó descubrir y que están anotadas en el test para el siguient
 ---
 
 
+<a id="-bug-tool3"></a>
+
+### BUG-TOOL3 — la herramienta en la mano, si es translúcida, se dibuja del revés ✅ resuelto 2026-08-18
+
+Dueño: «*otro bug que veo es como se renderizan las herramientas de la mano, parece que no se dibujan con la
+profundidad correcta ya que algunas caras traseras parecen estar por delante*» (capturas de la herramienta de
+volumen y la de selección). Y el aviso que evita perseguir el fantasma equivocado: «*el problema no es de los
+brackets, los graficos de herramientas de la mano derecha son estructuras de la galeria*» · «*lo mismo pongo
+un pico para cavar como que pongo un pulpo*» ⇒ **no se puede suponer qué dibujo lleva en la mano**.
+
+**Por qué pasaba.** El dibujo se parte en dos VBOs: opaco y translúcido (voxeles `#rrggbbaa`). La pasada 3
+del render de estructuras —la de cristal— dibuja con blend, **sin ordenar y con `depthMask(false)`**, a
+propósito: para el cristal del mapa es barato y no se nota. `hab:caja-de-volumen` tiene 24 de sus 56 voxeles
+en `#2cfc56e6` ⇒ la mitad de la herramienta cae en esa pasada, y ahí el orden lo pone el VBO, no la cámara:
+un brazo de detrás pintado después tapa al de delante. En el mapa se perdona; en la mano, que ocupa media
+pantalla a 1 m del ojo, canta. Las herramientas **opacas** (`hab:pico-de-piedra`, `hab:varita-de-selecci-n`)
+nunca lo tuvieron: 0 vértices en esa pasada.
+
+**Arreglo.** La herramienta sale del montón (`s._isHeldTool`) y se dibuja aparte al final de la misma pasada:
+
+1. pasada muda, `colorMask` apagado y `depthMask(true)` ⇒ el buffer de profundidad se queda con la cara **más
+   cercana** de la herramienta;
+2. pasada de color con `depthFunc(LEQUAL)` ⇒ solo pasa esa cara. Una capa de mezcla y ya.
+
+Es el resultado de ordenar, sin ordenar nada (ordenar de verdad costaría rehacer el VBO cada frame) y no
+supone nada del dibujo. Conmutable con **`game.toolAlphaFix`** (`false` = como antes), que es además el A/B
+para medir su coste: 2 draw calls de un objeto pequeño.
+
+<a id="-bug-load1"></a>
+
+### BUG-LOAD1 — fogonazo azul al volver al mapa desde el editor ✅ resuelto 2026-08-18
+
+Dueño: «*al dar al icono de la bola del mundo para ir al mapa, aparece un flash molesto. se ve el mundo
+renderizado, luego flash con fondo azul y mensaje, y luego otra vez el mundo renderizado*».
+
+**Por qué pasaba.** `openWorld()` corre el autoarranque **cada vez**, no solo en la primera entrada; el
+mundo ya está horneado, así que se ve el mapa. El cartel de carga (`.mc-loading`, degradado azul) que se le
+añadió a `mcCorreArranqueVisible` el 2026-08-18 para contar **quién** construye el mundo se encendía también
+en esa vuelta, y su `await mcYield()` obliga a pintarlo: mapa → azul → mapa.
+
+**Arreglo.** El cartel **solo se actualiza, nunca se enciende**: `mcCorreArranqueVisible` mira si
+`#mc-loading` ya estaba puesto (carga inicial desde `openWorld`, o `mcVolverAIntro`) y solo entonces escribe
+el texto y cede el frame. Medido con `/tmp/flash2.js` (muestreo cada 16 ms de si el cartel tapa el mapa):
+**3 muestras → 0** al volver del editor, y `/tmp/flash3.js` confirma que la carga de verdad sigue tapada y
+sigue listando las 20 fases, autoarranque incluido.
+
+<a id="-bug-tool2"></a>
+
+### BUG-TOOL2 — la herramienta en la mano no se entera de que has guardado ✅ resuelto 2026-08-18
+
+Dueño: «*implementar con el boton en la mano en el mapa desde el editor 2d/3d, la guardo, pero no veo los
+cambios en el modo mapa. sí que funciona bien para los bloques del mapa que ya están, pero no cambia para la
+herramienta que lleva en el mano el jugador y deberia*».
+
+**Por qué pasaba.** Guardar dispara `mcRefreshSaved(key)` (`app.js:13246`), que tira de la cadena entera:
+`invalidateTex` (texturas + `roomDataCache`), `agGeomCache`, `mc.structs[key]`, `mc.catalog`,
+`mcClearPreview`, la paleta de terreno y `mcRestampAll` para lo ya estampado. Todo eso es lo que el dueño
+**sí** veía cambiar. Pero la herramienta empuñada **no pasa por ninguna de esas puertas**: se hornea en
+`mcSyncHeldToolStruct` (`app.js:11629`) contra una caché propia, `mcHeldToolCache`, detrás de un candado
+`if(mc._heldToolKey !== key)`. Re-guardar la misma pieza no cambia la clave ⇒ el candado no se abre nunca; y
+aunque se abriera, la caché seguiría devolviendo la malla vieja.
+
+**Arreglo** (12 líneas dentro de `mcRefreshSaved`, tras `mcClearPreview()`): se borran de `mcHeldToolCache`
+todas las entradas de esa pieza y se pone `mc._heldToolKey = null` para que la siguiente pasada la re-hornee.
+Dos cuidados que no son evidentes:
+
+- Se compara por **`mcNombreMat`** (nombre pelado), no por clave: el editor guarda por una puerta
+  (`hab:pico-de-piedra`) y el catálogo pudo armar la herramienta por la otra
+  (`asset:assets/pico-de-piedra.vox.json`) — mismo dibujo, otra clave (mismo defecto que BUG-RS23/BUG-FLUID3).
+- Aquí **sí** se llama a `mcFreeStruct`. `mcSyncHeldToolStruct` solo desengancha la vieja de `mc.structures`
+  sin liberarla, y hace bien: allí la caché sigue siendo su dueña. Al vaciar la caché, el dueño somos nosotros.
+
+**Verificado** con `/tmp/heldtool.js` (Playwright sobre `/map/test?noauto=1`): se intercepta el `fetch` del
+documento para que tras «guardar» devuelva un dibujo distinto — **no se toca ningún fichero de
+`data/habitantes/`** — y se mira el recuento de vértices de `mc._heldToolStruct`: 960 → 918 con el arreglo,
+960 → 960 sin él (comprobado con `git stash`).
+
+<a id="-req-split1"></a>
+
+### REQ-SPLIT1 — pantalla dividida: el script abajo, el juego arriba ✅ resuelto 2026-08-18
+
+Dueño: «*cuando hago cambios en un script y le doy a ejecutar no puedo ver fácil qué está pasando en el
+mundo, por ejemplo si hago un cambio en la escala de la espada o la posición. Se me ocurre que se pueda
+dividir la pantalla de forma que pueda ver tanto el script como el juego, igual script abajo y juego
+arriba, así puedo darle al botón de ejecutar y ver los cambios en tiempo real en el juego*» — y, a
+continuación: «*con algún agarre en el editor para poder cambiar el tamaño de la ventana*».
+
+**Lo que NO se ha hecho, y es la decisión del ticket: ni un iframe ni un segundo lienzo.** La tentación
+era montar el Mundo aparte, como hace la pantalla-mapa del OSD (`?osd=1`). Sería un error caro: `mc` es un
+**singleton** y un iframe es OTRO contexto WebGL vivo — por eso el OSD se obliga a destruir el suyo al
+cerrar ([REQ-OSD6](#-req-osd6)). Y además es innecesario: el gestor de snippets **ya está en la misma
+página** que el Mundo (`#snip-modal` e `#mc-modal` son hermanos de `index.html`) y los snippets corren con
+`AsyncFunction` **en el ámbito global**, o sea contra el `mc` que se está viendo. El editor no estaba lejos
+del juego: solo lo estaba **tapando** (`.modal{position:fixed; inset:0}` con fondo al 90 %).
+
+Así que dividir es puro reparto de altura, y todo el trabajo lo hace el CSS:
+
+```css
+body.snip-dividido #snip-modal{ top:auto; height:var(--snip-alto, 45vh) }
+body.snip-dividido #mc-modal  { bottom:var(--snip-alto, 45vh) }
+```
+
+Dos piezas del motor hacen que eso baste, sin tocar el renderizador:
+
+- `#mc-canvas` es `width/height:100%` y **`mcRender` llama a `mcResize` en cada frame**, que lee
+  `clientWidth`/`clientHeight` y reajusta el buffer y el `viewport`. Encoger la caja reencuadra el juego
+  solo, con su resolución interna correcta (medido: canvas 700 px → 385 px → 265 px, y `canvas.height` con él).
+- **Todo el HUD del Mundo es `position:absolute` DENTRO de `#mc-modal`** (mira, hotbar, OSD, cartel de
+  carga, mandos táctiles): baja con el modal sin una línea de CSS extra.
+
+**El agarre** (`#snip-grip`, primer hijo del modal, `display:none` salvo dividido): `pointerdown` +
+`pointermove` en `window` con captura, `snipAplicaAlto(h0 + (y0 - clientY))` — hacia arriba, más código.
+Topes: 150 px de editor como mínimo y 140 px de Mundo siempre. Doble clic lo devuelve a la mitad.
+El alto y el modo se guardan en `localStorage` (`vf_snipAlto`, `vf_snipDiv`).
+
+**Dividido, el que manda es el código** (segunda pasada, mismo día, foto del dueño: cabecera y barra de
+botones marcadas en rojo, chuleta de materiales del pie en amarillo). De una pieza sobra sitio y el editor
+puede respirar; en una franja de 300 px cada píxel de adorno se le quita a las líneas que se ven. Todo lo
+que no es código se encoge (paddings, tipos, botones, `.snip-list-pane` 230 → 172 px) y desaparece lo que
+uno ya sabe de memoria: el subtítulo de la cabecera (`#snip-sub`) y el pie con la lista de materiales
+(`.snip-foot`) — los dos son texto **fijo** del HTML, nadie les escribe desde JS, así que esconderlos no
+pierde ningún aviso. La lista estrecha no es solo sitio a lo ancho: cuantas más columnas caben, menos
+líneas se parten solas. **Nada de esto toca al modo de pantalla completa**, todo cuelga de
+`body.snip-dividido`. Medido a 315 px de franja (`/tmp/split_compacto.js`, comparando contra el layout
+viejo borrando las reglas en caliente): adorno **153 → 80 px**, código **162 → 235 px** (+45 %), de **8
+líneas × 146 columnas** a **11 × 154**.
+
+**La clase la manda el ESTADO, no el botón** (`snipPintaDividido`): dividido solo tiene sentido con el
+editor abierto **y** el Mundo abierto, así que `closeSnips` y `closeWorld` la repintan. Sin eso, cerrar el
+editor dejaría `#mc-modal` encogido debajo de nada.
+
+**Teclado.** Los atajos del Mundo se cortaban con `!$('#snip-modal').hidden`, o sea *por estar abierto*.
+Dividido eso sobra: el Mundo se ve y se juega. El corte pasa a `snipTapaElMundo()` (abierto **y** no
+dividido) y quien decide es **el foco** — los atajos ya excluyen `input,select,textarea`, así que la `w`
+escribe si estás en el código y anda si has hecho clic en el juego. `Esc` sigue soltando el ratón primero
+y cerrando el editor después; `Ctrl`+`Enter` ejecuta sin levantar las manos del teclado.
+
+Puertas: botón **«⬍ Dividir»** en la cabecera del gestor y **`Alt+D`** (con el editor cerrado lo abre ya
+dividido, en un solo gesto). Comprobado con `/tmp/split_editor.js`: el canvas encoge y su `viewport` GL con
+él, el bucle del Mundo sigue corriendo debajo (`mc.last` avanza 1,9 s en 1,5 s de espera), el arrastre de
+120 px se traslada exacto, ▶ Ejecutar llega al `mc` de arriba y cerrar el editor devuelve la pantalla entera.
+
+<a id="-req-tool8"></a>
+
+### REQ-TOOL8 — herramientas nuevas definidas desde un snippet ✅ resuelto 2026-08-18
+
+Dueño: «*necesito a nivel de snippet poder definir una herramienta nueva que no exista y seleccionarla para
+ponerla en la mano del jugador, tambien que se la pueda definir la animacion y la accion que ocurre cuando se
+hace clic izquierdo o derecho. asi por ejemplo puedo hacer desde un snippet elegir un bloque que tiene por
+ejemplo una espada, definir su movimiento, y hacer que "pase algo en javascript" cuando hago clic*».
+
+Antes, las herramientas eran **cinco y estaban en el código**: `MC_HERRAMIENTAS` + una rama por herramienta en
+`mcDoAction`. El comentario de `MC_HERRAMIENTAS` lo decía ya sin rodeos: «*añadir una entrada aquí sin
+implementarla en `mcDoAction` no crea una herramienta*». Ahora sí se puede crear una desde fuera, y **el motor
+sigue sin saber qué es una espada**: lleva un dibujo en la mano, le anima el gesto y avisa de que hubo un clic.
+
+**La API** (`game.herramientas`): `define(id, ficha)`, `quita(id)`, `activa(id)`, `golpea(cfg?)`, `lista()`,
+`info(id?)`. La ficha:
+
+| campo | qué es |
+|---|---|
+| `dibujo` | **lo único obligatorio**: la clave del catálogo que se lleva en la mano (`hab:espada-de-diamante`, `asset:assets/x.vox.json`) |
+| `nombre`, `ayuda`, `mira` | rótulo de la ranura 10, aviso al activarla y punto de mira |
+| `pos`, `rot`, `escala`, `alcance` | postura en la mano y alcance del rayo; lo que falte cae en los mandos globales de siempre |
+| `gesto` | tabla de mandos del golpe. **Parte del hachazo del pico** y encima va lo que pida la ficha, así que `{dur:0.18}` ya trae las 9 fases bien puestas. `false` = no se mueve |
+| `gestoBotones` | con qué botones se anima (por defecto `[0]`) |
+| `izquierdo(c)` / `derecho(c)` | lo que pasa al hacer clic |
+| `anima(e)` | movimiento propio, cada frame |
+| `enRueda` | si aparece en la rosca (por defecto sí, **detrás** de las cinco del motor) |
+
+**Decisiones que importan:**
+
+- **Es PASIVA** (`mcToolPasiva`): el motor no rompe ni pone nada con ella. Si el snippet quiere tocar el
+  mundo, lo hace él desde su acción (`setVoxel`, `game.stamp`…) — que es justo la gracia. El reparto del clic
+  va **antes** de las cinco del código para que una espada no acabe construyendo por descarte.
+- **El rayo se tira UNA vez** (`mcHerrCtx`) y se le da masticado: celda apuntada, su clave, la celda de
+  delante, punto exacto, normal, distancia, postura del jugador y ranura. Si cada acción de cada snippet se
+  montara su `mcRaycast`, serían tres rayos por clic apuntando a sitios distintos.
+- **Los cinco ids del motor son intocables**: `define('build', …)` tira error. Redefinir el pico desde un
+  snippet sería apagarlo sin que nada lo diga y sin vuelta atrás al recargar.
+- **`anima(e)` que revienta se anula** (y se avisa por consola) en vez de tumbar el frame: se llama en cada
+  frame de `mcBuildToolTransform`, así que un `throw` ahí es el mundo entero parado.
+- **Se re-aplica en caliente**: `define` sobre una herramienta ya puesta suelta `mc._heldToolKey` y el dibujo
+  vuelve a cargarse. Tunear la escala o el gesto desde F12 sin cambiar de herramienta y volver es media gracia.
+- **No se persiste** `mc.tool`: ya no se guardaba desde antes (`vf_mcTool` se limpia al arrancar), así que
+  recargar antes de que corra el snippet no deja a nadie con una herramienta que no existe. Y si llega un id
+  desconocido, `mcSetPlayerTool` cae en `build`.
+- El gesto congela su tabla en `mc._toolSwingCfg` **al disparar**, igual que `_toolSwingSel` congelaba la
+  elección: cambiar de herramienta a media animación no la deforma.
+
+**Demo**: snippet `herramienta-espada` (publicado por `POST /api/snippets`) — dibujo `hab:espada-de-diamante`,
+gesto rápido y plano, vaivén de reposo que se apaga durante el tajo, clic izquierdo que dice qué has golpeado
+y a qué bichos alcanzas, clic derecho que da una estocada hacia donde miras. Ese snippet documenta de paso un
+detalle del motor que se paga caro: **en el suelo, `mc.vel[0]/[2]` se reescriben en cada frame** desde las
+teclas de marcha (`app.js:11134`), así que un empujón horizontal a secas se borra antes de verse — hay que
+despegar (`mc.onGround=false` + algo de `vel[1]`), y entonces la inercia del aire lo conserva. Medido: 1,35
+bloques de avance en 1,2 s, y el mundo con exactamente los mismos voxeles que antes.
+
+<a id="-bug-ag19"></a>
+
+### BUG-AG19 — la herramienta no veía a los agentes articulados ✅ resuelto 2026-08-18
+
+Dueño (captura #54): «*cuando le doy con la espada a un agente articulado me dice que solo doy espadazos al
+aire, ver captura #54, debería detectar los agentes articulados incluso la posición donde el agente (en este
+caso sale escalado) recibe el tajazo; lo mismo es un tajazo o he creado una tool para ponerle margaritas en
+esa posición, la acción no es tan importante sino saber dónde recibe la acción de la herramienta*».
+
+**Chocar y apuntar son DOS caminos distintos, y el snippet solo estaba en uno.** Ésa es toda la causa, y no
+se ve leyendo el código: hay que medirla. `mundo-autoarranque` envuelve tres sondas —`mcStructColl`,
+`mcFineBoxHit` y `mcStructAt`— para que una pieza de agente choque y se rompa **donde se la ve** y no donde
+está su ancla (BUG-AG4). Pero el rayo de la mira no pasa por ninguna de las tres:
+
+```
+mcRaycast(alcance, true) → mcStructRayHit → mcAimSolidAt → mcAimBoxHit
+```
+
+y `mcAimBoxHit` (`app.js:13447`) empieza por `const g = mcStructColl(s); if(!g) continue;` — que para una
+pieza de rig devuelve **null a propósito**, porque su ancla está vacía y quien la dibuja es la matriz del rig.
+Resultado: el rayo de apuntar **atravesaba entero** a todos los agentes articulados.
+
+Medido con `/tmp/apuntar_agente.js` (zombi de verdad en `/map/test`, apuntando al centro del aabb del torso):
+
+| | antes | después |
+|---|---|---|
+| celda del rayo | `[49,16,43]` (el terreno de detrás) | `[49,16,45]` (el torso) |
+| distancia | 4,67 | 3,11 · `fina:true` |
+| `mcFineBoxHit` en el pecho (chocar) | ✅ | ✅ |
+| `mcAimSolidAt` en el pecho (apuntar) | ❌ | ✅ |
+| envolturas puestas | `{fine:true, at:true, aim:false}` | `{…, aim:true}` |
+
+⚠️ **`s.model[12..14] NO es la posición** de la pieza, es el resto fraccionario del plantado; dónde se la ve
+lo dice su `aabb`. Apuntar al `model` fue el primer callejón sin salida de este ticket.
+
+**El arreglo, en la librería y no en `app.js`** (§ Agentes, orden 1) — `herramientas/parche_snp_apuntar_agente.py`:
+cuarta envoltura `envAim` sobre `mcAimBoxHit`, reutilizando el `golpe()` que **ya sabía** pasar la caja de
+consulta por la inversa de la matriz de la pieza. `golpe` gana un parámetro `mirar` que cambia exactamente
+tres cosas: lee `g.bitsAim || g.bits` en vez de `g.bits`, **no** se salta las piezas `atravesable` (a la hierba
+se le apunta aunque se la cruce — lo mismo que hace `sinChoque` con las quietas) y salta `s._isHeldTool`, que
+es lo que impide que la espada se apunte a sí misma. El bitset se elige **una vez por pieza, fuera del bucle
+caliente**, para que el camino de la física quede igual de rápido; y se conserva la salida rápida
+`if(!nDesplazados && !nPosadas) return false`, así que sin agentes vivos las tres líneas nuevas no se pisan.
+
+**Y la segunda mitad, que es la que el dueño pedía de verdad: DÓNDE.** El `c` que recibe `izquierdo(c)` habla
+de **celdas y materiales**, y una pieza de agente no es ninguna de las dos cosas (estructura efímera, sin
+voxel en `mc.grid`): con el rayo ya arreglado, `c.clave` seguía siendo `null` y la espada seguía diciendo «al
+aire». Así que `game.esqueletos` gana dos métodos (`herramientas/parche_snp_impacto_agente.py`):
+
+```js
+game.esqueletos.enLaMira()        // lo que hay en el punto de mira AHORA
+game.esqueletos.enPunto(x,y,z)    // lo mismo para un punto cualquiera (p.ej. c.punto)
+// → { id, nombre, agente, agenteId, pieza, texto, punto, dist, local, dim, alto, rig, s, parte }
+```
+
+`local` es el voxel **dentro del dibujo de la pieza** (índices del editor, no del mundo), `dim` su tamaño y
+`alto` esa misma altura ya normalizada a 0..1. Ahí es donde iría el efecto, sea un tajo o una margarita. El
+cálculo es la misma vuelta por la inversa que ya hacía `envAt`; ⚠️ hay que pedirle el bitset a
+**`mcStructColl._orig`**, porque la envuelta devuelve `null` para las piezas que no son la raíz. `texto` sale
+de `senas()`, el mismo que usan el atasco y el golpe, para que el mundo entero nombre al bicho igual.
+
+`piezaDeAgenteEnLaMira()` (la que usa el golpe de `mcBreak`) se queda intacta: ahora es una línea sobre
+`impactoEnLaMira()`, que es el mismo rayo devolviendo además el punto y la distancia.
+
+**Verificado de extremo a extremo** con `/tmp/espada_agente.js` — espada en la mano, zombi delante, el clic
+izquierdo de verdad (`mcDoAction(0,false)`), cazando los `toast`:
+
+```
+tajo a cabeza      🗡️ Tajo #1 a «cabeza» de zombie (#1) · en lo alto (voxel 0,12,10 de 15×15×15)
+tajo a torso       🗡️ Tajo #2 a «torso» de zombie (#1) · en lo alto (voxel 4,11,7 de 12×14×8)
+tajo a pierna izq  🗡️ Tajo #3 a «pierna izq» de zombie (#1) · a media altura (voxel 0,7,4 de 5×12×5)
+tajo al cielo      🗡️ Tajo #4 al aire
+```
+
+El voxel local **cambia con el sitio al que apuntas**, que es la prueba de que no se está devolviendo un
+centro fijo. Suite `node correr_tests.js --node`: 20 ok / 1 fallo, el mismo `test_observador_redstone.js` de
+antes de tocar nada. `app.js` sin una línea de cambio ⇒ `SYMBOLS.md` intacto.
+
+**Un matiz que se vio midiendo y conviene saber**: `enLaMira()` marcha el rayo del **golpe** (el de `mcBreak`),
+que atraviesa lo que no tiene colisión; `mcRaycast` (el de apuntar) se para en ello. Con un cartel entre tú y
+el bicho, `enLaMira()` dice «el zombi» y `c.celda` dice «el cartel». No es un fallo —es la regla del puñetazo,
+que ya era así— pero una herramienta que quiera ser estricta tiene `enPunto(c.punto)`.
+
+<a id="-req-sangre1"></a>
+
+### REQ-SANGRE1 — que salte sangre del punto del tajo ✅ resuelto 2026-08-18
+
+> *«ya se ve donde es el golpe. Ahora lo que quiero es que detectes las coordenadas exactas en el mapa para
+> que donde se ha dado el golpe, uses la funcion de pintar voxels de 1x1x1 de color rojo y hagas un efecto de
+> como si le saltase sangre al agente cuando le golpean con la espada. Que caigan los voxels/sangre al suelo y
+> se quede por ahi tirados al menos 30 segundos»*
+
+La mitad del trabajo la traía hecha [BUG-AG19](#-bug-ag19): `game.esqueletos.enLaMira().punto` **es** la
+coordenada exacta del mundo donde ha entrado la espada. Lo nuevo es `game.sangre`, un motor de partículas
+entero **dentro del snippet `herramienta-espada`** (`herramientas/parche_snp_sangre.py`) — cero líneas de
+`app.js`, que es la regla. La espada solo añade una línea donde ya sabía que había acertado:
+
+```js
+game.sangre.salpica(h.punto);   // la sangre sale DE la herida, no del centro del bicho
+```
+
+Se pinta en **`game.voxelesUI`** con `tam:1`, o sea cubos de `MC_VOX` = **1/16 de bloque**, que es el voxel
+1×1×1 del editor que pedía el dueño. Grupo propio `'sangre'`, así que `limpia('sangre')` no toca lo que haya
+plantado nadie más. Al no ser mundo: no colisiona, no se guarda, no sale en la foto del mapa.
+
+Mandos (todos en caliente, `game.sangre.<lo que sea> = …`):
+
+| mando | por defecto | qué es |
+|---|---|---|
+| `activa` | `true` | apagar el efecto sin desenganchar nada |
+| `chorro` | `22` | gotas por tajo |
+| `dura` | `30` | segundos **de reloj** tirada en el suelo (lo que pedía el dueño) |
+| `desvanece` | `4` | los últimos segundos de `dura`, apagándose |
+| `grav` · `fuerza` · `rebote` | `24` · `5.5` · `0.22` | la física de la gota |
+| `vuelo` | `8` | tope de segundos en el aire (la que cae al vacío no se queda ahí) |
+| `tope` | `500` | gotas vivas como mucho, para no ahogar el remallado |
+
+Y `salpica(punto)`, `limpia()`, `info()`.
+
+**Tres cosas se aprendieron midiendo, y las tres estaban a punto de pasar por buenas:**
+
+1. **La sangre se posaba EN EL BICHO, en el aire.** `solido()` preguntaba por `mcFineBoxHit`… que es una de las
+   sondas que `mundo-autoarranque` **envuelve** para meter los agentes articulados (eso es BUG-AG19). Medido:
+   9 de 22 gotas «posadas» a los 0,1 s, a y≈16,4, sin haber caído. ⚠️ Hay que preguntarle a
+   **`mcFineBoxHit._orig`**: la sangre quiere el suelo, no al zombi.
+2. **Gotas volando para siempre en un rincón diagonal**, donde ni la rama del suelo ni la de la pared las
+   posaba nunca. Salida de emergencia: `g.atasco > 12` ⇒ `posa()`.
+3. **El vuelo se cuenta en tiempo SIMULADO, no de reloj.** Con `dt` acotado a `0,05`, en una máquina a pocos
+   fps un segundo de reloj es una fracción de segundo de caída, y midiendo `vuelo` por reloj se mataban gotas
+   **que aún estaban en el aire** (medido en swiftshader: 16 de 22 desaparecidas entre +2 s y +5 s). El
+   descanso en el suelo, en cambio, **sí** es de reloj: 30 segundos son 30 segundos.
+4. **La sangre se posaba sobre la CAJA invisible de las piezas finas** (foto #56 del dueño: una antorcha con
+   la sangre flotando por encima, «como si las rodease una caja invisible»). `solido()` preguntaba a
+   `mcSolid`, que contesta **por celda entera** —«¿hay materia aquí?»— y para una antorcha eso es `true` en
+   el cubo completo. La forma de verdad está en **`mc._geoFina`** (bits en 1/16 por id de material), que es
+   justo lo que mira `mcTerrenoChoca` para chocar al jugador ⇒ ahora la sangre cae por donde el jugador se
+   cuela. Medido sobre la celda de la antorcha, subcelda a subcelda: el predicado viejo daba por macizas
+   **4096 de 4096**; el nuevo, **48** — que es exactamente el palo (2×12×2). Y en el escenario del zombi el
+   reposo pasó de `y 15,00 → 16,01` a `y 15,00 → 15,02`: había gotas colgadas **un bloque entero** por
+   encima del suelo, no solo en la antorcha.
+
+**Verificado en el navegador** con `/tmp/sangre.js` (zombi de verdad en `/map/test`, espada en la mano, clic
+izquierdo de verdad por `mcDoAction(0,false)`, POST cortados):
+
+```
+tajo      vivas 22 · volando 22 · posadas  0        ← salen las 22 de la herida
++0,1 s    volando 22 · posadas  0 · y 16.40 → 16.53 ← en el aire, abriéndose
++2 s      volando 22 · posadas  0 · y 16.33 → 16.88
++12 s     volando  0 · posadas 22 · y 15.00 → 16.01 ← las 22 en el suelo, ninguna perdida
++20 s     volando  0 · posadas 22 · y 15.00 → 16.01 ← ahí siguen
+— cuenta atrás real, sin acortar `dura` —
++20 s     posadas 22 · posadas desde hace 16.3 … 22.3 s · brillo mín 1
++30 s     posadas  9 · posadas desde hace 26.8 … 30.1 s · brillo mín 0.15   ← caducan a los 30,1 s
++38 s     no queda ninguna
+```
+
+O sea: **los 30 s son de reloj y se cuentan desde que la gota se posa**, no desde el tajo (una que rueda 3 s
+está tirada 33 s en total). Los últimos 4 se va apagando en vez de desaparecer de golpe.
+
+Detalles de implementación que no se ven en los mandos: un solo `requestAnimationFrame` para todas las gotas,
+que **se apaga solo** cuando no queda ninguna (`S.on = false`) en vez de girar en vacío; subpasos por gota
+(`h = dt/n`, `n` según su velocidad) para que a `fuerza: 5.5` no atraviese el suelo; y `pinta()` repinta el
+grupo entero cada frame porque `mcVoxUIGeom()` remalla **toda** la capa en cuanto está sucia — pintar gota a
+gota no ahorraría nada. Reejecutar el snippet cancela el bucle anterior (`window.__sangre`), así se puede
+retunear desde el editor sin dejar dos simulaciones vivas.
+
+<a id="-req-snp-lib1"></a>
+
+### REQ-SNP-LIB1 — sacar de `herramienta-espada` lo que no era de la espada ✅ resuelto 2026-08-19
+
+> *«el snippet 'herramienta-espada' se ha vuelto muy grande, posiblemente tenga codigo reutilizable, me
+> gustaria saber que se puede externalizar por ejemplo en otro snippet que se llame con `game.snippet(...)`
+> para hacerlo mas ligero y entendible»*
+
+Al mirarlo, lo reutilizable **no era «la sangre»**. Eran **dos capas distintas** que habían acabado pegadas:
+
+1. **Preguntarle al mundo por FORMA, no por celda.** Lo que arregló la caja invisible de la antorcha
+   ([REQ-SANGRE1](#-req-sangre1)) no tiene nada que ver con la sangre: es «¿hay materia en este punto de
+   1/16?», y lo necesita cualquiera que tire algo, camine algo o dispare algo.
+2. **Simular partículas.** Gravedad, subpasos, rebote, rozamiento, posarse, caducar, pintar en la capa.
+   De la espada solo era **el color rojo y de dónde salen**.
+
+Así que salieron **dos** ficheros, no uno (el dueño eligió esta opción frente a meterlo en
+`base-npc-skills.json`: son librerías de mundo, no habilidades de NPC):
+
+| snippet | líneas | qué es |
+|---|---|---|
+| `sondas-mundo` | 97 | `solido/solidoRejilla/solidoEstructura/suelo/geoFina` por **forma fina** |
+| `particulas-voxel` | 243 | el motor: `crea(cfg)` → `salpica/enciende/para/limpia/info` |
+| `efectos-demo` | 142 | [REQ-SNP-LIB2](#-req-snp-lib2), siete efectos de ejemplo |
+
+**`herramienta-espada`: 271 → 125 líneas (−146, −54 %)**, y lo que queda es de la espada de verdad (el tajo,
+el punto de impacto, el color de la sangre). Cero líneas de `app.js`.
+
+Lo que costó ver, y por qué merece quedar escrito:
+
+- **La tercera copia del predicado.** `solido()` estaba **ya escrito tres veces** en el repo, cada una un
+  poco distinta: `mundo-autoarranque.json:1703`, `redstone-piezas.json:738` y la de la espada. La de la
+  espada era la única arreglada tras foto #56. Ese es exactamente el bug que se evita sacándolo fuera:
+  arreglar la forma fina **una vez** y que valga para las tres.
+- **Las estructuras se preguntan con `mcFineBoxHit._orig`, no con `mcFineBoxHit`.** `mundo-autoarranque` la
+  **envuelve** para meter a los agentes articulados (eso es [BUG-AG19](#-bug-ag19)); si la sonda usa la
+  envuelta, lo que tires se posa **encima del bicho** y se queda flotando cuando el bicho se va. Queda
+  avisado en la cabecera del snippet: para preguntar por agentes está `game.esqueletos.enPunto()`, que es
+  otra pregunta.
+- **La rejilla se pregunta con `mcSolidWalk`, ⛔ nunca parcheando `mcSolid`** (lo comparten mallado + rayo +
+  romper/poner).
+- `game.snippet(id)` **no tiene guardia de ciclos**: A→B→A cuelga la pestaña. Las tres librerías son hojas.
+
+<a id="-req-snp-lib2"></a>
+
+### REQ-SNP-LIB2 — `efectos-demo`: siete efectos, ni una línea de física ✅ resuelto 2026-08-19
+
+> *«haz cuando termines un snippet de demostracion para lo que decias de los efectos gratis "chispas, el
+> polvo al romper, las hojas, el humo"»* … *«me gustaria por ejemplo cosas practicas como: cielo con
+> estrellas autoiluminadas para ambientes nocturnos / nieve para entornos invernales / lluvia para entornos
+> de tormenta»*
+
+Snippet `efectos-demo`, una tecla cada uno: **Y** chispas · **M** polvo · **T** hojas · **H** humo ·
+**C** estrellas · **V** nieve · **L** lluvia. Cada efecto son **~8 líneas de configuración**.
+
+Los cuatro primeros salieron literalmente gratis: cambian color, cuántas, cuánto duran y hacia dónde. Los
+tres «prácticos» pidieron **una capacidad nueva** en el motor y es la que importa:
+
+- **Siembra continua sobre una caja que VIAJA CON EL JUGADOR** (`porSegundo`, `radio`, `alto`, `fondo`).
+  Esto es la diferencia entre practicable e inviable: **no se siembra el mapa**, se siembra un cubo de
+  `radio` bloques alrededor del jugador y lo que se sale por detrás se recoge. Andar bajo la nieve no deja
+  un rastro de copos vivos a la espalda.
+- **Nieve cuaja, lluvia no**, y es un solo mando: `posarse`. La nieve se queda posada 25 s; la gota de
+  lluvia revienta al tocar.
+- **Las estrellas ni siquiera son partículas.** `game.voxelesUI` se dibuja en el overlay con el shader
+  plano, **SIN luz ni sombreado del sol** (`app.js:13199`) ⇒ un voxel blanco se ve blanco a medianoche:
+  **autoiluminadas por construcción**, sin pedirle nada al motor de luz. 420 voxeles plantados una vez
+  sobre una media esfera (media esfera, no disco, o se amontonan sobre tu cabeza) y ahí se quedan.
+  Por eso **no titilan por defecto**: titilar es repintar, y repintar es remallar la capa entera.
+
+**Cómo se midió, que es lo que costó.** El navegador de pruebas (swiftshader) va a **1,4 fps**, y con `dt`
+acotado eso hace que 9 s de reloj sean **0,6 s simulados**: mirando el rAF la nieve salía con `posadas: 0`
+y parecía rota. **Era artefacto de medida, no bug.** Se midió llamando al motor a mano con `dt` fijo de
+1/30 (`_siembra`/`_paso`), así «20 s» son 20 s de verdad:
+
+```
+— NIEVE (tiene que cuajar) —          — LLUVIA (no tiene que cuajar) —
+  3 s   vivas 165 · posadas   0         3 s   vivas 59 · posadas 0 · y 15,12 → 25,81
+ 10 s   vivas 420 · posadas 420        20 s   vivas 58 · posadas 0 · y 15,17 → 25,19
+ 20 s   vivas 420 · posadas 420  ✅            ✅ ni una gota, y el tope aguanta (58 ≤ 500)
+
+— los cuatro de golpe (suelo en y=15) —
+  polvo   2 s · 26 posadas · y media 16,52 → 15,02     ✅ cae y se queda
+  hojas   6 s · 14 posadas · y media 16,50 → 15,00     ✅ planea (grav 1,6) y se posa
+  humo  1,2 s ·  0 posadas · y media 16,55 → 18,73     ✅ SUBE (grav −1,8)
+  chispas 0,5 s · no queda ninguna                     ✅ se apagan al tocar (posarse:false)
+```
+
+**El coste real por frame** es remallar la capa `game.voxelesUI` entera, que es lo único que se paga
+(medido, 20 remallados por punto):
+
+| voxeles en la capa | ms por remallado |
+|---|---|
+| 0 | 0,06 |
+| 100 | 0,48 |
+| 250 | 1,16 |
+| 500 | 2,88 |
+| 1000 | 6,29 |
+
+O sea **~6 µs por voxel**, y se paga **una vez por frame** mientras algo se mueva (no por partícula). La
+nieve a tope (420 copos) son ~2,4 ms/frame; la lluvia a 150/s se queda en ~58 gotas vivas (`dura: 0.1`) y
+no llega a 0,5 ms. Los números de fps del navegador de pruebas **no valen** para esto: daban 1,4 fps con
+todo encendido y 1,4 fps con todo apagado.
+
+<a id="-req-voxui1"></a>
+
+### REQ-VOXUI1 — grosor por grupo en `game.voxelesUI` ✅ resuelto 2026-08-19
+
+> *«he creado unas estrellas con grosor 16, quiero hacerlo así, y los fps han caido drasticamente; hay que
+> hacer que no caiga ni un solo fps»*
+
+El `grosor` que traía [REQ-SNP-LIB2](#-req-snp-lib2) **apilaba** voxeles (un cubo de `n³` por estrella)
+porque la capa solo tenía un tamaño de cubo, `mc.voxUITam`, **global y además escalando la posición**.
+A grosor 16 eso son **4096 voxeles por estrella, 983 040 en total**. Y como `mcDrawArr` reconstruye el
+`Float32Array` y **sube la capa entera a la GPU cada frame**, no hay optimización que salve eso.
+
+Arreglo: **el grosor es del GRUPO y agranda solo el cubo**, no el paso.
+
+```js
+game.voxelesUI.grosor('estrellas', 16);   // cada voxel del grupo pasa a ser un bloque entero
+game.voxelesUI.grosor('estrellas');       // lee
+```
+
+| 240 estrellas, grosor 16 | voxeles | vértices | remallado |
+|---|---|---|---|
+| antes (apilando) | 983 040 | 5,5 M | **~1 640 ms/frame** |
+| ahora | **240** | 8 640 | **2,1 ms** |
+
+Y **de grosor 1 a 16 cuesta lo mismo**: medido a 240 estrellas, 8 640 vértices en los cuatro casos y
+−0,07 fps entre el más fino y el más gordo (ruido). Lo que sigue costando 0,46 fps es tener 240 voxeles
+quietos en una capa que la nieve ensucia cada frame — es el coste de compartir capa, no del grosor, y ya
+existía.
+
+Detalles que costaron pensar:
+
+- **El culling ahora es por grosor.** Las caras pegadas solo se comen entre voxeles del **mismo** tamaño:
+  un cubo gordo no tapa la cara del fino de al lado. Con todo a grosor 1 —lo único que existía— el
+  conjunto de ocupación es **exactamente el único de antes**, así que no cambia un vértice. Comprobado con
+  un cubo macizo 4×4×4: sigue emitiendo 576 vértices (su piel) y no 2304.
+- **`grosor` sobrevive a `limpia()`**: es ajuste del grupo, no de su contenido. Se pone una vez.
+- ⛔ Ojo con confundirlo con **`game.voxelesUI.tam`**, que sigue siendo global y **sí mueve** las cosas
+  (escala paso y cubo a la vez).
+
+<a id="-bug-voxui1"></a>
+
+### BUG-VOXUI1 — `game.voxelesUI` se pintaba encima de lo translúcido ✅ resuelto 2026-08-19
+
+> *«he bajado la altura de las estrellas y se estan pintando por delante de los objetos de la escena, no
+> estan respetando la profundidad»*
+
+La capa se dibujaba **al final, dentro de `mcDrawOverlays`**, junto a los fantasmas y las guías de las
+herramientas. Con el test de profundidad puesto, sí — pero el test se hace contra lo que hay **escrito** en
+el buffer, y la **pasada 3 (translúcido, voxeles `#rrggbbaa`) va con `depthMask(false)` a propósito**
+(sin ordenar, order-independent). Todo lo que se pinta ahí —el agua, el cristal, **la herramienta en la
+mano** (`_isHeldTool`), los carteles— **no deja profundidad**, así que un voxel de la capa que estuviera
+detrás pasaba el test contra lo que hubiera *más atrás* y se pintaba **encima**.
+
+Con las estrellas en el cielo no se veía nunca: no había nada delante de ellas. Se destapó al bajarlas a
+la altura de la escena.
+
+Arreglo: la capa es un **cuerpo sólido del mundo**, no adorno de interfaz ⇒ se dibuja **con el mundo**, en
+`mcDrawVoxUI(pj, view)`, después del terreno opaco y **antes** de las estructuras, del cielo y del
+translúcido. Mismos uniformes que traía del overlay (sin niebla, `aEmit=1` ⇒ **sigue sin luz**: una
+estrella blanca sigue siendo blanca a medianoche) y mismo enrollado (`frontFace(CW)`).
+
+Medido con una cortina de cubos a 8 bloques que tapa toda la vista, mismo fotograma y misma cámara:
+
+| | píxeles del cubo sin tapar |
+|---|---|
+| antes (en el overlay) | 103 662 — se comía el cartel y el pico de la mano |
+| ahora (con el mundo) | **60 624** — el cartel y el pico quedan delante |
+
+Detalles:
+
+- **`game.voxelesUI.encima = true`** recupera el comportamiento de antes (marcadores que se quieren ver a
+  través de las paredes). Es solo **dónde** se dibuja: ni geometría ni coste cambian.
+- La llamada va **fuera** del `if(mc.structures.length || finoOp || finoAl)`: ese bloque —y con él el
+  cielo— se salta entero en un mundo sin estructuras, y las partículas tienen que salir igual.
+- La pasada va **en medio del frame**, así que guarda y repone `CULL_FACE`, `FRONT_FACE`,
+  `POLYGON_OFFSET_FILL` y `BLEND`. Pisarlos es el mismo estropicio que BUG-FLUID6 (el `CULL_FACE` que
+  `mcRenderSky` no repone, comentado en `app.js` junto a la llamada), por el otro lado.
+
+<a id="-req-snp6"></a>
+
+### REQ-SNP6 — el editor de snippets: buscar dentro del código y ver **quién usa** el abierto ✅ resuelto 2026-08-19
+
+> *«necesito dos cosas nuevas para el editor de snippets: 1) poder buscar snippets que contengan un texto
+> concreto 2) saber si el snippet que tengo abierto tiene referencias hacia él desde otros snippets (es
+> decir, qué snippets hacen uso del snippet actual)»* (el dueño)
+
+El panel Código **no tenía buscador de ninguna clase** (la lista era todo lo que había, ordenada por fecha).
+
+**Se busca en el SERVIDOR** (`GET /api/snippets?q=` y `?usa=`), no en el cliente: el listado no lleva el
+código y bajárselo entero en cada tecla son **~1,5 MB** (solo `mundo-autoarranque` son 300 KB). Un recorrido
+de ficheros contesta las dos preguntas; el detalle del formato está en
+[`docs/servidor-y-apis.md`](docs/servidor-y-apis.md).
+
+**La distinción que hace útil el panel «Usos»: LLAMADA vs MENCIÓN.** `game.snippet('x')` ejecuta; el id
+suelto entre comillas (una tabla de nombres, un comentario) no. Renombrar rompe las dos, pero **solo la
+primera se ve fallar**. Dos detalles que costaron una vuelta:
+- **El nombre de la función no se ancla por delante.** Con `game.snippet` exacto,
+  `await ejecutarSnippet('redstone-piezas')` —el ayudante de `redstone-arranque`— salía como simple
+  mención, que es justo el caso que importa. Ahora casa `…snippet(` con `re.I`.
+- **No se busca el id a pelo**: `redstone` aparece en media docena de palabras que no son referencias.
+
+**Lo que el servidor no puede saber lo pone el cliente** (`snipUsosDelMotor`): los snippets que llama el
+motor **por convención** (`mundo-<mapa>`, `arranque-<mapa>`, `mundo-autoarranque`, `editor-autoarranque`,
+`arranque-intro`) no están escritos en el código de nadie ⇒ «nadie llama a `mundo-badlands`» a secas sería
+mentira. El botón dice `🔗 Usos (motor)` y la cabecera explica *cuándo* lo ejecuta.
+
+**En pantalla**: caja de búsqueda sobre la lista (a partir de 2 letras, 250 ms tras dejar de teclear, `Esc`
+quita el filtro); cada ficha enseña **la línea encontrada** tal cual, monoespaciada y recortada a una (con
+`textContent`, que ahí dentro va código de cualquiera); una cabecera dice en qué modo está la lista, con ✕
+para volver a todos. El **contador de usos se pide solo al abrir** el snippet (`🔗 Usos (3)`, con la lista
+en el `title`): es la pregunta que uno se hace **antes** de cambiarle el id o borrarlo, y si hay que clicar
+para verla, nadie la hace. `snips` (la lista completa) **no se pisa** con los resultados — la consulta el
+guardado para avisar de un id repetido.
+
+Verificado en navegador (:8502) y con guardián nuevo `tests/test_snippets_buscador.js` (**20 ok / 0 fallos**,
+crea sus propios `zz-test-…` y los retira pase lo que pase). Caso real: abrir `miosd` → `🔗 Usos (3)` →
+`mundo-fornite-c2-island`, `arranque-empty`, `mundo-sphere`, cada uno con su línea.
+
+**Archivos**: `server.py` (`buscar_snips`, `GET /api/snippets` con query), `web/app.js` (`renderSnipList`,
+`snipBusca`, `snipUsos`, `snipCuentaUsos`, `snipUsosDelMotor`, `snipVerTodos`, `snipModoCabecera`),
+`web/index.html` (`#snip-search`, `#snip-modo`, `#snip-usos`), `web/style.css`, `docs/servidor-y-apis.md`.
+
+<a id="-bug-snp5"></a>
+
+### BUG-SNP5 — el **id** de un snippet: invisible, incoherente con el mapa y no editable ✅ resuelto 2026-08-19
+
+> *«en el editor de codigo, si creo un mapa como http://…/map/fornite_c2_island que tiene "_" pasan dos cosas:
+> 1) genero un snippet llamado "Mundo fornite_c2_island", aunque su name usa "_" el id interno que se le pone es
+> "mundo-fornite-c2-island" que no coincide, por lo que es poco intuitivo. 2) modifico el nombre del snippet y lo
+> vuelvo a guardar, mantiene el id antiguo, con esto pasan dos cosas 2a) no lo veo salvo que inspeccione las
+> peticiones de red 2b) no puedo cambiarlo manualmente, y deberia poder hacerlo»* (el dueño)
+
+**No era solo incómodo: ese mapa entraba SIN su autoarranque y sin decirlo.** El servidor canoniza el nombre
+del mapa desde siempre (`world_file_for`: `/map/fornite_c2_island` → `data/worlds/fornite-c2-island.json`),
+pero `mcMapName()` devolvía el tramo de la URL **crudo** ⇒ `mcAutoarranqueMapa` pedía
+`mundo-fornite_c2_island`, un id que el POST del editor **no puede escribir** (slugifica el rótulo), así que
+el 404 era seguro. Y un 404 ahí es el caso normal (la mayoría de los mapas no tienen snippet propio), así que
+**por diseño no se avisa**: el único rastro era la línea «este mapa no tiene» del informe de carga. Medido
+antes del arreglo: `GET /api/snippets/mundo-fornite_c2_island` → **404**, `…/mundo-fornite-c2-island` → **200**.
+
+Tres piezas:
+1. **`mcMapName()` canoniza con el MISMO slug que el servidor** (`[^a-z0-9]+`→`-`). Es la raíz: cliente y
+   servidor pasan a llamar igual al mismo mapa, y de paso lo arregla para la intro (`arranque-<mapa>`), el
+   `?map=` de las APIs y la meta de los vídeos. La URL se deja como el dueño la escribió (no se redirige);
+   la primera vez que difiere, **una línea en consola** dice cómo se llama de verdad el mapa y sus snippets.
+2. **El id se ve**: campo propio junto al rótulo (`#snip-id`, monoespaciado y apagado) y, en cada ficha de la
+   lista, delante de las líneas y la fecha. Con snippet nuevo el campo va vacío y el **placeholder** enseña
+   el id que va a salir del rótulo mientras se teclea.
+3. **El id se puede escribir**, con guión bajo incluido (`[A-Za-z0-9_-]`, que es lo que acepta la ruta de
+   lectura; el slug del rótulo es quien se comía el `_`). Cambiarlo es **MOVER**, no renombrar: se pregunta
+   —quien llamara `game.snippet('<id viejo>')` deja de encontrarlo—, se avisa si el id destino ya existe, se
+   guarda **primero** el nuevo y solo si el servidor confirma el `DELETE` se retira el viejo (a la papelera):
+   así un fallo o un id protegido deja **dos copias, nunca cero**.
+
+**El POST acota el id** (`re.sub(r'[^A-Za-z0-9_-]+','-',…)`) — antes se usaba tal cual del cliente y acaba en
+un `os.path.join`: ahora que el id se teclea a mano, sin acotar un `../` escribiría fuera de `data/snippets/`.
+Comprobado: `{"id":"../../zz_pwn"}` → guarda `zz_pwn` **dentro** de `data/snippets/`.
+
+Verificado en navegador (:8502): en `/map/fornite_c2_island`, `game.mapName === 'fornite-c2-island'` y la
+página pide `mundo-fornite-c2-island` **y** `ambientes` (lo que ese snippet llama en su primera línea) ⇒ el
+autoarranque del mapa corre. En el editor: id visible al abrir un snippet, pista al teclear el nombre,
+guardado con `zz_prueba_snp` (con `_`), movido a otro id tras el confirm (queda **uno solo** en el servidor),
+y cancelar el confirm no mueve nada.
+
+**Archivos**: `web/app.js` (`mcMapName`, `renderSnipList`, `snipLoad`, `snipNew`, `snipSave`, `snipIdSano`,
+`snipSlugDe`, `snipPistaId`), `web/index.html` (`#snip-id`), `web/style.css` (`.snip-id`), `server.py`
+(`POST /api/snippets`), `docs/servidor-y-apis.md`.
+
+<a id="-bug-fluid7"></a>
+
+### BUG-FLUID7 — `setVoxel` de una pieza fina dentro del agua se llevaba el agua ✅ resuelto 2026-08-19
+
+> *«el script "Construye BadLands" genera zonas con agua y planta en ellas estructuras finas "hierba-alta",
+> cuando la profundidad del agua es 1 habia un bug que era que desaparecia el agua. Esto se corrigio en el
+> modo herramienta de construir, pero a nivel de script está visto que no funciona. Tal vez deberia haber un
+> wrapper para que setVoxel elija si ha de plantar la estructura fina o la solida, pero a nivel de app.js, de
+> forma que los scripts generados no tengan que crecer para distinguir cual de las dos han de usar»* (foto #59)
+
+**Una celda de `mc.grid` es UN id**, así que una pieza fina escrita donde hay agua no convive con ella: la
+sustituye, y en un charco de 1 de hondo eso es un **agujero en la superficie del lago** debajo de cada mata.
+La **mano** ya lo tenía resuelto —`mcPlace` y `mcPaint` llevan su `&& !mcCeldaFluida(...)` y caen al
+estampado, que sí convive con el voxel de agua—, pero el **scripting** entraba por `mcSetVoxel`, que escribía
+a pelo. De ahí que el mismo mundo saliera bien construido a mano y roto generado.
+
+El arreglo es el wrapper que pidió el dueño, y va **en el motor** para que ningún script tenga que saber si
+está mojado:
+
+```js
+// en mcSetVoxel, justo antes de mcSetBlock
+if(mcFinoEnRejilla(id) && !mcIsReplaceable(id,x,y,z) && mcCeldaFluida(x,y,z)){
+  const k=mc.blockKey[id];
+  game.stamp(mcClaveBase(k), x, y, z, mcClaveOri(k));
+  return true;
+}
+```
+
+Tres condiciones y ninguna sobra:
+
+- **`mcFinoEnRejilla(id)`** (nueva) — «¿este id se dibuja con sus voxels de verdad dentro de la malla del
+  chunk?». Es `mcEsFinaEnRejilla` pero **por id y síncrona**, que es lo que hace falta aquí: `mcSetVoxel`
+  solo tiene `id` cuando el material ya está en la paleta, y la paleta hornea esa respuesta con el propio
+  `mcRecFina` (`mc.finoRejilla`, con `mc.finoExtra` mandando encima). Sin ella habría que esperar a
+  `mcStructCells` y el primer voxel del script se escaparía por el camino viejo. `mcTablaFina` pasa a
+  llamarla también, para que la regla siga teniendo **una sola** fuente.
+- **`!mcIsReplaceable(...)`** — un fluido no se desvía nunca: poner agua sobre agua es el propio motor de
+  fluidos propagándose ([REQ-FLUID4](#-req-fluid4)), y el agua entra en `finoRejilla` por translúcida.
+- **`mcCeldaFluida(...)`** — fuera del agua **no cambia absolutamente nada**: un prado normal sigue siendo
+  rejilla, a 0 draw calls.
+
+Un **macizo** (roca, arena) escrito en el agua la sustituye, como siempre y como se espera.
+
+**El precio es el mismo que paga la mano**: cada pieza sumergida es una entrada de `mc.structures` = un draw
+call y una línea de `mundo.json`. Se paga solo dentro del agua.
+
+Medido en `/map/test` con un charco de 9×9 y 1 de hondo, sembrando 6 matas con `setVoxel`:
+
+| | celdas del charco sin agua |
+|---|---|
+| antes (escritura directa en la rejilla) | **6** — una por mata |
+| ahora | **0**, y 6 piezas estampadas en su sitio |
+
+<a id="-bug-rs26"></a>
+
+### BUG-RS26 — la caja invisible de los botones se comía el clic del vecino ✅ resuelto 2026-08-19
+
+> *«con los botones de redstone, cuando hay dos uno al lado del otro, aunque este apuntando a uno, el raycast
+> choca contra la caja de uno de ellos que es invisible aunque por detras o al lado haya otro al que realmente
+> se desea dar, ver foto #58. Habria que respectar la estructura fina, un clic en el aire de un boton no
+> deberia activar el boton y si hay algo detras de ese aire que es activable, deberia llegar la activacion a
+> esa zona»*
+
+**No era el rayo del motor.** `mcRaycast` ya sub-marcha en fino (`mcRejillaRayHit`, `mc._geoFina`). El clic de
+conmutar no pasa por ahí: es `miraFina`, del snippet `redstone-piezas`, y tenía escrita una excepción —
+
+```js
+// Manga ancha para las ENTRADAS: a una palanca, un botón o una placa les vale la celda entera.
+if (game.redstone.esManual(cx, cy, cz)) return [cx, cy, cz];
+```
+
+⇒ **cualquier pieza manual paraba el rayo en la frontera de su celda**, mirase donde mirase. Medido en el
+dibujo: `boton.json` ocupa `x 5..10, y 0..2, z 5..10` de 16³ = **88 subceldas de 4096, el 2 %**. El otro 98 %
+era una caja invisible que se tragaba el clic — y con dos botones pegados, el de delante se comía siempre el
+de detrás. Exactamente lo que se ve en la foto.
+
+Esa manga ancha **no era un capricho** y por eso no se podía borrar sin más: la varilla de la palanca es de
+1/16 y **se mueve al girarla** (se inclina al otro lado), así que apuntando al voxel exacto la enciendes y a
+la siguiente ya no le das: el rayo se cuela por el hueco que ella misma acaba de dejar.
+
+**Primer intento: degradarla a reserva** — apuntado fino, y la celda entera solo si el rayo no encontraba
+nada conmutable más allá. Resolvía la foto, pero el dueño lo devolvió: *«si por ejemplo tengo un boton y doy
+al aire de su caja, sin que el puntero apunte los voxels solidos de su estructura se activa tambien,
+solamente deberia activarse si se apunta algo solido de la estructura fina»*. **La reserva se quitó**; la
+regla es la simple:
+
+1. Todas las celdas se miden finas, también las manuales (con `bitsAim||bits`, como el resto del apuntado).
+2. Materia de verdad de una pieza manual → **ésa es la apuntada**.
+3. Materia que no se conmuta → el rayo **se para**, como debe.
+4. Hueco → **como si no hubiera nada**, aunque detrás no haya nada que conmutar.
+
+Antes de quitar la reserva se comprobó **pieza a pieza** que ninguna se queda inconmutable por el hueco que
+deja al cambiar de estado: `palanca`/`palanca-on` comparten **92 de 108** voxeles (la base, `z 0..3` entera)
+y `boton`/`boton-on` **72 de 88** ⇒ apuntando al cuerpo hay materia en los dos estados. La `placa` no
+comparte ninguno, pero solo **se hunde 1/16 dentro de su propia celda** (`z 1` → `z 0`) y el rayo que bajaba
+hacia ella le sigue dando (y su gesto de verdad es pisarla, no clicarla).
+
+Comprobado sobre la función extraída del fichero, con el bitset real del botón (16³, jugador a 4 bloques):
+
+| escenario | antes | reserva | ahora |
+|---|---|---|---|
+| apuntar al cuerpo del botón A / del B | A / B | A / B | A / B ✅ |
+| **aire de A, cuerpo de B detrás** (el caso de la foto) | **A** ❌ | B | **B** ✅ |
+| aire de A, nada fino detrás | A | A | **`null`** ✅ |
+| aire de A, **pared** detrás | A | A | **`null`** ✅ |
+| roca **delante** del botón | `null` | `null` | `null` ✅ |
+
+⚠️ **Hay que subir `VERSION`** (`piezas-1.5` → `1.6`) o el arreglo no llega: el envoltorio de `mcUseRight` se
+salta si `mcUseRight._redstone === VERSION`, y re-ejecutando el snippet con la misma versión se queda vivo el
+**closure viejo**, con la `miraFina` vieja dentro.
+
+<a id="-bug-paste1"></a>
+
+### BUG-PASTE1 — la vista previa del pegado dibujaba un cubo donde va una pieza fina ✅ resuelto 2026-08-18
+
+Dueño (foto #53): «*con la herramienta de seleccion, cuando se hace pegar control+v para pegar una estructura
+no se previsualiza la estructura bien; en la captura se ve a la izquierda como deberia ser y a la derecha como
+sale (mal)*». Y, al verme dar vueltas: «*te estas complicando demasiado, la herramienta de volumen cuando
+muestra el preview muestra bien la pieza que va a colocar aunque sea una estructura con huecos, mira como lo
+hace esa tool, y haz lo mismo*». Esa era la clave: **no había que inventar nada, había que copiar**.
+
+**La causa, medida**: con `hab:repetidor` en el portapapeles, `mc._pasteCache.vertCount === 36` (exactamente
+un cubo de 6 caras) mientras `mc.finoGeom['hab:repetidor'].colCount === 642`. `mcDrawPasteBlocks` resolvía
+cada celda a un material (`mc.blockKey.indexOf(key)`), cogía su `mc.palette[mat]` y emitía **6 caras del
+atlas**: no preguntaba jamás por la geometría fina. Cualquier pieza que no llena su celda —redstone, flores,
+antorchas, puertas— se previsualizaba como un bloque macizo.
+
+**El arreglo, calcado de `mcDrawVolumeBlocks`** (la herramienta volumen ya lo hacía bien):
+
+- Por celda, `mat > 0 && mc.finoRejilla[mat]` decide si es fina. Si lo es, se busca `mc.finoGeom[key]` y, si
+  aún no está horneada, `mcCalientaFina(key)`; la clave del portapapeles **ya trae su postura** (`flor@7`),
+  así que no se re-gira nada aquí (el pegado planta esa misma clave verbatim).
+- Lo fino se copia **tal cual**, 9 floats por vértice, sumando solo el `x/y/z` de la celda, a
+  `mc.pasteFinoVbo` / `mc.pasteFinoAVbo`, y se dibuja con `mc.structProg` + `mc.structLoc` (paso `9*4`),
+  con `mcSunUniforms(SL, null)` porque el fantasma ni proyecta ni recibe sombra.
+- Lo fino **no entra en el conjunto `occ`**: no llena la celda, así que no puede tapar la cara del cubo de al
+  lado (antes tapaba, y un bloque pegado a una flor perdía esa cara).
+- La caché lleva bandera **`pend`**: mientras alguna pieza se esté horneando, se reconstruye cada frame (y esa
+  celda no se dibuja como cubo entretanto, así no hay parpadeo de bloque macizo).
+
+Comprobado con `/tmp/pegar_fino3.js` (planta el repetidor de verdad y congela el pegado al lado): la caché
+pasa de `{v:36, fc:0}` a `{v:0, fc:642, fa:0, pend:false}` — cero cubos, la geometría entera de la pieza.
+
+<a id="-req-tool7"></a>
+
+### REQ-TOOL7 — el cambio de herramienta con la rosca es un gesto (y el botón central vuelve a redstone) ✅ resuelto 2026-08-18
+
+Dueño: «*el cambio de herramienta con la whell debe de ser realista, tendria que bajarla como cuando se oculta
+con el boton de enmedio, y luego subir con la nueva*». Y, un rato después: «*necesito de nuevo que el boton
+central vuelva a ser el de activar botones / palancas / etc de redstone en lugar de ocultar y mostrar la
+herramienta; la herramienta se mostrara y ocultara con la wheel a partir de ahora*».
+
+**El cambio de herramienta pasa a tener duración**, y eso es lo caro: `mcSetPlayerTool` era instantáneo, así
+que había que partirlo en dos mitades separadas por varios frames sin inventar un temporizador nuevo.
+
+- `mcCambiaToolConGesto(t)` no cambia nada: **apunta el destino** (`mc._toolPend`) y lanza la bajada de
+  [REQ-TOOL5](#-req-tool5) con `mcGuardarTool(true)`. Reutiliza el viaje entero —mandos, curva, reloj de
+  frame— sin una sola animación nueva.
+- El relevo se aplica **dentro de `mcSyncHeldToolStruct`, justo antes de su portazo**. Ese es el único sitio
+  del motor que se ejecuta *después* de que el viaje llegue a `_guardaT >= 1` y *antes* de que la estructura
+  salga de `mc.structures`: cambiar ahí de herramienta y pedir la vuelta en el **mismo frame** hace que la
+  nueva suba sin que se vea ni un fotograma de mano vacía. Medido: la película de estados es
+  `0/pico → 0.06>volumen → 0.4 → 0.73 → 1 (fuera, aún pico) → 1/volumen → 0.67 → 0.33 → 0/volumen`, con
+  `mc._heldToolStruct` presente en **todos** los frames (el reemplazo de la malla ya era atómico).
+- **Dos roscas seguidas no encadenan dos viajes**: si ya hay relevo en vuelo se **re-apunta** el destino. Sin
+  eso, la segunda rosca vería `mc._guardada` y cambiaría de golpe a media bajada — justo el salto que el ticket
+  venía a quitar. Verificado: `pico ↻↻ → seleccionar` con **una** bajada, y las herramientas que llegan a verse
+  en la mano son solo `['build','select']` (Volumen, el peldaño intermedio, no aparece nunca).
+- Mientras baja **sigue sin haber herramienta activa** (es una guardada de verdad), y la caja confirmada de
+  Seleccionar se rescata al otro lado (`mc._toolSelPend`): guardarse la herramienta la tira, pero **cambiar**
+  de herramienta la conserva para el Ctrl+C, y esto es un cambio de herramienta.
+- Casos de borde medidos: roscar hasta el suelo a media bajada deja la mano **vacía** (no sube nada) y
+  cualquier «sácala» que interrumpa el relevo (rosca hacia arriba, tecla, consola) lo **cancela** devolviendo
+  la que se estaba bajando.
+
+**El botón central vuelve a redstone.** Fue compartido apenas unas horas: `app.js` ahora solo se lo come
+(`preventDefault`, por el desplazamiento automático del navegador) y no hace nada más, y
+`redstone/redstone-piezas.js` recupera el suyo entero — sin reparto por puntería y sin la excepción de
+`mc._guardada`, que existía solo para poder sacar la herramienta. Sigue **callado** cuando no hay nada que
+conmutar (el aviso «ahí no hay nada que conmutar» lo quitó el dueño esa misma mañana y no vuelve), y sigue
+escuchando en `window` en fase de captura. Guardar y sacar es ahora **solo** la rosca: bajar al peldaño
+«vacía» de [REQ-TOOL6](#-req-tool6). Republicado con `node redstone/make_snippets.js`.
+
+Mando: `game.showTool.ruedaGesto` (`true` por defecto, persiste). En `false` la rosca vuelve a cambiar de
+herramienta en el acto, que es además la forma de medir lo que cuesta el gesto. `game.showTool.info()` añade
+`ruedaGesto` y `cambiandoA` (el relevo en vuelo).
+
+**Verificado** en `/map/test?noauto=1`: `/tmp/rueda_gesto.js` (la película frame a frame de arriba, más el
+cambio seco con `ruedaGesto=false`), `/tmp/rueda_gesto2.js` (roscas encadenadas, llegar al suelo a media
+bajada, cancelación) y `/tmp/medio_redstone.js` (con redstone cargado de verdad: el central conmuta **siempre**
+—apunte o no a una pieza manual, y también con la herramienta guardada—, nunca guarda la herramienta y nunca
+suelta aviso; guardar/sacar solo responde a la rosca). ⚠️ Ojo al medir: el reloj del viaje **capa el `dt` en
+100 ms por frame**, así que bajo *swiftshader* (~2 fps) el gesto avanza por frames y tarda varios segundos
+reales; las esperas de los scripts son así a propósito.
+
+<a id="-req-tool6"></a>
+
+### REQ-TOOL6 — la rosca del ratón recorre las herramientas ✅ resuelto 2026-08-18
+
+Dueño: «*quiero que con la rosca del raton se vaya rotando entre las tools, que la de abajo de todo sea vacia,
+es decir, si tengo pico y hago rosca hacia abajo pasa a vacia, si estoy en volumen, rosca hacia abajo seria
+pico, otra rosca mas vacia*».
+
+**No es un anillo, es una escalera.** El ejemplo lo dice: hay un *abajo del todo*. Rotar sin fin habría hecho
+que pasarse un peldaño te llevara al otro extremo, y el peldaño de abajo es justamente el que hay que poder
+alcanzar a ciegas. Así que `mcRuedaHerramienta(±1)` tiene **suelo y techo**: en los extremos la rosca no hace
+nada (ni trabajo ni aviso). Y el suelo no es un hueco inventado: es la **mano vacía** de [REQ-TOOL5](#-req-tool5),
+un estado de verdad —índice `-1`— con su animación de guardarse y sin herramienta activa.
+
+- Orden: `['build','box','select','paint','pick']` **filtrado por catálogo** (`mcEscaleraHerramientas`), así
+  que solo aparecen las que el dueño ha dibujado; en `/map/test` la escalera medida es
+  `['vacía','build','box','select','paint']`. Es una sola escalera con TODAS, no los dos grupos de `e`/`E`:
+  la rosca las recorre de una tacada y ahí la distinción principales/secundarias no ayuda.
+- Bajar al `-1` llama a `mcGuardarTool(true)`; subir desde ahí llama a `mcSetPlayerTool`, que ya **saca sola**
+  la herramienta (el viaje de vuelta de REQ-TOOL5). Ni un caso especial extra.
+- **En el Mundo la rueda no hacía nada** (la hotbar se elige con los números) ⇒ no pisa ningún mando.
+- El delta se **acumula** y solo salta de peldaño al pasar `ruedaUmbral` (30 por defecto): un ratón manda ~100
+  por muesca, pero un trackpad manda una lluvia de deltas pequeños y un gesto suave habría recorrido la
+  escalera entera de golpe.
+
+Mandos: `game.showTool.rueda` (on/off, persiste), `game.showTool.ruedaUmbral` (rechaza ≤ 0, que haría saltar
+un peldaño por cada temblor) y `game.showTool.info().escalera`, que imprime el recorrido de abajo arriba.
+
+**Verificado** con `/tmp/rueda.js` (rueda de verdad, puntero capturado, en `/map/test?noauto=1`): pico → abajo
+→ **vacía** → arriba → pico → arriba → volumen → abajo → pico → abajo → vacía; dos roscas más abajo siguen en
+vacía (suelo) y ocho arriba se quedan en la última de la escalera (techo).
+
+<a id="-req-tool5"></a>
+
+### REQ-TOOL5 — guardarse la herramienta (botón central) ✅ resuelto 2026-08-18
+
+Dueño: «*me gustaria que si hago clic con el boton central del raton, se oculte la herramienta de la mano
+derecha, pero con una transicion que parezca que el jugador se la guarda, tal y como esta ahora bastaria con
+bajarla hasta que salga fuera de pantalla, pero con un movimiento suave. que sea algo tunneable como se
+guarda la herramienta, como tiene un agarre/pivote podria ser bajarla apuntando hacia el suelo con ella
+hasta que no se vea en pantalla*» · «*otro click o un cambio de herramienta si esta oculta tendria que hacer
+el movimiento contrario para mostrarla de nuevo en la mano derecha de forma natural*».
+
+**Lo que NO valía: colgarlo del gesto de clic.** Ya existe una animación de la herramienta en mano
+(`mc._toolSwingT`, `game.showTool.swing`), pero es un **golpe que se agota solo**: se dispara, recorre sus
+tres fases y vuelve a cero sin que nadie se acuerde de él. Esto es lo contrario: un **estado con memoria**
+(`mc._guardada`, guardada sí/no) y un **viaje que se recorre en los dos sentidos** (`mc._guardaT`, 0 = en la
+mano → 1 = guardada). Por eso van mandos aparte y no un mando más en `swing`.
+
+**Cómo funciona.** `mcGuardarTool(v)` (`app.js:11546`) solo mueve el **destino** — sin argumento alterna,
+`false` la saca siempre — y pone el reloj a cero. El viaje lo recorre `mcBuildToolTransform` frame a frame:
+
+- avance `dt/ms` con `dt` **topado a 100 ms**, o volver de otra pestaña la teletransportaría;
+- suavizado `G = t^curva` (`curva > 1` = arranca lenta y se suelta al final: el tirón de meterla en el cinto);
+- y `G` se aplica en **espacio de cámara**: `posY -= baja·G` (cae), `swRotX += giro·G` (la punta apunta al
+  suelo, girando sobre el agarre del asset) y `posX += aparta·G` (se retira al costado para que no baje en
+  plancha).
+
+Dos detalles que no son evidentes:
+
+- **La estructura se retira de `mc.structures` solo al TERMINAR el viaje** (`mc._guardada && mc._guardaT >= 1`),
+  no al pulsar. Si se retirara al pulsar no habría animación que ver — y si se retirara mientras `_guardaT < 1`
+  nadie avanzaría el reloj y la vuelta no existiría.
+- **El reloj se pone a cero dentro de `mcGuardarTool`**, no al empezar a dibujar: mientras estuvo guardada del
+  todo no se dibujaba nada, así que `_guardaLastT` se quedó parado y el primer frame de la vuelta se habría
+  comido de golpe el tope de 100 ms.
+
+El botón central se atiende **antes** de `mc.heldBtn` en el `mousedown` del canvas (con `preventDefault`), así
+que no se cuela como poner/romper bloque. Y `mcSetPlayerTool` llama a `mcGuardarTool(false)`: cambiar de
+herramienta estando guardada dispara el viaje de vuelta, nunca deja la mano vacía con otra herramienta dentro.
+
+**Guardada = herramienta NULA** (tres órdenes del dueño el mismo día, que son la misma idea):
+
+- «*cuando se guarde la tool con boton de enmedio, no tiene que haber tool activa*» ⇒ corte en **`mcDoAction`**,
+  que es por donde pasan **las dos** puertas (el clic y su repetición al mantener pulsado en `mcTick`): guardada
+  no se rompe, ni se pone, ni se pinta, ni se marca. El fantasma de colocar se apaga en `mcUpdatePreview` y la
+  ranura 10 se pinta **vacía** (sin tocar `mc.tool`: al sacarla vuelve la misma, y el `title` sigue diciendo cuál).
+- «*si ... se estaba haciendo algo en pantalla como mostrar guias de una herramienta ... eso tiene que
+  descartarse. no tener seleccionada herramienta es como cambiar a una herramienta nula, que no hace nada*» ⇒
+  al guardar se hace **lo mismo que al cambiar de herramienta**: `mc.selA=null`, `mcBoxClear()` (la caja del
+  volumen a medio definir y sus guías), `mcPasteCancel()`, `mcCancelNotePlace()` y `mc.heldBtn=-1` (si no, al
+  sacarla seguiría rompiendo sin haber vuelto a pulsar).
+- «*le doy al boton de enmedio para esconder la herramienta ... no puedo usar volumen, pero sigo viendo el
+  bloque y no deberia salir ya. lo mismo le pasa a la herramienta de seleccionar*» ⇒ faltaba lo que se
+  **DIBUJA**, que va por otro sitio (`mcDrawOverlays`): apagar la herramienta no apagaba sus guías. Arreglado
+  donde nacen los tres grupos: `playing` (guías de Pintar, fantasma de Construir, cajas de Pegar) se pone a
+  false con `mc._guardada`, y las ramas `mc.tool==='select'` y `mc.tool==='box'` —que no miran `playing`—
+  llevan la condición explícita. Y una segunda pasada del dueño («*sigue mostrando un bloque de
+  previsualizacion*») destapó que Volumen dibuja **por dos sitios**: las guías en `mcDrawOverlays` y el
+  **bloque texturado de verdad** en `mcDrawVolumeBlocks`, que es otra llamada del render y necesitaba su
+  propia condición. Los otros dos vecinos de esa lista ya estaban cubiertos de rebote: `mcDrawPreview` mira
+  `mc.preview` (que se vacía al guardar) y `mcDrawPasteBlocks` mira `mc.pasteActive` (que se cancela).
+  Además, guardarla **borra la caja confirmada de Seleccionar** (`mc.selBox`),
+  que un cambio de herramienta sí conserva para el Ctrl+C: guardarse la herramienta no es cambiar de
+  herramienta, es quedarse sin ninguna. Medido contando las llamadas a `mcPushBoxEdges` &co. por fotograma
+  (`/tmp/guardar_overlay.js`): Volumen **12 → 0 → 12**, Seleccionar con caja **21 → 0**; y los `drawArrays`
+  que ocurren dentro de `mcDrawVolumeBlocks` (`/tmp/guardar_volbloque.js`): **6 → 0 → 6**.
+- «*tampoco deberia de aparecer el toast que dice "aqui no hay nada que conmutar"*» ⇒ **choque de mandos**: ese
+  aviso lo daba `redstone-piezas.js`, que se había quedado el botón central *porque `app.js` lo ignoraba*. Ya no
+  lo ignora. Ahora el botón **se reparte por puntería**, y el arbitraje vive en el snippet (cero líneas de
+  `app.js`): el listener de redstone pasa a `window` en fase de **captura** —en el canvas mandaría el orden de
+  registro, y `app.js` registra primero— y solo **mata el clic** (`stopPropagation`) si de verdad conmutó una
+  pieza manual. Si no hay nada que conmutar se aparta en silencio y el clic llega a `app.js`, que guarda la
+  herramienta. Con la herramienta **ya guardada** redstone ni lo intenta: si no, apuntando a una palanca no
+  habría manera de sacarla. Republicado con `node redstone/make_snippets.js`.
+
+**Mandos** (`game.showTool.guardar`, persistidos en `vf_mcToolGuardaCfg`; atajos planos `guardarMs`,
+`guardarBaja`…, y `game.toolGuardar`/`game.toolGuardada`): `ms` 300 · `baja` 1.25 · `giro` 70 · `aparta` 0.10
+· `curva` 1.6. `ms` y `curva` rechazan ≤ 0 (congelarían el viaje a medio camino, con la herramienta colgando
+y sin manera de sacarla). El **estado** `game.showTool.guardada` va aparte y **no se persiste**: empezar una
+partida con la mano vacía sin saber por qué es un fallo, no una preferencia. `baja` se midió: el pico sale de
+pantalla con 0.63, así que 1.25 deja el doble de margen para dibujos más grandes sin que el final del viaje
+sea invisible.
+
+**Verificado** en `/map/test?noauto=1`: `/tmp/guardar_sin_tool.js` (guardada, un clic izquierdo y otro derecho
+no mueven ni un voxel de la rejilla —162 357 antes y después— y la ranura sale `empty`; al sacarla vuelve a
+romper), `/tmp/guardar_descarta.js` (Volumen en el paso 2 y una esquina de Seleccionar → todo a cero al
+guardar), `/tmp/guardar_overlay.js` (los trazos por fotograma), `/tmp/guardar_redstone.js` (el reparto del
+botón central con redstone cargado de verdad: sin pieza → guarda y calla; sobre pieza → conmuta y no guarda;
+guardada → la saca sin que redstone lo intente). Y del viaje en sí: `/tmp/guardar.js` mide el recorrido entero (0 → 1, la estructura sale de
+`mc.structures`; 1 → 0, vuelve; y `mcSetPlayerTool` estando guardada la saca sola) y que un mando inválido
+(`ms:0`) se ignora; `/tmp/guardar_click.js` lo hace con **el botón central de verdad** y el puntero capturado,
+comprobando que la rejilla del mundo no cambia (1680 muestras iguales) y `mc.heldBtn` sigue en `-1`;
+`/tmp/guardar_visual.js` fotografía el recorrido (t = 0 · 0.25 · 0.5 · 0.75 · 1) y se ve bajar e inclinarse
+hasta desaparecer.
+
+> ⚠️ **El disparador cambió ese mismo día**: el botón central volvió entero a redstone y guardar/sacar la
+> herramienta pasó a la **rosca** (peldaño «vacía» de [REQ-TOOL6](#-req-tool6)) → [REQ-TOOL7](#-req-tool7).
+> Todo lo de arriba —el viaje, los mandos, «guardada = herramienta nula»— sigue igual; lo único que ya no vale
+> es el párrafo del reparto del botón central con redstone, y con él `/tmp/guardar_click.js` y
+> `/tmp/guardar_redstone.js`, que pulsan el central esperando que guarde.
+
 <a id="-req-shadow2"></a>
 
 ### ✅ REQ-SHADOW2 · Materiales sin sombra (nubes) — ✅ resuelto 2026-08-10
@@ -8465,6 +9477,61 @@ comparador que no ordenase nada pasaría el test.
 
 ---
 
+<a id="-req-cart4"></a>
+
+### ✅ REQ-CART4 · El TINTE del cartel, por nota — ✅ resuelto 2026-08-18
+**Pedido** 2026-08-18 por el dueño: «entre las propiedades de los carteles, cuando doy a la "n" y
+puedo editar el mensaje o rotación, me gustaría una que fuese el **tinte**, de forma que los colores
+del cartel se tinten de un color, por ejemplo si selecciono verde tendría que tintarse en verde, pon
+unos tintes por defecto que sean los de los **posits** y que haya un **picker** para elegir un color
+rgb arbitrario».
+
+Es justo lo contrario que [REQ-CART3](#-req-cart3): `game.carteles` es **global al mundo** (escala,
+palo, desvío, giro), y esto tiene que ser **por cartel**. Así que va donde ya vive lo de por-nota:
+un **mapa propio**, `mc.noteTints` (`"x,y,z" → '#rrggbb'`), hermano de `mc.noteRots`. **No se mete
+dentro de `mc.notes`**: eso sigue siendo `"x,y,z" → TEXTO` en todos los `mundo.json` escritos hasta
+hoy y convertirlo en objeto cambiaría el formato para todos los mundos a la vez. El test lo guarda
+con una aserción explícita (`Object.values(doc.notes).every(v => typeof v === 'string')`).
+
+**Dónde se aplica el color: horneado en el VBO, no en un uniform.** La tentación era un `uTint` en
+`mc.structProg` — dos líneas de GLSL. Pero ese programa lo comparten **~6 pasadas de dibujo**
+(estructuras opacas, estructuras con alfa, geometría fina de chunk, sombras, vista previa y
+herramienta en mano), y los uniforms arrancan a **0**: la pasada que se olvidara de ponerlo dibujaría
+su geometría en **NEGRO**. Horneando dentro de `mcBuildStructMesh(..., tinte)` —en `upload`, sobre el
+color ya calculado, solo cuando `s===9`— el resto del motor no se entera de que existen los tintes.
+
+**Tintar conservando el relieve.** Multiplicar el color por el tinte deja el cartel plano, un recorte
+de cartulina: las vetas de la madera y el texto se van con él. Se hace por **gamma sobre la
+luminancia**: `f = (luma(rgb)/luma(tinte))^MC_TINTE_RELIEVE`, `out = clamp(tinte·f)`. La constante
+salió de probarla: **`MC_TINTE_RELIEVE = 0.6`** — a `1.0` el verde sale un oliva embarrado, a `0` es
+el plano de antes. `mcNoteTinteRGB` guarda `lt = max(0.08, luma)` para que un tinte casi negro no
+divida por cero.
+
+**Lo que costaría caro olvidar:** como el color está en la malla, **tiene que sobrevivir a
+`mcRestampAll`** — si no, editar un bloque cualquiera al lado devolvería el cartel a madera (el
+mismo BUG-AG3 de siempre). Los dos sitios que re-mallan pasan ahora `s.esc` **y** `s.tinte`. Y
+cambiar el tinte **replanta** el cartel por la vía que ya existía para la escala: `(s.tinte||'')`
+contra `mcNoteTinte(s.nota)` dentro de `mcNoteSignsDesfasados`, que además garantiza que quede
+**UNO**, no dos.
+
+**El panel de la `N`:** las muestras se construyen en `mcNoteTintBotones` **desde `MC_NOTE_TINTES`**
+(los seis del post-it), no copiadas en el HTML — el test comprueba justo eso, o la tabla y la barra
+se irían separando. Más `∅` (sin tinte = *borrar* la entrada, no guardar `''`) y un
+`<input type=color>` para el RGB a medida. Previsualiza **en vivo** y **`Cancelar` devuelve el color
+de antes**: sin eso, asomarse a un color dejaría el cartel pintado aunque el dueño se lo pensara.
+Trampa de CSS que costó un rato: hace falta el selector **`.mc-note-tint-bar .mc-note-tint-btn`**
+(0,2,0), porque `.btn.ghost{background:transparent}` le gana a un `.mc-note-tint-btn` suelto (0,1,0)
+y deja todas las muestras en blanco.
+
+**Persistencia:** viaja en el documento (`noteTints`) y por la cabecera incremental — hubo que
+añadirlo a la **lista blanca** de `servidor/voxfmt.py` (`guardar_cabecera`), que si no lo tira sin
+decir nada, y a `desde_v1`/`a_doc_v1`. Comprobado de punta a punta: cartel tintado `#b7e778` que se
+lee verde con la veta y el texto legibles, y `#ffb3c1` que **vuelve tintado tras recargar la
+página**. Guardián nuevo **`tests/test_notas_tinte.js`** (26 ok). Detalle en
+[`docs/notas-y-fuente.md`](docs/notas-y-fuente.md).
+
+---
+
 ---
 
 ---
@@ -8472,6 +9539,8 @@ comparador que no ordenase nada pasaría el test.
 <a id="-bitacora"></a>
 
 ## Bitácora
+- 2026-08-18 · 🪧 **[REQ-CART4](#-req-cart4): el cartel de la nota se puede TEÑIR, uno a uno** (petición del dueño: «entre las propiedades de los carteles […] me gustaría una que fuese el *tinte* […] pon unos tintes por defecto que sean los de los posits y que haya un picker para elegir un color rgb arbitrario»). El color va en un **mapa propio, `mc.noteTints`**, hermano de `mc.noteRots`: meterlo dentro de `mc.notes` habría convertido `"x,y,z" → texto` en `"x,y,z" → objeto` en **todos** los `mundo.json` escritos hasta hoy. Se aplica **horneado en la malla** de la instancia y no como uniform, porque `mc.structProg` lo comparten unas seis pasadas de dibujo y los uniforms arrancan a 0 ⇒ la pasada que se olvidara de ponerlo saldría **negra**. Tintar **conserva el relieve** con una gamma sobre la luminancia (`f = (luma(rgb)/luma(tinte))^0.6`); a exponente 1 el verde salía oliva embarrado y a 0 el cartel era un recorte de cartulina. Al estar en la malla, el color **tiene que sobrevivir a `mcRestampAll`** (los dos sitios que re-mallan pasan ya `s.esc` **y** `s.tinte`, el mismo BUG-AG3 de siempre) y cambiar el tinte **replanta** el cartel por la vía de la escala, dejando UNO. El panel de la `N` construye las muestras **desde `MC_NOTE_TINTES`**, no copiadas en el HTML, más `∅` y un `<input type=color>`; previsualiza en vivo y **`Cancelar` devuelve el color de antes**. Trampa pagada: `.btn.ghost{background:transparent}` (0,1,0) le ganaba a `.mc-note-tint-btn` y dejaba las muestras en blanco — hace falta `.mc-note-tint-bar .mc-note-tint-btn`. Persistencia: `noteTints` en el documento y en la **lista blanca** de `voxfmt.guardar_cabecera`, o la cabecera incremental lo tira sin avisar; comprobado que un `#ffb3c1` vuelve tintado tras recargar. `tests/test_notas_tinte.js` **26 ok**.
+- 2026-08-18 · 📋 **Los corchetes de la selección se dibujan con VOXELES, y de paso el Mundo aprende a plantar voxeles de color sueltos** (petición del dueño: «un bloque es de 16×16×16 voxels; sería reemplazar los brackets dibujados con líneas por brackets dibujados con voxels… podría ser algo nuevo en el juego reutilizable esa función de plantar únicamente voxels de colores»). Lo que había eran `gl.LINES`: un brazo es una línea de 1 px, así que se veía igual de gruesa a dos bloques que a cincuenta y no se leía como parte del Mundo. Ahora hay una **primitiva de dibujo** —`mcPushVoxCubo` (un cubo del tamaño de un voxel fino, color plano por cara), `mcPushVoxFila` (fila de cubos, sin emitir las caras que quedan pegadas entre dos vecinos) y `mcPushVoxCorchetes` (las 8 esquinas: cubo blanco de vértice apoyado **por fuera** de la caja para no tapar lo seleccionado, y tres brazos del color de la selección hacia dentro por las aristas)— y la herramienta Seleccionar la usa en sus seis corchetes. **No es mundo**: no ocupa celda, no colisiona, no se guarda; es geometría de overlay que se va con el frame, lo contrario de `setVoxel`. Dos detalles que costaron: **(1)** el overlay va con `aEmit=1`, y con eso el shader de estructuras ignora `vShade` (`mix(lit, vColor, em)`), así que el sombreado por cara **no puede viajar en el atributo** como en el mundo — se multiplica dentro del propio rgb, con los factores de `MC_FACES` para que un cubo suelto se lea como un voxel de verdad. **(2)** el resto del overlay dibuja con `CULL_FACE` apagado; un cubo así sale plano, porque con `depthMask(false)` no hay z entre sus propias caras y el píxel se lo queda **la última cara enviada**, que la mitad de las veces es la trasera. Estos dos dibujados encienden el culling (`frontFace(CW)`, el enrollado de `mcPushBoxTris`) y lo dejan como estaba al salir. Los brazos se recortan solos (`(lado/tam − 1)/2`) para que los de dos esquinas opuestas no se toquen: si se juntan deja de leerse un corchete y pasa a leerse una jaula. Mandos: **`game.selVoxeles`** = `{activo, tam, largo}` en voxeles finos (persiste; `false` devuelve los corchetes de líneas de siempre) y **`game.voxelesUI`** = la capa reutilizable que pedía el dueño — `pon/quita/limpia/linea/caja/info`, por grupos, con las caras entre voxeles pegados sin emitir y la geometría cacheada hasta que algo cambia. Las cajas, la rejilla interior y las guías de las otras herramientas siguen siendo líneas: cambiarlas es enrutar su llamada por el mismo `corchete()` de `mcDrawOverlays`. **Repaso tras la foto 47 del dueño** («esos brackets no son de grosor 1 sino de dos; y algunos voxels como los blancos que quedan más cerca del jugador se ve a través de sus caras»): grosor por defecto a **1** voxel (`tam:1, largo:5`), y el «ver a través» eran DOS cosas a la vez. **(a)** El overlay entero va con `depthMask(false)` —son líneas sueltas, no se tapan entre sí—, así que entre cubos mandaba el ORDEN de dibujado: los brazos se envían después del cubo de vértice, y un brazo que pasa por detrás le repintaba la cara al cubo blanco de delante. Estos dos dibujados **escriben profundidad** (y la dejan como estaba al salir; `mcDrawOverlays` es lo último del frame, así que no afecta a nadie). **(b)** Los corchetes ámbar de A y B se plantaban ENCIMA de los de la caja —A y B son dos de sus ocho esquinas—: con líneas era invisible, con cuerpos sólidos son dos sólidos disputándose el mismo píxel. Ahora A y B se señalan **repintando su cubo de vértice** (parámetro `marcas` de `mcPushVoxCorchetes`), sin geometría duplicada; se marcan las dos puntas de su arista vertical porque la correcta, en una selección a ras de suelo, cae enterrada en el terreno. **Segundo repaso del dueño** («cuando hago Ctrl+C y Ctrl+V luego, los voxel brackets siguen puestos donde hice el Ctrl+C, deberían estar en los bloques donde voy a hacer ahora el pegado; además si selecciono con un número del 1 al 9 una ranura para cambiar el material, me cambia el material de donde estaba el Ctrl+C, no el nuevo de Ctrl+V que estoy previsualizando y quiero plantar»): pegar y seleccionar son **la misma herramienta**, y con `pasteActive` seguían vivas las dos cajas a la vez. Ahora la sección 4 de `mcDrawOverlays` **se calla mientras se pega** (`mc.tool==='select' && !mc.escaparate && !mc.pasteActive`) y los corchetes del pegado (4b) van por el mismo `corchete()`, o sea también en voxeles: solo hay marcas donde va a caer el cúmulo. Y la tecla 1-9 pregunta primero por **`mcPasteMaterial(i)`**, que repinta las celdas del PORTAPAPELES (`cel.c = 'tex:…'`) en vez de rellenar la selección de atrás — el material entra en la vista previa (se invalida `mc._pasteCache`, que lleva el material dentro de la geometría) y vale para todas las copias siguientes, porque el pegado sigue cargado tras plantar. Mismas dos preguntas que `mcSelectFillPieza` para una pieza (`mcCabeEnRejilla`, postura en la clave con `mcClaveConOri`) y alta perezosa con `mcAddBlock` si la clave aún no está en la paleta, o la previa se vería con el material de relleno hasta plantarla.
 - 2026-08-18 · 📋 **El pegado pasa a ser continuo, se planta con el DERECHO y se puede agarrar por donde quieras** (dos peticiones seguidas del dueño; la primera probada por él: «funciona») · **(1) Botones intercambiados**: en modo pegar el **clic derecho planta** y el izquierdo suelta. No es capricho: colocar es el derecho en todo el resto del Mundo —poner un bloque, estampar una estructura—, así que el izquierdo, que es el que rompe, aquí solo podía significar «quita eso». **(2) Pegado continuo**: `mcPasteConfirm` ya no hace `pasteActive=false`, así que tras plantar el cúmulo sigue cargado como si acabaras de pulsar Ctrl+V y se puede sembrar la misma pieza en fila. Se **conservan cara y giro** a propósito: rehacer la postura después de cada copia era justo el trabajo que esto ahorra. No hay riesgo de sembrar sin querer al mantener pulsado porque `mcToolPasiva()` es cierta mientras `pasteActive`, y la repetición de `mc.heldBtn` pregunta por ella. **(3) Agarre con Ctrl + ratón**, el mismo gesto que ya tenía la herramienta volumen: Ctrl **congela** el cúmulo (si siguiera a la mira no habría forma de señalar una de sus celdas, porque se movería con el gesto que la elige), el ratón resalta en ámbar la celda apuntada y al soltar queda fijada. **El agarre se guarda SIN ROTAR**, en los ejes de la pieza, y se pasa por `mcOriMove` como todo lo demás: guardarlo ya rotado era más corto pero al girar con R el agarre saltaba a otro vóxel y había que rehacerlo; así «lo sujeto por esta esquina» sigue siendo esa esquina al tumbarlo. La vuelta (ratón → ejes de la pieza) se hace por **barrido** en `mcPasteAnchorDesdeRotado`, sin escribir una matriz inversa: corre UNA vez, al soltar Ctrl, y una pieza de 32³ son 32 k comprobaciones enteras. **Lo que evitó el bug**: los tres que dibujan o plantan el cúmulo —malla de la vista previa, contorno cian y `mcPasteConfirm`— se calculaban la esquina cada uno por su cuenta y coincidían de milagro; con postura y agarre de por medio eso son tres sitios donde la caja miente sobre lo que vas a plantar, así que ahora la decide **`mcPasteOrigen` y solo ella**. Comprobado en banco aparte con las funciones reales de `app.js` y una pieza 3×2×4, las 576 combinaciones de postura×celda: **ida y vuelta del agarre exacta (0 fallos)**, ninguna celda fuera de la caja de `mcOriDims`, y el agarre cae **clavado** en la celda apuntada en las 24 posturas. Batería Node: 20 ok, 1 fallo **previo** (`test_observador_redstone`, falla igual en `f910cc6~1`, sin tocar nada). `SYMBOLS.md` regenerado.
 - 2026-08-18 · 📋 **El pegado (Ctrl+V) llega a las 24 posturas, no a 4** (petición del dueño: «con la herramienta de seleccion, al pegar con control+V, `r` solamente rota entre 4 posiciones, cuando puede haber hasta 6x4») · El modo de pegado se había escrito con un contador propio, `mc.pasteRot` de 0..3, y una llamada directa a `mcRotXZ`: solo el **yaw**, así que lo copiado nunca se podía **tumbar**. Ahora pasa por `MC_ORI` como todo lo demás del motor (`mcPasteOri()` = `cara*4 + giro`, hermano de `mcBoxOri`/`mcPreviewOri`), con el mismo gesto de dos pasos que ya usan las estructuras de la hotbar: **`r` recorre las 6 caras y `Shift+R` los 4 giros dentro de la cara**. Tres consumidores actualizados —la malla de la vista previa, el contorno cian y `mcPasteConfirm`—, y el contorno pasa a pedir sus lados a **`mcOriDims`**: tumbar una pieza también le cambia el ALTO, y con el `rh = dims.h` de antes la caja habría mentido en cuanto la postura no fuera de pie. Ojo al detalle que se paga caro: el portapapeles guarda `dy` como **profundidad** y `dz` como **altura** (coordenadas del editor), mientras `mcOriMove` trabaja en ejes del mundo, así que la llamada es `mueve(dx, dz, dy)` — invertirlo compila y planta la pieza volcada. Comprobado con banco aparte sobre las funciones reales extraídas de `app.js`, con una pieza asimétrica 3×2×4: **24 posturas distintas de 24**, **ninguna celda fuera de la caja de `mcOriDims`**, y las posturas 0..3 **reproducen exactamente** el `mcRotXZ` viejo (los 4 giros de siempre siguen saliendo igual y en el mismo orden). Batería Node: 21 ok. `SYMBOLS.md` regenerado (+`mcPasteOri`).
 - 2026-08-13 · 🐛 **[BUG-IMP1](#-bug-imp1): importar objetos tumbaba el editor, y lo cazó una línea de la traza** · `TypeError: hex.slice is not a function` al importar. La clave estaba en QUÉ línea petó: `hex.slice` (412) y no `hex.length` (411), así que `hex` tenía `.length` pero no `.slice` — un **número**. Los colores del `.vox.json` venían como **enteros empaquetados**, no `'#rrggbb'`, y `hex6` los devolvía tal cual para que `shade` reventara dentro del render de la miniatura → caía el editor entero. Arreglado en el pipeline de color: entero → se recupera su hex, cualquier otro tipo raro → magenta de error, nunca un crash. `test_importar_color.js`. Falta que el dueño confirme que los colores salen bien (por si el empaquetado no fuera `0xRRGGBB`). También cerrado [REQ-FLY2](#-req-fly2) de paso (vuelo vertical ∝ playerSpeed).
