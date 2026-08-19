@@ -32,6 +32,10 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[BUG-RS27](#-bug-rs27)~~ | ~~los **botones y palancas de redstone se conmutan también con el botón derecho**, y debería ser solo con el central~~ | ✅ resuelto 2026-08-20 | fuera la envoltura de `mcUseRight` en `redstone/redstone-piezas.js`: el derecho **construye y punto**, accionar es del central. Se **desenvuelve en caliente** (`mcUseRight._orig`) en vez de borrar el código y ya, para que una pestaña con la versión vieja cargada se cure sola. `tests/test_bug_rs27_boton_derecho.js` (con tramo anti-falso-verde). ⚠️ **no llega al mundo vivo hasta republicar**: `node redstone/make_snippets.js` |
+| ~~[REQ-CART6](#-req-cart6)~~ | ~~el **panel de la nota es demasiado alto**: no se llena nunca de texto, bajarlo al 70 %~~ | ✅ resuelto 2026-08-20 | 10 → 7 líneas de cuerpo y tope 46vh → 32vh, en `web/style.css`. El alto se **deriva de la letra** (`--note-fs` × 1.8 × 7), así que subirle el tamaño al texto no vuelve a descuadrar la caja. `test_notas_panel.js` en verde con dos comprobaciones nuevas (caben los 280 del `maxlength`, y no se come la pantalla) |
+| ~~[REQ-GLOW7](#-req-glow7)~~ | ~~los **topes de los mandos de luz** se quedan cortos: `interiorDark` no pasa de 1, `glowFocus` tampoco, y un punto emisivo alumbra demasiado de noche~~ | ✅ resuelto 2026-08-20 | `game.interiorDark` llega a **4** (`MC_INTERIOR_DARK_MAX`) y pasar de 1 **sobreexpone** la penumbra: es un revelado para ver qué alumbra. La trampa era otra: el «apagado» se probaba con `>=1`, así que con 2 puesto el mundo se quedaba **sin `mc.light` calculado** y no se veía nada ⇒ ahora es el **1 EXACTO**. `game.flowFocus` (que no existe) avisa y reenvía a `glowFocus`. `tests/test_glow7_topes_luz.js` |
+| ~~[REQ-SNP7](#-req-snp7)~~ | ~~volver del editor 2D/3D al Mundo **recarga el snippet `mundo-<nombre>`** y no hace falta~~ | ✅ resuelto 2026-08-20 | el autoarranque corre **solo en la primera entrada** (`mcPrimeraEntrada = !mc.grid`). Lo que un snippet quiera hacer al volver lo registra él: **`game.alVolverAlMundo(clave, fn)`**, con clave como `game.bloques.define` para que reejecutarlo a mano reemplace en vez de encadenar. `tests/test_snp7_vuelta_sin_recargar.js` |
 | ~~[BUG-SPLIT2](#-bug-split2)~~ | ~~en la **pantalla dividida** del editor de código (Alt+C) el cielo pierde las estrellas~~ | ✅ resuelto 2026-08-19 | **Nació cerrado.** Se abrió a las pocas horas de arreglar el Alt+C que **además disparaba el `game.onKey('c')`** del snippet, y el dueño confirma que era eso: el atajo apagaba las estrellas de `efectos-demo` al ir a programar. La pantalla dividida no tenía nada que ver. Lección: un «ya no se ve X» abierto el mismo día que se toca el teclado, mírese primero el teclado |
 | ~~[BUG-IMP1](#-bug-imp1)~~ | ~~**crash al importar objetos**: `TypeError: hex.slice is not a function` en `shade` → el editor no pinta el modelo importado~~ | ✅ resuelto 2026-08-18 | **Cerrado: el dueño confirma que los colores importados salen bien.** el color venía como **entero empaquetado**, no `'#rrggbb'`. **Arreglado el crash** en `hex6`/`shade`: un entero se recupera como su hex (`0xff8844`→`#ff8844`), y cualquier otro tipo raro → magenta de error sin tumbar el editor. `test_importar_color.js`. **Pendiente:** que el dueño confirme que los colores importados salen BIEN (si el entero no fuera `0xRRGGBB` sino otro empaquetado, saldría mal; entonces mande el fichero) |
 | ~~[REQ-FLUID4](#-req-fluid4)~~ | ~~**«ilusión de agua»**: un lago se ve como cubos transparentes con caras internas, no como una masa continua~~ | ✅ resuelto 2026-08-18 | **Cerrado: la fase 4 (reflejos) aterrizó por [REQ-ENV5](#-req-env5).** **fases 1-2 (culling en el camino fino) y 3 (vista subacuática) hechas** — `test_caras_fluido.js` + `test_vista_subacuatica.js`. Queda la **fase 4 (reflejos)**, aplazada por el dueño ⇒ [REQ-FLUID5](#-req-fluid5) |
@@ -176,6 +180,208 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 ---
 
+
+
+<a id="-req-glow7"></a>
+
+### ✅ REQ-GLOW7 · Los topes de los mandos de luz se quedan cortos — ✅ resuelto 2026-08-20
+
+Tres notas de **`/map/bugfinder`**, las tres sobre mandos:
+
+- `43,14,69` — «*hace falta poder subir game.interiorDark a un valor mayor que 1*»
+- `29,14,70` — «*game.flowFocus no sube de 1, con esto es dificil saber si la espada ilumina
+  correctamente*»
+- `35,14,37` — «*un punto emisivo en un bloque por la noche ilumina demasiado ¿como se controla?
+  game.glowGain*»
+
+**Lo comprobado:**
+
+- `game.interiorDark` está **topado a mano**: `v=Math.max(0,Math.min(1, …))` (`app.js:19287`). Es un
+  **factor de sombra**, `interiorDark^((MAX-lv)/MAX)`: 1 = sin oscurecer, 0 = negro. Pasar de 1 no es
+  «más oscuro», es **más claro que la luz plena** — hay que decidir qué debe significar antes de subir
+  el tope, o el mando deja de tener sentido.
+- **`game.flowFocus` no existe**: es `game.glowFocus`, también topado a 1 (`app.js:19604`), y ahí el 1
+  es el extremo del recorrido por diseño (0 = omnidireccional tipo antorcha, 1 = haz estrecho hacia la
+  normal). Lo que pide de verdad es **ver mejor hasta dónde llega la espada**, que puede ser alcance
+  (`game.glowLevel`) y no foco. Preguntarle qué quiere ver.
+- `game.glowGain` **sí existe** y va de 0 a 16 (def. 1, `app.js:19614`), pero es **global**: no hay
+  forma de decir «este dibujo alumbra la mitad». Eso es lo que falta.
+
+**Criterio de cierre:** el dueño puede dejar un punto emisivo alumbrando lo justo de noche sin bajarle
+la luz a todo lo demás, y sabe qué mando toca sin preguntar (documentado en `docs/luz-y-sombra.md`).
+
+---
+
+**Lo hecho (2026-08-20).**
+
+1. **`game.interiorDark` llega a 4** (`MC_INTERIOR_DARK_MAX`, `app.js`), no a 1. Pasar de 1 **sobreexpone
+   la penumbra**: el factor `interiorDark^((MAX-lv)/MAX)` se hace >1 donde no hay luz, o sea que lo que
+   está a oscuras sale **más claro** que lo iluminado. No es un modo de juego, es un **revelado de
+   inspección** — que es exactamente para lo que lo pedía («*saber si la espada ilumina correctamente*»).
+2. **La trampa de verdad, y el motivo de que subir el tope a secas no hubiera hecho nada:** el «apagado»
+   del skylight se probaba con **`>=1`** en `mcComputeLight` y `mcRelightBox`. Con `interiorDark=2`
+   puestos, el mundo se quedaba **sin `mc.light` que leer** y la sobreexposición no se veía por ningún
+   lado. Ahora el apagado es el **1 EXACTO** (`===1` / `!==1`) en los cinco sitios que lo consultan
+   (`mcComputeLight`, `mcRelightBox`, `mcCapaGeom`, el mallado de chunk y el de flujos). **Excepción a
+   propósito**: el `dynLift` del shader sigue con `>=1`, porque con la penumbra ya subida desde el
+   vértice, dividir la **bajaría**.
+3. **`game.flowFocus` no existe** (es `glowFocus`) y hasta ahora **se tragaba el valor callado**: dejaba
+   una propiedad suelta en `game` que no lee nadie, y desde fuera parecía un mando topado. Ahora avisa
+   por consola, saca un `toast` y **reenvía** a `glowFocus`. El alias convierte «no sube» en «te has
+   equivocado de nombre». Para ver **más lejos** lo que alumbra la espada el mando es `game.glowLevel`
+   (alcance), no el foco: también escrito en `docs/luz-y-sombra.md`.
+4. **`game.glowGain`** (lo de «*ilumina demasiado*») ya existía y ya se puede **bajar** de 1 — el ticket
+   solo pedía saberlo. Queda pendiente y **sin abrir ticket** lo de «este dibujo alumbra la mitad»
+   (ganancia por pieza, no global): que lo pida si le hace falta.
+
+**Guardián:** `tests/test_glow7_topes_luz.js` (16 ok). El tramo B es el que importa: monta una caja
+opaca, pone `interiorDark=2` y exige que el hueco de dentro siga a **0** y el cielo a `MC_MAXLIGHT`,
+igual que con 0,55 — o sea que el mando **no cambia la difusión, solo el revelado**. Y con el 1 exacto
+comprueba con un centinela (`mc.light.fill(7)`) que el cálculo **se salta entero**, que es lo que hace
+que apagarlo sea gratis. El material de la caja se elige por lo que **hace** (el primero de la paleta
+por el que `mcTablaLuz()` dice que la luz no pasa), no por su nombre: pedir `hab:roca` en un mapa que no
+lo tenga cargado daba `undefined`, la «caja» era aire y el hueco salía a 15 sin que nada estuviera roto.
+
+---
+
+---
+
+
+<a id="-bug-rs27"></a>
+
+### ✅ BUG-RS27 · Los botones de redstone se conmutan también con el derecho — ✅ resuelto 2026-08-20
+
+Nota `40,14,65` de **`/map/bugfinder`**: «*los botones de redstone se estan activando con boton derecho
+y deberia de ser solamente con boton central*».
+
+**Sitio localizado**, y el propio fichero ya avisa del riesgo: `redstone/redstone-piezas.js` envuelve
+`window.mcUseRight` (el derecho conmuta **y**, si no hay palanca, **construye**) además de escuchar el
+`mousedown` del botón central en fase de captura. El comentario de al lado lo dice tal cual: con el
+derecho, «*un palmo de un circuito montado y un fallo de puntería te deja un bloque encima del cable*».
+El central ya es solo-conmutar desde que el dueño lo devolvió entero a redstone (2026-08-18, REQ-TOOL6/7).
+
+Trabajo: quitar la envoltura de `mcUseRight` y dejar únicamente el escucha del central. ⚠️ Se toca el
+`.js` de `redstone/`, **no el `.json`**, y se publica con `node redstone/make_snippets.js` + `POST
+/api/snippets` (orden del dueño: «todo lo de redstone va en ficheros aparte»). Comprobar antes si algún
+guardián de redstone da por bueno el derecho.
+
+**Criterio de cierre:** en `/map/redstone`, clic derecho sobre una palanca **no** la conmuta (y sí pone
+el bloque de la ranura, como en cualquier otro sitio); el central sigue conmutando.
+
+---
+
+**Lo hecho (2026-08-20).** Fuera la envoltura de `mcUseRight` en `redstone/redstone-piezas.js`: el
+derecho **construye y punto**, accionar es del central. Ningún guardián daba por bueno el derecho.
+
+Dos decisiones que no se ven en el diff:
+
+- **Se DESENVUELVE en caliente, no se borra el código y ya.** Lo primero que hace el snippet es
+  `if(mcUseRight._redstone || mcUseRight._orig) mcUseRight = mcUseRight._orig`. Una pestaña que tenga
+  cargada la versión vieja seguiría con su envoltorio vivo hasta recargar, y republicar el snippet no
+  lo tocaría. Va **lo primero** a propósito: si algo de más abajo falla, esto ya está hecho.
+- **`VERSION` sube a `piezas-1.7`** y los rótulos de las piezas (`plantar_piston.js`,
+  `redstone-ejemplos.js`) dicen ya **CENTRAL** donde decían «derecho o central».
+
+⚠️ **Esto NO llega al mundo del dueño hasta republicar**: `node redstone/make_snippets.js` (los `POST`
+los deniega el sandbox de esta sesión). Hasta entonces el servidor sigue sirviendo la versión con
+envoltorio — y el test lo aprovecha, porque comprueba de paso que el desenvoltorio en caliente funciona.
+
+**Guardián:** `tests/test_bug_rs27_boton_derecho.js` (11 ok, ~85 s). El tramo C es el anti-falso-verde:
+vuelve a poner el envoltorio viejo **a mano** y exige que el test **sí** vea conmutar por el derecho —
+sin eso, «no conmuta» también lo cumpliría un test que no esté apuntando a nada. Dos trampas que
+costaron tres pasadas en rojo, apuntadas en la cabecera del test: conmutar **no se ve en la misma
+vuelta** (el motor encola, la celda cambia de clave un tick después), y **`?noauto=1` no evita que el
+mundo autoarranque el redstone publicado** (eso solo salta el autoarranque del editor y la intro).
+
+---
+
+---
+
+
+<a id="-req-snp7"></a>
+
+### ✅ REQ-SNP7 · Volver del editor al Mundo no debería recargar el snippet del mapa — ✅ resuelto 2026-08-20
+
+Nota `50,14,40` de **`/map/bugfinder`**: «*si el mundo esta cargado y vuelvo al editor 2d/3d, volver al
+juego no tendria que recargar el snippet del mapa "mundo-nombre-del-mundo", es innecesari…*».
+
+Editor y Mundo son **la misma página** (`closeWorld()` / `mcVolverAIntro()`, jamás `location.href`), así
+que el mundo no se pierde al ir y volver: lo que se rehace es el arranque del snippet. Mirar junto con
+[BUG-SNP4](PLAN.md#-bug-snp4), que es la otra cara del mismo lío (dos copias vivas del mismo snippet y los
+cambios del editor revertidos).
+
+⚠️ Cuidado: hay snippets cuyo arranque **monta** cosas (bucles, `game.onKey`, envoltorios de
+`mcUpdate`). No re-ejecutarlo está bien; dejarlo a medias, no. Si se decide no recargar, el snippet
+tiene que poder distinguir «arranco» de «vuelvo».
+
+**Criterio de cierre:** ir al editor y volver al Mundo no reinicia lo que el snippet del mapa tuviera
+en marcha, y no duplica bucles ni teclas.
+
+---
+
+**Lo hecho (2026-08-20).** Una línea de decisión y un gancho:
+
+```js
+const mcPrimeraEntrada = !mc.grid;          // openWorld, ANTES de montar nada
+…
+if(mcPrimeraEntrada) await mcAutoarranque();
+else                 await mcAvisaVueltaAlMundo();
+```
+
+`closeWorld()` **solo pausa** (`mc.active=false`): ni tira la rejilla, ni el contexto GL, ni lo que
+dejaran montado los snippets. Lo único que se rehacía era el autoarranque, y eso no es «arrancar»: es
+plantar otra vez lo plantado, montar otro bucle encima del que ya corre y re-ligar la tecla ya ligada.
+
+**La otra mitad, que es la que contestaba al ⚠️ de arriba** («*el snippet tiene que poder distinguir
+arranco de vuelvo*»): **`game.alVolverAlMundo(clave, fn)`**. Lo que un snippet quiera hacer al volver
+—repintar su HUD, releer un ajuste— lo registra él **al arrancar**, y `app.js` sigue sin saber qué hace
+ninguno (§ agentes: el framework es agnóstico). La **clave** es lo que hace que reejecutar el snippet a
+mano con Alt+C **reemplace** su callback en vez de encadenar otro; es el mismo trato que
+`game.bloques.define(clave, cfg)`. Pasar `null` da de baja. Fallar es **inocuo y se avisa**: un menú que
+peta no puede impedirte volver al Mundo.
+
+**Guardián:** `tests/test_snp7_vuelta_sin_recargar.js` (15 ok). Cuenta **llamadas a `mcAutoarranque`**
+con un envoltorio propio, no efectos: mirar «¿sigue existiendo `game.redstone`?» lo cumpliría también un
+segundo arranque. Hace dos idas y venidas completas y exige 0 arranques, 2 avisos de vuelta, y que lo
+montado siga en pie. **No cierra [BUG-SNP4](PLAN.md#-bug-snp4)** (las dos copias vivas del snippet editado):
+son primos, pero aquél es del editor de código, no de `openWorld`.
+
+---
+
+---
+
+
+<a id="-req-cart6"></a>
+
+### ✅ REQ-CART6 · El panel de la nota es demasiado alto — ✅ resuelto 2026-08-20
+
+Nota `47,14,40` de **`/map/bugfinder`**: «*la altura de la nota no deberia de ser tan alta, total, no se
+puede llenar hasta el final de texto. reducir su altura al 70%*».
+
+⚠️ Precedente en contra, leerlo antes de tocar: [REQ-CART2](PLAN_ARCHIVO.md#-req-cart2) **agrandó** esa
+ventana porque era diminuta, y la letra de 9 px de `--font-game` la fijó él mismo (las notas de los
+agentes son volcados largos que hay que leer enteros). Esto es la **altura de la caja**, no el tamaño de
+la letra: bajarla al 70 % sin quitar líneas visibles al texto largo. Guardián que hay que mantener en
+verde: `tests/test_notas_panel.js`.
+
+**Criterio de cierre:** el panel ocupa ~70 % de lo que ocupa hoy, una nota larga de agente se sigue
+leyendo entera (con scroll si hace falta) y `test_notas_panel.js` sigue en verde.
+
+**Lo hecho (2026-08-20).** Solo `web/style.css`: **10 → 7 líneas** de cuerpo (el 70 % que pedía) y el
+tope de pantalla de **46vh → 32vh**. Ni una línea de `app.js` ni de la letra: REQ-CART2 fijó los 9 px de
+`--font-game` y eso no se toca.
+
+Lo que no era obvio: el alto **se deriva de la letra**, `min(calc(var(--note-fs,18px) * 12.6), 32vh)`
+(1.8 de `line-height` × 7 líneas). Así, subirle el tamaño al texto no vuelve a descuadrar la caja —
+que es de donde venía el «demasiado alto» de origen. Los 280 caracteres del `maxlength` siguen cabiendo
+sin scroll, así que el «no se puede llenar hasta el final» deja de ser cierto por los dos lados.
+
+**Guardián:** `test_notas_panel.js`, en verde con dos comprobaciones nuevas — que caben los 280 del
+`maxlength` y que el textarea **no se come la pantalla** (tope 32vh).
+
+---
+
+---
 
 
 <a id="-bug-split2"></a>

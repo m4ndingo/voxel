@@ -48,12 +48,8 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-MOV1](#-req-mov1) | en el **móvil** el Mundo es inmanejable: sobran 📷/🎬, faltan los **3 botones del ratón**, pantalla completa, y el ✕ debe ser un **menú** | 🔴 abierto 2026-08-19 | captura y palabras del dueño en [`data/tickets/REQ-MOV1/`](data/tickets/REQ-MOV1/contexto.md). Revierte el «a propósito NO hay botones de romper/poner» que estaba escrito en `app.js`. El central **no es duda**: es el de redstone. Ojo al `pointerLockElement`: pantalla completa lo suelta |
 | [REQ-ED3](#-req-ed3) | **guías de rejilla** en el editor 2D (líneas azul claro que parten la capa en 2×2, 4×4…), conmutables | 🟢 abierto 2026-08-18 | pedido por el dueño como «tool que rote entre sin grid / ÷2 / ÷4». **Investigado**: el sitio es `drawEdit` (`app.js:565`), que ya pinta una rejilla por celda. Ojo con lo de «tool»: las del panel son de DIBUJO y elegirla te dejaría sin pincel — el precedente correcto es el interruptor de Caras (`vf_caras_marcar`), estado de VISTA que no viaja en el documento |
 | [BUG-GLOW6](#-bug-glow6) | **la luz dinámica atraviesa los sólidos**: las estrellas alumbran cuartos cerrados y la espada alumbra al otro lado de la pared | 🔴 abierto 2026-08-19 | 6 notas del dueño en `/map/bugfinder` que son **el mismo fallo**. Investigado: las luces dinámicas (`mcDynSync` → `uDynPos`) son luces de punto del shader **sin prueba de oclusión**; la luz de bloque horneada (`mcComputeBlockLight`, BFS por el aire) sí respeta sólidos. Desde [REQ-GLOW5](#-req-glow5) las estrellas de `game.voxelesUI` entran por esa misma vía |
-| [REQ-GLOW7](#-req-glow7) | los **topes de los mandos de luz** se quedan cortos: `interiorDark` no pasa de 1, `glowFocus` tampoco, y un punto emisivo alumbra demasiado de noche | 🟡 abierto 2026-08-19 | 3 notas de `/map/bugfinder`. Los dos topes son `Math.min(1, …)` explícitos (`app.js:19287` y `19604`); hay que decidir **qué significa pasarse de 1** antes de subirlos. Ojo: el dueño escribe `game.flowFocus`, que **no existe** — es `glowFocus` |
 | [REQ-SHADOW3](#-req-shadow3) | de noche la **sombra proyectada** sale tan difuminada que casi no se ve, y no se sabe si la espada de luz proyecta la suya | 🟢 abierto 2026-08-19 | 2 notas de `/map/bugfinder`. Sin investigar. Pide mandos para las sombras, no un arreglo concreto |
-| [BUG-RS27](#-bug-rs27) | los **botones y palancas de redstone se conmutan también con el botón derecho**, y debería ser solo con el central | 🔴 abierto 2026-08-19 | sitio localizado: la envoltura de `mcUseRight` en `redstone/redstone-piezas.js`, que convive con el escucha del central. Es dar marcha atrás a lo que se puso antes de REQ-TOOL5; el fichero ya explica por qué el derecho es peligroso (falla la puntería → bloque encima del cable) |
-| [REQ-SNP7](#-req-snp7) | volver del editor 2D/3D al Mundo **recarga el snippet `mundo-<nombre>`** y no hace falta | 🟡 abierto 2026-08-19 | nota de `/map/bugfinder`. Emparentado con [BUG-SNP4](#-bug-snp4) (las dos copias vivas del snippet): mirar los dos juntos |
 | [REQ-CART5](#-req-cart5) | poder **mover una nota ya plantada**, con un botón «mover» en su propio panel | 🟢 abierto 2026-08-19 | nota de `/map/bugfinder`. Hoy una nota se planta y no se recoloca. Ojo: la nota es el dato (`mc.notes`, clave = la posición) y el cartel se DERIVA, así que mover es **cambiar de clave**, no mover el cartel |
-| [REQ-CART6](#-req-cart6) | el **panel de la nota es demasiado alto**: no se llena nunca de texto, bajarlo al 70 % | 🟢 abierto 2026-08-19 | nota de `/map/bugfinder`. Ojo al precedente contrario: [REQ-CART2](PLAN_ARCHIVO.md#-req-cart2) lo agrandó porque era diminuto, y la letra de 9 px la fijó él mismo; esto es **alto**, no letra |
 | [REQ-EXTRU1](#-req-extru1) | **extrusión con la herramienta de selección**: seleccionar y con Shift+rueda subir (extruir) o bajar (cavar) | 🟢 abierto 2026-08-19 | nota de `/map/bugfinder`. El editor 2D ya tiene extrude; esto es lo mismo dentro del Mundo. Sin investigar |
 | [REQ-RANURA1](#-req-ranura1) | **guardar la selección en una ranura** para volver a plantarla: ranura 11, tecla `K` | 🟡 abierto 2026-08-19 | nota de `/map/bugfinder`. Es una galería de recortes, no un portapapeles: pide varias guardadas y poder elegir. Roza [REQ-TOOL6/7](PLAN_ARCHIVO.md) (la rosca de ranuras) y el pegado de 24 posturas |
 | [REQ-MULTI1](#-req-multi1) | **multijugador colaborativo**: varios jugadores en el mismo mapa, viéndose entre sí (con el arma en la mano y su etiqueta de nombre) y con los cambios del mundo sincronizados | 🟢 abierto 2026-08-19 | pedido por el dueño el 2026-08-19 al hilo de «pisar el mundo»: si el mapa es de todos, **nadie pisa a nadie**. Es el ticket más grande del plan. **Acotado ya por él (2026-08-19)**: tope **10** jugadores de momento (idealmente sin tope), **internet y red local**, y se **juega Y se construye** a la vez. A favor: medio camino hecho sin querer — `POST /api/mundo/edits` ya manda **el delta**, no el mundo. En contra: hoy no hay proceso servidor con estado (stdlib, un `Handler` por petición), ni identidad, ni cuerpo de jugador dibujable. Construir a la vez obliga a que **el servidor sea el árbitro**, no el navegador |
@@ -545,36 +541,6 @@ cara de enfrente. Sin perder fps medidos con `game.osd`.
 
 ---
 
-<a id="-req-glow7"></a>
-
-### 🟡 REQ-GLOW7 · Los topes de los mandos de luz se quedan cortos — 🟡 abierto 2026-08-19
-
-Tres notas de **`/map/bugfinder`**, las tres sobre mandos:
-
-- `43,14,69` — «*hace falta poder subir game.interiorDark a un valor mayor que 1*»
-- `29,14,70` — «*game.flowFocus no sube de 1, con esto es dificil saber si la espada ilumina
-  correctamente*»
-- `35,14,37` — «*un punto emisivo en un bloque por la noche ilumina demasiado ¿como se controla?
-  game.glowGain*»
-
-**Lo comprobado:**
-
-- `game.interiorDark` está **topado a mano**: `v=Math.max(0,Math.min(1, …))` (`app.js:19287`). Es un
-  **factor de sombra**, `interiorDark^((MAX-lv)/MAX)`: 1 = sin oscurecer, 0 = negro. Pasar de 1 no es
-  «más oscuro», es **más claro que la luz plena** — hay que decidir qué debe significar antes de subir
-  el tope, o el mando deja de tener sentido.
-- **`game.flowFocus` no existe**: es `game.glowFocus`, también topado a 1 (`app.js:19604`), y ahí el 1
-  es el extremo del recorrido por diseño (0 = omnidireccional tipo antorcha, 1 = haz estrecho hacia la
-  normal). Lo que pide de verdad es **ver mejor hasta dónde llega la espada**, que puede ser alcance
-  (`game.glowLevel`) y no foco. Preguntarle qué quiere ver.
-- `game.glowGain` **sí existe** y va de 0 a 16 (def. 1, `app.js:19614`), pero es **global**: no hay
-  forma de decir «este dibujo alumbra la mitad». Eso es lo que falta.
-
-**Criterio de cierre:** el dueño puede dejar un punto emisivo alumbrando lo justo de noche sin bajarle
-la luz a todo lo demás, y sabe qué mando toca sin preguntar (documentado en `docs/luz-y-sombra.md`).
-
----
-
 <a id="-req-shadow3"></a>
 
 ### 🟢 REQ-SHADOW3 · Las sombras de noche y las de la espada, configurables — 🟢 abierto 2026-08-19
@@ -596,50 +562,6 @@ persista, y está escrito en la wiki qué proyecta sombra y qué no.
 
 ---
 
-<a id="-bug-rs27"></a>
-
-### 🔴 BUG-RS27 · Los botones de redstone se conmutan también con el derecho — 🔴 abierto 2026-08-19
-
-Nota `40,14,65` de **`/map/bugfinder`**: «*los botones de redstone se estan activando con boton derecho
-y deberia de ser solamente con boton central*».
-
-**Sitio localizado**, y el propio fichero ya avisa del riesgo: `redstone/redstone-piezas.js` envuelve
-`window.mcUseRight` (el derecho conmuta **y**, si no hay palanca, **construye**) además de escuchar el
-`mousedown` del botón central en fase de captura. El comentario de al lado lo dice tal cual: con el
-derecho, «*un palmo de un circuito montado y un fallo de puntería te deja un bloque encima del cable*».
-El central ya es solo-conmutar desde que el dueño lo devolvió entero a redstone (2026-08-18, REQ-TOOL6/7).
-
-Trabajo: quitar la envoltura de `mcUseRight` y dejar únicamente el escucha del central. ⚠️ Se toca el
-`.js` de `redstone/`, **no el `.json`**, y se publica con `node redstone/make_snippets.js` + `POST
-/api/snippets` (orden del dueño: «todo lo de redstone va en ficheros aparte»). Comprobar antes si algún
-guardián de redstone da por bueno el derecho.
-
-**Criterio de cierre:** en `/map/redstone`, clic derecho sobre una palanca **no** la conmuta (y sí pone
-el bloque de la ranura, como en cualquier otro sitio); el central sigue conmutando.
-
----
-
-<a id="-req-snp7"></a>
-
-### 🟡 REQ-SNP7 · Volver del editor al Mundo no debería recargar el snippet del mapa — 🟡 abierto 2026-08-19
-
-Nota `50,14,40` de **`/map/bugfinder`**: «*si el mundo esta cargado y vuelvo al editor 2d/3d, volver al
-juego no tendria que recargar el snippet del mapa "mundo-nombre-del-mundo", es innecesari…*».
-
-Editor y Mundo son **la misma página** (`closeWorld()` / `mcVolverAIntro()`, jamás `location.href`), así
-que el mundo no se pierde al ir y volver: lo que se rehace es el arranque del snippet. Mirar junto con
-[BUG-SNP4](#-bug-snp4), que es la otra cara del mismo lío (dos copias vivas del mismo snippet y los
-cambios del editor revertidos).
-
-⚠️ Cuidado: hay snippets cuyo arranque **monta** cosas (bucles, `game.onKey`, envoltorios de
-`mcUpdate`). No re-ejecutarlo está bien; dejarlo a medias, no. Si se decide no recargar, el snippet
-tiene que poder distinguir «arranco» de «vuelvo».
-
-**Criterio de cierre:** ir al editor y volver al Mundo no reinicia lo que el snippet del mapa tuviera
-en marcha, y no duplica bucles ni teclas.
-
----
-
 <a id="-req-cart5"></a>
 
 ### 🟢 REQ-CART5 · Mover una nota ya plantada — 🟢 abierto 2026-08-19
@@ -658,24 +580,6 @@ tinte por el camino es peor que no tenerlo; que pase por el mismo sitio que hoy 
 
 **Criterio de cierre:** desde el panel de una nota, botón «mover», se recoloca con la mira y al soltar
 el cartel está en el sitio nuevo con su texto y su tinte, y el viejo ha desaparecido.
-
----
-
-<a id="-req-cart6"></a>
-
-### 🟢 REQ-CART6 · El panel de la nota es demasiado alto — 🟢 abierto 2026-08-19
-
-Nota `47,14,40` de **`/map/bugfinder`**: «*la altura de la nota no deberia de ser tan alta, total, no se
-puede llenar hasta el final de texto. reducir su altura al 70%*».
-
-⚠️ Precedente en contra, leerlo antes de tocar: [REQ-CART2](PLAN_ARCHIVO.md#-req-cart2) **agrandó** esa
-ventana porque era diminuta, y la letra de 9 px de `--font-game` la fijó él mismo (las notas de los
-agentes son volcados largos que hay que leer enteros). Esto es la **altura de la caja**, no el tamaño de
-la letra: bajarla al 70 % sin quitar líneas visibles al texto largo. Guardián que hay que mantener en
-verde: `tests/test_notas_panel.js`.
-
-**Criterio de cierre:** el panel ocupa ~70 % de lo que ocupa hoy, una nota larga de agente se sigue
-leyendo entera (con scroll si hace falta) y `test_notas_panel.js` sigue en verde.
 
 ---
 
