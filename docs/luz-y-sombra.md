@@ -356,3 +356,27 @@ Valen igual para la luz de bloque (antorchas fijas) y para la dinámica (emisor 
 
 `glowLevel` y `glowFocus` re-siembran + re-mallan al asignarlos (`mc._blEmiSig=null` fuerza el recálculo — **sin eso el
 cambio no se veía hasta editar un bloque**, que era el síntoma de BUG-GLOW1). `glowGain` no necesita nada, se ve al frame.
+
+⛔ **`game.flowFocus` no existe** (REQ-GLOW7). Es la errata de `glowFocus` que el dueño escribió tres veces. Desde
+REQ-GLOW7 hay un alias que **avisa y reenvía** en vez de tragarse el valor callado, que era lo que hacía parecer que
+el mando estaba topado. Y el tope de `glowFocus` **sí es 1 de verdad**: es el extremo del recorrido, no un recorte.
+Para «ver hasta dónde llega la espada» el mando es `glowLevel` (alcance en bloques), no el foco.
+
+### `game.interiorDark` pasa de 1: la sobreexposición (REQ-GLOW7)
+
+`interiorDark` es un **factor de sombra**, `interiorDark^((MAX−lv)/MAX)`:
+
+| valor | qué hace |
+|---|---|
+| `0` | la penumbra baja **hasta negro** |
+| `0.55` (defecto) | penumbra normal |
+| `1` | **desactivado** (neutro: todo a plena luz) |
+| `>1`, hasta `MC_INTERIOR_DARK_MAX` = **4** | **SOBREEXPONE**: lo que NO tiene luz sale más claro que lo que la tiene |
+
+El `>1` es un **revelado de inspección**, no un modo de juego: lo pidió el dueño para ver qué está alumbrando la espada
+en una escena a oscuras. A 4 el fondo sin luz ya sale a tope y subir más no enseña nada nuevo.
+
+⚠️ **El «apagado» es el 1 EXACTO, nunca `>=1`.** `mcComputeLight` y `mcRelightBox` se saltan el cálculo entero cuando
+vale 1, y `mcMeshChunk` / `mcCapaGeom` solo construyen la `lightLut` si `dark!==1`. Si alguna de esas comparaciones
+vuelve a `<1` / `>=1`, la sobreexposición se queda **sin `mc.light` que leer** y no se ve nada. La excepción es
+`dynLift` en el shader, que sí sigue en `uDynDark>=1.0`: con la penumbra ya subida en el vértice, dividir la bajaría.

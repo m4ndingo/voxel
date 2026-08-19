@@ -7128,6 +7128,12 @@ game.fisicaAgua = _mcTunableFisica('WATER', { gravedad: MC_FISICA_FLUIDO.WATER.g
 game.fisicaLava = _mcTunableFisica('LAVA',  { gravedad: MC_FISICA_FLUIDO.LAVA.gravedad,  arrastre: MC_FISICA_FLUIDO.LAVA.arrastre,  empuje: MC_FISICA_FLUIDO.LAVA.empuje });
 const MC_CHUNK=16;              // lado del chunk en x/z (la columna vertical y entera va en un chunk)
 const MC_MAXLIGHT=15;               // NIVELES de luz (gradación) y alcance del skylight: se pierde 1 por bloque al difundirse. NO es la INTENSIDAD: lightLut normaliza /MC_MAXLIGHT ⇒ a tope siempre ×1. Para brillo mayor → game.glowGain (uGlowGain), no subir esto
+// REQ-GLOW7 · tope de game.interiorDark. El mando es un FACTOR de sombra, `interiorDark^((MAX-lv)/MAX)`:
+// 0 = penumbra a negro · 1 = neutro (desactivado) · >1 = SOBREEXPONER la penumbra (lo que no tiene luz
+// sale MÁS claro que lo que la tiene). Lo pidió el dueño para poder ver qué está alumbrando la espada
+// en una escena a oscuras, así que es un revelado de inspección, no un modo de juego. El 4 no es
+// mágico: a 4 el fondo sin luz ya sale a tope y subir más no enseña nada nuevo.
+const MC_INTERIOR_DARK_MAX=4;
 const MC_TILE=16;                 // px por cara en el atlas (las texturas son 16³)
 const MC_ATLAS_STEP=16;           // el atlas de estructuras crece de 16 en 16 filas: si se ajustase al recuento, cada
                                   // textura nueva cambiaría AH y con ella la v de TODAS las estructuras (re-mallar todas)
@@ -7783,7 +7789,7 @@ function mcCapaGeom(ch){
     // La luz es la de SU celda y una sola vez para las 5 caras: una lámina de 2/16 tumbada en el aire
     // no tiene interior que sombrear, y así el manto se apaga dentro de una cueva como el suelo que tapa.
     let lz=1;
-    if(dark<1 && LU && mcInside(x,y,z)) lz=Math.pow(dark,(MC_MAXLIGHT-LU[mcIdx(x,y,z)])/MC_MAXLIGHT);
+    if(dark!==1 && LU && mcInside(x,y,z)) lz=Math.pow(dark,(MC_MAXLIGHT-LU[mcIdx(x,y,z)])/MC_MAXLIGHT);   // !==1, no <1: >1 sobreexpone (REQ-GLOW7)
     for(const f of MC_CAPA_CARAS){
       const F=MC_FACES[f], d=F.dir;
       if(f!==0){
@@ -9099,11 +9105,13 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc, noBakeLight, tinte)
   const E=(esc>0?+esc:1);
   // Luz del entorno horneada por CARA (Parte A): igual que el terreno, cada cara se oscurece por la luz de la celda
   // de aire vecina (celda-muestra en geom.*SC, en unidades de bloque relativas al origen). lv = max(skylight, luz de
-  // bloque). Sin luz activa (interiorDark>=1 y sin brillo) → factor 1: comportamiento de hoy (plena luz).
+  // bloque). Sin luz activa (interiorDark===1 y sin brillo) → factor 1: comportamiento de hoy (plena luz).
+  // El apagado es el 1 EXACTO: por debajo oscurece y por encima SOBREEXPONE (REQ-GLOW7), y las dos ramas
+  // necesitan la LUT igual.
   const dark=mc.interiorDark, L=mc.light, BL=mc.blockLight;
-  const doLight=!noBakeLight && (dark<1 || mc.hasGlow) && (L || BL);
+  const doLight=!noBakeLight && (dark!==1 || mc.hasGlow) && (L || BL);
   let lightLut=null;
-  if(dark<1 && L){ lightLut=new Float32Array(MC_MAXLIGHT+1);
+  if(dark!==1 && L){ lightLut=new Float32Array(MC_MAXLIGHT+1);
     for(let lv=0;lv<=MC_MAXLIGHT;lv++) lightLut[lv]=Math.pow(dark,(MC_MAXLIGHT-lv)/MC_MAXLIGHT); }
   // Factor de luz para la cara fi de un flujo, desde su celda-muestra (celda de bloque local → mundo).
   const faceFactor=(sc,fi)=>{
@@ -9513,7 +9521,7 @@ float dynLuz(vec3 w){
   return m;
 }
 float dynLift(float shade, float dyn){
-  if(uDynDark>=1.0 || dyn<=0.0) return shade;               // interiores no se oscurecen ⇒ nada que reponer
+  if(uDynDark>=1.0 || dyn<=0.0) return shade;               // interiores no se oscurecen ⇒ nada que reponer. Aquí SÍ es >=1: con la sobreexposición de REQ-GLOW7 (uDynDark>1) la penumbra ya viene subida del vértice y dividir la BAJARÍA
   return min(shade / pow(max(uDynDark, 0.001), clamp(dyn, 0.0, 1.0)), 1.12); // restaura el sombreado continuo
 }
 vec3 mcLitGlow(vec3 baseCol, vec4 blk, float dyn, float expo, float gain){
@@ -10557,10 +10565,10 @@ function mcMeshChunk(cx,cz){
   // más por interiorDark (curva exponencial en el déficit de luz). Por eso interiorDark=0 puede llegar a NEGRO en el
   // interior de una sala (no solo en el fondo con luz 0), mientras el default 0.55 queda casi como el mapeo lineal.
   // Al depender de la luz REAL, no hay bandas por el grosor de tierra encima y una figura flotante apenas ensombrece
-  // el suelo (la luz entra de lado). interiorDark = 1 ⇒ desactivado.
+  // el suelo (la luz entra de lado). interiorDark = 1 ⇒ desactivado (el 1 EXACTO: >1 sobreexpone, REQ-GLOW7).
   const dark=mc.interiorDark, L=mc.light, BL=mc.blockLight;
   let lightLut=null;
-  if(dark<1 && L){
+  if(dark!==1 && L){
     lightLut=new Float32Array(MC_MAXLIGHT+1);
     for(let lv=0;lv<=MC_MAXLIGHT;lv++) lightLut[lv]=Math.pow(dark,(MC_MAXLIGHT-lv)/MC_MAXLIGHT);
   }
@@ -10785,7 +10793,7 @@ function mcTablaCielo(){
 function mcComputeLight(){
   const dim=mc.dim, g=mc.grid, NX=dim.x, NY=dim.y, NZ=dim.z, sxy=NX*NY, N=NX*NY*NZ;
   const L=(mc.light&&mc.light.length===N)?mc.light:(mc.light=new Uint8Array(N));
-  if(mc.interiorDark>=1) return;   // desactivado: mcMeshChunk no muestrea la luz, no hace falta calcularla
+  if(mc.interiorDark===1) return;  // desactivado: mcMeshChunk no muestrea la luz, no hace falta calcularla. ES el 1 EXACTO: >1 sobreexpone (REQ-GLOW7) y necesita mc.light igual que <1
   L.fill(0);
   const PASA=mcTablaLuz(), CIELO=mcTablaCielo();
   const buckets=[]; for(let i=0;i<=MC_MAXLIGHT;i++) buckets.push([]);
@@ -10834,7 +10842,7 @@ let mcRelightPrev=null;                 // scratch reusado (el mc.light de antes
 function mcRelightBox(bx,bz,bx1,bz1){
   const dim=mc.dim, g=mc.grid, NX=dim.x, NY=dim.y, NZ=dim.z, sxy=NX*NY, N=NX*NY*NZ;
   const L=(mc.light&&mc.light.length===N)?mc.light:(mc.light=new Uint8Array(N));
-  if(mc.interiorDark>=1) return null;   // desactivada: mcMeshChunk no muestrea la luz, no hace falta calcularla
+  if(mc.interiorDark===1) return null;  // desactivada: mcMeshChunk no muestrea la luz, no hace falta calcularla (el 1 EXACTO, ver REQ-GLOW7)
   if(bx1===undefined){ bx1=bx; bz1=bz; }
   const x0=Math.max(0,Math.min(bx,bx1)-MC_RELIGHT_R), x1=Math.min(NX-1,Math.max(bx,bx1)+MC_RELIGHT_R);
   const z0=Math.max(0,Math.min(bz,bz1)-MC_RELIGHT_R), z1=Math.min(NZ-1,Math.max(bz,bz1)+MC_RELIGHT_R);
@@ -19282,9 +19290,14 @@ Object.defineProperty(game,'useOldStructBuildCall',{ enumerable:true, get:()=>mc
 // hay bandas por el grosor de tierra encima y una figura flotante apenas ensombrece el suelo (la luz entra de lado).
 // Mapeo exponencial `interiorDark^((MAX-lv)/MAX)`: 1 = desactivado; 0.55 por defecto; **0 = interiores hasta negro**
 // (una sala con poca luz se apaga del todo, no solo el fondo con luz 0). Re-malla el terreno en vivo y persiste.
-try{ const d=parseFloat(localStorage.getItem('vf_mcInteriorDark')); if(isFinite(d)) mc.interiorDark=Math.max(0,Math.min(1,d)); }catch(e){}
+// REQ-GLOW7 · **el recorrido llega a MC_INTERIOR_DARK_MAX (4), ya no a 1**. Pasar de 1 invierte el mando: la penumbra
+// sale MÁS clara que la luz plena, o sea SOBREEXPOSICIÓN para inspeccionar («*hace falta poder subir game.interiorDark
+// a un valor mayor que 1*»: quería ver qué alumbra la espada en una escena negra). Ojo al cambiar esto: el «apagado»
+// es el **1 exacto**, no «≥1» — mcComputeLight y mcRelightBox se saltan el cálculo entero cuando vale 1, y si esa
+// comparación se deja en `>=1` la sobreexposición se queda sin mc.light que leer y no se ve NADA.
+try{ const d=parseFloat(localStorage.getItem('vf_mcInteriorDark')); if(isFinite(d)) mc.interiorDark=Math.max(0,Math.min(MC_INTERIOR_DARK_MAX,d)); }catch(e){}
 Object.defineProperty(game,'interiorDark',{ enumerable:true, get:()=>mc.interiorDark,
-  set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.1)); mc.interiorDark=v; try{localStorage.setItem('vf_mcInteriorDark',v);}catch(e){}
+  set:v=>{ v=Math.max(0,Math.min(MC_INTERIOR_DARK_MAX, isFinite(+v)?+v:0.1)); mc.interiorDark=v; try{localStorage.setItem('vf_mcInteriorDark',v);}catch(e){}
     if(mc.grid){ mcMeshAll(); if(mc.structures.length) mcRestampAll(); }   // re-oscurece terreno Y estructuras en vivo
     return v; } });
 // game.sunShade = SOMBRA PROYECTADA del sol vertical, que es COSA APARTE de game.interiorDark. interiorDark es
@@ -19604,6 +19617,16 @@ Object.defineProperty(game,'glowFocus',{ enumerable:true, get:()=>mc.glowFocus,
   set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.2)); mc.glowFocus=v; try{localStorage.setItem('vf_mcGlowFocus',v);}catch(e){}
     if(mc.grid){ mc._blEmiSig=null; mcComputeBlockLight(); mcMeshAll(); if(mc.structures.length) mcRestampAll(); }   // _blEmiSig=null: glowLevel/glowFocus no cambian la firma del BFS ⇒ sin esto mcComputeBlockLight se saltaría y no verías el cambio hasta editar un bloque
     return v; } });
+// REQ-GLOW7 · `game.flowFocus` NO existe: es una errata de `glowFocus` que el dueño escribió tres veces
+// («*game.flowFocus no sube de 1*»). Y el tope de glowFocus SÍ es 1 de verdad: es el extremo del recorrido
+// —0 omnidireccional, 1 haz lo más fino— y pasarse no significa nada. Lo que sí engañaba es que
+// `game.flowFocus=3` se tragaba el valor CALLADO: dejaba una propiedad suelta en `game` que no lee nadie,
+// y desde fuera parece que el mando está topado. El alias no es azúcar: convierte «no sube» en «te has
+// equivocado de nombre». Para ver MÁS LEJOS lo que alumbra la espada, el mando es `game.glowLevel` (alcance
+// en bloques), no el foco.
+Object.defineProperty(game,'flowFocus',{ enumerable:false,
+  get:()=>{ console.warn('game.flowFocus no existe: es game.glowFocus (0..1). Para el alcance, game.glowLevel.'); return mc.glowFocus; },
+  set:v=>{ toast('game.flowFocus no existe → aplicado a game.glowFocus'); game.glowFocus=v; return v; } });
 // game.glowGain = INTENSIDAD de la luz artificial (antorchas, gafas de agente…). 1 = tope normal (una superficie a plena
 // luz de bloque llega al brillo de pleno día, ni más). >1 SOBREEXPONE: sube el techo del mix de exposición (uGlowGain), así
 // una fuente brilla MÁS que el día (se «quema» a blanco cuanto más alto). NO confundir con MC_MAXLIGHT (eso son NIVELES de
