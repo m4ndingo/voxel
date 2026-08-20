@@ -15441,6 +15441,12 @@ function mcNoteSignsDesfasados(){
     if(!quiere || !mc.notes[s.nota] || s.cartel!==firma || (s.rot|0)!==wantedRot || (s.tinte||'')!==mcNoteTinte(s.nota)) return true;
     n++;
   }
+  // BUG-CART1 · un cartel FANTASMA (venido del documento, sin `nota`) plantado donde va el de una nota
+  // también es estar desfasado: si no se mira aquí, la limpieza de mcSyncNoteSignsRun no llega a correr
+  // nunca, porque todo lo demás cuadra.
+  else if(s.key===MC_NOTE_SIGN || s.key===MC_NOTE_SIGN_PLANO){
+    for(const k in mc.notes){ const o=mcNoteSignOrigin(k); if(o[0]===s.ox && o[1]===s.oy && o[2]===s.oz) return true; }
+  }
   return n!==(quiere ? Math.min(Object.keys(mc.notes).length, MC_NOTE_SIGN_MAX) : 0);
 }
 // Las sincronizaciones se ENCOLAN, no se descartan: estampar es asíncrono, y una nota escrita
@@ -15459,6 +15465,20 @@ async function mcSyncNoteSignsRun(){
     if(quiere && mc.notes[s.nota] && s.cartel===firma && (s.rot|0)===wantedRot && (s.tinte||'')===mcNoteTinte(s.nota) && !tienen.has(s.nota)) tienen.set(s.nota, s);
     else mcRemoveStruct(s, true);                       // nota borrada, carteles apagados, ajustes o tinte cambiados, o duplicado
   }
+  // BUG-CART1 · los carteles que la carrera de antes dejó ESCRITOS en `mundo.json` vuelven del disco
+  // sin `nota` ni `efimera`, así que nadie los recogía: quedaban clavados debajo del cartel bueno y se
+  // duplicaban en cada guardado. Se limpian aquí, y solo los que están exactamente en el sitio donde
+  // va el cartel de una nota (`mcNoteSignOrigin`) — un cartel puesto a mano en cualquier otro sitio es
+  // decoración del dueño y no se toca. El mundo se marca sucio para que el fichero salga limpio.
+  const sitios=new Set();
+  for(const k in mc.notes) sitios.add(mcNoteSignOrigin(k).join(','));
+  let fantasmas=0;
+  for(const s of mc.structures.slice()){
+    if(s.nota || (s.key!==MC_NOTE_SIGN && s.key!==MC_NOTE_SIGN_PLANO)) continue;
+    if(!sitios.has(s.ox+','+s.oy+','+s.oz)) continue;
+    mcRemoveStruct(s, true); fantasmas++;
+  }
+  if(fantasmas){ console.warn('[notas] '+fantasmas+' cartel(es) guardados por error en el documento: fuera (BUG-CART1)'); mcDirtyHeader(); mcScheduleSave(); }
   if(!quiere) return;
   // Se plantan por tandas: estampar construye malla (y a veces re-hornea el atlas), así que un
   // agente que suelta veinte notas de golpe congelaría el cuadro. Lo que quede lo recoge el repaso
@@ -15472,9 +15492,12 @@ async function mcSyncNoteSignsRun(){
     if(!mcInside(o[0],o[1],o[2])) continue;
     const rot = (mc.noteRots && mc.noteRots[k] !== undefined) ? mc.noteRots[k] : c.rot;
     const tinte = mcNoteTinte(k);
-    const s=await mcStampStruct(c.palo?MC_NOTE_SIGN:MC_NOTE_SIGN_PLANO, o[0],o[1],o[2], rot, true, c.esc, tinte);
+    // BUG-CART1 · la marca viaja EN la llamada: puesta después del `await`, un guardado que cayera
+    // mientras se estampa se llevaba el cartel al documento (y de ahí no salía nunca más).
+    const marca={efimera:true, nota:k, cartel:firma, noteRot:rot, tinte};
+    const s=await mcStampStruct(c.palo?MC_NOTE_SIGN:MC_NOTE_SIGN_PLANO, o[0],o[1],o[2], rot, true, c.esc, tinte, marca);
     if(!s) continue;
-    s.efimera=true; s.nota=k; s.cartel=firma; s.noteRot=rot; s.tinte=tinte;   // marcar DESPUÉS del await: antes no hay instancia viva
+    Object.assign(s, marca);                                 // …y otra vez por si mcRestampAll devolvió otra instancia
     tienen.set(k, s); plantados++;
   }
 }
@@ -17333,11 +17356,16 @@ async function mcStructTexKeys(srcKey){
   for(const k in vox){ const v=vox[k]; if(typeof v==='string' && v.slice(0,4)==='tex:') out.add(v.slice(4)); }
   return [...out];
 }
-async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet, esc, tinte){
+// BUG-CART1 · `marca` son los campos que la instancia tiene que llevar YA, no después del `await`:
+// estampar tarda (atlas, malla, a veces red) y en ese hueco puede caer un guardado. Un cartel de nota
+// marcado tarde se serializaba como estructura normal en `mundo.json` y ahí se quedaba para siempre,
+// duplicándose en cada carga. Los campos que se pongan aquí llegan antes de que nadie pueda mirar.
+async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet, esc, tinte, marca){
   rot=mcOriNorm(rot);                   // una de las 24 posturas; ver mcStructGeom
   const E=(esc>0?+esc:1);               // escala libre de la instancia (REQ-AGESC1); 1 = el camino de siempre
   const TT=mcNoteTinteNorm(tinte);      // tinte horneado en la malla (carteles de nota); '' = el dibujo tal cual
   const s={key:srcKey, ox,oy,oz, rot, esc:E, tinte:TT, colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[ox,oy,oz,ox,oy,oz]};
+  if(marca) Object.assign(s, marca);
   mc.structures.push(s);                                        // en la lista ya (el render la ignora sin malla; el atlas la ve)
   // ¿aparece alguna clave tex: nueva? ⇒ recomponer el atlas de estructuras. Con filas fijas y altura escalonada eso
   // NO mueve las UV de las demás casi nunca, así que solo hay que re-mallarlo todo cuando el atlas sube de escalón

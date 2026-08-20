@@ -49,6 +49,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-ED3](#-req-ed3) | **guías de rejilla** en el editor 2D (líneas azul claro que parten la capa en 2×2, 4×4…), conmutables | 🟢 abierto 2026-08-18 | pedido por el dueño como «tool que rote entre sin grid / ÷2 / ÷4». **Investigado**: el sitio es `drawEdit` (`app.js:565`), que ya pinta una rejilla por celda. Ojo con lo de «tool»: las del panel son de DIBUJO y elegirla te dejaría sin pincel — el precedente correcto es el interruptor de Caras (`vf_caras_marcar`), estado de VISTA que no viaja en el documento |
 | [BUG-GLOW6](#-bug-glow6) | **la luz dinámica atraviesa los sólidos**: las estrellas alumbran cuartos cerrados y la espada alumbra al otro lado de la pared | 🔴 abierto 2026-08-19 | 6 notas del dueño en `/map/bugfinder` que son **el mismo fallo**. Investigado: las luces dinámicas (`mcDynSync` → `uDynPos`) son luces de punto del shader **sin prueba de oclusión**; la luz de bloque horneada (`mcComputeBlockLight`, BFS por el aire) sí respeta sólidos. Desde [REQ-GLOW5](#-req-glow5) las estrellas de `game.voxelesUI` entran por esa misma vía |
 | [REQ-SHADOW3](#-req-shadow3) | de noche la **sombra proyectada** sale tan difuminada que casi no se ve, y no se sabe si la espada de luz proyecta la suya | 🟢 abierto 2026-08-19 | 2 notas de `/map/bugfinder`. Sin investigar. Pide mandos para las sombras, no un arreglo concreto |
+| [BUG-CART1](#-bug-cart1) | **carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce | 🟡 arreglado 2026-08-20, **falta una pasada del dueño** | encontrado tirando de un guardián en rojo, no pedido. La causa (la marca `efimera` se ponía DESPUÉS del `await` de estampar) está arreglada y el motor se cura solo en caliente. Queda lo que ya está escrito en los ficheros: `python3 herramientas/carteles_fantasma.py` (en seco) y luego `--escribe`. **No lo puedo lanzar yo**: la caja de arena me deniega escribir en `data/worlds/` |
 | [REQ-RANURA1](#-req-ranura1) | **guardar la selección en una ranura** para volver a plantarla: ranura 11, tecla `K` | 🟡 abierto 2026-08-19 | nota de `/map/bugfinder`. Es una galería de recortes, no un portapapeles: pide varias guardadas y poder elegir. Roza [REQ-TOOL6/7](PLAN_ARCHIVO.md) (la rosca de ranuras) y el pegado de 24 posturas |
 | [REQ-MULTI1](#-req-multi1) | **multijugador colaborativo**: varios jugadores en el mismo mapa, viéndose entre sí (con el arma en la mano y su etiqueta de nombre) y con los cambios del mundo sincronizados | 🟢 abierto 2026-08-19 | pedido por el dueño el 2026-08-19 al hilo de «pisar el mundo»: si el mapa es de todos, **nadie pisa a nadie**. Es el ticket más grande del plan. **Acotado ya por él (2026-08-19)**: tope **10** jugadores de momento (idealmente sin tope), **internet y red local**, y se **juega Y se construye** a la vez. A favor: medio camino hecho sin querer — `POST /api/mundo/edits` ya manda **el delta**, no el mundo. En contra: hoy no hay proceso servidor con estado (stdlib, un `Handler` por petición), ni identidad, ni cuerpo de jugador dibujable. Construir a la vez obliga a que **el servidor sea el árbitro**, no el navegador |
 | [REQ-SPAWN1](#-req-spawn1) | **pensar el tema de los puntos de aparición** (spawn) | 🟢 abierto 2026-08-19 | nota del dueño en `/map/bugfinder`, tal cual: es un **encargo de pensar**, no un arreglo. Hoy hay un único `spawn` en la cabecera del mundo |
@@ -557,6 +558,49 @@ contestar; si de verdad quiere sombra de la espada, eso es otra luz en el mapa d
 
 **Criterio de cierre:** de noche la sombra del sol/luna se ve tanto como él quiera, con un mando que
 persista, y está escrito en la wiki qué proyecta sombra y qué no.
+
+---
+
+<a id="-bug-cart1"></a>
+
+### 🟡 BUG-CART1 · Carteles de nota apilados dentro de `mundo.json` — 🟡 arreglado 2026-08-20, falta una pasada del dueño
+
+No lo pidió nadie: salió tirando de un guardián en rojo mientras se cerraba
+[REQ-CART5](PLAN_ARCHIVO.md#-req-cart5). En `data/worlds/test.json` había **siete carteles apilados de
+tres en tres** encima de las notas.
+
+**La causa.** El cartel de una nota se **deriva** de `mc.notes` y va marcado `efimera`, así que
+`mcStructuresDoc()` lo filtra y `mundo.json` no debería llevar ninguno jamás. Pero la marca se ponía
+**después** del `await` de `mcStampStruct`, y estampar tarda (atlas, malla, a veces red): cualquier
+guardado que cayera en ese hueco se llevaba el cartel al fichero. Y de ahí ya no salía solo — al cargar
+vuelve **sin `nota` ni `efimera`**, nadie lo reconoce como cartel de nota, y el guardado siguiente
+añadía otro encima.
+
+**Lo hecho.** Dos mitades, las dos necesarias:
+
+- La marca **viaja en la llamada** (`mcStampStruct(..., marca)`) y se aplica antes de que la instancia
+  entre en `mc.structures`: ya no hay hueco que aprovechar.
+- El motor **se cura solo**: `mcSyncNoteSignsRun` retira los carteles sin marcar que estén justo donde
+  va el de una nota viva, y `mcNoteSignsDesfasados` los ve (si no, la limpieza no llegaría a correr
+  nunca, porque todo lo demás cuadra).
+
+Guardián `tests/test_cart1_carteles_fantasma.js`, en verde. `/map/test` ya está limpio (7 notas del
+dueño, `carteles: []`).
+
+**Lo que queda, y por qué no lo cierro yo.** Los **huérfanos** —carteles de un bloque que ya no tiene
+nota— no se tocan a propósito: no se distinguen de uno puesto a mano como decoración, así que borrarlos
+adivinando iría contra la regla de arranque. Para ésos está
+`herramientas/carteles_fantasma.py`, que hace pasada en seco por defecto:
+
+```
+python3 herramientas/carteles_fantasma.py                    # lista lo que hay en todos los mapas
+python3 herramientas/carteles_fantasma.py --escribe          # borra (idempotente)
+```
+
+**No lo puedo lanzar yo**: escribe en `data/worlds/` y la caja de arena me lo deniega.
+
+**Criterio de cierre:** el dueño lanza la pasada en seco, mira la lista, decide si algún huérfano es
+decoración suya y corre `--escribe` con lo demás.
 
 ---
 
