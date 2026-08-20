@@ -62,6 +62,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-TOOL9](#-req-tool9) | poder **elegir qué herramientas entran con `e` y cuáles con `E`** desde el editor (primarias / secundarias) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «cambiar el orden de las herramientas empieza a ser algo habitual». Redactado, sin investigar | 
 | [REQ-CART7](#-req-cart7) | poder **elegir el tipo de cartel** de una nota desde su editor, con los carteles definidos en un sitio | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Él mismo propone la puerta: categoría **«Cartel de Notas»** en la galería. Encaja con que los carteles ya **se derivan** de `mc.notes` y no viven en `mundo.json` ([BUG-CART1](#-bug-cart1)) | 
 | [REQ-FX1](#-req-fx1) | **temblor de cámara al caer** desde 15 bloques o más, con altura/amplitud/duración ajustables | 🟢 abierto 2026-08-20 | nota de `/map/bugfinder2`. El sitio natural es el aterrizaje que ya detecta `mcCaidaPaso`. Redactado, sin investigar | 
+| [REQ-CIUDAD1](#-req-ciudad1) | **renderizar un `.md` como ciudad de voxels** (`/map/plan`) y **regenerar el `.md` desde el mapa** | 🟢 entregado 2026-08-20, esperando su visto bueno | pedido del dueño el 2026-08-20. Hecho y en verde: la vuelta es **byte a byte** con `--fidelidad=exacta` (`tests/test_ciudad_md.js`). Detalle en [`docs/ciudad-md.md`](docs/ciudad-md.md). Falta que lo mire y decida si el aspecto de la ciudad merece más presupuesto (todo lo estético es DERIVADO y no toca la ida y vuelta) | 
 
 ---
 
@@ -990,6 +991,39 @@ ya está a mano ahí. ⛔ Y por lo mismo, ojo: si se la envuelve hay que pasarle
 (comerse el 6º apaga el nadar, el 7º la mirada, sin fallar nada).
 
 Verde y no rojo porque es adorno: no rompe nada mientras no exista.
+
+---
+
+<a id="-req-ciudad1"></a>
+
+### 🟢 REQ-CIUDAD1 · Renderizar un `.md` como ciudad de voxels, y deshacerla — 🟢 entregado 2026-08-20, esperando su visto bueno
+
+Pedido del dueño (2026-08-20): **«un script que pueda ejecutar desde consola que genere un mapa»** a
+partir de `PLAN.md` —y de cualquier otro `.md`—, donde los encabezados grandes sean continentes,
+países o edificios según lo anidados que estén sus contenidos, se pueda **llegar al dato final**
+apoyándose en notas, **toda la arquitectura tenga relación con el fichero**, e idealmente **del mapa
+se pueda volver a generar el `.md`**.
+
+Cómo funciona y por qué → [`docs/ciudad-md.md`](docs/ciudad-md.md). Lo que hay hoy:
+
+```bash
+python3 herramientas/md_a_ciudad.py PLAN.md --escribe   # -> /map/plan   (43 carteles, se lee del aire)
+python3 herramientas/ciudad_a_md.py plan --verifica PLAN.md
+```
+
+- **La vuelta es byte a byte** con `--fidelidad=exacta`: `PLAN.md` (79 033 B) sale idéntico, y también
+  un fixture adversario con CRLF, valla de código que contiene `#`, línea de 5000 y un par suplente
+  justo en el corte de nota. Guardián `tests/test_ciudad_md.js` (15 comprobaciones, `--area=general`).
+- **La regla que lo sostiene**: cada rasgo es **PORTADOR** (la partición del suelo en `y=GH` por
+  materiales separadores + las notas) o **DERIVADO** (todo lo demás). Sólo hay **dos** portadores, así
+  que todo el presupuesto estético futuro es gratis: se puede rehacer entero sin tocar la vuelta.
+- **`--enlaces=carteles` se ha caído del plan a propósito**: una nota es PORTADORA, así que un cartel
+  de enlace se colaría en la concatenación y corrompería el `.md`. Los enlaces van como senderos de
+  grava en `y=GH+1`, nunca en `y=GH`.
+
+Queda pendiente de su visto bueno, y sin medir: **`PLAN_ARCHIVO.md` (900 KB) son miles de notas** y
+por orden suya no hay tope ni aviso. La ciudad tira hoy a cementerio de cajas ordenadas; el remedio
+es todo derivado y no toca la ida y vuelta.
 
 ---
 

@@ -49,11 +49,8 @@ como línea, pero el fichero es `web/app.js`.
    su fila a `PLAN_ARCHIVO.md` + **1 commit por ticket**.
 3. Servidor primero: `python3 server.py 8500` (antes `pgrep -af server.py`). Plantar/estampar de prueba →
    **`/map/test`**, ⛔ nunca `/map/default` ni `/map/agents`; lo que ya hay ahí **no se borra**.
-4. **129 tests** en `tests/` (113 Chromium real vía Playwright vs `http://localhost:8500`, 16 Node puro).
-   Runner `node correr_tests.js --node | --area=X | --list`; **corre solo tu área**. ! **desde la raíz**
-   (leen `data/…`, `assets/…` relativos al cwd). ! test que entre por `/` → **`?noauto=1`**, o el
-   autoarranque del dueño lo lleva a otro mapa y falla con un error que no se parece a la causa. Clon
-   nuevo: `npm i && npx playwright install chromium` (clavado 1.47.2; 1.48+ pide Node 20).
+4. Tests → [`docs/repo.md`](docs/repo.md). `node correr_tests.js --node | --area=X | --list`, **solo tu
+   área**, ! **desde la raíz**, ! test que entre por `/` → **`?noauto=1`**.
 5. Las 2 más caras (secciones abajo): `app.js` **no se toca para cambiar agentes**; un snippet del Mundo
    tiene **2 copias vivas** ⇒ `parche_snp_*.py` idempotente por ancla, **jamás reescribir entero**.
 
@@ -203,6 +200,10 @@ es un intérprete de propiedades.
   que él lo pida.** Tu cambio la desfasa → 1 línea en [`wiki/PENDIENTE.md`](wiki/PENDIENTE.md) y sigues.
   En `api.json`, `fuente` lleva el **SÍMBOLO, nunca el número de línea**; `tests/test_wiki.js` comprueba
   que cada símbolo sigue existiendo.
+- Ciudad-MD (`.md` ↔ ciudad, `herramientas/md_a_ciudad.py`/`ciudad_a_md.py`) →
+  [`docs/ciudad-md.md`](docs/ciudad-md.md). Cada rasgo es **PORTADOR** (suelo `y=GH` + notas; la
+  vuelta los lee) o **DERIVADO** (el resto; los ignora). ⛔ Derivado **jamás** en `y=GH` ni en nota:
+  el `.md` regenerado sale corrupto **sin que nada falle a gritos**. Guardián `test_ciudad_md.js`.
 
 ## Convenciones → [`docs/repo.md`](docs/repo.md)
 

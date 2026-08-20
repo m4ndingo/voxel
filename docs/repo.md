@@ -57,3 +57,13 @@ El runner incluye comprobación *pre-flight* automática del servidor `:8500` y 
   el puntero con la regla que cuesta caro romper. Nada se borra al mover: se mueve verbatim.
 - Al ampliar el MVP (p. ej. hacer reales las pestañas Habitaciones/Mapa), mantener el mismo
   `state.voxels`/serialización como fuente de verdad y añadir vistas nuevas sin duplicar el modelo.
+
+## Correr los tests — el punto 4 del ARRANQUE
+
+*(movido verbatim desde `CLAUDE.md` el 2026-08-20, al pasarse el tope de 15 KB al añadir Ciudad-MD)*
+
+4. **129 tests** en `tests/` (113 Chromium real vía Playwright vs `http://localhost:8500`, 16 Node puro).
+   Runner `node correr_tests.js --node | --area=X | --list`; **corre solo tu área**. ! **desde la raíz**
+   (leen `data/…`, `assets/…` relativos al cwd). ! test que entre por `/` → **`?noauto=1`**, o el
+   autoarranque del dueño lo lleva a otro mapa y falla con un error que no se parece a la causa. Clon
+   nuevo: `npm i && npx playwright install chromium` (clavado 1.47.2; 1.48+ pide Node 20).
