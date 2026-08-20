@@ -554,3 +554,49 @@ mira **antes** que la rosca y **sin** consultar `mc.ruedaTool`: lleva Shift, as�
 quien haya apagado la rosca sigue queriendo extruir. El acumulador `mc._ruedaAcum` es el mismo para los
 dos, pero se **vacía al cambiar de gesto** (`mc._ruedaExtru`) o media muesca de rosca acabaría
 extruyendo.
+
+## La ranura 11: recortes guardados (REQ-RANURA1)
+
+*(2026-08-20, nota del dueño en `/map/bugfinder`, 46,14,65: «*La herramienta de seleccionar deberia
+poder guardar los bloques seleccionados, de forma que desde una ranura se puedan volver a cargar. Usar
+la ranura 11 para ello, tecla "K" por ejemplo; alt+k o pulsar ranura "K" mostraria bloques guardados y
+seleccionables para usar.*»)*
+
+**Un recorte NO es el portapapeles.** El portapapeles (`clipboard`, Ctrl+C/Ctrl+V) es **uno solo** y lo
+pisa el siguiente copiado. Un recorte es una copia **guardada con nombre**, y hay **varias** a la vez:
+por eso el ticket pedía una galería para elegir cuál va a la ranura.
+
+Pero **el formato es el mismo** (`{cells:[{dx,dy,dz,c}], gx, gy}`), y ahí está toda la gracia del
+diseño: **armar un recorte = ponerlo en `clipboard` y llamar a `mcPasteWorld()`**. De eso salen gratis,
+sin una línea nueva, las **24 posturas** (`R` cara / `Shift+R` giro), el **plantado con el derecho** que
+no se desarma, el material con **1-9** (`mcPasteMaterial`) y el agarre con Ctrl. Si un día armar dejara
+de pasar por el pegado, el tramo D de `tests/test_ranura1_recortes.js` es el que avisa.
+
+Gestos:
+
+| gesto | qué hace |
+|---|---|
+| `K` con la herramienta Seleccionar y caja marcada | guarda el recorte (y lo pone en la ranura) |
+| `K` sin caja | pone en la mano el recorte de la ranura (modo pegar) |
+| `Alt+K`, clic derecho en la ranura, o clic con la ranura vacía | abre la galería |
+| en la galería: clic / doble clic / clic derecho | poner en la mano / renombrar / borrar |
+
+**Dónde viven — decisión escrita en el ticket y REVOCABLE:** en `localStorage` (`vf_mcRecortes`), o sea
+**del usuario y no del mundo**. Un recorte es material de taller —se copia de un mapa para plantarlo en
+otro—, y los ficheros de `data/` son autoría del dueño. Si él los prefiere del mundo, se mudan a la
+cabecera sin tocar nada más: el formato ya es serializable. Al guardar, las claves de material van a una
+**paleta** y las celdas a un array plano de números (`{p:[…], c:[dx,dy,dz,i, …]}`): un recorte de 5 000
+bloques repetiría 5 000 veces la misma cadena `tex:hab:roca`. Topes: `MC_RECORTES_MAX` = 12 recortes
+(el decimotercero empuja al más viejo) y `MC_RECORTE_CELDAS` = 40 000 bloques por recorte.
+
+Dos detalles que parecen de adorno y no lo son:
+
+- **Guardar se apoya en `mcCopySelection`**, no recorre la caja por su cuenta. Dos recorridos distintos
+  de la misma selección serían dos ideas de qué entra en ella, y una de las dos se quedaría atrás al
+  primer cambio. Efecto lateral querido: guardar un recorte **también** lo deja en el portapapeles.
+- **Al armar, las celdas se COPIAN.** Pegando, `1-9` repinta el cúmulo escribiendo en `cel.c`; con la
+  referencia compartida eso le llegaría al recorte guardado y lo estropearía para siempre.
+
+La miniatura (`mcDibujaRecorte`) es la silueta de frente con el color representativo de cada material
+(`texRepr`), pintada de atrás hacia delante y oscureciendo con la profundidad. No se malla nada ni se
+pide un dibujo por red: un recorte no es una pieza del catálogo, es una caja de bloques del mundo.

@@ -7190,6 +7190,7 @@ const mc={
   catalog:null, pickSlot:-1,      // catálogo de galería (bloques+texturas) y ranura que edita el selector
   structs:{},                     // caché por sala: malla fina {colLocal,colCount, texLocal,texCount, ext, solid}
   slotStruct:[],                  // por ranura: srcKey si la ranura lleva una ESTRUCTURA (habitación), null si bloque suelto
+  recortes:null, recorteSel:0,    // ranura 11 (K): galería de recortes guardados y cuál está puesto (null = sin leer de localStorage)
   structures:[],                  // instancias estampadas: {key, ox,oy,oz, rot, colVbo,colCount, texVbo,texCount, aabb} (voxeles finos, malla propia 1/16; rot=cuartos de vuelta que la orientan al jugador)
   structAtlas:null, structAtlasTex:null, // atlas de TEXTURAS de estructuras (gemelo de atlas/atlasTex) — solo claves tex: usadas por las estructuras vivas
   structUV:{},                    // clave tex: → [6 rects UV] dentro del atlas de estructuras
@@ -17569,6 +17570,7 @@ function mcBuildHotbar(){
     bar.appendChild(slot);
   }
   bar.appendChild(mcSlotHerramienta());
+  bar.appendChild(mcSlotRecortes());          // ranura 11 (K) · REQ-RANURA1
 }
 // La ranura 10. No entra en el bucle de arriba porque no es una ranura de bloque: no tiene `mc.hotbar`
 // detrás, no se selecciona con un número, y su icono no sale del atlas (el dibujo de una herramienta no
@@ -17644,6 +17646,196 @@ function mcSaveLoadout(){ try{
 }catch(e){} }
 function mcLoadoutKeys(){ try{ const a=JSON.parse(localStorage.getItem('vf_mcHotbar')); if(Array.isArray(a)) return a; }catch(e){} return null; }
 function mcSlotStructKeys(){ try{ const a=JSON.parse(localStorage.getItem('vf_mcSlotStruct')); if(Array.isArray(a)) return a; }catch(e){} return null; }
+
+// --- REQ-RANURA1 · la ranura 11 (tecla K): GALERÍA DE RECORTES ---
+// Qué es y qué NO es: el portapapeles (Ctrl+C/Ctrl+V) es UNO solo y lo pisa el siguiente copiado. Un
+// recorte es una copia GUARDADA con nombre, y hay varias a la vez: la galería sirve para elegir cuál va
+// a la ranura. Almacén aparte, pero MISMO FORMATO — un recorte es un portapapeles ({cells,gx,gy}) con
+// nombre y fecha, y «armarlo» consiste literalmente en ponerlo en `clipboard` y entrar en modo pegar.
+// De ahí salen gratis las 24 posturas (R / Shift+R), el plantado con el derecho que no se desarma y el
+// repintado con 1-9: nada de eso se reimplementa aquí.
+// DÓNDE VIVEN — decisión escrita en el ticket y revocable: en `localStorage`, o sea DEL USUARIO y no del
+// mundo. Un recorte es material de taller (se copia de un mapa para plantarlo en otro), y los ficheros
+// de `data/` son autoría del dueño. Si él los prefiere del mundo, se mudan a la cabecera sin tocar nada
+// más: el formato ya es serializable.
+const MC_RECORTES_MAX=12;                 // caben doce; el decimotercero empuja al más viejo
+const MC_RECORTE_CELDAS=40000;            // tope de bloques por recorte: localStorage no es un disco
+function mcRecortesCarga(){
+  if(mc.recortes) return mc.recortes;
+  mc.recortes=[];
+  try{
+    const doc=JSON.parse(localStorage.getItem('vf_mcRecortes')||'null');
+    if(doc && Array.isArray(doc.r)) for(const r of doc.r){
+      const pal=r.p||[], c=r.c||[], cells=[];
+      for(let i=0;i+3<c.length;i+=4) cells.push({dx:c[i], dy:c[i+1], dz:c[i+2], c:pal[c[i+3]]});
+      if(cells.length) mc.recortes.push({nombre:r.n||'Recorte', ms:r.ms|0, gx:r.gx|0, gy:r.gy|0, cells});
+    }
+  }catch(e){}
+  if(mc.recorteSel>=mc.recortes.length) mc.recorteSel=0;
+  return mc.recortes;
+}
+// Al guardar, las claves de material van a una PALETA y las celdas a un array plano de números: un
+// recorte de 5 000 bloques repite la misma cadena 'tex:hab:roca' 5 000 veces, y en JSON eso son 60 KB
+// de nada. Con paleta, 4 números por celda.
+function mcRecortesGuarda(){
+  try{
+    const r=(mc.recortes||[]).map(x=>{
+      const pal=[], idx=new Map(), c=[];
+      for(const cel of x.cells){
+        const v=String(cel.c); let i=idx.get(v);
+        if(i===undefined){ i=pal.length; idx.set(v,i); pal.push(v); }
+        c.push(cel.dx|0, cel.dy|0, cel.dz|0, i);
+      }
+      return {n:x.nombre, ms:x.ms|0, gx:x.gx|0, gy:x.gy|0, p:pal, c};
+    });
+    localStorage.setItem('vf_mcRecortes', JSON.stringify({v:1, r}));
+    return true;
+  }catch(e){
+    // Cuota llena: el recorte SÍ está en memoria y se puede plantar ya; lo que no sobrevive es recargar.
+    toast('El recorte no cabe en la memoria del navegador: se puede usar ahora, pero no sobrevivirá a recargar');
+    return false;
+  }
+}
+// Medidas en bloques de mundo. El portapapeles va en ejes de EDITOR (dx=X, dy=profundidad, dz=altura),
+// así que esto también: es lo que enseñan la ficha y la miniatura.
+function mcRecorteDim(r){
+  let w=0,h=0,d=0;
+  if(r) for(const c of r.cells){ if(c.dx+1>w)w=c.dx+1; if(c.dy+1>d)d=c.dy+1; if(c.dz+1>h)h=c.dz+1; }
+  return {w, d, h};
+}
+function mcRecorteNombre(){
+  const usados=new Set((mc.recortes||[]).map(r=>r.nombre));
+  for(let i=1;;i++){ const n='Recorte '+i; if(!usados.has(n)) return n; }
+}
+// K con la herramienta Seleccionar y una caja marcada. Se apoya en `mcCopySelection` A PROPÓSITO:
+// guardar un recorte ES copiar la caja, y tener dos recorridos distintos de la misma selección sería
+// tener dos ideas de qué entra en ella (y una de las dos se quedaría atrás al primer cambio).
+function mcRecorteGuardar(nombre){
+  if(!mcCopySelection()) return false;                   // él ya avisa si no hay caja o falta la herramienta
+  const cells=clipboard.cells;
+  if(cells.length>MC_RECORTE_CELDAS){
+    toast('Recorte demasiado grande: '+cells.length+' bloques (tope '+MC_RECORTE_CELDAS+'). Sigue en el portapapeles: Ctrl+V');
+    return false;
+  }
+  const lista=mcRecortesCarga();
+  const r={nombre:String(nombre||mcRecorteNombre()), ms:Date.now(), gx:clipboard.gx|0, gy:clipboard.gy|0,
+           cells:cells.map(c=>({dx:c.dx, dy:c.dy, dz:c.dz, c:c.c}))};
+  lista.unshift(r);
+  while(lista.length>MC_RECORTES_MAX) lista.pop();
+  mc.recorteSel=0;
+  mcRecortesGuarda(); mcPintaSlotRecortes(); mcRenderRecortes();
+  const d=mcRecorteDim(r);
+  toast('Recorte «'+r.nombre+'» guardado — '+cells.length+' bloque(s), '+d.w+'×'+d.d+'×'+d.h+' · K lo pone en la mano · Alt+K la galería');
+  return true;
+}
+// Elegir un recorte = ponerlo en el portapapeles y entrar en modo pegar. Las celdas se COPIAN, no se
+// comparten: pegando, 1-9 repinta el cúmulo (mcPasteMaterial escribe en `cel.c`), y eso no puede
+// llegarle al recorte guardado.
+function mcRecorteArma(i){
+  const lista=mcRecortesCarga(), r=lista[i|0];
+  if(!r) return false;
+  clipboard={ cells:r.cells.map(c=>({dx:c.dx, dy:c.dy, dz:c.dz, c:c.c})), gx:r.gx|0, gy:r.gy|0 };
+  mc.recorteSel=i|0;
+  mcPintaSlotRecortes();
+  mcPasteWorld();
+  toast('Recorte «'+r.nombre+'» en la mano — clic dcho planta (sigue cargado) · R cara, Shift+R giro · clic izq. suelta');
+  return true;
+}
+function mcRecorteBorra(i){
+  const lista=mcRecortesCarga(); if(!lista[i|0]) return false;
+  const r=lista.splice(i|0,1)[0];
+  if(mc.recorteSel>=lista.length) mc.recorteSel=Math.max(0, lista.length-1);
+  mcRecortesGuarda(); mcPintaSlotRecortes(); mcRenderRecortes();
+  toast('Recorte «'+r.nombre+'» borrado');
+  return true;
+}
+function mcRecorteRenombra(i, nombre){
+  const lista=mcRecortesCarga(), r=lista[i|0];
+  if(!r || !nombre) return false;
+  r.nombre=String(nombre).slice(0,40);
+  mcRecortesGuarda(); mcPintaSlotRecortes(); mcRenderRecortes();
+  return true;
+}
+// Miniatura de un recorte: su silueta de frente (ancho × alto) con el color representativo de cada
+// material. No se malla nada ni se pide un dibujo por red — un recorte no es una pieza del catálogo,
+// es una caja de bloques del mundo, y su color ya lo sabe la paleta (`texRepr`).
+function mcDibujaRecorte(cv, r){
+  if(!cv) return;
+  const cx=cv.getContext('2d'); cx.clearRect(0,0,cv.width,cv.height);
+  if(!r || !r.cells || !r.cells.length) return;
+  const d=mcRecorteDim(r);
+  const p=Math.max(1, Math.floor(Math.min(cv.width/Math.max(1,d.w), cv.height/Math.max(1,d.h))));
+  const ox=Math.floor((cv.width-d.w*p)/2), oy=Math.floor((cv.height-d.h*p)/2);
+  const col=new Map();
+  // De atrás (dy grande) hacia delante: lo cercano tapa a lo lejano sin necesidad de z-buffer.
+  const cel=r.cells.slice().sort((a,b)=>b.dy-a.dy);
+  for(const c of cel){
+    const v=String(c.c); let rgb=col.get(v);
+    if(rgb===undefined){ rgb=mcHexRGB(v.slice(0,4)==='tex:' ? texRepr(v.slice(4)) : v); col.set(v,rgb); }
+    // La profundidad oscurece: sin esto, una pared plana y un cubo macizo se ven exactamente igual.
+    const t=d.d>1 ? 0.55+0.45*(1-c.dy/(d.d-1)) : 1;
+    cx.fillStyle='rgb('+(rgb[0]*255*t|0)+','+(rgb[1]*255*t|0)+','+(rgb[2]*255*t|0)+')';
+    cx.fillRect(ox+c.dx*p, oy+(d.h-1-c.dz)*p, p, p);
+  }
+}
+// La ranura 11. Como la de herramienta (ranura 10), va FUERA del bucle de las nueve: no tiene `mc.hotbar`
+// detrás, no se elige con un número y su icono no sale del atlas.
+function mcSlotRecortes(){
+  const slot=document.createElement('div');
+  slot.className='mc-slot mc-slot-rec';
+  slot.id='mc-slot-rec';
+  const cv=document.createElement('canvas'); cv.width=cv.height=MC_ICONO_PX; slot.appendChild(cv);
+  const key=document.createElement('span'); key.className='mc-slot-key'; key.textContent='K'; slot.appendChild(key);
+  // Mismo reparto que en las demás: izquierdo usa, derecho abre la galería. Vacía, el izquierdo también
+  // la abre — pinchar una ranura vacía y que no pase nada no explica nada.
+  slot.onclick=e=>{ if(e.altKey || !mcRecorteArma(mc.recorteSel|0)) mcAbreRecortes(); };
+  slot.oncontextmenu=e=>{ e.preventDefault(); mcAbreRecortes(); };
+  mcPintaSlotRecortes(slot);
+  return slot;
+}
+function mcPintaSlotRecortes(slot){
+  slot=slot||$('#mc-slot-rec'); if(!slot) return;
+  const lista=mcRecortesCarga(), r=lista[mc.recorteSel|0];
+  slot.classList.toggle('empty', !r);
+  slot.title = r
+    ? 'Recorte «'+r.nombre+'» · '+r.cells.length+' bloque(s) · K lo pone en la mano · Alt+K la galería ('+lista.length+')'
+    : 'Recortes · marca una caja con Seleccionar (e) y pulsa K para guardarla · Alt+K abre la galería';
+  mcDibujaRecorte(slot.querySelector('canvas'), r);
+}
+function mcRecortesAbierta(){ const pk=$('#mc-recortes'); return !!(pk && !pk.hidden); }
+function mcAbreRecortes(){
+  const pk=$('#mc-recortes'); if(!pk) return false;
+  if(document.pointerLockElement===mc.canvas) document.exitPointerLock();   // soltar el ratón para poder elegir
+  pk.hidden=false;
+  mcRenderRecortes();
+  return true;
+}
+function mcCierraRecortes(){
+  const pk=$('#mc-recortes'); if(!pk || pk.hidden) return;
+  pk.hidden=true; mcRelock();
+}
+function mcRenderRecortes(){
+  const g=$('#mc-recortes-grid'); if(!g || !mcRecortesAbierta()) return;
+  const lista=mcRecortesCarga();
+  g.innerHTML='';
+  if(!lista.length){
+    g.innerHTML='<p class="hab-empty">Todavía no hay recortes. Con la herramienta <b>Seleccionar</b> (e) marca dos esquinas y pulsa <b>K</b>.</p>';
+    return;
+  }
+  lista.forEach((r,i)=>{
+    const d=mcRecorteDim(r);
+    const o=document.createElement('div'); o.className='mapa-opt'+(i===(mc.recorteSel|0)?' is-active':'');
+    o.title=r.nombre+' · '+r.cells.length+' bloque(s) · clic lo pone en la mano · doble clic renombra · clic dcho borra';
+    o.innerHTML='<div class="mo-thumb"><canvas width="120" height="120"></canvas></div>'+
+                '<div class="mo-name">✂️ '+esc(r.nombre)+'</div>'+
+                '<div class="mo-badge">'+d.w+'×'+d.d+'×'+d.h+' · '+r.cells.length+' bloques</div>';
+    mcDibujaRecorte(o.querySelector('canvas'), r);
+    o.onclick=()=>{ if(mcRecorteArma(i)) mcCierraRecortes(); };
+    o.ondblclick=e=>{ e.preventDefault(); const n=prompt('Nombre del recorte:', r.nombre); if(n!=null) mcRecorteRenombra(i, n.trim()||r.nombre); };
+    o.oncontextmenu=e=>{ e.preventDefault(); if(confirm('¿Borrar el recorte «'+r.nombre+'»?')) mcRecorteBorra(i); };
+    g.appendChild(o);
+  });
+}
 
 // --- Selector de galería para la hotbar (calca buildRoomCatalog/openPicker del Mapa) ---
 // Catálogo = bloques (type:bloque) + texturas (type:textura), assets + guardados.
@@ -20038,6 +20230,11 @@ function mcMarcaSync(){
 if($('#marca-inicio')) $('#marca-inicio').onclick=()=>{ mcVolverAIntro(); };
 $('#mc-picker-close').onclick=mcClosePicker;
 $('#mc-picker-remove').onclick=mcRemoveSlot;
+// REQ-RANURA1 · la galería de recortes se cierra por su ✕ y por Esc. El Esc va en su propio listener y
+// no en el handler del Mundo porque aquél sale antes de mirar teclas cuando esta galería está abierta
+// (mcRecortesAbierta), que es justo lo que hay que hacer con las de mover/construir.
+if($('#mc-recortes-close')) $('#mc-recortes-close').onclick=mcCierraRecortes;
+window.addEventListener('keydown',e=>{ if(e.key==='Escape' && mcRecortesAbierta()){ mcCierraRecortes(); e.preventDefault(); } });
 $('#mc-note-save').onclick=mcSaveNote;
 $('#mc-note-del').onclick=mcDeleteNote;
 if($('#mc-note-move')) $('#mc-note-move').onclick=mcStartNoteMove;
@@ -20097,7 +20294,7 @@ const mcUserKeys={};   // atajos de teclado definidos por el usuario vía game.o
 // ⚠️ Esta lista tiene que llevar TODA tecla que el handler de más abajo atienda ANTES de mirar
 // `mcUserKeys`, o ligarla se acepta sin rechistar y luego no hace nada: la rama del motor sale antes
 // con su `return`. La `f` faltaba desde REQ-FLY1 (pasó a ser volar) y era exactamente ese caso.
-const MC_RESERVED=new Set([...MC_KEYS,'e','p','b','x','u','n','r','z','f','escape','1','2','3','4','5','6','7','8','9']);
+const MC_RESERVED=new Set([...MC_KEYS,'e','p','b','x','u','n','r','z','f','k','escape','1','2','3','4','5','6','7','8','9']);
 // REQ-OSD4 · en una pantalla de menú (?osd=1) el clic PULSA el bloque, no captura la cámara: capturarla
 // escondería el cursor y dejaría el menú inservible. Se trabaja aquí, en el 'click', y no en el
 // 'mousedown' de más abajo, porque aquel exige tener el puntero capturado — que es justo lo que no hay.
@@ -20121,7 +20318,7 @@ document.addEventListener('mousemove',e=>{
   // Reemerge la hotbar si el jugador está PARADO y mueve el ratón (gesto de «volver a mirar el inventario»).
   if(mc.hbTarget===0 && Math.hypot(mc.vel[0],mc.vel[2])<0.6 && (Math.abs(e.movementX)+Math.abs(e.movementY))>1) mcRevealHotbar();
 });
-window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || !$('#mc-note').hidden || snipTapaElMundo() || !$('#ag-modal').hidden || (e.target && e.target.matches && e.target.matches('input,select,textarea'))) return;   // selector/editor de nota/código/agentes abierto ⇒ no mover/seleccionar (dividido NO tapa: manda el foco)
+window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || mcRecortesAbierta() || !$('#mc-note').hidden || snipTapaElMundo() || !$('#ag-modal').hidden || (e.target && e.target.matches && e.target.matches('input,select,textarea'))) return;   // selector/editor de nota/código/agentes abierto ⇒ no mover/seleccionar (dividido NO tapa: manda el foco)
   if(/^[1-9]$/.test(e.key)){ const i=+e.key-1;
     // Alt+número: abre el selector de esa ranura (sin Esc+clic derecho); si no, selecciona la ranura.
     // Con la herramienta Seleccionar y una caja marcada, ADEMÁS reemplaza lo seleccionado por ese
@@ -20142,6 +20339,16 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
   if(k==='b'){ const st=1.15; game.playerScale=mc.scale*(e.shiftKey?1/st:st); toast('Tamaño ×'+(+mc.scale.toFixed(2))); e.preventDefault(); return; }   // b = más grande («big») · B (mayús) = más pequeño (paso fino ×1.15)
   if(k==='x'){ mc.xray=!mc.xray; toast('Rayos-X: '+(mc.xray?'ON':'OFF')); e.preventDefault(); return; }    // modo depuración: ver el volumen de colisión
   if(k==='u'){ mcForceUnstick(); toast('Desatascado'); e.preventDefault(); return; }                       // U = sácame de aquí (sube sobre lo que estorbe; si no, al spawn)
+  // REQ-RANURA1 · K = la ranura 11 (recortes). Con una caja marcada, GUARDA el recorte; sin ella, pone
+  // en la mano el que esté puesto (y si no hay ninguno, abre la galería, que es lo único que se puede
+  // hacer). Alt+K abre la galería para elegir otro. La rama de Alt mira `e.code` (tecla FÍSICA) por lo
+  // mismo que Alt+F más abajo: con Alt pulsado, `e.key` llega compuesto en varios teclados.
+  if((k==='k' || (e.altKey && e.code==='KeyK')) && !e.ctrlKey && !e.metaKey){
+    if(e.altKey) mcAbreRecortes();
+    else if(mc.tool==='select' && mc.selBox) mcRecorteGuardar();
+    else if(!mcRecorteArma(mc.recorteSel|0)) mcAbreRecortes();
+    e.preventDefault(); return;
+  }
   if(k==='n'){
     if(mc.notePlacing){ mcCancelNotePlace(); e.preventDefault(); return; }
     const hit = mcRaycast(mcReach(), true);

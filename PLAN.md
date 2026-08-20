@@ -48,7 +48,6 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-MOV1](#-req-mov1) | en el **móvil** el Mundo es inmanejable: sobran 📷/🎬, faltan los **3 botones del ratón**, pantalla completa, y el ✕ debe ser un **menú** | 🔴 abierto 2026-08-19 | captura y palabras del dueño en [`data/tickets/REQ-MOV1/`](data/tickets/REQ-MOV1/contexto.md). Revierte el «a propósito NO hay botones de romper/poner» que estaba escrito en `app.js`. El central **no es duda**: es el de redstone. Ojo al `pointerLockElement`: pantalla completa lo suelta |
 | [REQ-ED3](#-req-ed3) | **guías de rejilla** en el editor 2D (líneas azul claro que parten la capa en 2×2, 4×4…), conmutables | 🟢 abierto 2026-08-18 | pedido por el dueño como «tool que rote entre sin grid / ÷2 / ÷4». **Investigado**: el sitio es `drawEdit` (`app.js:565`), que ya pinta una rejilla por celda. Ojo con lo de «tool»: las del panel son de DIBUJO y elegirla te dejaría sin pincel — el precedente correcto es el interruptor de Caras (`vf_caras_marcar`), estado de VISTA que no viaja en el documento |
 | [BUG-CART1](#-bug-cart1) | **carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce | 🟡 arreglado 2026-08-20, **falta una pasada del dueño** | encontrado tirando de un guardián en rojo, no pedido. La causa (la marca `efimera` se ponía DESPUÉS del `await` de estampar) está arreglada y el motor se cura solo en caliente. Queda lo que ya está escrito en los ficheros: `python3 herramientas/carteles_fantasma.py` (en seco) y luego `--escribe`. **No lo puedo lanzar yo**: la caja de arena me deniega escribir en `data/worlds/` |
-| [REQ-RANURA1](#-req-ranura1) | **guardar la selección en una ranura** para volver a plantarla: ranura 11, tecla `K` | 🟡 abierto 2026-08-19 | nota de `/map/bugfinder`. Es una galería de recortes, no un portapapeles: pide varias guardadas y poder elegir. Roza [REQ-TOOL6/7](PLAN_ARCHIVO.md) (la rosca de ranuras) y el pegado de 24 posturas |
 | [REQ-MULTI1](#-req-multi1) | **multijugador colaborativo**: varios jugadores en el mismo mapa, viéndose entre sí (con el arma en la mano y su etiqueta de nombre) y con los cambios del mundo sincronizados | 🟢 abierto 2026-08-19 | pedido por el dueño el 2026-08-19 al hilo de «pisar el mundo»: si el mapa es de todos, **nadie pisa a nadie**. Es el ticket más grande del plan. **Acotado ya por él (2026-08-19)**: tope **10** jugadores de momento (idealmente sin tope), **internet y red local**, y se **juega Y se construye** a la vez. A favor: medio camino hecho sin querer — `POST /api/mundo/edits` ya manda **el delta**, no el mundo. En contra: hoy no hay proceso servidor con estado (stdlib, un `Handler` por petición), ni identidad, ni cuerpo de jugador dibujable. Construir a la vez obliga a que **el servidor sea el árbitro**, no el navegador |
 | [REQ-SPAWN1](#-req-spawn1) | **pensar el tema de los puntos de aparición** (spawn) | 🟢 **propuesta escrita 2026-08-20**, esperando su visto bueno | nota del dueño en `/map/bugfinder`, tal cual: es un **encargo de pensar**, no un arreglo. Hoy hay un único `spawn` en la cabecera del mundo |
 
@@ -537,28 +536,6 @@ decoración suya y corre `--escribe` con lo demás.
 
 ---
 
-<a id="-req-ranura1"></a>
-
-### 🟡 REQ-RANURA1 · Guardar la selección en una ranura y volver a plantarla — 🟡 abierto 2026-08-19
-
-Nota `46,14,65` de **`/map/bugfinder`**, verbatim: «*La herramienta de seleccionar deberia poder guardar
-los bloques seleccionados, de forma que desde una ranura se puedan volver a cargar. Usar la ranura 11
-para ello, tecla "K" por ejemplo; alt+k o pulsar ranura "K" mostraria bloques guardados y seleccionables
-para usar.*»
-
-Ojo a lo que pide de verdad: no es un portapapeles (eso ya es Ctrl+C/Ctrl+V), es una **galería de
-recortes** — varios guardados, y un desplegable para elegir cuál va en la ranura. Roza la rosca de
-ranuras de REQ-TOOL6/7 y el pegado de 24 posturas de `mc.structures`.
-
-A decidir con él antes de empezar: si los recortes **sobreviven al recargar** (¿`localStorage`, o
-ficheros como los habitantes?) y si son del mundo o del usuario. Sin eso, el ticket no se puede cerrar
-bien.
-
-**Criterio de cierre:** seleccionar → `K` guarda el recorte; Alt+K enseña los guardados; elegir uno lo
-deja en la ranura 11 listo para plantar con las 24 posturas, como cualquier estructura.
-
----
-
 <a id="-req-spawn1"></a>
 
 ### 🟢 REQ-SPAWN1 · Pensar el tema de los puntos de aparición — 🟢 abierto 2026-08-19
@@ -604,7 +581,7 @@ de todo lo demás.** Ticket propio, chico.
 **B · Varios puntos con nombre.** `mc.spawns` = lista de `{nombre,x,y,z,mira}` en la cabecera, con el
 `spawn` de hoy como el primero de la lista (así los mundos viejos siguen valiendo). Sirve para dos cosas
 a la vez: elegir dónde entras, y **viaje rápido** entre sitios de un mapa grande — que es probablemente
-lo que más se va a usar. Se pega bien con la galería de recortes de [REQ-RANURA1](#-req-ranura1): misma
+lo que más se va a usar. Se pega bien con la galería de recortes de [REQ-RANURA1](PLAN_ARCHIVO.md#-req-ranura1): misma
 idea de «cosas guardadas con nombre a las que se vuelve». **Recomendación: sí, pero después de A**, y
 preguntándole antes si lo quiere como *viaje rápido* (mi apuesta) o solo como *punto de entrada*.
 

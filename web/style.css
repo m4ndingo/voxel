@@ -713,6 +713,19 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 /* El dibujo se renderiza a 120 px y se reduce aquí: `pixelated` (que es lo que quieren las otras
    ranuras, recortes del atlas a tamaño nativo) haría picadillo con esa reducción. */
 .mc-slot-tool canvas{image-rendering:auto; padding:2px; box-sizing:border-box}
+/* REQ-RANURA1 · la ranura 11: el recorte guardado. Como la de herramienta, va separada del bloque de
+   las nueve —tampoco se elige con un número— y su letra es la K. Aquí sí queda el «+» de las vacías:
+   una ranura de recortes vacía SE LLENA pinchándola (abre la galería), que es lo que el «+» promete. */
+.mc-slot-rec{margin-left:8px; border-color:rgba(255,255,255,.4)}
+.mc-slot-rec::before{content:''; position:absolute; left:-6px; top:4px; bottom:4px;
+  border-left:1px solid rgba(255,255,255,.22)}
+/* La miniatura es una silueta de bloques cuadrados dibujada a mano: `pixelated` conserva el filo. */
+.mc-slot-rec canvas{image-rendering:pixelated; padding:2px; box-sizing:border-box}
+/* Galería de recortes: el que está PUESTO en la ranura va marcado — es la pregunta que uno trae al
+   abrirla («¿cuál tengo?»), y sin marca hay que acordarse. */
+#mc-recortes .mapa-opt.is-active{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent)}
+#mc-recortes .mo-thumb{background:rgba(0,0,0,.35)}
+#mc-recortes .mo-thumb canvas{image-rendering:pixelated}
 /* Controles táctiles del Mundo. El CONTENEDOR no intercepta nada (pointer-events:none): el resto
    del canvas tiene que seguir siendo la zona de mirar, y la hotbar (z-index:6) tiene que seguir
    pulsándose aunque esto vaya por encima. Solo el joystick y el botón capturan el dedo. */

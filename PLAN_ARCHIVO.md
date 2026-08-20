@@ -32,6 +32,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[REQ-RANURA1](#-req-ranura1)~~ | ~~**guardar la selección en una ranura** para volver a plantarla: ranura 11, tecla `K`~~ | ✅ resuelto 2026-08-20 | ranura 11 (`K`) + galería de recortes. **Un recorte ES un portapapeles con nombre**: mismo formato `{cells,gx,gy}`, así que armarlo = ponerlo en `clipboard` y entrar en el modo pegar ⇒ las 24 posturas, el plantado con el derecho y el material con `1-9` salen **gratis**. Registrarlo como estructura del catálogo habría pedido un documento a escala 1/16 (307 200 voxels para una caja de 5×3×5) y un draw call por copia. **Decisión que él puede revocar**: viven en `localStorage` ⇒ son del USUARIO y no del mundo (material de taller, y `data/` es autoría suya); mudarlos a la cabecera es una línea. Guardar se apoya en `mcCopySelection` (un solo recorrido de la caja) y armar COPIA las celdas (`1-9` repinta el cúmulo). `tests/test_ranura1_recortes.js` |
 | ~~[REQ-SHADOW3](#-req-shadow3)~~ | ~~de noche la **sombra proyectada** sale tan difuminada que casi no se ve, y no se sabe si la espada de luz proyecta la suya~~ | ✅ resuelto 2026-08-20 | dos mandos: **`game.shadowSuave`** (radio del PCF en téxeles, **0 = borde duro**, tope 4 — gratis, porque los 9 pesos del filtro ya sumaban 1) y **`game.sunShadeNoche`** (cuánto aprieta con la exposición a 0, interpolado; `null` = como siempre). El diagnóstico de la nota estaba a medias: **no era difuminado, era contraste** — la sombra es un factor y de noche multiplica algo que `game.luz` ya dejó casi negro. Y la respuesta a la 2ª nota: **la espada NO proyecta sombra**, el mapa tiene una sola fuente; lo que le da corte limpio es [BUG-GLOW6](#-bug-glow6). `tests/test_shadow3_mandos.js` |
 | ~~[BUG-GLOW6](#-bug-glow6)~~ | ~~**la luz dinámica atraviesa los sólidos**: las estrellas alumbran cuartos cerrados y la espada alumbra al otro lado de la pared~~ | ✅ resuelto 2026-08-20 | `game.luzOcluye`. **Dos mitades, ninguna sola llega**: en el **shader**, una cara no recibe la luz que le da por detrás (exacto y gratis — la normal ya la sacan `sunFactor`/`blkLuz` de `cross(dFdx,dFdy)`), y eso arregla el grosor de la pared; en la **CPU**, una luz que no ve al ojo no se sube (`mcLuzLibre`, con la MISMA tabla que la difusión horneada, `mcTablaLuz`), y eso apaga el cuarto cerrado y la espada metida dentro de un bloque. La exacta sería un raycast por fragmento y por luz ⇒ descartada por fps. Visibilidad **con fundido** de 0,18 s: conmutar de golpe se ve peor que el fallo. `tests/test_glow6_luz_ocluida.js` |
 | ~~[REQ-CART5](#-req-cart5)~~ | ~~poder **mover una nota ya plantada**, con un botón «mover» en su propio panel~~ | ✅ resuelto 2026-08-20 | botón «Mover» en el panel: `mcStartNoteMove()` **guarda lo tecleado** y reentra en el Modo Cartel que ya existía para plantar (fantasma, `R`, `Esc`); `mcMoveNoteA()` aterriza. Mover **es cambiar de clave**, así que texto, giro y tinte cambian los tres a la vez o el cartel nuevo sale sin color y el viejo se queda huérfano. No pisa otra nota ni se borra al soltarla en su sitio. El cartel se replanta solo (`mcSyncNoteSigns`). `tests/test_cart5_mover_nota.js` |
@@ -185,6 +186,74 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 ---
 
 
+
+<a id="-req-ranura1"></a>
+
+### ✅ REQ-RANURA1 · Guardar la selección en una ranura y volver a plantarla — ✅ resuelto 2026-08-20
+
+Nota `46,14,65` de **`/map/bugfinder`**, verbatim: «*La herramienta de seleccionar deberia poder guardar
+los bloques seleccionados, de forma que desde una ranura se puedan volver a cargar. Usar la ranura 11
+para ello, tecla "K" por ejemplo; alt+k o pulsar ranura "K" mostraria bloques guardados y seleccionables
+para usar.*»
+
+Ojo a lo que pide de verdad: no es un portapapeles (eso ya es Ctrl+C/Ctrl+V), es una **galería de
+recortes** — varios guardados, y un desplegable para elegir cuál va en la ranura. Roza la rosca de
+ranuras de REQ-TOOL6/7 y el pegado de 24 posturas de `mc.structures`.
+
+A decidir con él antes de empezar: si los recortes **sobreviven al recargar** (¿`localStorage`, o
+ficheros como los habitantes?) y si son del mundo o del usuario. Sin eso, el ticket no se puede cerrar
+bien.
+
+**Criterio de cierre:** seleccionar → `K` guarda el recorte; Alt+K enseña los guardados; elegir uno lo
+deja en la ranura 11 listo para plantar con las 24 posturas, como cualquier estructura.
+
+#### ✅ Hecho (2026-08-20) — `docs/rejilla-y-estructuras.md`, `tests/test_ranura1_recortes.js`
+
+**La pregunta que quedaba abierta se contestó sola, y está escrita para que él la revoque.** Los
+recortes viven en **`localStorage`** (`vf_mcRecortes`) ⇒ son **del usuario, no del mundo**: un recorte
+es material de taller —se copia de un mapa para plantarlo en otro— y los ficheros de `data/` son
+autoría del dueño. **Si prefiere que sean del mundo, se mudan a la cabecera sin tocar nada más**: el
+formato ya es serializable. No interrumpí a preguntar porque él dejó dicho que no lo hiciera esa noche;
+la decisión es de una línea de cambiar.
+
+**Lo que hace, en gestos:**
+
+| gesto | qué hace |
+|---|---|
+| `K` con **Seleccionar** y caja marcada | guarda el recorte (y lo deja puesto en la ranura) |
+| `K` sin caja | pone en la mano el recorte de la ranura (modo pegar) |
+| `Alt+K`, clic derecho en la ranura, o clic con la ranura vacía | abre la galería |
+| en la galería: clic / doble clic / clic derecho | poner en la mano / renombrar / borrar |
+
+**La decisión de arquitectura, que es toda la gracia: un recorte ES un portapapeles con nombre.** Mismo
+formato (`{cells:[{dx,dy,dz,c}], gx, gy}`) ⇒ **armarlo = ponerlo en `clipboard` y llamar a
+`mcPasteWorld()`**. De ahí salen **gratis, sin una línea nueva**, las 24 posturas (`R`/`Shift+R`), el
+plantado con el derecho que no se desarma, el material con `1-9` y el agarre con Ctrl — todo lo que se
+acaba de construir en los dos commits de pegado. La alternativa (registrar el recorte como una
+estructura del catálogo, `mcStructCells`+`mcStampStruct`) obligaba a inventarle un documento a escala
+1/16 y un draw call por copia: una caja de 5×3×5 bloques son 307 200 voxels de documento para algo que
+la rejilla ya sabe pintar.
+
+Dos detalles que parecen de adorno y no lo son:
+
+- **Guardar se apoya en `mcCopySelection`**, no recorre la caja por su cuenta: dos recorridos distintos
+  de la misma selección serían dos ideas de qué entra en ella, y una se quedaría atrás al primer
+  cambio. Efecto lateral querido: guardar **también** deja el recorte en el portapapeles.
+- **Al armar, las celdas se COPIAN.** Pegando, `1-9` repinta el cúmulo escribiendo en `cel.c`; con la
+  referencia compartida eso le llegaría al recorte guardado y lo estropearía para siempre. Lo vigila el
+  tramo D del guardián.
+
+**Lo barato que salió:** `MC_RECORTES_MAX` = 12 y `MC_RECORTE_CELDAS` = 40 000 bloques. Al guardar, las
+claves de material van a una **paleta** y las celdas a un array plano de números — un recorte de 5 000
+bloques repetiría 5 000 veces la cadena `tex:hab:roca`. La miniatura es la silueta de frente con el
+color representativo de cada material (`texRepr`), oscurecida por profundidad: no se malla nada ni se
+pide un dibujo por red.
+
+**Lo que NO se hizo, a propósito:** los recortes no se comparten entre navegadores ni se pueden regalar
+como un habitante. Si él quiere eso, es otro ticket (guardar el recorte como pieza del catálogo,
+`POST /api/habitantes`) y ahí sí hay que preguntarle: pasaría a ser autoría suya en `data/`.
+
+---
 
 <a id="-req-shadow3"></a>
 

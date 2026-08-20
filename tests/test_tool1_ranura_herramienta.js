@@ -68,10 +68,12 @@ const { chromium } = require('playwright');
   ok(await p.evaluate(() => localStorage.getItem('vf_mcTool')) === null,
      'y la herramienta ya no se persiste: no puede cambiar sola al recargar');
 
+  // 11 desde REQ-RANURA1 (2026-08-20): a las nueve de bloques y la de herramienta se les sumó la de
+  // RECORTES (tecla K). Lo que sigue importando aquí es que la de herramienta va detrás de la 9.
   const slots = await p.evaluate(() => document.querySelectorAll('#mc-hotbar .mc-slot').length);
-  ok(slots === 10, 'la hotbar tiene 10 ranuras: las 9 de bloques y la de herramienta', slots);
+  ok(slots === 11, 'la hotbar tiene 11 ranuras: las 9 de bloques, la de herramienta y la de recortes', slots);
   ok(await p.evaluate(() => { const s = document.querySelectorAll('#mc-hotbar .mc-slot'); return s[9] && s[9].id === 'mc-slot-tool'; }),
-     'y la de herramienta es la ÚLTIMA (detrás de la 9, no en su sitio)');
+     'y la de herramienta va detrás de la 9 (no en su sitio)');
   ok(await p.evaluate(() => document.querySelector('#mc-slot-tool .mc-slot-key').textContent) === 'E',
      'se etiqueta «E», no «10»');
 
