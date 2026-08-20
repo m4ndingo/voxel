@@ -268,6 +268,69 @@ sale una pieza fina, su sombreado no está en `ch.vbo` y el test mide el búfer 
 
 ---
 
+## La luz dinámica respeta los sólidos — `game.luzOcluye` (BUG-GLOW6)
+
+Hay **dos** luces artificiales y hasta el 2026-08-20 solo una respetaba la materia:
+
+| | quién la calcula | ¿la para una pared? |
+|---|---|---|
+| **horneada** | `mcComputeBlockLight()`, BFS **por el aire** desde cada emisor quieto | sí, siempre lo hizo |
+| **dinámica** | `mcDynSync()` → `uDynPos`/`uDynDir`, sumada **en el fragmento** por distancia y ángulo | **no** — de ahí el bug |
+
+Lo que veía el dueño en `/map/bugfinder` eran seis síntomas del mismo agujero: estrellas alumbrando un
+cuarto cerrado, la espada de luz iluminando la cara de enfrente de un muro, la espada metida **dentro**
+de un bloque alumbrando fuera, y una pared de 2 bloques filtrando menos que una de 1.
+
+**No hay una sola solución, hay dos mitades**, y hacen falta las dos porque cada una llega donde la otra
+no puede. La exacta —un raycast por fragmento y por luz— no se puede pagar: con 8 luces y una decena de
+pasos son ~100 lecturas por píxel.
+
+**1 · Por fragmento (shader, `dynLuz`).** Una cara **no recibe la luz que le da por detrás**:
+
+```glsl
+if(uDynCara>0.5 && d>uDynCerca && dot(nCara, P-w)<0.0) continue;
+```
+
+Es **exacto** para luz directa y sale **gratis**: `nCara` son las derivadas de la posición de mundo
+(`cross(dFdx(w),dFdy(w))`), que ya se calculan aquí mismo para `sunFactor` y `blkLuz` — ni un atributo
+nuevo ni una lectura de textura. Esto arregla las quejas de **grosor**: la cara de enfrente de un muro
+mira al otro lado, así que deja de recibir, y con eso 1 bloque y 2 bloques filtran lo mismo (nada).
+
+`uDynCerca` (0,6 bloques) es un margen de cortesía: el emisor que llevas **en la mano es geometría**, y
+sin él las caras traseras de la propia espada se apagarían. Meterla dentro de un bloque no vuelve a
+colar luz fuera — de eso se encarga la otra mitad.
+
+Sin `OES_standard_derivatives` (WebGL1 antiguo, `mc.deriv` a false) esta mitad no se compila y todo
+queda como antes; la de CPU sigue funcionando.
+
+**2 · Por luz (CPU, `mcDynSync` → `mcLuzLibre`).** Una luz que **no ve al ojo** no se sube al shader.
+`mcLuzLibre(ax,ay,az, bx,by,bz, P)` recorre las celdas entre los dos puntos (Amanatides-Woo, tope
+`MC_DYN_PASOS`) y decide con **la misma tabla que gobierna la difusión de la luz horneada**
+(`mcTablaLuz`, que se le pasa ya hecha). ⚠️ Eso no es un detalle: si aquí se usara otro predicado, el
+mundo tendría **dos ideas distintas de qué es opaco** y una vidriera pararía una luz y no la otra.
+
+Esto es lo que apaga el **cuarto cerrado** y la espada metida dentro de un bloque (el origen cae en
+celda sólida ⇒ ocluida). Cuesta **una línea por luz y por frame**, ≤ `MC_DYN_MAX` = 8.
+
+Es una **aproximación**: juzga por lo que ve el **ojo**, no cada fragmento. Lo que se le escapa es una
+luz que tú ves pero que una esquina esconde de la pared que estás mirando, y en la práctica la tapa la
+mitad 1 en cuanto la cara está de espaldas.
+
+La visibilidad **se desvanece** (`MC_DYN_FUNDE`, 0,18 s) en vez de conmutar: cruzar una puerta con una
+antorcha fuera encendería y apagaría en un frame, y eso se ve peor que el fallo. El fundido se indexa
+por **posición redondeada**, no por índice de plaza: las plazas se reparten por cercanía al ojo y su
+índice no identifica a la misma luz de un frame al siguiente. Una luz que **se estrena** nace con su
+valor y no funde, o cada estrella que entra en las plazas aparecería subiendo desde negro.
+
+**El mando.** `game.luzOcluye` (por defecto **true**, persiste en `vf_mcLuzOcluye`) enciende y apaga
+**las dos mitades a la vez**. No re-siembra luz ni re-malla nada: es un uniforme y un filtro por frame,
+así que conmutarlo cuesta cero y sirve para medir fps con y sin. `false` = comportamiento anterior al
+2026-08-20, la luz atraviesa la materia.
+
+Guardián: `node tests/test_glow6_luz_ocluida.js`.
+
+---
+
 ## Luz global (exposición) — `game.luz` (REQ-ENV3)
 
 Aparte del skylight y de la sombra del sol, hay una **exposición global** para oscurecer el mundo entero

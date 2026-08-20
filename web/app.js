@@ -7386,6 +7386,7 @@ const mc={
   blockLight:null,                // Uint8Array 0..MC_MAXLIGHT por celda: luz de BLOQUE emisiva (*#hex) difundida por el aire (mcComputeBlockLight); escalar/neutra (no tiñe)
   glowLevel:15,                   // nivel de siembra de la luz emisiva (game.glowLevel; 0 = sin luz de bloque; 15 = MC_MAXLIGHT = alcance máximo)
  glowFocus:0.2,                  // foco del haz emisivo 0..1 (game.glowFocus): 0=omnidireccional (antorcha), 1=haz estrecho hacia la normal neta de las caras emisivas
+  luzOcluye:true,                 // BUG-GLOW6 · ¿la luz DINÁMICA respeta los sólidos? (game.luzOcluye). false = como antes de 2026-08-20: atraviesa paredes. Enciende las dos mitades a la vez, la cara de espaldas (shader) y la línea de visión ojo↔luz (mcDynSync)
   glowGain:1,                     // INTENSIDAD de la luz artificial (game.glowGain): 1 = tope normal (pleno día); >1 sobreexpone (una antorcha/gafas brillan MÁS que el día). Es el techo del mix de exposición, no re-siembra ni re-malla (solo uniforme) ⇒ live y barato
   hasGlow:false,                  // ¿hay ≥1 voxel emisivo vivo (estructura o celda de rejilla)? cache para saltar BFS/mallado sin brillo
   _glowIds:null,                  // id de bloque → geometría fina con ≥1 celda emisiva (o null); lo hornea mcGlowCeldas
@@ -9489,13 +9490,37 @@ vec4 blkLuz(vec3 w){ return vec4(0.0); }
 // atrás). Sin haz (dir≈0, p.ej. una antorcha que asoma por todas las caras) o con foco 0 ⇒ omnidireccional, como antes.
 // No proyecta sombra (como blkLuz). No usa sampler3D ⇒ vale también en WebGL1.
 const MC_DYN_MAX=8;   // luces de agente simultáneas (las más cercanas al ojo); array fijo de uniforms
+// BUG-GLOW6 · afinado de la oclusión de la luz dinámica (game.luzOcluye).
+const MC_DYN_CERCA=0.6;   // por debajo de esta distancia (bloques) una cara SÍ recibe luz de espaldas: el emisor que uno
+                          // lleva en la mano es geometría, y sin margen sus propias caras traseras se apagarían
+const MC_DYN_PASOS=64;    // tope de celdas que recorre mcLuzLibre: una luz al otro lado del mundo no puede costar más
+const MC_DYN_FUNDE=0.18;  // segundos que tarda una luz en encenderse/apagarse al ganar o perder la línea de visión
 const MC_DYNLIGHT_LIB=`
 uniform int uDynN; uniform vec4 uDynPos[${MC_DYN_MAX}]; uniform vec4 uDynDir[${MC_DYN_MAX}]; uniform float uDynDark; uniform float uGlowGain;
+uniform float uDynCara;    // BUG-GLOW6 · 1 = una cara no recibe la luz que le da por detrás (game.luzOcluye)
+uniform float uDynCerca;   // margen de cortesía en bloques: por debajo de esta distancia no se aplica (el emisor es geometría)
 // uDynPos = (x,y,z mundo, nivel 0..${MC_MAXLIGHT}) · uDynDir = (dx,dy,dz haz, foco 0..1); |dir|≈0 ó foco 0 ⇒ omnidireccional
+// BUG-GLOW6 · mitad POR FRAGMENTO de la oclusión: una cara no se ilumina si la luz le da POR DETRÁS. Es exacto para
+// luz directa y sale gratis — la normal de la cara es la misma que ya sacan sunFactor y blkLuz de las derivadas del
+// mundo (cross(dFdx,dFdy)), sin atributo nuevo ni una sola lectura de textura. Arregla las dos quejas de grosor
+// («pegado a una pared con la espada se ilumina la cara de enfrente», «con 2 bloques se ve más oscuro que con 1»):
+// la cara de enfrente mira al otro lado, así que deja de recibir. Sin derivadas (WebGL1 viejo) no se aplica y todo
+// queda como antes. La otra mitad —la luz encerrada en otro cuarto— NO se puede resolver aquí: sería un raycast por
+// fragmento y por luz. Va en la CPU, una vez por luz y por frame (mcLuzLibre, en mcDynSync).
+// El margen de cortesía uDynCerca existe porque el propio emisor es geometría: sin él, las caras traseras de la
+// espada que uno lleva en la mano se apagarían. Meterla DENTRO de un bloque no vuelve a colar luz fuera: de eso se
+// encarga la mitad de CPU, que ve el sólido entre la luz y el ojo.
 float dynLuz(vec3 w){
   float m=0.0;
+#ifdef SUN_DERIV
+  vec3 nCara=normalize(cross(dFdx(w),dFdy(w)));
+  if(dot(nCara,uEye-w)<0.0) nCara=-nCara;                     // orientada al ojo, como en sunFactor
+#endif
   for(int i=0;i<${MC_DYN_MAX};i++){ if(i>=uDynN) continue;
     vec3 P=uDynPos[i].xyz; float d=distance(w, P);
+#ifdef SUN_DERIV
+    if(uDynCara>0.5 && d>uDynCerca && dot(nCara, P-w)<0.0) continue;   // la luz queda detrás de la cara
+#endif
     // BUG-GLOW4 · el haz ENCARECE el camino, NO lo corta. Es la misma ley que la siembra estática de
     // mcComputeBlockLight (paso a favor del haz = 1 nivel, de lado = 1+NARROW, con NARROW=glowFocus*5), y por eso
     // se escribe como coste por bloque recorrido en vez de como factor. Antes era pow(cos, 1+foco*8), que ANULA
@@ -9653,6 +9678,7 @@ function mcLocOf(p){ const gl=mc.gl; return {
   uExpo:gl.getUniformLocation(p,'uExpo'), uClipY:gl.getUniformLocation(p,'uClipY'),
   uBlkTex:gl.getUniformLocation(p,'uBlkTex'), uBlkDim:gl.getUniformLocation(p,'uBlkDim'), uBlkOn:gl.getUniformLocation(p,'uBlkOn'),
     uDynN:gl.getUniformLocation(p,'uDynN'), uDynPos:gl.getUniformLocation(p,'uDynPos'), uDynDir:gl.getUniformLocation(p,'uDynDir'), uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · luz dinámica de agente
+    uDynCara:gl.getUniformLocation(p,'uDynCara'), uDynCerca:gl.getUniformLocation(p,'uDynCerca'),   // BUG-GLOW6 · oclusión
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
   uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
@@ -9779,6 +9805,7 @@ function mcBuildStructProgram(){
     uExpo:gl.getUniformLocation(p,'uExpo'), uClipY:gl.getUniformLocation(p,'uClipY'),
     uBlkTex:gl.getUniformLocation(p,'uBlkTex'), uBlkDim:gl.getUniformLocation(p,'uBlkDim'), uBlkOn:gl.getUniformLocation(p,'uBlkOn'),
     uDynN:gl.getUniformLocation(p,'uDynN'), uDynPos:gl.getUniformLocation(p,'uDynPos'), uDynDir:gl.getUniformLocation(p,'uDynDir'), uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · luz dinámica de agente
+    uDynCara:gl.getUniformLocation(p,'uDynCara'), uDynCerca:gl.getUniformLocation(p,'uDynCerca'),   // BUG-GLOW6 · oclusión
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
     uReflejo:gl.getUniformLocation(p,'uReflejo'), uReflCurva:gl.getUniformLocation(p,'uReflCurva'),
     uReflColor:gl.getUniformLocation(p,'uReflColor'), uReflOpac:gl.getUniformLocation(p,'uReflOpac'),
@@ -9826,6 +9853,7 @@ function mcBuildStructTexProgram(){
     uExpo:gl.getUniformLocation(p,'uExpo'), uClipY:gl.getUniformLocation(p,'uClipY'),
     uBlkTex:gl.getUniformLocation(p,'uBlkTex'), uBlkDim:gl.getUniformLocation(p,'uBlkDim'), uBlkOn:gl.getUniformLocation(p,'uBlkOn'),
     uDynN:gl.getUniformLocation(p,'uDynN'), uDynPos:gl.getUniformLocation(p,'uDynPos'), uDynDir:gl.getUniformLocation(p,'uDynDir'), uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · luz dinámica de agente
+    uDynCara:gl.getUniformLocation(p,'uDynCara'), uDynCerca:gl.getUniformLocation(p,'uDynCerca'),   // BUG-GLOW6 · oclusión
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
@@ -10309,6 +10337,11 @@ function mcSunUniforms(L, S){
     if(n>0 && L.uDynPos && mc._dynArr) gl.uniform4fv(L.uDynPos, mc._dynArr);
     if(n>0 && L.uDynDir && mc._dynDir) gl.uniform4fv(L.uDynDir, mc._dynDir);
     if(L.uDynDark) gl.uniform1f(L.uDynDark, mc.interiorDark!=null?mc.interiorDark:1);
+    // BUG-GLOW6 · el mando es uno solo (game.luzOcluye) y enciende las DOS mitades: ésta (la cara de
+    // espaldas, aquí) y la línea de visión ojo↔luz (mcDynSync). Apagarlo devuelve el comportamiento viejo
+    // sin recargar, que es lo que pide medir fps con y sin.
+    if(L.uDynCara) gl.uniform1f(L.uDynCara, mc.luzOcluye?1:0);
+    if(L.uDynCerca) gl.uniform1f(L.uDynCerca, MC_DYN_CERCA);
   }
   if(L.uGlowGain!==undefined && L.uGlowGain!==null) gl.uniform1f(L.uGlowGain, mc.glowGain!=null?mc.glowGain:1);   // intensidad de la luz artificial
   if(L.uEye) gl.uniform3f(L.uEye, mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]);
@@ -11080,6 +11113,38 @@ function mcMeshAll(){
 //      conjunto «seguido» cambia —un emisor empieza o deja de ir montado (montado↔quieto)— hay que re-sembrar la luz de
 //      bloque UNA vez (quitar/poner su semilla estática en la celda estampada) y re-mallar su halo. Eso ocurre al arrancar/
 //      parar, no en cada paso ⇒ cero hipos por movimiento. La 1ª vez que se ve un emisor solo se fija la línea base.
+// BUG-GLOW6 · ¿hay materia entre estos dos puntos? Recorrido de celdas (Amanatides-Woo) sobre `mc.grid`, con la
+// MISMA tabla que gobierna la difusión de la luz horneada (`mcTablaLuz`, que se pasa ya hecha): una vidriera deja
+// pasar la luz dinámica exactamente igual que deja pasar la del cielo, y una pared la para igual. Si aquí se usara
+// otro predicado, el mundo tendría dos ideas distintas de qué es opaco — que es el bug de siempre en esta casa.
+// Fuera del mundo por arriba o por los lados = aire (no tapa); por debajo del suelo sí tapa, como en mcSolid.
+function mcLuzLibre(ax, ay, az, bx, by, bz, P){
+  const dx=bx-ax, dy=by-ay, dz=bz-az;
+  if(dx*dx+dy*dy+dz*dz < 1e-8) return true;
+  let x=Math.floor(ax), y=Math.floor(ay), z=Math.floor(az);
+  const fx=Math.floor(bx), fy=Math.floor(by), fz=Math.floor(bz);
+  const sx=dx>0?1:(dx<0?-1:0), sy=dy>0?1:(dy<0?-1:0), sz=dz>0?1:(dz<0?-1:0);
+  const dtx=sx?Math.abs(1/dx):Infinity, dty=sy?Math.abs(1/dy):Infinity, dtz=sz?Math.abs(1/dz):Infinity;
+  let tx=sx?((sx>0?x+1-ax:ax-x)*dtx):Infinity,
+      ty=sy?((sy>0?y+1-ay:ay-y)*dty):Infinity,
+      tz=sz?((sz>0?z+1-az:az-z)*dtz):Infinity;
+  const g=mc.grid, dim=mc.dim;
+  // Tope de pasos: las celdas que separan los dos extremos, más margen. Nunca es un bucle abierto aunque la
+  // geometría venga rara, y así una luz lejanísima no cuesta más que una cercana.
+  const tope=Math.min(MC_DYN_PASOS, Math.abs(fx-x)+Math.abs(fy-y)+Math.abs(fz-z)+3);
+  for(let paso=0; paso<=tope; paso++){
+    if(y<0) return false;
+    if(x>=0 && z>=0 && y<dim.y && x<dim.x && z<dim.z){
+      const id=g[mcIdx(x,y,z)];
+      if(id && !P[id]) return false;
+    }
+    if(x===fx && y===fy && z===fz) return true;
+    if(tx<=ty && tx<=tz){ if(tx>1) return true; x+=sx; tx+=dtx; }
+    else if(ty<=tz){ if(ty>1) return true; y+=sy; ty+=dty; }
+    else { if(tz>1) return true; z+=sz; tz+=dtz; }
+  }
+  return true;   // se acabaron los pasos sin dar con nada: se da por visible (no oscurecer por dejar de mirar)
+}
 function mcDynSync(){
   if(!mc.grid){ mc._dynN=0; return; }
   const eye=mc.pos, cand=mc._dynCand||(mc._dynCand=[]); cand.length=0;
@@ -11133,6 +11198,30 @@ function mcDynSync(){
   const idx=mc._dynIdx||(mc._dynIdx=[]); idx.length=nC; for(let i=0;i<nC;i++) idx[i]=i;
   idx.sort((a,b)=>cand[a*8]-cand[b*8]);
   const n=Math.min(nC, MC_DYN_MAX);
+  // BUG-GLOW6 · mitad de CPU: una luz que no VE al ojo no se sube. Es lo que apaga las estrellas dentro de un cuarto
+  // cerrado y la espada metida dentro de un bloque («*se ilumina fuera? no es realista*»), y no se puede hacer en el
+  // shader: sería un raycast por fragmento y por luz. Aquí sale a UNA línea por luz y por frame (≤MC_DYN_MAX), o
+  // sea nada, a cambio de ser una aproximación: la luz se juzga por lo que ve el OJO, no cada fragmento. Lo que se
+  // le escapa —la cara de enfrente de una pared— lo tapa la otra mitad, la del shader.
+  // La visibilidad se DESVANECE en vez de conmutar (MC_DYN_FUNDE): cruzar una puerta con una antorcha fuera
+  // encendería y apagaría de golpe en un solo frame, y eso se ve peor que el fallo. El desvanecido va por posición
+  // redondeada porque las plazas se reparten por cercanía y su índice no identifica a nadie de un frame al otro.
+  const ocl = mc.luzOcluye && mc.grid;
+  if(ocl){
+    const P=mcTablaLuz(), ex=eye[0], ey=eye[1]+MC_EYE*mc.scale, ez=eye[2];
+    const vis=mc._dynVis||(mc._dynVis=new Map());
+    const ahora=performance.now(), ant=mc._dynVisT||ahora; mc._dynVisT=ahora;
+    const k=Math.min(1, (ahora-ant)/1000/Math.max(0.001, MC_DYN_FUNDE));
+    for(let i=0;i<n;i++){ const c=idx[i]*8;
+      const lx=cand[c+1], ly=cand[c+2], lz=cand[c+3];
+      const clave=Math.round(lx*2)+','+Math.round(ly*2)+','+Math.round(lz*2);
+      const meta=mcLuzLibre(lx,ly,lz, ex,ey,ez, P) ? 1 : 0;
+      let v=vis.get(clave); if(v===undefined) v=meta;          // recién aparecida: nace con su valor, sin fundido
+      v += (meta-v)*k; if(Math.abs(meta-v)<0.02) v=meta;
+      vis.set(clave, v); cand[c+7] *= v;
+    }
+    if(vis.size > MC_DYN_MAX*8) vis.clear();                   // no crece: se tira la memoria del fundido y ya
+  } else if(mc._dynVis) mc._dynVis.clear();
   for(let i=0;i<n;i++){ const c=idx[i]*8;
     arr[i*4]=cand[c+1]; arr[i*4+1]=cand[c+2]; arr[i*4+2]=cand[c+3]; arr[i*4+3]=cand[c+7];
     dir[i*4]=cand[c+4]; dir[i*4+1]=cand[c+5]; dir[i*4+2]=cand[c+6]; dir[i*4+3]=foco; }
@@ -19795,6 +19884,23 @@ try{ const gg=parseFloat(localStorage.getItem('vf_mcGlowGain')); if(isFinite(gg)
 Object.defineProperty(game,'glowGain',{ enumerable:true, get:()=>mc.glowGain,
   set:v=>{ v=Math.max(0,Math.min(16, isFinite(+v)?+v:1)); mc.glowGain=v; try{localStorage.setItem('vf_mcGlowGain',v);}catch(e){}
     return v; } });   // solo uniforme: el bucle de render lo aplica en el siguiente frame, sin recalcular nada
+// game.luzOcluye (BUG-GLOW6) = la luz DINÁMICA (la que sigue a un agente, la que llevas en la mano, las estrellas de
+// game.voxelesUI) respeta los sólidos. La HORNEADA siempre lo hizo —mcComputeBlockLight es un BFS por el aire—, pero
+// la dinámica se sumaba por distancia y ángulo sin preguntar si había una pared en medio: estrellas alumbrando un
+// cuarto cerrado, la espada de luz iluminando el otro lado del muro, y 2 bloques de grosor filtrando menos que 1.
+// Son DOS mitades y hacen falta las dos, porque ninguna sola llega:
+//   · por fragmento (shader) — una cara no recibe la luz que le da POR DETRÁS. Exacto y gratis: la normal sale de las
+//     derivadas de la posición de mundo, que ya se calculan para la sombra del sol. Arregla el grosor de la pared.
+//   · por luz (CPU, mcDynSync) — una luz que no ve al ojo no se sube al shader (mcLuzLibre). Arregla el cuarto
+//     cerrado. Es una aproximación de una línea por luz y por frame; la alternativa exacta sería un raycast por
+//     fragmento y por luz, que es justo lo que no se puede pagar.
+// NO re-siembra ni re-malla: un uniforme y un filtro por frame ⇒ conmutarlo cuesta cero y sirve para medir. Persiste
+// en vf_mcLuzOcluye. false = comportamiento anterior al 2026-08-20, la luz atraviesa la materia.
+try{ const lo=localStorage.getItem('vf_mcLuzOcluye'); if(lo!==null) mc.luzOcluye = lo==='1'; }catch(e){}
+Object.defineProperty(game,'luzOcluye',{ enumerable:true, get:()=>mc.luzOcluye,
+  set:v=>{ v=!!v; mc.luzOcluye=v; try{localStorage.setItem('vf_mcLuzOcluye', v?'1':'0');}catch(e){}
+    if(!v && mc._dynVis) mc._dynVis.clear();
+    toast(v?'La luz dinámica respeta los sólidos':'La luz dinámica atraviesa los sólidos (como antes)'); return v; } });
 // game.worldSize (t8) = límites del mundo. Lectura: '96×40×96'. Redimensionar en vivo: game.resizeWorld(x,y,z)
 // (x/z 16..512, y 8..256). Conserva los bloques anclados en el origen, recoloca al jugador dentro y re-malla; las
 // estructuras estampadas mantienen sus coords de mundo. Persiste en el servidor (dim viaja en el guardado).

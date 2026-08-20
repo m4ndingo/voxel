@@ -32,6 +32,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[BUG-GLOW6](#-bug-glow6)~~ | ~~**la luz dinámica atraviesa los sólidos**: las estrellas alumbran cuartos cerrados y la espada alumbra al otro lado de la pared~~ | ✅ resuelto 2026-08-20 | `game.luzOcluye`. **Dos mitades, ninguna sola llega**: en el **shader**, una cara no recibe la luz que le da por detrás (exacto y gratis — la normal ya la sacan `sunFactor`/`blkLuz` de `cross(dFdx,dFdy)`), y eso arregla el grosor de la pared; en la **CPU**, una luz que no ve al ojo no se sube (`mcLuzLibre`, con la MISMA tabla que la difusión horneada, `mcTablaLuz`), y eso apaga el cuarto cerrado y la espada metida dentro de un bloque. La exacta sería un raycast por fragmento y por luz ⇒ descartada por fps. Visibilidad **con fundido** de 0,18 s: conmutar de golpe se ve peor que el fallo. `tests/test_glow6_luz_ocluida.js` |
 | ~~[REQ-CART5](#-req-cart5)~~ | ~~poder **mover una nota ya plantada**, con un botón «mover» en su propio panel~~ | ✅ resuelto 2026-08-20 | botón «Mover» en el panel: `mcStartNoteMove()` **guarda lo tecleado** y reentra en el Modo Cartel que ya existía para plantar (fantasma, `R`, `Esc`); `mcMoveNoteA()` aterriza. Mover **es cambiar de clave**, así que texto, giro y tinte cambian los tres a la vez o el cartel nuevo sale sin color y el viejo se queda huérfano. No pisa otra nota ni se borra al soltarla en su sitio. El cartel se replanta solo (`mcSyncNoteSigns`). `tests/test_cart5_mover_nota.js` |
 | ~~[REQ-EXTRU1](#-req-extru1)~~ | ~~**extrusión con la herramienta de selección**: seleccionar y con Shift+rueda subir (extruir) o bajar (cavar)~~ | ✅ resuelto 2026-08-20 | `mcSelExtruir(±1)` colgado del manejador de rueda de REQ-TOOL6. Va **por columnas `(x,z)`**, no por capas: la extrusión sigue la **silueta** del terreno. La caja se estira una celda por el lado del que se tira, así que la muesca siguiente sigue subiendo/cavando sola. Arriba y abajo **no son inversos** (deshacer es `z`: un gesto `'bb'` por muesca). Con Shift no pisa la rosca y funciona aunque `mc.ruedaTool` esté apagado. `tests/test_extru1_seleccion.js` |
 | ~~[BUG-RS27](#-bug-rs27)~~ | ~~los **botones y palancas de redstone se conmutan también con el botón derecho**, y debería ser solo con el central~~ | ✅ resuelto 2026-08-20 | fuera la envoltura de `mcUseRight` en `redstone/redstone-piezas.js`: el derecho **construye y punto**, accionar es del central. Se **desenvuelve en caliente** (`mcUseRight._orig`) en vez de borrar el código y ya, para que una pestaña con la versión vieja cargada se cure sola. `tests/test_bug_rs27_boton_derecho.js` (con tramo anti-falso-verde). ⚠️ **no llega al mundo vivo hasta republicar**: `node redstone/make_snippets.js` |
@@ -183,6 +184,88 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 ---
 
 
+
+<a id="-bug-glow6"></a>
+
+### ✅ BUG-GLOW6 · La luz dinámica atraviesa los sólidos — ✅ resuelto 2026-08-20
+
+Seis notas del dueño en **`/map/bugfinder`** que parecen seis cosas y son **una sola**. Verbatim, con
+su coordenada:
+
+- `45,14,69` — «*como es posible que las estrellas esten iluminando un espacio cerrado al que no llega
+  la luz por ninguna esquina? no deberia llegar la luz de las estrellas a los espacios cerrados*»
+- `24,14,67` — «*como es posible que en una escena oscura, si me pongo pegado a una pared con la espada
+  de luz, se ilumine no solo la pared y el suelo, sino los lados de la pared que tengo delante*»
+- `26,14,78` — «*como es posible que si visualmente meto la espada de luz dentro de este bloque
+  acercandome a él hasta que desaparezca la espada, se ilumine fuera? no es realista*»
+- `15,10,76` — «*probar game.interiorDark=0.1 aqui con la espada de luz en la mano, alumbra de forma
+  confusa…*»
+- `34,14,46` / `34,14,51` — «*aqui se ve mas oscuro porque hay 2 bloques*» / «*aqui solo hay un bloque
+  y parece mas brillante*» (las dejó como medición: el grosor de la pared cambia lo que se cuela)
+
+**Investigado (sin tocar nada).** Hay **dos** luces artificiales y solo una respeta la materia:
+
+- **Horneada** — `mcComputeBlockLight()` es un BFS que se propaga **por el aire**, así que un muro la
+  para. Es la de una antorcha plantada.
+- **Dinámica** — `mcDynSync` mete las luces vivas en `uDynPos`/`uDynDir` (`mc._dynArr`, `MC_DYN_MAX`
+  plazas, las más cercanas al ojo) y el fragmento las suma **por distancia y ángulo, sin preguntar si
+  hay un sólido en medio**. No hay prueba de oclusión en ningún sitio. De ahí que atraviese la pared,
+  que alumbre desde dentro de un bloque y que 2 bloques de grosor se noten menos oscuros que 1.
+
+Las **estrellas** entran justo por ahí desde [REQ-GLOW5](PLAN.md#-req-glow5): `mcVoxUILuces()` convierte los
+voxeles emisivos de `game.voxelesUI` en luces dinámicas (agrupadas por celda). Un cielo de estrellas es
+un puñado de focos sin oclusión → se cuelan en un cuarto cerrado.
+
+**Lo caro de decidir** no es el fallo, es el arreglo: una prueba de oclusión por fragmento y por luz es
+un raycast en el shader, y el dueño manda que **no bajen los fps**. Opciones a ponderar antes de
+escribir una línea: (a) sombreado barato por línea de visión muestreando la luz horneada del camino;
+(b) apagar la luz dinámica cuando el sólido del ojo y el de la luz no se ven (test por celda, no por
+fragmento); (c) para las estrellas, que sea suficiente el interruptor `mc.voxUILuces=false` o un
+alcance corto. Preguntar antes de elegir.
+
+**Criterio de cierre:** en un cuarto cerrado de `/map/bugfinder`, de noche, con estrellas en el cielo y
+la espada de luz en la mano fuera, dentro está **oscuro**; y la espada pegada a una pared no ilumina la
+cara de enfrente. Sin perder fps medidos con `game.osd`.
+
+**Lo hecho (2026-08-20)** — `game.luzOcluye` (por defecto **true**). Detalle en
+[`docs/luz-y-sombra.md`](docs/luz-y-sombra.md), guardián `tests/test_glow6_luz_ocluida.js`. De las tres
+opciones que quedaban por decidir arriba **no gana ninguna sola: hacen falta dos mitades**, porque cada
+una llega justo donde la otra no puede, y ninguna de las dos cuesta fps:
+
+- **Por fragmento, en el shader** — una cara **no recibe la luz que le da por detrás**
+  (`dot(nCara, P-w) < 0`). Es **exacto** para luz directa y sale **gratis**: la normal son las derivadas
+  de la posición de mundo (`cross(dFdx,dFdy)`) que `sunFactor` y `blkLuz` ya calculan en ese mismo
+  fragmento — ni un atributo nuevo ni una lectura de textura. Esto tumba las quejas de **grosor**: «*me
+  pego a una pared con la espada y se ilumina la cara de enfrente*» y «*con 2 bloques se ve más oscuro
+  que con 1*» (ahora con 1 y con 2 se filtra lo mismo: nada). Margen de cortesía `MC_DYN_CERCA` = 0,6
+  bloques, porque el emisor que llevas **en la mano es geometría** y sin él se apagarían las caras
+  traseras de la propia espada.
+- **Por luz, en la CPU** (`mcLuzLibre` dentro de `mcDynSync`) — una luz que **no ve al ojo** no se sube
+  al shader. Recorrido de celdas con **la misma tabla que gobierna la difusión de la luz horneada**
+  (`mcTablaLuz`): si aquí se usara otro predicado, el mundo tendría dos ideas de qué es opaco y una
+  vidriera pararía una luz y no la otra. Esto apaga el **cuarto cerrado con estrellas** y la espada
+  metida dentro de un bloque («*se ilumina fuera? no es realista*»: el origen cae en celda sólida ⇒
+  ocluida). Cuesta **una línea por luz y por frame**, ≤ 8.
+
+Lo que **no** se ha hecho, y a sabiendas: la oclusión exacta por fragmento y por luz sería un raycast en
+el shader (8 luces × ~12 pasos ≈ 100 lecturas por píxel) y eso es justo lo que el ticket prohíbe pagar.
+La mitad de CPU es por tanto una **aproximación**: juzga por lo que ve el **ojo**, no cada fragmento. Se
+le escapa una luz que tú ves pero que una esquina esconde de la pared que miras — en la práctica la tapa
+la otra mitad en cuanto la cara está de espaldas.
+
+Dos detalles que costaron:
+
+- La visibilidad **se desvanece** (0,18 s) en vez de conmutar: cruzar una puerta con una antorcha fuera
+  encendía y apagaba en un frame, y eso se ve **peor** que el fallo. El fundido va indexado por posición
+  redondeada, no por índice de plaza — las plazas se reparten por cercanía al ojo y su índice no
+  identifica a la misma luz de un frame al siguiente.
+- El mando **no re-siembra ni re-malla**: un uniforme y un filtro por frame. Apagarlo devuelve el
+  comportamiento viejo en el frame siguiente, que es lo que hace falta para medir fps con y sin.
+
+⚠️ `tests/test_agente_luz_sigue.js` y `tests/test_luz_artificial.js` siguen en rojo, con **el mismo
+fallo exacto que en HEAD antes de tocar nada** (comprobado con `git stash`): no son regresión de esto.
+
+---
 
 <a id="-req-cart5"></a>
 

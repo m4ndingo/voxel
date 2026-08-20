@@ -47,7 +47,6 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-GLOW5](#-req-glow5) | poder decir desde un snippet que un **voxel de `game.voxelesUI` emite luz** (fuego, partículas) | 🔴 abierto 2026-08-19 | mismo principio que BUG-GLOW4: se declara con el prefijo `*` del color, igual que en un dibujo. Se apoya en la luz dinámica ya existente | 
 | [REQ-MOV1](#-req-mov1) | en el **móvil** el Mundo es inmanejable: sobran 📷/🎬, faltan los **3 botones del ratón**, pantalla completa, y el ✕ debe ser un **menú** | 🔴 abierto 2026-08-19 | captura y palabras del dueño en [`data/tickets/REQ-MOV1/`](data/tickets/REQ-MOV1/contexto.md). Revierte el «a propósito NO hay botones de romper/poner» que estaba escrito en `app.js`. El central **no es duda**: es el de redstone. Ojo al `pointerLockElement`: pantalla completa lo suelta |
 | [REQ-ED3](#-req-ed3) | **guías de rejilla** en el editor 2D (líneas azul claro que parten la capa en 2×2, 4×4…), conmutables | 🟢 abierto 2026-08-18 | pedido por el dueño como «tool que rote entre sin grid / ÷2 / ÷4». **Investigado**: el sitio es `drawEdit` (`app.js:565`), que ya pinta una rejilla por celda. Ojo con lo de «tool»: las del panel son de DIBUJO y elegirla te dejaría sin pincel — el precedente correcto es el interruptor de Caras (`vf_caras_marcar`), estado de VISTA que no viaja en el documento |
-| [BUG-GLOW6](#-bug-glow6) | **la luz dinámica atraviesa los sólidos**: las estrellas alumbran cuartos cerrados y la espada alumbra al otro lado de la pared | 🔴 abierto 2026-08-19 | 6 notas del dueño en `/map/bugfinder` que son **el mismo fallo**. Investigado: las luces dinámicas (`mcDynSync` → `uDynPos`) son luces de punto del shader **sin prueba de oclusión**; la luz de bloque horneada (`mcComputeBlockLight`, BFS por el aire) sí respeta sólidos. Desde [REQ-GLOW5](#-req-glow5) las estrellas de `game.voxelesUI` entran por esa misma vía |
 | [REQ-SHADOW3](#-req-shadow3) | de noche la **sombra proyectada** sale tan difuminada que casi no se ve, y no se sabe si la espada de luz proyecta la suya | 🟢 abierto 2026-08-19 | 2 notas de `/map/bugfinder`. Sin investigar. Pide mandos para las sombras, no un arreglo concreto |
 | [BUG-CART1](#-bug-cart1) | **carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce | 🟡 arreglado 2026-08-20, **falta una pasada del dueño** | encontrado tirando de un guardián en rojo, no pedido. La causa (la marca `efimera` se ponía DESPUÉS del `await` de estampar) está arreglada y el motor se cura solo en caliente. Queda lo que ya está escrito en los ficheros: `python3 herramientas/carteles_fantasma.py` (en seco) y luego `--escribe`. **No lo puedo lanzar yo**: la caja de arena me deniega escribir en `data/worlds/` |
 | [REQ-RANURA1](#-req-ranura1) | **guardar la selección en una ranura** para volver a plantarla: ranura 11, tecla `K` | 🟡 abierto 2026-08-19 | nota de `/map/bugfinder`. Es una galería de recortes, no un portapapeles: pide varias guardadas y poder elegir. Roza [REQ-TOOL6/7](PLAN_ARCHIVO.md) (la rosca de ranuras) y el pegado de 24 posturas |
@@ -493,50 +492,6 @@ nadie haya borrado nada.
 
 **Cuidado al arreglarlo:** el snippet es autoría del dueño y lo edita en vivo. Nada de reescribirlo
 entero; los cambios de código van por parche idempotente por marca, como el resto de esta zona.
-
----
-
-<a id="-bug-glow6"></a>
-
-### 🔴 BUG-GLOW6 · La luz dinámica atraviesa los sólidos — 🔴 abierto 2026-08-19
-
-Seis notas del dueño en **`/map/bugfinder`** que parecen seis cosas y son **una sola**. Verbatim, con
-su coordenada:
-
-- `45,14,69` — «*como es posible que las estrellas esten iluminando un espacio cerrado al que no llega
-  la luz por ninguna esquina? no deberia llegar la luz de las estrellas a los espacios cerrados*»
-- `24,14,67` — «*como es posible que en una escena oscura, si me pongo pegado a una pared con la espada
-  de luz, se ilumine no solo la pared y el suelo, sino los lados de la pared que tengo delante*»
-- `26,14,78` — «*como es posible que si visualmente meto la espada de luz dentro de este bloque
-  acercandome a él hasta que desaparezca la espada, se ilumine fuera? no es realista*»
-- `15,10,76` — «*probar game.interiorDark=0.1 aqui con la espada de luz en la mano, alumbra de forma
-  confusa…*»
-- `34,14,46` / `34,14,51` — «*aqui se ve mas oscuro porque hay 2 bloques*» / «*aqui solo hay un bloque
-  y parece mas brillante*» (las dejó como medición: el grosor de la pared cambia lo que se cuela)
-
-**Investigado (sin tocar nada).** Hay **dos** luces artificiales y solo una respeta la materia:
-
-- **Horneada** — `mcComputeBlockLight()` es un BFS que se propaga **por el aire**, así que un muro la
-  para. Es la de una antorcha plantada.
-- **Dinámica** — `mcDynSync` mete las luces vivas en `uDynPos`/`uDynDir` (`mc._dynArr`, `MC_DYN_MAX`
-  plazas, las más cercanas al ojo) y el fragmento las suma **por distancia y ángulo, sin preguntar si
-  hay un sólido en medio**. No hay prueba de oclusión en ningún sitio. De ahí que atraviese la pared,
-  que alumbre desde dentro de un bloque y que 2 bloques de grosor se noten menos oscuros que 1.
-
-Las **estrellas** entran justo por ahí desde [REQ-GLOW5](#-req-glow5): `mcVoxUILuces()` convierte los
-voxeles emisivos de `game.voxelesUI` en luces dinámicas (agrupadas por celda). Un cielo de estrellas es
-un puñado de focos sin oclusión → se cuelan en un cuarto cerrado.
-
-**Lo caro de decidir** no es el fallo, es el arreglo: una prueba de oclusión por fragmento y por luz es
-un raycast en el shader, y el dueño manda que **no bajen los fps**. Opciones a ponderar antes de
-escribir una línea: (a) sombreado barato por línea de visión muestreando la luz horneada del camino;
-(b) apagar la luz dinámica cuando el sólido del ojo y el de la luz no se ven (test por celda, no por
-fragmento); (c) para las estrellas, que sea suficiente el interruptor `mc.voxUILuces=false` o un
-alcance corto. Preguntar antes de elegir.
-
-**Criterio de cierre:** en un cuarto cerrado de `/map/bugfinder`, de noche, con estrellas en el cielo y
-la espada de luz en la mano fuera, dentro está **oscuro**; y la espada pegada a una pared no ilumina la
-cara de enfrente. Sin perder fps medidos con `game.osd`.
 
 ---
 
