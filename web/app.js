@@ -14780,6 +14780,9 @@ function mcDoAction(btn, shift){
     if(hit){
       const cell = hit.cell.slice();
       const rot = (mc.notePlaceRot !== undefined) ? mc.notePlaceRot : mcCartelCfg().rot;
+      // REQ-CART5 · moviendo una nota, el clic la SUELTA aquí (mcMoveNoteA apaga el modo por su cuenta;
+      // pasar por mcCancelNotePlace avisaría de una cancelación que no ha habido).
+      if(mc.noteMoving){ mcMoveNoteA(cell, rot); return; }
       mcCancelNotePlace();
       mcOpenNote(cell, rot);
     }
@@ -15823,8 +15826,51 @@ function mcStartNotePlace(){
   toast('📝 Modo Cartel: Apunta y haz Clic para plantar (R: girar, Esc: cancelar)');
 }
 function mcCancelNotePlace(){
+  // REQ-CART5 · cancelar un «mover» no pierde nada: la nota se guardó ANTES de empezar a moverla
+  // (mcStartNoteMove), así que sigue entera en su sitio de siempre.
+  if(mc.noteMoving){ mc.noteMoving=null; toast('Movimiento cancelado: la nota se queda donde estaba'); }
   mc.notePlacing = false;
   mcClearPreview();
+}
+// REQ-CART5 · «Mover» del panel de la nota (nota del dueño en /map/bugfinder, 57,14,58: «*me gustaria
+// poder moverlas una vez plantadas, que tal un boton de "mover" dentro de la nota que me permita
+// reposicionarla*»).
+// No hay modo nuevo: se reutiliza el Modo Cartel entero (fantasma del cartel, R para girar, Esc para
+// cancelar) y solo cambia lo que pasa al hacer clic — en vez de abrir el panel en la celda apuntada,
+// mcMoveNoteA lleva la nota allí. Lo tecleado se guarda PRIMERO, así que un movimiento a medias, un
+// Esc o un mundo que se recargue dejan la nota exactamente donde estaba: mover nunca puede perder
+// texto (regla de arranque: las notas del Mundo no se reescriben).
+function mcStartNoteMove(){
+  if(!mc.noteCell) return;
+  const cell=mc.noteCell.slice();
+  if(!$('#mc-note-text').value.trim()){ toast('Escribe la nota antes de moverla'); return; }
+  mcSaveNote();                                          // guarda texto, giro y tinte, y cierra el panel
+  const k=mcNoteKey(cell);
+  if(!mc.notes[k]) return;
+  mc.noteMoving=k;
+  mcStartNotePlace();
+  mc.notePlaceRot=(mc.noteRots && mc.noteRots[k]!==undefined) ? (mc.noteRots[k]&3) : mcCartelCfg().rot;
+  mcUpdatePreview();
+  toast('📍 Moviendo la nota: clic para volver a mirar, apunta y clic la deja ahí (R gira, Esc cancela)');
+}
+// La nota ES la clave (`mc.notes` va por "x,y,z"), así que mover = borrar una entrada y crear otra. El
+// giro (`mc.noteRots`) y el tinte (`mc.noteTints`) son mapas APARTE con esa misma clave: viajan aquí o
+// se quedarían huérfanos en el fichero y el cartel saldría del color de nadie. El cartel no se toca —
+// se deriva y lo replanta mcSyncNoteSigns.
+function mcMoveNoteA(cell, rot){
+  // Soltar la nota apaga el Modo Cartel aquí y no en quien llama: así cualquier camino (el clic, un
+  // snippet, una prueba) deja el mismo estado y no queda un fantasma de cartel pegado a la mira.
+  const k=mc.noteMoving; mc.noteMoving=null; mc.notePlacing=false; mcClearPreview();
+  if(!k || !mc.notes[k]){ toast('Esa nota ya no está'); return; }
+  const nk=mcNoteKey(cell);
+  if(nk===k){ toast('La nota ya estaba en ese bloque'); return; }
+  if(mc.notes[nk]){ toast('Ahí ya hay otra nota: elige otro bloque'); return; }   // una nota no pisa a otra
+  mc.notes[nk]=mc.notes[k]; delete mc.notes[k];
+  if(mc.noteRots){ const r=(rot!==undefined)?(rot&3):mc.noteRots[k];
+    if(r!==undefined) mc.noteRots[nk]=r; delete mc.noteRots[k]; }
+  if(mc.noteTints){ const t=mcNoteTinte(k); if(t) mc.noteTints[nk]=t; delete mc.noteTints[k]; }
+  mcDirtyHeader(); mcScheduleSave(); mcSyncNoteSigns();
+  toast('Nota movida a '+nk);
 }
 // Tecla N: abre el panel para el bloque apuntado (crea o edita). Como el editor libera el ratón, guarda la celda.
 function mcOpenNote(cellOverride, rotOverride){
@@ -15839,6 +15885,7 @@ function mcOpenNote(cellOverride, rotOverride){
   if(document.pointerLockElement===mc.canvas) document.exitPointerLock();   // suelta el ratón para poder escribir
   const ta=$('#mc-note-text'); ta.value=cur; ta.maxLength=MC_NOTE_MAX;
   $('#mc-note-del').hidden=!cur;                        // «Borrar» solo si ya había nota
+  { const bm=$('#mc-note-move'); if(bm) bm.hidden=!cur; }   // REQ-CART5 · «Mover» tampoco antes de que exista
   
   let curRot;
   if(rotOverride !== undefined){
@@ -19805,6 +19852,7 @@ $('#mc-picker-close').onclick=mcClosePicker;
 $('#mc-picker-remove').onclick=mcRemoveSlot;
 $('#mc-note-save').onclick=mcSaveNote;
 $('#mc-note-del').onclick=mcDeleteNote;
+if($('#mc-note-move')) $('#mc-note-move').onclick=mcStartNoteMove;
 if($('#mc-note-trace')) $('#mc-note-trace').onclick=mcShowTraceModal;
 if($('#trace-close')) $('#trace-close').onclick=mcCloseTraceModal;
 if($('#trace-copy')) $('#trace-copy').onclick=mcCopyTraceText;

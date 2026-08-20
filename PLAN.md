@@ -49,7 +49,6 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-ED3](#-req-ed3) | **guías de rejilla** en el editor 2D (líneas azul claro que parten la capa en 2×2, 4×4…), conmutables | 🟢 abierto 2026-08-18 | pedido por el dueño como «tool que rote entre sin grid / ÷2 / ÷4». **Investigado**: el sitio es `drawEdit` (`app.js:565`), que ya pinta una rejilla por celda. Ojo con lo de «tool»: las del panel son de DIBUJO y elegirla te dejaría sin pincel — el precedente correcto es el interruptor de Caras (`vf_caras_marcar`), estado de VISTA que no viaja en el documento |
 | [BUG-GLOW6](#-bug-glow6) | **la luz dinámica atraviesa los sólidos**: las estrellas alumbran cuartos cerrados y la espada alumbra al otro lado de la pared | 🔴 abierto 2026-08-19 | 6 notas del dueño en `/map/bugfinder` que son **el mismo fallo**. Investigado: las luces dinámicas (`mcDynSync` → `uDynPos`) son luces de punto del shader **sin prueba de oclusión**; la luz de bloque horneada (`mcComputeBlockLight`, BFS por el aire) sí respeta sólidos. Desde [REQ-GLOW5](#-req-glow5) las estrellas de `game.voxelesUI` entran por esa misma vía |
 | [REQ-SHADOW3](#-req-shadow3) | de noche la **sombra proyectada** sale tan difuminada que casi no se ve, y no se sabe si la espada de luz proyecta la suya | 🟢 abierto 2026-08-19 | 2 notas de `/map/bugfinder`. Sin investigar. Pide mandos para las sombras, no un arreglo concreto |
-| [REQ-CART5](#-req-cart5) | poder **mover una nota ya plantada**, con un botón «mover» en su propio panel | 🟢 abierto 2026-08-19 | nota de `/map/bugfinder`. Hoy una nota se planta y no se recoloca. Ojo: la nota es el dato (`mc.notes`, clave = la posición) y el cartel se DERIVA, así que mover es **cambiar de clave**, no mover el cartel |
 | [REQ-RANURA1](#-req-ranura1) | **guardar la selección en una ranura** para volver a plantarla: ranura 11, tecla `K` | 🟡 abierto 2026-08-19 | nota de `/map/bugfinder`. Es una galería de recortes, no un portapapeles: pide varias guardadas y poder elegir. Roza [REQ-TOOL6/7](PLAN_ARCHIVO.md) (la rosca de ranuras) y el pegado de 24 posturas |
 | [REQ-MULTI1](#-req-multi1) | **multijugador colaborativo**: varios jugadores en el mismo mapa, viéndose entre sí (con el arma en la mano y su etiqueta de nombre) y con los cambios del mundo sincronizados | 🟢 abierto 2026-08-19 | pedido por el dueño el 2026-08-19 al hilo de «pisar el mundo»: si el mapa es de todos, **nadie pisa a nadie**. Es el ticket más grande del plan. **Acotado ya por él (2026-08-19)**: tope **10** jugadores de momento (idealmente sin tope), **internet y red local**, y se **juega Y se construye** a la vez. A favor: medio camino hecho sin querer — `POST /api/mundo/edits` ya manda **el delta**, no el mundo. En contra: hoy no hay proceso servidor con estado (stdlib, un `Handler` por petición), ni identidad, ni cuerpo de jugador dibujable. Construir a la vez obliga a que **el servidor sea el árbitro**, no el navegador |
 | [REQ-SPAWN1](#-req-spawn1) | **pensar el tema de los puntos de aparición** (spawn) | 🟢 abierto 2026-08-19 | nota del dueño en `/map/bugfinder`, tal cual: es un **encargo de pensar**, no un arreglo. Hoy hay un único `spawn` en la cabecera del mundo |
@@ -558,27 +557,6 @@ contestar; si de verdad quiere sombra de la espada, eso es otra luz en el mapa d
 
 **Criterio de cierre:** de noche la sombra del sol/luna se ve tanto como él quiera, con un mando que
 persista, y está escrito en la wiki qué proyecta sombra y qué no.
-
----
-
-<a id="-req-cart5"></a>
-
-### 🟢 REQ-CART5 · Mover una nota ya plantada — 🟢 abierto 2026-08-19
-
-Nota `57,14,58` de **`/map/bugfinder`**: «*un poco lio las notas / carteles, pero parecen ir ok. me
-gustaria poder moverlas una vez plantadas, que tal un boton de "mover" dentro de la nota que me permita
-reposicionarla*».
-
-⚠️ Lo que hay que entender antes de empezar (`docs/notas-y-fuente.md`): **la nota es el dato y el cartel
-se deriva**. `mc.notes` es un mapa `"x,y,z" → texto`, o sea que **la posición ES la clave**: mover una
-nota es borrar una entrada y crear otra (arrastrando su tinte, `noteTints`, con la misma clave). El
-cartel se replanta solo (`mcSyncNoteSigns`), no hay que tocarlo.
-
-Y la regla de arranque: **las notas del Mundo no se reescriben**. Un «mover» que pierda el texto o el
-tinte por el camino es peor que no tenerlo; que pase por el mismo sitio que hoy escribe la nota.
-
-**Criterio de cierre:** desde el panel de una nota, botón «mover», se recoloca con la mira y al soltar
-el cartel está en el sitio nuevo con su texto y su tinte, y el viejo ha desaparecido.
 
 ---
 

@@ -215,3 +215,34 @@ Las notas son **la excepción** a la regla de «todo a 9px» del bloque `--font-
 está escrito allí: las notas de los agentes son volcados largos que hay que leer enteros.
 La media query de 680px **ya no toca el cuerpo** — el móvil dejó de ser un caso especial cuando 18
 pasó a ser el valor general. Guardián: `node test_notas_panel.js`.
+
+## Mover una nota ya plantada (REQ-CART5)
+
+*(2026-08-20, nota del dueño en `/map/bugfinder`, 57,14,58: «*me gustaria poder moverlas una vez
+plantadas, que tal un boton de "mover" dentro de la nota que me permita reposicionarla*»)*
+
+Botón **«📍 Mover»** en el panel de la `N` (`#mc-note-move`, escondido mientras la nota no exista todavía).
+Guardián: `tests/test_cart5_mover_nota.js`.
+
+**No hay modo nuevo**: se reutiliza el **Modo Cartel** entero (`mcStartNotePlace` — fantasma del cartel
+con la mira, `R` gira, `Esc` cancela) y lo único que cambia es el aterrizaje: con `mc.noteMoving` puesto,
+el clic no abre el panel en la celda apuntada, sino que llama a `mcMoveNoteA(cell, rot)`.
+
+Las tres cosas que importan:
+
+- **Mover es cambiar de clave.** `mc.notes` va por `"x,y,z"`, así que la posición **es** la clave: se
+  crea la entrada nueva y se borra la vieja. `mc.noteRots` y `mc.noteTints` son **mapas aparte con esa
+  misma clave** y viajan en el mismo sitio — dejarlos atrás deja un cartel del color de nadie y un par
+  de entradas huérfanas en `mundo.json`. El cartel no se toca: se **deriva** y lo replanta
+  `mcSyncNoteSigns`.
+- **Mover no puede perder texto** (regla de arranque: las notas del Mundo no se reescriben).
+  `mcStartNoteMove` **guarda primero** (pasa por `mcSaveNote`, con lo tecleado, el giro y el tinte) y
+  solo después entra en el modo. De ahí que cancelar con `Esc`, cambiar de herramienta o recargar a
+  medias dejen la nota **entera donde estaba**: no hay ningún estado intermedio en el que el dato no
+  esté en ninguna clave.
+- **Una nota no pisa a otra**: si el destino ya tiene nota, se avisa y no se mueve nada. Soltarla en su
+  propio bloque tampoco la borra.
+
+`mcMoveNoteA` apaga el Modo Cartel por su cuenta (`notePlacing=false` + `mcClearPreview`) en vez de
+esperar a que lo haga quien llama: así el clic, un snippet o una prueba dejan todos el mismo estado y no
+queda un fantasma de cartel pegado a la mira.

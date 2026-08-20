@@ -32,6 +32,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[REQ-CART5](#-req-cart5)~~ | ~~poder **mover una nota ya plantada**, con un botón «mover» en su propio panel~~ | ✅ resuelto 2026-08-20 | botón «Mover» en el panel: `mcStartNoteMove()` **guarda lo tecleado** y reentra en el Modo Cartel que ya existía para plantar (fantasma, `R`, `Esc`); `mcMoveNoteA()` aterriza. Mover **es cambiar de clave**, así que texto, giro y tinte cambian los tres a la vez o el cartel nuevo sale sin color y el viejo se queda huérfano. No pisa otra nota ni se borra al soltarla en su sitio. El cartel se replanta solo (`mcSyncNoteSigns`). `tests/test_cart5_mover_nota.js` |
 | ~~[REQ-EXTRU1](#-req-extru1)~~ | ~~**extrusión con la herramienta de selección**: seleccionar y con Shift+rueda subir (extruir) o bajar (cavar)~~ | ✅ resuelto 2026-08-20 | `mcSelExtruir(±1)` colgado del manejador de rueda de REQ-TOOL6. Va **por columnas `(x,z)`**, no por capas: la extrusión sigue la **silueta** del terreno. La caja se estira una celda por el lado del que se tira, así que la muesca siguiente sigue subiendo/cavando sola. Arriba y abajo **no son inversos** (deshacer es `z`: un gesto `'bb'` por muesca). Con Shift no pisa la rosca y funciona aunque `mc.ruedaTool` esté apagado. `tests/test_extru1_seleccion.js` |
 | ~~[BUG-RS27](#-bug-rs27)~~ | ~~los **botones y palancas de redstone se conmutan también con el botón derecho**, y debería ser solo con el central~~ | ✅ resuelto 2026-08-20 | fuera la envoltura de `mcUseRight` en `redstone/redstone-piezas.js`: el derecho **construye y punto**, accionar es del central. Se **desenvuelve en caliente** (`mcUseRight._orig`) en vez de borrar el código y ya, para que una pestaña con la versión vieja cargada se cure sola. `tests/test_bug_rs27_boton_derecho.js` (con tramo anti-falso-verde). ⚠️ **no llega al mundo vivo hasta republicar**: `node redstone/make_snippets.js` |
 | ~~[REQ-CART6](#-req-cart6)~~ | ~~el **panel de la nota es demasiado alto**: no se llena nunca de texto, bajarlo al 70 %~~ | ✅ resuelto 2026-08-20 | 10 → 7 líneas de cuerpo y tope 46vh → 32vh, en `web/style.css`. El alto se **deriva de la letra** (`--note-fs` × 1.8 × 7), así que subirle el tamaño al texto no vuelve a descuadrar la caja. `test_notas_panel.js` en verde con dos comprobaciones nuevas (caben los 280 del `maxlength`, y no se come la pantalla) |
@@ -182,6 +183,46 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 ---
 
 
+
+<a id="-req-cart5"></a>
+
+### ✅ REQ-CART5 · Mover una nota ya plantada — ✅ resuelto 2026-08-20
+
+Nota `57,14,58` de **`/map/bugfinder`**: «*un poco lio las notas / carteles, pero parecen ir ok. me
+gustaria poder moverlas una vez plantadas, que tal un boton de "mover" dentro de la nota que me permita
+reposicionarla*».
+
+⚠️ Lo que hay que entender antes de empezar (`docs/notas-y-fuente.md`): **la nota es el dato y el cartel
+se deriva**. `mc.notes` es un mapa `"x,y,z" → texto`, o sea que **la posición ES la clave**: mover una
+nota es borrar una entrada y crear otra (arrastrando su tinte, `noteTints`, con la misma clave). El
+cartel se replanta solo (`mcSyncNoteSigns`), no hay que tocarlo.
+
+Y la regla de arranque: **las notas del Mundo no se reescriben**. Un «mover» que pierda el texto o el
+tinte por el camino es peor que no tenerlo; que pase por el mismo sitio que hoy escribe la nota.
+
+**Criterio de cierre:** desde el panel de una nota, botón «mover», se recoloca con la mira y al soltar
+el cartel está en el sitio nuevo con su texto y su tinte, y el viejo ha desaparecido.
+
+**Lo hecho (2026-08-20)** — botón «Mover» en el panel de la nota (`web/index.html`, junto a Borrar) y
+`mcStartNoteMove()` / `mcMoveNoteA()` en `web/app.js`. Detalle en
+[`docs/notas-y-fuente.md`](docs/notas-y-fuente.md), guardián `tests/test_cart5_mover_nota.js`. Lo que
+costó decidir:
+
+- **No hay modo nuevo**: «Mover» entra en el **Modo Cartel** que ya existía para plantar (fantasma con
+  la mira, `R` gira, `Esc` cancela), solo que recordando de qué nota viene (`mc.noteMoving`). El clic
+  que planta ya pasaba por `mcDoAction`; ahí se bifurca y punto.
+- **Se guarda ANTES de mover**, no después. Así el «que pierda el texto es peor que no tenerlo» del
+  ticket deja de ser un riesgo por construcción: si el gesto se cancela a medias, lo tecleado ya está
+  escrito. El tramo D del test es exactamente eso.
+- **Mover es cambiar de clave**, y las tres tablas van con la misma: texto (`mc.notes`), giro
+  (`mc.noteRots`) y tinte (`mc.noteTints`) viajan juntos o el cartel nuevo sale del color de nadie y el
+  viejo se queda huérfano en `mundo.json`. El fantasma arranca ya con el giro que tenía.
+- **No pisa a otra nota**: si el destino está ocupado se avisa y no se mueve nada (borrar la de destino
+  a espaldas del dueño sería justo lo que prohíbe la regla de arranque). Soltarla en su mismo bloque
+  tampoco la borra.
+- El cartel **no se toca a mano** en ningún momento: se replanta solo por `mcSyncNoteSigns()`.
+
+---
 
 <a id="-req-extru1"></a>
 
