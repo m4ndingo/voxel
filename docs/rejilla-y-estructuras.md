@@ -528,21 +528,34 @@ poner claves `hab:` a mano, que es exactamente lo que rompió BUG-RS23 y BUG-FLU
 herramienta de seleccion, podria ser seleccionar, y una vez seleccionado, usar shift+wheel up o down,
 para estruir hacia arriba o hacia abajo (hacia abajo cavaria)*»)*
 
-Con la herramienta **Seleccionar** y una caja confirmada (`mc.selBox`), **Shift + rueda** llama a
+Con la herramienta **Seleccionar** y una caja confirmada (`mc.selBox`), **Ctrl + rueda** llama a
 `mcSelExtruir(±1)`: arriba **construye**, abajo **cava**.
+
+> **El gesto nació en Shift + rueda y el dueño lo mudó a Ctrl el mismo día** (2026-08-20), al pedir que
+> **Shift + clic** sirviera para añadir cajas a la selección (REQ-SEL1). Ojo con Ctrl+rueda: es el **zoom
+> del navegador**, así que el manejador le corta el paso (`preventDefault`) a *cualquier* Ctrl+rueda
+> dentro del Mundo, toque extruir o no; si no, la página se va de escala y el mapa con ella.
 
 Tres decisiones que no son obvias y que sujeta `tests/test_extru1_seleccion.js`:
 
-- **Por columnas, no por capas.** Para cada `(x,z)` se busca el bloque sólido más **alto** (extruir) o
-  más **bajo** (cavar) *de dentro de la caja*, y se escribe una celda más allá. Sobre terreno desigual
-  eso sube siguiendo la **silueta**; una capa plana sobre `y1` habría dejado una plancha flotando sobre
-  los valles. El material que se copia es el **id** de ese bloque, columna a columna.
-- **La caja se estira una celda por el lado del que se tira**, aunque alguna columna no haya podido
-  escribir (tope del mundo, celda ocupada — extruir **no pisa** lo que ya hay). Ahí está la gracia: la
-  muesca siguiente ya ve lo recién puesto, o el terreno que acaba de entrar en la caja, y se sigue
-  subiendo/cavando sin volver a marcar esquinas. Sin eso el gesto solo serviría una vez.
-- **Los dos sentidos no son inversos.** La rueda abajo no deshace la de arriba: cava en lo que haya
-  debajo (es lo que pidió el dueño). Lo que deshace es **Ctrl+Z**, y cada muesca es **un** gesto `'bb'`.
+- **Por columnas, no por capas.** Para cada `(x,z)` se busca el bloque sólido más **alto** *de dentro de
+  la caja*: subir escribe una celda por encima de él, bajar se lo lleva. Sobre terreno desigual eso sube
+  y baja siguiendo la **silueta**; una capa plana sobre `y1` habría dejado una plancha flotando sobre los
+  valles. El material que se copia es el **id** de ese bloque, columna a columna.
+- **La caja se mueve por su borde de ARRIBA**, que es donde está pasando todo, aunque *alguna* columna no
+  haya podido escribir (tope del mundo, celda ocupada — extruir **no pisa** lo que ya hay). Al subir se
+  estira una celda; al bajar se encoge una, y cuando ya no puede encogerse más (alto 1) **baja entera** y
+  sigue cavando en el terreno. Ahí está la gracia: la muesca siguiente ya ve lo recién puesto, o el
+  terreno que acaba de entrar en la caja, y se sigue sin volver a marcar esquinas. Si **ninguna** columna
+  escribió, en cambio, la caja **tampoco se mueve**: no ha pasado nada que enseñar, y moverla rompía la
+  regla de abajo (con la selección tapada por arriba, el `wup` no ponía nada pero subía el marco, y el
+  `wdown` de vuelta se comía el bloque ajeno que estorbaba).
+- **Los dos sentidos SON inversos**: una muesca arriba y otra abajo dejan los bloques **como estaban**.
+  No lo eran en la v1 —cavaba por el bloque más **bajo** de la caja— y el dueño lo devolvió el mismo día
+  (fotos 62 y 63): bajar no deshacía nada, encima no se veía (el bloque que se comía estaba enterrado) y
+  la caja **crecía hacia abajo** en vez de bajar. El tramo G del guardián es un *property test*: fotografía
+  las columnas enteras, da una muesca arriba y otra abajo y exige el mismo mapa. Deshacer de verdad sigue
+  siendo **Ctrl+Z**, y cada muesca es **un** gesto `'bb'`.
 
 Se escribe con **`mcSetBlock`**, no con `mc.grid[i]=`: aquí cambia la **topología** (aire↔sólido) y es
 `mcSetBlock` quien mueve `mc.gridGen`, que es lo que hace que `mcRemeshEdiciones` → `mcRemeshAround`
@@ -550,10 +563,50 @@ re-ilumine la caja en vez de saltárselo (PERF-RS1). Rellenar de material (`mcSe
 escribir directo porque no cambia la topología.
 
 En el manejador de la rueda (`#mc-canvas`, junto a la rosca de herramientas de REQ-TOOL6) el gesto se
-mira **antes** que la rosca y **sin** consultar `mc.ruedaTool`: lleva Shift, así que es otro gesto, y
+mira **antes** que la rosca y **sin** consultar `mc.ruedaTool`: lleva Ctrl, así que es otro gesto, y
 quien haya apagado la rosca sigue queriendo extruir. El acumulador `mc._ruedaAcum` es el mismo para los
 dos, pero se **vacía al cambiar de gesto** (`mc._ruedaExtru`) o media muesca de rosca acabaría
 extruyendo.
+
+## La selección son N cajas, y giran las 24 posturas (REQ-SEL1)
+
+*(2026-08-20, dueño: «*si teniendo ya una seleccion hago shift y click sea para añadir nuevas selecciones
+a la seleccion actual […] y operar con esa herramienta con todas a la vez; cortarlas, pegarlas,
+guardarlas, extruirlas, etc*»)*
+
+**`mc.selCajas`** es la selección: un array de `{a:[x,y,z], b:[x,y,z]}`, cajas inclusivas de mundo.
+**`mc.selBox` ya no es un campo, es un accesor**: leerlo da la **última** caja, asignarlo **sustituye** la
+selección entera y ponerlo a `null` **la limpia**. Se hizo así a propósito, porque hay veinte sitios del
+motor que llevan desde el principio tratando la selección como una sola caja y no había por qué tocarlos.
+
+Añadir sin borrar tiene **una sola puerta**: `mc.selCajas.push(...)` en `mcSelectClick`, cuando la esquina
+**A** se marcó con **Shift**. El Shift se mira en la A y se recuerda en `mc.selSuma` hasta la B — si se
+mirase en la B, soltar Shift a mitad de gesto se cargaría las cajas anteriores sin que nadie lo pidiera.
+
+Y **`mcSelForEach(fn)` es LA puerta** de todo lo demás: recorre las N cajas, pasa `fn(x,y,z,id,ci)` (`ci`
+= qué caja) y **no repite las celdas del solape**. De ahí salen gratis contar, copiar, cortar, guardar el
+recorte y extruir; la multiselección no costó una rama en cada operación, costó esa función.
+
+**Girar (`R` / `⇧R` / `⌥R`)**: cada caja gira **sobre su base, en orden y sin saber de las demás** («*si
+cada una se hace desde su base se pueden abrir las ventanas*», dueño con la foto 64). Los tres ejes salen
+de **`MC_ORI`**, la tabla de las 24 posturas del motor (`MC_SEL_GIRO` guarda el código de un cuarto de
+vuelta en cada eje y `mcOriMove`/`mcOriDims` hacen el trabajo): ⛔ nada de rotar «a mano» en el plano, que
+es lo que hacía la v1 y por eso solo giraba en planta. Encadenando los tres ejes salen las 24.
+
+**El agarre (`mc.selPivote`)**: **Ctrl + apuntar** un bloque de la selección marca la celda sobre la que
+**pivota** el giro; se pinta en **magenta** y se suelta con un Ctrl apuntando fuera. Es el mismo gesto que
+ya tenían la herramienta volumen y el pegado continuo, no uno nuevo que aprenderse. Sin agarre, la caja
+gira anclada en su **esquina mínima**, exactamente como antes. Con él, se mira dónde caería esa celda tras
+el giro y se corre la huella entera lo justo para devolverla a su sitio: como es una rotación rígida
+alrededor de un punto fijo, **cuatro vueltas devuelven caja y pieza al sitio**. El agarre es **de una
+caja**: si cae fuera de una, esa gira como siempre.
+
+> Ctrl es aquí tecla **muy** ocupada (extruye con la rueda, y lleva Ctrl+C/X/V/S), así que el agarre solo
+> se fija si al soltar el Ctrl **no se usó ninguno de esos atajos**: quien atienda el atajo marca
+> `mc.selCtrlUsado` y el gesto del agarre queda en «Ctrl a secas + ratón». Sin foco (`blur`) no llega el
+> `keyup`, así que ahí se cancela.
+
+Guardián: `tests/test_sel1_multiseleccion.js` (tramos A→H).
 
 ## La ranura 11: recortes guardados (REQ-RANURA1)
 

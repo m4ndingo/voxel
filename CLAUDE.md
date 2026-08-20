@@ -168,18 +168,16 @@ Botón = **bloque con una nota**, identificado **por su texto** ⇒ una pantalla
   **Ni JUGAR ni CONSTRUIR recargan**: editor y Mundo son **la misma página** (`closeWorld()` /
   `mcVolverAIntro()`, ⛔ jamás `location.href`).
 
-## Luz y sombra → [`docs/luz-y-sombra.md`](docs/luz-y-sombra.md)
+## 🔒 Luz y sombra — CANDADO → [`wiki/paginas/ley-de-la-luz.md`](wiki/paginas/ley-de-la-luz.md)
 
-**2 sombras distintas, confundirlas ES el bug**: **skylight** (horneado en el sombreado de cada vértice al
-mallar, `mc.light`) vs **sombra proyectada del sol** (mapa de sombra en GPU).
+⛔ **NO SE TOCA LA ILUMINACIÓN DEL MOTOR SIN HABER ENTENDIDO ANTES LA LEY DE LA LUZ** (orden del
+dueño, 2026-08-20). Se lee **entera** (10 mandamientos + 8 leyes + Sótano) y se **cita el artículo**
+que se aplica. Dueño: «la iluminación debe ser real y consistente para todo el motor; **no puede haber
+apaños o trucos** para quedar bien». Corolario: si algo se ve mal **no es «un bug raro»** — es que algo
+infringe un artículo, y el documento dice cuál. Implementación → [`docs/luz-y-sombra.md`](docs/luz-y-sombra.md).
 
-- Poner un bloque **no recalcula la luz del mundo**: `mcRelightBox` trabaja en caja acotada y es
-  **exacto**. `mcComputeLight` y `mcRelightBox` **usan los mismos predicados, sin excepción**, o el mundo
-  editado deja de coincidir con el recién cargado → es lo que compara celda a celda
-  `test_luz_incremental_navegador.js`.
-- **Difusión ≠ siembra**: `mcTablaLuz()` = por dónde se propaga; `mcTablaCielo()` = hasta dónde baja la
-  columna de cielo (`luz:'pasa'` **no** la abre). **Cambiarlas invalida las mallas cacheadas** aunque no
-  se mueva un voxel: entran en la firma del chunk.
+**2 sombras distintas, confundirlas ES el bug**: **skylight** (`mc.light`, horneado al mallar) vs
+**sombra proyectada del sol** (mapa de sombra en GPU).
 
 ## Redstone → [`docs/redstone.md`](docs/redstone.md)
 

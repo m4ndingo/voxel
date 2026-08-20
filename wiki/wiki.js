@@ -71,10 +71,13 @@ function bloqueCodigo(code, salvo){
 function md(texto, salvo){
   const lineas = String(texto).replace(/\r\n?/g, '\n').split('\n');
   const out = [];
-  let i = 0, lista = null;                      // lista = 'ul' | 'ol' | null
+  let i = 0, lista = null, listaAbre = -1;      // lista = 'ul' | 'ol' | null; listaAbre = dónde quedó su <ul>/<ol>
 
-  const cierraLista = () => { if(lista){ out.push('</' + lista + '>'); lista = null; } };
-  const abreLista = t => { if(lista !== t){ cierraLista(); out.push('<' + t + '>'); lista = t; } };
+  const cierraLista = () => { if(lista){ out.push('</' + lista + '>'); lista = null; listaAbre = -1; } };
+  const abreLista = t => { if(lista !== t){ cierraLista(); listaAbre = out.push('<' + t + '>') - 1; lista = t; } };
+  // Lista «suelta» (puntos separados por un blanco): se le pone la clase para que respire. Hay que reescribir
+  // la etiqueta que ya se emitió, porque la looseness no se sabe hasta que aparece el blanco.
+  const listaSuelta = () => { if(listaAbre >= 0) out[listaAbre] = '<' + lista + ' class="suelta">'; };
 
   while(i < lineas.length){
     const l = lineas[i];
@@ -87,7 +90,16 @@ function md(texto, salvo){
       out.push(bloqueCodigo(buf.join('\n'), salvo));
       continue;
     }
-    if(!l.trim()){ cierraLista(); i++; continue; }
+    // Línea en blanco. OJO: no cierra la lista si lo siguiente es otro punto DEL MISMO tipo — eso es una
+    // lista «suelta» de Markdown (items separados por un blanco), y cerrarla abría un <ol> nuevo por punto,
+    // así que los diez mandamientos de #/ley-de-la-luz salían numerados «1. 1. 1.» en vez de «1. 2. 3.».
+    if(!l.trim()){
+      let j=i; while(j<lineas.length && !lineas[j].trim()) j++;
+      const sig = j<lineas.length ? /^\s*([-*]|\d+\.)\s+/.exec(lineas[j]) : null;
+      const mismo = sig && lista === (/^\d/.test(sig[1]) ? 'ol' : 'ul');
+      if(mismo) listaSuelta(); else cierraLista();
+      i++; continue;
+    }
     if(/^-{3,}$/.test(l.trim())){ cierraLista(); out.push('<hr>'); i++; continue; }
 
     const h = /^(#{1,4})\s+(.*)$/.exec(l);

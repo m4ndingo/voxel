@@ -10,10 +10,14 @@
 //      lo canta: la columna alta y las bajas acaban a distinta altura a propósito.
 //   2) La caja se estira una celda, así que la muesca SIGUIENTE sigue subiendo (o cavando) sola. Sin
 //      eso, la segunda vuelta re-escribiría lo mismo y el gesto solo serviría una vez.
-//   3) Arriba construye, abajo CAVA — y no son inversos (lo que deshace es Ctrl+Z, que también se
-//      comprueba: un gesto 'bb', un solo mcUndo).
-//   4) El cableado real de la rueda: Shift + rueda con la herramienta Seleccionar extruye AUNQUE la
-//      rosca de herramientas (REQ-TOOL6, `mc.ruedaTool`) esté apagada, y sin Shift no hace nada.
+//   3) Arriba construye, abajo CAVA, y los DOS por el techo de cada columna ⇒ una muesca arriba seguida
+//      de una abajo deja los bloques como estaban (tramo G). Corrección del dueño del 2026-08-20 (fotos
+//      62 y 63): la v1 cavaba por el SUELO de la caja, así que bajar ni deshacía lo subido ni se veía
+//      —se comía un bloque enterrado— y la caja crecía hacia abajo en vez de bajar. Deshacer de verdad
+//      sigue siendo Ctrl+Z (un gesto 'bb', un solo mcUndo: tramo C).
+//   4) El cableado real de la rueda: Ctrl + rueda con la herramienta Seleccionar extruye AUNQUE la
+//      rosca de herramientas (REQ-TOOL6, `mc.ruedaTool`) esté apagada, y sin Ctrl no hace nada. El
+//      dueño lo pidió en Ctrl el 2026-08-20 (nació en Shift, que se le quedó para añadir cajas).
 //
 // ⚠️ Trampa del tramo D: el manejador exige puntero capturado (`document.pointerLockElement`), que en
 // un navegador sin cabeza no llega solo; se finge con un getter y se quita al final.
@@ -69,7 +73,7 @@ const ok = (nom, cond, extra) => {
   const celda = (x, y, z) => p.evaluate(([x, y, z]) => mc.grid[mcIdx(x, y, z)], [x, y, z]);
   const cajaY = () => p.evaluate(() => [Math.min(mc.selBox.a[1], mc.selBox.b[1]), Math.max(mc.selBox.a[1], mc.selBox.b[1])]);
 
-  console.log('\nA · Shift+rueda arriba extruye SIGUIENDO LA SILUETA, columna a columna');
+  console.log('\nA · Ctrl+rueda arriba extruye SIGUIENDO LA SILUETA, columna a columna');
   const a1 = await p.evaluate(() => mcSelExtruir(1));
   ok('mcSelExtruir(1) hace algo', a1 === true);
   ok('la columna alta creció desde SU techo (Y+2)', await celda(X, Y + 2, Z) === id);
@@ -121,7 +125,7 @@ const ok = (nom, cond, extra) => {
   ok('caja sin bloques, false (y no revienta)', e.vacia === false);
   ok('con otra herramienta, false', e.otraHerramienta === false);
 
-  console.log('\nF · el cableado de la rueda: Shift manda, y la rosca apagada no estorba');
+  console.log('\nF · el cableado de la rueda: Ctrl manda, y la rosca apagada no estorba');
   const f = await p.evaluate(async () => {
     const out = {};
     const rosca = mc.ruedaTool, tool = mc.tool;
@@ -129,24 +133,70 @@ const ok = (nom, cond, extra) => {
     mc.tool = 'select';
     mc.selBox = { a: [8, 12, 8], b: [10, 13, 10] };
     Object.defineProperty(document, 'pointerLockElement', { get: () => mc.canvas, configurable: true });
-    const rueda = (deltaY, shift) => mc.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY, shiftKey: shift, bubbles: true, cancelable: true }));
+    const rueda = (deltaY, mod) => mc.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY, ctrlKey: mod === 'ctrl', shiftKey: mod === 'shift', bubbles: true, cancelable: true }));
     // Se mide la columna (10,10) —una de las bajas—: la de la esquina tiene encima lo que dejó el tramo A
     // y una extrusión no pisa lo que ya hay, así que ahí el contador no se movería.
     const alturaDe = () => { let n = 0; for (let y = 0; y < mc.dim.y; y++) if (mc.grid[mcIdx(10, y, 10)]) n++; return n; };
     const antes = alturaDe();
-    rueda(-20, true);  out.mediaMuesca = alturaDe() - antes;   // por debajo del umbral (30): todavía nada
-    rueda(-20, true);  out.muescaEntera = alturaDe() - antes;  // acumulado 40 ⇒ un paso
+    rueda(-20, 'ctrl');  out.mediaMuesca = alturaDe() - antes;   // por debajo del umbral (30): todavía nada
+    rueda(-20, 'ctrl');  out.muescaEntera = alturaDe() - antes;  // acumulado 40 ⇒ un paso
     const tras = alturaDe();
-    rueda(-120, false); out.sinShift = alturaDe() - tras;      // sin Shift y con la rosca apagada: nada
-    out.herramienta = mc.tool;                                 // …y tampoco cambió de herramienta
+    rueda(-120, null);   out.pelada = alturaDe() - tras;         // a pelo y con la rosca apagada: nada
+    rueda(-120, 'shift'); out.conShift = alturaDe() - tras;      // Shift ya NO extruye: es de añadir cajas
+    out.herramienta = mc.tool;                                   // …y tampoco cambió de herramienta
     delete document.pointerLockElement;
     mc.ruedaTool = rosca; mc.tool = tool;
     return out;
   });
   ok('media muesca no extruye (umbral de rueda respetado)', f.mediaMuesca === 0, 'delta=' + f.mediaMuesca);
   ok('la muesca entera sí, con la rosca de herramientas APAGADA', f.muescaEntera === 1, 'delta=' + f.muescaEntera);
-  ok('sin Shift no extruye', f.sinShift === 0, 'delta=' + f.sinShift);
-  ok('sin Shift tampoco cambia de herramienta (rosca apagada)', f.herramienta === 'select');
+  ok('la rueda a pelo no extruye', f.pelada === 0, 'delta=' + f.pelada);
+  ok('Shift+rueda tampoco: desde el 2026-08-20 el gesto es Ctrl', f.conShift === 0, 'delta=' + f.conShift);
+  ok('y ninguna de las dos cambia de herramienta (rosca apagada)', f.herramienta === 'select');
+
+  console.log('\nG · subir y bajar SON inversos (corrección del dueño, fotos 62/63)');
+  // Property test: fotografía las tres columnas ENTERAS (de y=0 al techo), da una muesca arriba y otra
+  // abajo, y exige volver al mismo sitio. Rehace el banco antes, porque los tramos de arriba han cavado y
+  // extruido y aquí hace falta saber qué hay: macizo hasta Y, aire limpio encima.
+  const g = await p.evaluate((base) => {
+    const { X, Y, Z, id } = base;
+    const rehaz = (techo) => {                   // techo: celda que se pone SOBRE la selección, o 0 = aire
+      const lock = mc.histLock; mc.histLock = true;
+      const edits = [];
+      for (let x = X; x < X + 3; x++) for (let z = Z; z < Z + 3; z++) for (let y = Y - 6; y <= Y + 6; y++) {
+        const nuevo = (y <= Y + 1) ? id : (y === Y + 2 ? techo : 0);   // macizo hasta la cima de la caja
+        const before = mc.grid[mcIdx(x, y, z)];
+        if (before === nuevo) continue;
+        mcSetBlock(x, y, z, nuevo); edits.push({ x, y, z, before, after: nuevo });
+      }
+      mcRemeshEdiciones(edits); mc.histLock = lock;
+      mc.tool = 'select'; mc.selA = null;
+      mc.selBox = { a: [X, Y, Z], b: [X + 2, Y + 1, Z + 2] };
+    };
+    const foto = () => { const s = []; for (let x = X; x < X + 3; x++) for (let z = Z; z < Z + 3; z++) for (let y = 0; y < mc.dim.y; y++) s.push(mc.grid[mcIdx(x, y, z)]); return s.join(','); };
+    const caja = () => Math.min(mc.selBox.a[1], mc.selBox.b[1]) + '..' + Math.max(mc.selBox.a[1], mc.selBox.b[1]);
+    const out = {};
+    rehaz(0);
+    out.antes = foto(); out.cajaAntes = caja();
+    mcSelExtruir(1);
+    out.subido = foto(); out.cajaArriba = caja();
+    mcSelExtruir(-1);
+    out.despues = foto(); out.cajaDespues = caja();
+    // Y el caso que se colaba: con algo justo encima, arriba no cabe NADA. Entonces no puede moverse la
+    // caja, o el «bajar» de vuelta se come el bloque ajeno que estorbaba.
+    rehaz(id);
+    out.tapadoAntes = foto(); out.cajaTapada = caja();
+    out.subeTapado = mcSelExtruir(1);
+    out.tapadoTrasSubir = foto(); out.cajaTrasSubir = caja();
+    return out;
+  }, base);
+  ok('la muesca de arriba cambia algo (si no, el test no prueba nada)', g.subido !== g.antes);
+  ok('la caja crece por el techo al subir', g.cajaArriba === (base.Y) + '..' + (base.Y + 2), 'caja=' + g.cajaArriba);
+  ok('bajar deja los bloques EXACTAMENTE como estaban', g.despues === g.antes);
+  ok('…y la caja vuelve a su sitio, encogiendo por arriba', g.cajaDespues === g.cajaAntes, 'caja=' + g.cajaDespues + ' (antes ' + g.cajaAntes + ')');
+  ok('con la selección tapada, subir devuelve false', g.subeTapado === false);
+  ok('…no toca ni un bloque', g.tapadoTrasSubir === g.tapadoAntes);
+  ok('…y la caja NO sube (si no, el bajar de vuelta se comería el bloque de arriba)', g.cajaTrasSubir === g.cajaTapada, 'caja=' + g.cajaTrasSubir + ' (antes ' + g.cajaTapada + ')');
 
   // Dejar el banco EXACTAMENTE como estaba (la copia del principio): /map/test se guarda solo.
   await p.evaluate(() => {

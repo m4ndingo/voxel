@@ -53,7 +53,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [BUG-VID1](#-bug-vid1) | un clip de vídeo **muy corto se guarda con 0 bytes** y el servidor lo acepta tan tranquilo | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. **Reproducido en disco**: `data/videos/0001…mp4` y `0002…mp4` pesan 0 B, con `"duracion": 0.05` en su ficha. Dos fallos, uno cada lado: `start(100)` no llega a soltar un solo trozo en 50 ms, y el `POST /api/videos` mira que el base64 no esté vacío **antes** de quitarle el prefijo `data:` ⇒ una carga vacía se cuela | 
 | [BUG-RANURA2](#-bug-ranura2) | con un recorte de `K` cargado, pulsar **1-9 repinta el recorte** en vez de elegir bloque para construir | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`, estrena [REQ-RANURA1](PLAN_ARCHIVO.md#-req-ranura1) (commit `dcfabf7`, de anteanoche). **Localizado**: `mcPasteMaterial` (`app.js:16003`) dispara con solo `mc.pasteActive`, sin mirar qué herramienta hay en la mano. El repintado se escribió a propósito para el Ctrl+V; lo que falta es acotarlo | 
 | [BUG-GLOW9](#-bug-glow9) | las **estrellas del cielo no parecen autoiluminadas** (puntitos oscuros y cúbicos) y la **niebla no las tapa** | 🔴 abierto 2026-08-20 | **dos** notas de `/map/bugfinder2` sobre lo mismo. Lo de la niebla está escrito a propósito en `mcDrawVoxUI` (`app.js:14026`: `uFogNear = far*8`, `aEmit=1`) ⇒ es una **decisión que él quiere revisar**, no un descuido. Lo de «se nota que son voxels» es otra cosa y falta medirlo. Vecino de [REQ-GLOW5](#-req-glow5) | 
-| [REQ-GLOW10](#-req-glow10) | el brillo de los **emisivos debe adaptarse a la luz ambiente**: de noche brillan, de día no hace falta tanto | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Pide **dos tunables**: la adaptación y el brillo máximo. Redactado, sin investigar. Se apoya en lo que salga de [BUG-GLOW8](#-bug-glow8) — conviene no tocarlo antes | 
+| [REQ-GLOW10](#-req-glow10) | el brillo de los **emisivos debe adaptarse a la luz ambiente**: de noche brillan, de día no hace falta tanto | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Pide **dos tunables**: la adaptación y el brillo máximo. Redactado, sin investigar. **Desbloqueado**: [BUG-GLOW8](PLAN_ARCHIVO.md#-bug-glow8) cerró el 2026-08-20 y ya hay UNA sola ley de luz. 🔒 **bajo el candado** de la [Ley de la Luz](wiki/paginas/ley-de-la-luz.md) | 
 | [BUG-SEL5](#-bug-sel5) | en selección, **Ctrl+Z revierte los bloques pero deja los corchetes** donde estaban | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. La caja de selección no entra en el gesto del historial. Redactado, sin investigar | 
 | [BUG-SEL3](#-bug-sel3) | al **rotar una selección**, las piezas finas u orientadas no giran con ella (la puerta se sale de su marco) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`, con su ejemplo: marco de bloques bien, puerta no. Es el giro **local** de cada pieza, no el de la caja. Ojo: las 24 posturas van **en la clave** (`mcOriNorm`/`mcOriParts`), ⛔ nada de `(rot\|0)&15` | 
 | [REQ-SEL4](#-req-sel4) | con selección, **`r` debe girar en horizontal y `R` en profundidad** (4×4 posturas) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «así se puede con `r` abrir una ventana de bloques, o con `R` levantar una cornisa». Hermano de [BUG-SEL3](#-bug-sel3): el mismo giro, visto desde el mando | 
@@ -62,7 +62,6 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-TOOL9](#-req-tool9) | poder **elegir qué herramientas entran con `e` y cuáles con `E`** desde el editor (primarias / secundarias) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «cambiar el orden de las herramientas empieza a ser algo habitual». Redactado, sin investigar | 
 | [REQ-CART7](#-req-cart7) | poder **elegir el tipo de cartel** de una nota desde su editor, con los carteles definidos en un sitio | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Él mismo propone la puerta: categoría **«Cartel de Notas»** en la galería. Encaja con que los carteles ya **se derivan** de `mc.notes` y no viven en `mundo.json` ([BUG-CART1](#-bug-cart1)) | 
 | [REQ-FX1](#-req-fx1) | **temblor de cámara al caer** desde 15 bloques o más, con altura/amplitud/duración ajustables | 🟢 abierto 2026-08-20 | nota de `/map/bugfinder2`. El sitio natural es el aterrizaje que ya detecta `mcCaidaPaso`. Redactado, sin investigar | 
-| [BUG-GLOW8](#-bug-glow8) | la luz de un emisivo **en la mano** es un **círculo pintado encima**, no la luz del mundo: halo redondo donde el mundo hace rombos, se apaga entera al meter la pieza en un bloque, y no lleva el color del voxel | 🔴 abierto 2026-08-20 | el dueño, tras [BUG-GLOW6](PLAN_ARCHIVO.md#-bug-glow6): «*la iluminación debe ser real y consistente para todo el motor, no puede haber apaños o trucos para quedar bien*». **Investigado y medido**: la causa es que hay **dos modelos de luz** (BFS por el aire vs punto analítico en el shader) y el arreglo es dejar **uno**. Propuesta escrita, esperando su visto bueno |
 
 ---
 
@@ -613,99 +612,6 @@ C y D son de otros dueños.
 
 ---
 
-<a id="-bug-glow8"></a>
-
-### 🔴 BUG-GLOW8 · La luz de un emisivo en la mano es un parche, no la luz del mundo — 🔴 abierto 2026-08-20
-
-**De dónde sale.** Del dueño, 2026-08-20, mirando el arreglo de [BUG-GLOW6](PLAN_ARCHIVO.md#-bug-glow6)
-con **dos voxeles del mango de la varita de selección puestos a emisivos por él mismo**
-(`data/habitantes/varita-de-selecci-n.json`, `13,2,2` y `13,3,2` → `*#8a5a3b`, guardado a las 09:50; las
-capturas son de las 09:58). Palabras suyas, y son el criterio del ticket:
-
-> «*la corrección funciona a medias […] como iluminan los bloques del mundo de su derecha no es
-> realista, sale una especie de "círculo" que es imposible, la emisión de luz tiene que ser como la que
-> hacen los bloques/voxels del mundo y no un parche […] si la voy metiendo más, se va la luz, cuando en
-> realidad lo que ilumina está en el mango, no está dentro del bloque, se nota demasiado que es un
-> "truco visual" […] la iluminación debe de ser real y consistente para todo el motor, no puede haber
-> apaños o trucos para quedar bien*»
-
-Capturas y texto entero en [`data/tickets/BUG-GLOW8/`](data/tickets/BUG-GLOW8/contexto.md).
-
-**Diagnóstico (leído en el código y medido en el navegador, no de oídas).** No son tres fallos: es
-**uno**, y BUG-GLOW6 no lo tocó porque lo dio por bueno. **Hay dos modelos de luz artificial distintos y
-el dueño está viendo la costura entre ellos**:
-
-| | **luz horneada** (una antorcha plantada) | **luz dinámica** (lo que llevas en la mano) |
-|---|---|---|
-| dónde | `mcComputeBlockLight` → `mc.blockLight` → textura 3D → `blkLuz(w)` por fragmento | `mcDynSync` → `uDynPos[]` → `dynLuz(w)` por fragmento |
-| forma | **BFS por el aire**, 6 vecinos, −1 por paso ⇒ **rombo escalonado**, celda a celda | `rad = 1 − d·coste/nivel` con `d = distance()` ⇒ **esfera perfecta** |
-| materia | la para: no se propaga por sólido | no la ve: se sumaba a través de la pared (eso es lo que BUG-GLOW6 recortó **por fuera**) |
-| color | lleva el rgb del voxel emisivo (`s.emitCol`) | **no lo lleva**: `mcLitGlow` pinta un blanco cálido fijo `vec3(1.15,0.98,0.75)` |
-
-De ahí salen, una por una, las cuatro cosas que él ve:
-
-1. **El «círculo imposible».** Es literal: el halo dinámico es una **esfera euclídea** cortada por la
-   pared ⇒ un disco redondo y liso, mientras que a un palmo, la misma pared, iluminada por cualquier
-   antorcha del mundo, hace **rombos escalonados por celdas**. No es que esté mal calculado: es que es
-   **otra ley**. Ninguna cantidad de afinado lo va a hacer parecerse al mundo, porque no es la del mundo.
-2. **El segundo círculo, con borde duro.** `MC_DYN_CERCA = 0.6`: por debajo de esa distancia una cara
-   recibe luz **aunque le dé por detrás** (margen que BUG-GLOW6 metió para que la propia pieza en la
-   mano no se apagara). Cuando el emisivo cruza el plano de la pared, lo único que sigue iluminado es la
-   esfera de radio 0,6 recortada contra la cara ⇒ **un disco con borde de cuchillo**. Es el parche del
-   parche.
-3. **«Si la voy metiendo más, se va la luz».** `mcLuzLibre` juzga la luz **entera, sí o no**, y por la
-   línea que va **del emisivo al OJO**; su primera comprobación es la celda del propio emisivo
-   (comprobado en el navegador: emisor en celda sólida ⇒ `false`). En cuanto el voxel del mango entra en
-   la celda del bloque, **la luz se apaga del todo** — no se ocluye por un lado: desaparece. Y por eso
-   da igual dónde ponga los emisivos: no es «un fallo del mango», es que el modelo apaga la luz entera.
-4. **No tiñe.** Sus `*#8a5a3b` deberían dar luz parda; en la mano dan el mismo blanco cálido que
-   cualquier otra cosa. Plantado el mismo dibujo, tiñe. Es la misma costura.
-
-**Lo que propongo, y es lo que él pide: quitar el segundo modelo, no mejorarlo.** Que la luz de lo que
-llevas en la mano **sea luz de bloque**, la misma tabla, el mismo BFS, el mismo color, la misma textura
-3D — la pieza en la mano deja de tener luz «suya» y pasa a sembrar en el mundo como una antorcha. Con
-eso los cuatro puntos de arriba se caen solos, y `dynLuz`, `uDynPos`, `uDynDir`, `uDynCara`,
-`uDynCerca`, `mcLuzLibre` y `MC_DYN_CERCA` **se borran**: menos motor, no más.
-
-Lo que en su día lo impidió ([BUG-GLOW2](PLAN_ARCHIVO.md#-bug-glow2)) **ya no existe**: entonces mover
-la luz horneada obligaba a **re-mallar** el halo (la luz iba horneada en el vértice) y eso sí tiraba los
-fps. Desde [REQ-ENV4](PLAN_ARCHIVO.md#-req-env4) la luz de bloque se lee **por fragmento de una textura
-3D** (`blkLuz`): mover una luz es re-sembrar un array y subir una caja de téxeles. **Nada de mallas.**
-
-**Medido hoy en `/map/bugfinder` (96×40×96), no estimado:**
-
-| | coste |
-|---|---|
-| BFS completo del mundo (lo que ya se paga al poner un bloque) | **7,8 ms** |
-| BFS acotado a la caja de la luz (31³, alcance 15), buffers reusados | **1,09 ms** |
-| subir esa caja a la textura 3D (`texSubImage3D`, 119 KB) | **0,22 ms** |
-
-Y **solo hay que pagarlo cuando la luz cambia de celda**, no cada frame: andando son 2–4 veces por
-segundo ⇒ **≈0,05 ms/frame amortizado**. La pieza clave a escribir es una **re-siembra exacta en caja**
-para la luz de bloque, hermana de la que ya existe para el cielo (`mcRelightBox`): se recalcula la caja
-`[celda vieja, celda nueva] ± alcance`, sembrando el **borde** con lo que ya hay. Es exacta —la luz que
-se mueve no puede influir más allá de su alcance, o sea que el borde no está contaminado— y de regalo
-arregla que **plantar o romper una antorcha hoy relance el BFS del mundo entero** (7,8 ms).
-
-**El único punto que quiero que decida él, porque es de gusto y no de código:** hecho así, la luz que
-llevas en la mano **avanza a saltos de una celda** (rombo que salta un bloque al cruzar la frontera),
-igual que si fueras plantando y quitando una antorcha. Es exactamente «*como la que hacen los
-bloques/voxels del mundo*», que es lo que pide, pero es **menos suave** que el foco de hoy. Yo lo haría
-así (consistencia > suavidad, y él lo ha escrito con todas las letras). Si el salto le molesta, la
-salida **no** es volver al parche: es sembrar en las 8 celdas vecinas con peso por la posición
-fraccionaria, que quita el salto sin cambiar de modelo — más caro y lo dejaría para un segundo paso, con
-su ticket.
-
-**Criterio de cierre:** con los dos voxeles emisivos del mango, (a) el halo en la pared es **del mismo
-tipo** que el de una antorcha plantada al lado —rombos por celda, no un disco—, (b) meter la punta o la
-cabeza de la herramienta dentro de un bloque **no apaga la luz**, sigue alumbrando desde donde está el
-voxel emisivo, (c) la luz **tiñe** con el color del voxel, y (d) los fps con `game.osd` no bajan
-respecto a hoy andando con la herramienta en la mano. Guardián nuevo del estilo de
-`test_luz_incremental_navegador.js`: la caja re-sembrada tiene que dar **celda por celda** lo mismo que
-un `mcComputeBlockLight` desde cero.
-
----
-
 <a id="-req-multi1"></a>
 
 ### 🟢 REQ-MULTI1 · Multijugador colaborativo: el mismo mapa, varios jugadores — 🟢 abierto 2026-08-19
@@ -926,9 +832,14 @@ tunnable, que se pueda elegir el brillo maximo tmb».
 **Redactado, sin investigar.** Pide **dos** mandos: la adaptación (cuánto sube el brillo al bajar la
 luz) y el **brillo máximo**.
 
-⚠️ **No empezar esto antes de cerrar [BUG-GLOW8](#-bug-glow8)**: ahí se está decidiendo cómo se dibuja
-la luz de un emisivo en la mano, y este ticket es un tunable **encima** de eso. Hacerlos a la vez
-significa retocar dos veces la misma fórmula.
+✅ **Desbloqueado**: [BUG-GLOW8](PLAN_ARCHIVO.md#-bug-glow8) se cerró el 2026-08-20, así que ya hay UNA
+sola ley de luz sobre la que montar el tunable — antes esto habría obligado a retocar dos fórmulas.
+
+🔒 **Cae de lleno bajo el candado**: toca la iluminación del motor ⇒ se lee antes la
+[Ley de la Luz](wiki/paginas/ley-de-la-luz.md) **entera** y se cita el artículo que se aplica. Ojo al
+mandamiento 1 («ni un voxel quedará incorrectamente iluminado»): un brillo que depende de la luz
+ambiente es **exposición**, no campo de luz — si acaba cambiando el nivel de una celda en vez de cómo se
+muestra, está mal por definición.
 
 ---
 

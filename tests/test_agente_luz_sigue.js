@@ -83,15 +83,15 @@ const ok = (nom, cond, extra) => {
     S0.model = null;
     mcDynSync();
     out.A_luzBloque = luzBloque(OX, OZ);
-    out.A_dynN = mc._dynN | 0;
+    out.A_dynN = mc.dynLight ? mc.dynLight.luces : 0;
 
     // ── (B) EMPIEZA A MOVERSE: s.model traslación → sale de block light, entra como luz dinámica (1 recálculo) ───
     bfs = 0;
     S0.model = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 5.3,0,0,1]);
     mcDynSync();
     out.B_bfs = bfs;                       // debe ser 1 (transición montado↔quieto)
-    out.B_dynN = mc._dynN | 0;             // debe ser 1
-    out.B_dynX = mc._dynArr ? mc._dynArr[0] : null;
+    out.B_dynN = mc.dynLight ? mc.dynLight.luces : 0;             // debe ser 1
+    out.B_dynX = (mc.dynLight && mc.dynLight.pos) ? mc.dynLight.pos[0] : null;
     out.B_esperadoX = CX + 5.3;
     out.B_luzBloqueEnStamp = luzBloque(OX, OZ);   // ya no debe estar horneada en el spawn
 
@@ -101,39 +101,30 @@ const ok = (nom, cond, extra) => {
     for (const tx of [5.6, 5.9, 6.2, 6.55, 7.03]) {
       S0.model[12] = tx;
       mcDynSync();
-      maxErr = Math.max(maxErr, Math.abs((mc._dynArr ? mc._dynArr[0] : 1e9) - (CX + tx)));
+      maxErr = Math.max(maxErr, Math.abs(((mc.dynLight && mc.dynLight.pos) ? mc.dynLight.pos[0] : 1e9) - (CX + tx)));
     }
     out.C_bfs = bfs;                       // debe ser 0 → sin BFS por paso = sin caídas de fps
     out.C_maxErrPos = maxErr;              // debe ser ~0 → la luz sigue la posición continua (suave, sin trompicones)
 
     // ── (E) DIRECCIONAL: con un haz emisivo (emitDir) y foco, alumbra DELANTE y NO hacia atrás (queja del dueño) ──
-    // Replica dynLuz del shader desde los uniforms REALES que sube el motor (mc._dynArr/_dynDir): es la misma fórmula.
+    // BUG-GLOW8: ya no hay fórmula que replicar. El haz lo hace el propio BFS al sembrar (cuesta más avanzar en
+    // contra del haz que a favor), así que la anisotropía se LEE del campo, que es el mismo dato que ve el shader.
     S0.model[12] = 6.0; S0.emitDir = new Int16Array([100, 0, 0]);   // haz hacia +X
     mc.glowFocus = 0.3;
+    mc._dynSig = null;
     mcDynSync();
-    const P = [mc._dynArr[0], mc._dynArr[1], mc._dynArr[2]];
-    const bd = [mc._dynDir[0], mc._dynDir[1], mc._dynDir[2]], foco = mc._dynDir[3];
-    const dynLuzJS = (w) => {                          // == MC_DYNLIGHT_LIB
-      const d = Math.hypot(w[0]-P[0], w[1]-P[1], w[2]-P[2]);
-      let rad = Math.max(0, Math.min(1, (mc._dynArr[3] - d) / 15));
-      if (rad <= 0) return 0;
-      const bl = Math.hypot(bd[0], bd[1], bd[2]);
-      if (foco > 0 && bl > 0.5 && d > 1e-4) {
-        const c = ((w[0]-P[0])*bd[0] + (w[1]-P[1])*bd[1] + (w[2]-P[2])*bd[2]) / (d*bl);
-        rad *= Math.pow(Math.max(c, 0), 1 + foco*8);
-      }
-      return rad;
-    };
-    out.E_delante = dynLuzJS([P[0]+3, P[1], P[2]]);    // en la dirección del haz (+X)
-    out.E_detras  = dynLuzJS([P[0]-3, P[1], P[2]]);    // detrás del haz (−X)
-    out.E_haz = bd.slice(); out.E_foco = foco;
-    S0.emitDir = null; mc.glowFocus = 0.2;
+    const P = (mc.dynLight && mc.dynLight.pos) ? mc.dynLight.pos : [0, 0, 0];
+    const cel = [Math.floor(P[0]), Math.floor(P[1]), Math.floor(P[2])];
+    out.E_delante = mcDynNivel(cel[0] + 3, cel[1], cel[2]);   // en la dirección del haz (+X)
+    out.E_detras  = mcDynNivel(cel[0] - 3, cel[1], cel[2]);   // detrás del haz (−X)
+    out.E_foco = mc.glowFocus;
+    S0.emitDir = null; mc.glowFocus = 0.2; mc._dynSig = null;
 
     // ── (D) apagar el seguimiento: se acaba la luz dinámica y vuelve a la celda estampada ───────────────────────
     window.mcComputeBlockLight = bfsOrig;
     game.agentsLightTracking(false);
     mcDynSync();
-    out.D_dynN = mc._dynN | 0;                       // 0
+    out.D_dynN = mc.dynLight ? mc.dynLight.luces : 0;                       // 0
     out.D_luzBloqueEnStamp = luzBloque(OX, OZ);      // vuelve a estar horneada en el spawn (celda estampada)
 
     // limpieza
@@ -167,10 +158,11 @@ const ok = (nom, cond, extra) => {
     'errMax=' + (r.C_maxErrPos != null ? r.C_maxErrPos.toExponential(1) : '?'));
 
   console.log('\n(E) Con haz emisivo + foco: alumbra DELANTE, no hacia atrás (queja del dueño)');
-  ok('delante del haz sí ilumina', r.E_delante > 0.2, 'delante=' + (r.E_delante != null ? r.E_delante.toFixed(3) : '?'));
-  ok('detrás del haz NO ilumina', r.E_detras < 0.01, 'detras=' + (r.E_detras != null ? r.E_detras.toFixed(3) : '?'));
-  ok('el haz apunta a +X (rotado por la pose)', r.E_haz && r.E_haz[0] > 0.5 && Math.abs(r.E_haz[2]) < 0.5,
-    'haz=[' + (r.E_haz || []).map(v => v.toFixed(0)).join(',') + ']');
+  // Niveles de luz de bloque (0..15), no el 0..1 del foco analítico de antes: ahora se lee el CAMPO.
+  ok('delante del haz sí ilumina', r.E_delante > 3, 'delante=' + r.E_delante);
+  ok('detrás del haz NO ilumina', r.E_detras === 0, 'detras=' + r.E_detras);
+  ok('el haz es anisótropo (delante ≫ detrás)', r.E_delante - r.E_detras > 3,
+    'delante=' + r.E_delante + ' detras=' + r.E_detras);
 
   console.log('\n(D) Con el seguimiento apagado: vuelve a la celda estampada');
   ok('no quedan luces dinámicas', r.D_dynN === 0, 'dynN=' + r.D_dynN);

@@ -84,6 +84,9 @@ h3{font-size:14px; margin:26px 0 10px; color:var(--accent-2)}
 p{margin:0 0 14px}
 ul,ol{margin:0 0 14px; padding-left:22px}
 li{margin:5px 0}
+/* Lista «suelta»: sus puntos van separados por un blanco en el .md (los mandamientos de #/ley-de-la-luz),
+   o sea que son párrafos y no renglones, y necesitan aire entre ellos. La clase la pone md() en wiki.js. */
+ol.suelta>li,ul.suelta>li{margin:12px 0}
 strong{font-weight:700; color:#fff}
 hr{border:0; border-top:1px solid var(--line); margin:34px 0}
 

@@ -3,6 +3,19 @@
 <!-- Detalle de VoxelForge. NO se carga en cada turno: lo carga el agente a demanda
      desde el índice de ../CLAUDE.md. Contenido movido VERBATIM, sin reescribir. -->
 
+> ## 🔒 CANDADO — léete la Ley antes de tocar nada
+>
+> ⛔ **No se toca la iluminación del motor sin haber entendido antes la
+> [Ley de la Luz](../wiki/paginas/ley-de-la-luz.md)** (orden del dueño, 2026-08-20). Se lee **entera**
+> —10 mandamientos, 8 leyes y el Sótano— y se **cita el artículo** que se está aplicando.
+>
+> Dueño: «*la iluminación debe ser real y consistente para todo el motor; no puede haber apaños o
+> trucos para quedar bien*». Corolario, y es la forma de leerlo: **si algo de la luz se ve mal, no es
+> «un bug raro» — es que algo infringe un artículo**, y la Ley dice cuál.
+>
+> Este fichero es el **cómo está construido**; la Ley es el **qué debe cumplirse**. Cuando los dos no
+> coincidan, manda la Ley y este fichero está desfasado.
+
 ### 💡 Poner un bloque no puede costar el mundo entero (skylight incremental)
 
 Hasta aquí, **cada bloque puesto o roto recalculaba la luz del mundo entero**: `mcRemeshAround` llamaba
@@ -308,6 +321,54 @@ Guardián: `node tests/test_shadow3_mandos.js`.
 
 ---
 
+## UNA sola ley, y por qué el campo daba bandazos (BUG-GLOW8h)
+
+Orden del dueño: «*la iluminación debe ser real y consistente para todo el motor, no puede haber apaños ni trucos
+para quedar bien*». La ley es **una** y se evalúa de una vez en cada celda, nunca encadenando restas:
+
+```
+nivel = MX − máx(0, camino − 1) · k        MX = pleno del emisor (subniveles)
+                                           k  = 1 sin haz · mcLuzFactorHaz(focus, cos) con haz
+```
+
+Tres cosas la rompían, y las tres se vieron **midiendo**, no razonando (informe `luz-continuidad`, fotos #91–#94):
+
+1. **El paso costaba siempre un bloque.** La siembra mide el camino con la distancia Manhattan **real**
+   (fraccionaria: el emisor está donde está, no en el centro de su celda) y la difusión le sumaba `+1` por paso
+   aunque el paso fuera **de lado**. Al cruzar el plano del emisor la recta no se movía y el camino sí, así que la
+   misma celda valía 2,75 por un vecino y 3,75 por otro — y cuál ganaba dependía del ángulo. Ahora el paso cuesta
+   **lo que aleja del emisor**, y nunca menos que la recta (un rodeo que primero se *acerca* no cobra al volver).
+2. **`OR` y `DI` eran escalones de la ley, no un detalle de almacenaje.** Un salto de un paso en `OR` mueve la
+   distancia al emisor ese paso entero y se cobra `×k×MC_LUZ_SUB`; con 1/8 de bloque eso eran **0,75 niveles de
+   golpe**. Con 1/32 (`MC_LUZ_ORG`) y 1/128 (`MC_LUZ_DRES`) el escalón baja del suelo del campo. Techo: `OR` es
+   `Int16`, así que 1/32 da mundos de hasta 1023 bloques de lado — y los hay de 512.
+3. **La siembra con haz sembraba los dos anillos solo por los 6 ejes** (su propio comentario decía «los dos
+   anillos completos» y el código no lo hacía). Las **diagonales** pegadas al emisor —a 1,7 bloques, donde el
+   error angular de una escalera de celdas es enorme— se le dejaban al BFS, que llegaba por el vecino que ganase
+   la carrera. Ahora la siembra es **una sola rutina** con haz y sin él.
+
+Y el cuarto, que era el gordo: **quien ganaba una celda le imponía SU ley a todo lo que colgara de ella.** Las
+celdas de un emisor omnidireccional no guardaban `OR`/`MX`, así que se propagaban por una rama distinta —coste
+constante, restando al valor del vecino— mientras que las del cono se propagaban con la ley del haz. Una celda
+ganada por el cono decae `×k` (hasta 6 por bloque) y **estrangulaba ahí** la luz de una antorcha, que decae 1 por
+bloque. Medido en la foto #94: mover los emisores de la espada un pelín cambiaba celdas entre 1,25 y 6,5 niveles
+según qué ley acabara mandando. Ahora `OR`/`MX` viajan **siempre** y la rama de coste constante queda solo para
+los campos que se construyen sin ellos (`focus = 0`).
+
+### Y por eso el campo se resuelve en DOS PASADAS: primero lo que no tiene haz
+
+Unificar la ley no bastaba, porque cada celda solo puede guardar **un** emisor y `relax` corta (`BL[j] >= nl`)
+cuando una luz pierde una celda: pierde **y no puede seguir**, aunque más allá volviera a ganar. Con el cono
+resuelto primero, una sola celda suya por el camino estrangulaba a la antorcha para siempre.
+
+`mcDynBake` y `mcComputeBlockLight` siembran y difunden **dos veces**: la 1ª pasada, los emisores **sin haz**; la
+2ª, los de cono. No es un apaño de orden, es el único que da el máximo correcto: si un cono pierde una celda
+frente a una omnidireccional, **tampoco puede ganar más allá** —su `k` nunca baja de 1, así que la diferencia solo
+puede crecer a favor de la omnidireccional—. Entre conos distintos el efecto sigue existiendo, pero es pequeño.
+
+⚠️ El número que **nunca** puede moverse es `cruzarCelda` del informe `luz-continuidad`: la luz no sabe dónde
+están las paredes de las celdas. Si el campo cambia porque el emisor salta de celda, hay artefacto, punto.
+
 ## La luz dinámica respeta los sólidos — `game.luzOcluye` (BUG-GLOW6)
 
 Hay **dos** luces artificiales y hasta el 2026-08-20 solo una respetaba la materia:
@@ -483,3 +544,19 @@ en una escena a oscuras. A 4 el fondo sin luz ya sale a tope y subir más no ens
 vale 1, y `mcMeshChunk` / `mcCapaGeom` solo construyen la `lightLut` si `dark!==1`. Si alguna de esas comparaciones
 vuelve a `<1` / `>=1`, la sobreexposición se queda **sin `mc.light` que leer** y no se ve nada. La excepción es
 `dynLift` en el shader, que sí sigue en `uDynDark>=1.0`: con la penumbra ya subida en el vértice, dividir la bajaría.
+
+---
+
+## Movido VERBATIM desde `CLAUDE.md` (2026-08-20)
+
+Al poner el **candado de la Ley de la Luz** en `CLAUDE.md` se pasó el tope de 15 KB, así que estos dos
+puntos bajan aquí tal cual estaban escritos (regla del propio `CLAUDE.md`: el detalle se mueve, nada se
+borra). Lo que queda arriba es el candado + el enlace.
+
+- Poner un bloque **no recalcula la luz del mundo**: `mcRelightBox` trabaja en caja acotada y es
+  **exacto**. `mcComputeLight` y `mcRelightBox` **usan los mismos predicados, sin excepción**, o el mundo
+  editado deja de coincidir con el recién cargado → es lo que compara celda a celda
+  `test_luz_incremental_navegador.js`.
+- **Difusión ≠ siembra**: `mcTablaLuz()` = por dónde se propaga; `mcTablaCielo()` = hasta dónde baja la
+  columna de cielo (`luz:'pasa'` **no** la abre). **Cambiarlas invalida las mallas cacheadas** aunque no
+  se mueva un voxel: entran en la firma del chunk.

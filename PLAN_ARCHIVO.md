@@ -36,7 +36,10 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 | ~~[REQ-SHADOW3](#-req-shadow3)~~ | ~~de noche la **sombra proyectada** sale tan difuminada que casi no se ve, y no se sabe si la espada de luz proyecta la suya~~ | ✅ resuelto 2026-08-20 | dos mandos: **`game.shadowSuave`** (radio del PCF en téxeles, **0 = borde duro**, tope 4 — gratis, porque los 9 pesos del filtro ya sumaban 1) y **`game.sunShadeNoche`** (cuánto aprieta con la exposición a 0, interpolado; `null` = como siempre). El diagnóstico de la nota estaba a medias: **no era difuminado, era contraste** — la sombra es un factor y de noche multiplica algo que `game.luz` ya dejó casi negro. Y la respuesta a la 2ª nota: **la espada NO proyecta sombra**, el mapa tiene una sola fuente; lo que le da corte limpio es [BUG-GLOW6](#-bug-glow6). `tests/test_shadow3_mandos.js` |
 | ~~[BUG-GLOW6](#-bug-glow6)~~ | ~~**la luz dinámica atraviesa los sólidos**: las estrellas alumbran cuartos cerrados y la espada alumbra al otro lado de la pared~~ | ✅ resuelto 2026-08-20 | `game.luzOcluye`. **Dos mitades, ninguna sola llega**: en el **shader**, una cara no recibe la luz que le da por detrás (exacto y gratis — la normal ya la sacan `sunFactor`/`blkLuz` de `cross(dFdx,dFdy)`), y eso arregla el grosor de la pared; en la **CPU**, una luz que no ve al ojo no se sube (`mcLuzLibre`, con la MISMA tabla que la difusión horneada, `mcTablaLuz`), y eso apaga el cuarto cerrado y la espada metida dentro de un bloque. La exacta sería un raycast por fragmento y por luz ⇒ descartada por fps. Visibilidad **con fundido** de 0,18 s: conmutar de golpe se ve peor que el fallo. `tests/test_glow6_luz_ocluida.js` |
 | ~~[REQ-CART5](#-req-cart5)~~ | ~~poder **mover una nota ya plantada**, con un botón «mover» en su propio panel~~ | ✅ resuelto 2026-08-20 | botón «Mover» en el panel: `mcStartNoteMove()` **guarda lo tecleado** y reentra en el Modo Cartel que ya existía para plantar (fantasma, `R`, `Esc`); `mcMoveNoteA()` aterriza. Mover **es cambiar de clave**, así que texto, giro y tinte cambian los tres a la vez o el cartel nuevo sale sin color y el viejo se queda huérfano. No pisa otra nota ni se borra al soltarla en su sitio. El cartel se replanta solo (`mcSyncNoteSigns`). `tests/test_cart5_mover_nota.js` |
-| ~~[REQ-EXTRU1](#-req-extru1)~~ | ~~**extrusión con la herramienta de selección**: seleccionar y con Shift+rueda subir (extruir) o bajar (cavar)~~ | ✅ resuelto 2026-08-20 | `mcSelExtruir(±1)` colgado del manejador de rueda de REQ-TOOL6. Va **por columnas `(x,z)`**, no por capas: la extrusión sigue la **silueta** del terreno. La caja se estira una celda por el lado del que se tira, así que la muesca siguiente sigue subiendo/cavando sola. Arriba y abajo **no son inversos** (deshacer es `z`: un gesto `'bb'` por muesca). Con Shift no pisa la rosca y funciona aunque `mc.ruedaTool` esté apagado. `tests/test_extru1_seleccion.js` |
+| ~~[REQ-EXTRU1](#-req-extru1)~~ | ~~**extrusión con la herramienta de selección**: seleccionar y con Ctrl+rueda subir (extruir) o bajar (cavar)~~ | ✅ resuelto 2026-08-20 | `mcSelExtruir(±1)` colgado del manejador de rueda de REQ-TOOL6. Va **por columnas `(x,z)`**, no por capas: la extrusión sigue la **silueta** del terreno. La caja se estira una celda por el lado del que se tira, así que la muesca siguiente sigue subiendo/cavando sola. Arriba y abajo **SON inversos** (vuelta del dueño el mismo día; deshacer de verdad es `z`, un gesto `'bb'` por muesca). Con Ctrl no pisa la rosca y funciona aunque `mc.ruedaTool` esté apagado. `tests/test_extru1_seleccion.js` |
+| ~~[REQ-SEL1](#-req-sel1)~~ | ~~la selección debía poder ser de **N cajas** (Shift+clic añade) y operar con todas a la vez; y el giro, **sobre la base de cada una** y en las **24 posturas**~~ | ✅ resuelto 2026-08-20 | `mc.selCajas` es la selección; `mc.selBox` pasó a **accesor** de la última caja (leer/asignar/`null` se comportan como siempre, y así no hubo que tocar los veinte sitios que la tratan como una sola). `mcSelForEach(fn(x,y,z,id,ci))` es LA puerta: recorre todas y **no repite el solape** ⇒ contar, copiar, cortar, guardar el recorte y extruir salieron gratis. El giro usa `MC_ORI` (`R` en planta, `Shift+R` vuelco, `Alt+R` de lado) y admite **agarre** con Ctrl+apuntar. `tests/test_sel1_multiseleccion.js` |
+| ~~[BUG-GLOW8](#-bug-glow8)~~ | ~~la luz de un emisivo **en la mano** era un **círculo pintado encima**, no la luz del mundo: halo redondo donde el mundo hace rombos, se apagaba al meter la pieza en un bloque, y no llevaba el color del voxel~~ | ✅ resuelto 2026-08-20 | había **dos modelos de luz** (BFS por el aire vs punto analítico en el shader) y se arregló **borrando el segundo**, no afinándolo: lo que llevas en la mano es ya luz de bloque de verdad, misma tabla, mismo BFS, mismo color. `MC_DYN_CERCA` y `mcLuzLibre` **desaparecen**; `uDynPos`/`uDynDir`/`uDynCara`/`uDynCerca` solo quedan en el comentario que cuenta su entierro (`app.js:9590`). De aquí salió la **Ley de la Luz** ([`wiki/paginas/ley-de-la-luz.md`](wiki/paginas/ley-de-la-luz.md)) y el **candado** de `CLAUDE.md`. `tests/test_glow8_luz_una_sola.js` |
+| ~~[BUG-CUT1](#-bug-cut1)~~ | ~~al **cortar (Ctrl+X)** las caras que quedaban al aire se veían **negras o transparentes** hasta poner o romper otro bloque cerca~~ | ✅ resuelto 2026-08-20 | no era el mallado, era **la luz**: cortar/pegar/rotar/rellenar escriben `mc.grid` a pelo y se saltaban el contador de topología `mc.gridGen`, así que `mcRemeshAround` re-mallaba pero **no re-iluminaba**. Arreglado en `mcRemeshEdiciones` —la puerta común de todas las ráfagas— con el **mismo predicado** que usa `mcSetBlock` (`mcCambiaTopologia`). `tests/test_bug_cut1_luz_al_cortar.js` |
 | ~~[BUG-RS27](#-bug-rs27)~~ | ~~los **botones y palancas de redstone se conmutan también con el botón derecho**, y debería ser solo con el central~~ | ✅ resuelto 2026-08-20 | fuera la envoltura de `mcUseRight` en `redstone/redstone-piezas.js`: el derecho **construye y punto**, accionar es del central. Se **desenvuelve en caliente** (`mcUseRight._orig`) en vez de borrar el código y ya, para que una pestaña con la versión vieja cargada se cure sola. `tests/test_bug_rs27_boton_derecho.js` (con tramo anti-falso-verde). ⚠️ **no llega al mundo vivo hasta republicar**: `node redstone/make_snippets.js` |
 | ~~[REQ-CART6](#-req-cart6)~~ | ~~el **panel de la nota es demasiado alto**: no se llena nunca de texto, bajarlo al 70 %~~ | ✅ resuelto 2026-08-20 | 10 → 7 líneas de cuerpo y tope 46vh → 32vh, en `web/style.css`. El alto se **deriva de la letra** (`--note-fs` × 1.8 × 7), así que subirle el tamaño al texto no vuelve a descuadrar la caja. `test_notas_panel.js` en verde con dos comprobaciones nuevas (caben los 280 del `maxlength`, y no se come la pantalla) |
 | ~~[REQ-GLOW7](#-req-glow7)~~ | ~~los **topes de los mandos de luz** se quedan cortos: `interiorDark` no pasa de 1, `glowFocus` tampoco, y un punto emisivo alumbra demasiado de noche~~ | ✅ resuelto 2026-08-20 | `game.interiorDark` llega a **4** (`MC_INTERIOR_DARK_MAX`) y pasar de 1 **sobreexpone** la penumbra: es un revelado para ver qué alumbra. La trampa era otra: el «apagado» se probaba con `>=1`, así que con 2 puesto el mundo se quedaba **sin `mc.light` calculado** y no se veía nada ⇒ ahora es el **1 EXACTO**. `game.flowFocus` (que no existe) avisa y reenvía a `glowFocus`. `tests/test_glow7_topes_luz.js` |
@@ -468,9 +471,201 @@ tenía la rosca de herramientas (REQ-TOOL6). Detalle en
 - Se escribe con `mcSetBlock` y no con `mc.grid[i]=`: cambia la **topología**, y es `mcSetBlock` quien
   mueve `mc.gridGen`, que es lo que hace que `mcRemeshAround` re-ilumine en vez de saltárselo (PERF-RS1).
 
+**Vuelta del dueño, el mismo día** — «*si se empezo a hacer up y luego se da down, dice que esta cavando
+pero no lo hace, ademas la caja/brackets que seleccionan no bajan […] Un wup seguido de un wdown deberia
+dejar los bloques iguales que como estaban al ppo*» (fotos 62 y 63), y «*quiero cambiar la tecla […] para
+que sea control+wheel*».
+
+- La v1 cavaba por el bloque más **bajo** de la caja y estiraba la caja **hacia abajo**. Ahora **las dos
+  muescas trabajan sobre la CIMA de cada columna** y mueven el **borde de arriba** de la caja ⇒ subir y
+  bajar son inversos, que es lo que él pedía. *Property test* en el tramo G del guardián: fotografía las
+  columnas enteras, da una muesca arriba y otra abajo y exige el mismo mapa.
+- Con la selección **tapada por arriba** no se escribía nada pero la caja subía igual, y el `wdown` de
+  vuelta se comía el bloque ajeno que estorbaba. Si **ninguna** columna pudo escribir, ahora la caja
+  **tampoco se mueve**.
+- El gesto es **Ctrl+rueda**. Ctrl+rueda es el **zoom del navegador**, así que el manejador le corta el
+  paso con `preventDefault` a *cualquier* Ctrl+rueda sobre el lienzo, extruya o no.
+
+---
+
+<a id="-req-sel1"></a>
+
+### ✅ REQ-SEL1 · La selección son N cajas, y giran las 24 posturas — ✅ resuelto 2026-08-20
+
+Tres peticiones del dueño del mismo día, en vivo dentro del Mundo, sobre la herramienta **Seleccionar**:
+
+1. «*si teniendo ya una seleccion hago shift y click sea para añadir nuevas selecciones a la seleccion
+   actual; por lo tanto ya no tenemos solamente selecciones de (x1,y1,z1) a (x2,y2,z2) sino que podemos
+   tener "n" selecciones […] y operar con esa herramienta con todas a la vez; cortarlas, pegarlas,
+   guardarlas, extruirlas, etc*»
+2. «*cuando se seleccionan varios objetos y se indica una rotación, se unifica todo en un bloque […] lo
+   que quiero es una rotacion de cada seleccion desde su base de seleccion […] si cada una se hace desde
+   su base se pueden "abrir las ventanas", o sea, roto primero lo que esta seleccionado en 1, y luego lo
+   que esta seleccionado en 2 (1 no sabe de 2)*» (foto 64)
+3. «*el rotaje se hace bien, aunque ahora rotar solamente deja rotar en el plano, hay que tener en cuenta
+   las 6x4 rotaciones posibles como hacen otras herramientas*», y después: «*lo que falta es poder indicar
+   cual es el agarre de los bloques seleccionados para indicar el bloque sobre el que pivota el giro
+   (esto mas pensado para cuando haya una única selección); con otras herramientas se hace manteniendo
+   pulsado control y apuntando la pieza, hazlo así*»
+
+**Lo hecho** — detalle entero en
+[`docs/rejilla-y-estructuras.md`](docs/rejilla-y-estructuras.md), guardián
+`tests/test_sel1_multiseleccion.js` (tramos A→H):
+
+- **`mc.selCajas`** es la selección (N cajas inclusivas). **`mc.selBox` ya no es un campo, es un accesor**:
+  leer da la última, asignar sustituye, `null` limpia. Medio motor lleva desde el principio tratándola
+  como una sola caja y **no hubo que tocar ni uno** de esos sitios.
+- **`mcSelForEach(fn(x,y,z,id,ci))`** es LA puerta: recorre las N cajas y **deduplica el solape**. Contar,
+  copiar, cortar, guardar el recorte y extruir se volvieron multi-caja **sin una rama nueva**.
+- Añadir tiene **una sola puerta**: Shift en la esquina **A** (recordado en `mc.selSuma` hasta la B, para
+  que soltar Shift a mitad no se cargue lo anterior).
+- **Girar**: cada caja gira **sobre su base y en orden**, sin saber de las demás (las «ventanas» de la
+  foto 64). Los tres ejes salen de **`MC_ORI`**, la tabla de las 24 posturas del motor —⛔ nada de rotar a
+  mano en el plano, que era lo de la v1—; encadenándolos salen las 24. Comprobado contra
+  `mcOriMove`/`mcOriDims` en el tramo G, y cuatro vueltas al mismo eje devuelven la pieza.
+- **El agarre** (`mc.selPivote`): **Ctrl + apuntar**, el mismo gesto que ya tenían la herramienta volumen
+  y el pegado continuo. Se pinta en magenta; un Ctrl apuntando fuera lo suelta. Sin agarre se gira sobre
+  la esquina mínima, exactamente como antes. Es una rotación rígida alrededor de un punto fijo ⇒ cuatro
+  vueltas devuelven **caja y pieza**. Ctrl aquí es tecla muy ocupada (rueda que extruye, Ctrl+C/X/V/S), y
+  por eso el agarre solo se fija si ese Ctrl **no acabó siendo un atajo** (`mc.selCtrlUsado`).
+
+---
+
+<a id="-bug-cut1"></a>
+
+### ✅ BUG-CUT1 · Cortar dejaba las caras de detrás sin luz — ✅ resuelto 2026-08-20
+
+«*cuando se cortan los bloques (control+x) no se refrescan/repintan las caras de los bloques que estaban
+por detras de los recortados […] se ven huecos sin textura o transparentes en lugar de la textura de los
+bloques esperada. si se cambia la tool de construir y se borra o crea un bloque entonces sí se repintan,
+pero deberia hacerse solo justo despues del control+x*» (dueño, 2026-08-20).
+
+**No era el mallado, era la luz.** Cortar, pegar, rotar y rellenar escriben `mc.grid` **a pelo** (van por
+miles de celdas y juntan sus propios `edits`), así que se saltaban el contador de topología `mc.gridGen`
+que sí lleva `mcSetBlock`. Sin ese contador, `mcRemeshAround` entiende que solo cambió el **color**:
+re-malla, pero **no llama a `mcRelightBox`**. Las caras que el corte deja al aire se pintan entonces con
+el skylight que tenían **enterradas** —0, negro— hasta que pones o rompes un bloque cerca (eso sí pasa por
+`mcSetBlock`, sube `gridGen` y de rebote re-ilumina la zona). De ahí el «se arregla si toco otra cosa».
+
+Arreglado **una vez y en la puerta común**, `mcRemeshEdiciones`, para que ninguna operación en bloque
+—presente o futura— pueda olvidarse; y con el **mismo predicado** que usa `mcSetBlock`
+(`mcCambiaTopologia`/`mcTopologiaDeEdiciones`): dos predicados distintos aquí es exactamente el bug que
+avisa `CLAUDE.md`, el mundo editado dejando de parecerse al recién cargado. El guardián
+`tests/test_bug_cut1_luz_al_cortar.js` cava un pozo con Ctrl+X y exige que la luz incremental salga
+**idéntica** a un `mcComputeLight()` entero.
+
 ---
 
 ---
+<a id="-bug-glow8"></a>
+
+### ✅ BUG-GLOW8 · La luz de un emisivo en la mano es un parche, no la luz del mundo — ✅ resuelto 2026-08-20
+
+**De dónde sale.** Del dueño, 2026-08-20, mirando el arreglo de [BUG-GLOW6](PLAN_ARCHIVO.md#-bug-glow6)
+con **dos voxeles del mango de la varita de selección puestos a emisivos por él mismo**
+(`data/habitantes/varita-de-selecci-n.json`, `13,2,2` y `13,3,2` → `*#8a5a3b`, guardado a las 09:50; las
+capturas son de las 09:58). Palabras suyas, y son el criterio del ticket:
+
+> «*la corrección funciona a medias […] como iluminan los bloques del mundo de su derecha no es
+> realista, sale una especie de "círculo" que es imposible, la emisión de luz tiene que ser como la que
+> hacen los bloques/voxels del mundo y no un parche […] si la voy metiendo más, se va la luz, cuando en
+> realidad lo que ilumina está en el mango, no está dentro del bloque, se nota demasiado que es un
+> "truco visual" […] la iluminación debe de ser real y consistente para todo el motor, no puede haber
+> apaños o trucos para quedar bien*»
+
+Capturas y texto entero en [`data/tickets/BUG-GLOW8/`](data/tickets/BUG-GLOW8/contexto.md).
+
+**Diagnóstico (leído en el código y medido en el navegador, no de oídas).** No son tres fallos: es
+**uno**, y BUG-GLOW6 no lo tocó porque lo dio por bueno. **Hay dos modelos de luz artificial distintos y
+el dueño está viendo la costura entre ellos**:
+
+| | **luz horneada** (una antorcha plantada) | **luz dinámica** (lo que llevas en la mano) |
+|---|---|---|
+| dónde | `mcComputeBlockLight` → `mc.blockLight` → textura 3D → `blkLuz(w)` por fragmento | `mcDynSync` → `uDynPos[]` → `dynLuz(w)` por fragmento |
+| forma | **BFS por el aire**, 6 vecinos, −1 por paso ⇒ **rombo escalonado**, celda a celda | `rad = 1 − d·coste/nivel` con `d = distance()` ⇒ **esfera perfecta** |
+| materia | la para: no se propaga por sólido | no la ve: se sumaba a través de la pared (eso es lo que BUG-GLOW6 recortó **por fuera**) |
+| color | lleva el rgb del voxel emisivo (`s.emitCol`) | **no lo lleva**: `mcLitGlow` pinta un blanco cálido fijo `vec3(1.15,0.98,0.75)` |
+
+De ahí salen, una por una, las cuatro cosas que él ve:
+
+1. **El «círculo imposible».** Es literal: el halo dinámico es una **esfera euclídea** cortada por la
+   pared ⇒ un disco redondo y liso, mientras que a un palmo, la misma pared, iluminada por cualquier
+   antorcha del mundo, hace **rombos escalonados por celdas**. No es que esté mal calculado: es que es
+   **otra ley**. Ninguna cantidad de afinado lo va a hacer parecerse al mundo, porque no es la del mundo.
+2. **El segundo círculo, con borde duro.** `MC_DYN_CERCA = 0.6`: por debajo de esa distancia una cara
+   recibe luz **aunque le dé por detrás** (margen que BUG-GLOW6 metió para que la propia pieza en la
+   mano no se apagara). Cuando el emisivo cruza el plano de la pared, lo único que sigue iluminado es la
+   esfera de radio 0,6 recortada contra la cara ⇒ **un disco con borde de cuchillo**. Es el parche del
+   parche.
+3. **«Si la voy metiendo más, se va la luz».** `mcLuzLibre` juzga la luz **entera, sí o no**, y por la
+   línea que va **del emisivo al OJO**; su primera comprobación es la celda del propio emisivo
+   (comprobado en el navegador: emisor en celda sólida ⇒ `false`). En cuanto el voxel del mango entra en
+   la celda del bloque, **la luz se apaga del todo** — no se ocluye por un lado: desaparece. Y por eso
+   da igual dónde ponga los emisivos: no es «un fallo del mango», es que el modelo apaga la luz entera.
+4. **No tiñe.** Sus `*#8a5a3b` deberían dar luz parda; en la mano dan el mismo blanco cálido que
+   cualquier otra cosa. Plantado el mismo dibujo, tiñe. Es la misma costura.
+
+**Lo que propongo, y es lo que él pide: quitar el segundo modelo, no mejorarlo.** Que la luz de lo que
+llevas en la mano **sea luz de bloque**, la misma tabla, el mismo BFS, el mismo color, la misma textura
+3D — la pieza en la mano deja de tener luz «suya» y pasa a sembrar en el mundo como una antorcha. Con
+eso los cuatro puntos de arriba se caen solos, y `dynLuz`, `uDynPos`, `uDynDir`, `uDynCara`,
+`uDynCerca`, `mcLuzLibre` y `MC_DYN_CERCA` **se borran**: menos motor, no más.
+
+Lo que en su día lo impidió ([BUG-GLOW2](PLAN_ARCHIVO.md#-bug-glow2)) **ya no existe**: entonces mover
+la luz horneada obligaba a **re-mallar** el halo (la luz iba horneada en el vértice) y eso sí tiraba los
+fps. Desde [REQ-ENV4](PLAN_ARCHIVO.md#-req-env4) la luz de bloque se lee **por fragmento de una textura
+3D** (`blkLuz`): mover una luz es re-sembrar un array y subir una caja de téxeles. **Nada de mallas.**
+
+**Medido hoy en `/map/bugfinder` (96×40×96), no estimado:**
+
+| | coste |
+|---|---|
+| BFS completo del mundo (lo que ya se paga al poner un bloque) | **7,8 ms** |
+| BFS acotado a la caja de la luz (31³, alcance 15), buffers reusados | **1,09 ms** |
+| subir esa caja a la textura 3D (`texSubImage3D`, 119 KB) | **0,22 ms** |
+
+Y **solo hay que pagarlo cuando la luz cambia de celda**, no cada frame: andando son 2–4 veces por
+segundo ⇒ **≈0,05 ms/frame amortizado**. La pieza clave a escribir es una **re-siembra exacta en caja**
+para la luz de bloque, hermana de la que ya existe para el cielo (`mcRelightBox`): se recalcula la caja
+`[celda vieja, celda nueva] ± alcance`, sembrando el **borde** con lo que ya hay. Es exacta —la luz que
+se mueve no puede influir más allá de su alcance, o sea que el borde no está contaminado— y de regalo
+arregla que **plantar o romper una antorcha hoy relance el BFS del mundo entero** (7,8 ms).
+
+**El único punto que quiero que decida él, porque es de gusto y no de código:** hecho así, la luz que
+llevas en la mano **avanza a saltos de una celda** (rombo que salta un bloque al cruzar la frontera),
+igual que si fueras plantando y quitando una antorcha. Es exactamente «*como la que hacen los
+bloques/voxels del mundo*», que es lo que pide, pero es **menos suave** que el foco de hoy. Yo lo haría
+así (consistencia > suavidad, y él lo ha escrito con todas las letras). Si el salto le molesta, la
+salida **no** es volver al parche: es sembrar en las 8 celdas vecinas con peso por la posición
+fraccionaria, que quita el salto sin cambiar de modelo — más caro y lo dejaría para un segundo paso, con
+su ticket.
+
+**Criterio de cierre:** con los dos voxeles emisivos del mango, (a) el halo en la pared es **del mismo
+tipo** que el de una antorcha plantada al lado —rombos por celda, no un disco—, (b) meter la punta o la
+cabeza de la herramienta dentro de un bloque **no apaga la luz**, sigue alumbrando desde donde está el
+voxel emisivo, (c) la luz **tiñe** con el color del voxel, y (d) los fps con `game.osd` no bajan
+respecto a hoy andando con la herramienta en la mano. Guardián nuevo del estilo de
+`test_luz_incremental_navegador.js`: la caja re-sembrada tiene que dar **celda por celda** lo mismo que
+un `mcComputeBlockLight` desde cero.
+
+**Cómo se cerró (2026-08-20).** Se hizo lo que decía la propuesta: **borrar el segundo modelo**, no
+afinarlo. La luz de lo que llevas en la mano es ahora luz de bloque de verdad — misma tabla de opacos,
+mismo BFS, mismo color, misma textura 3D — y se propaga **por el aire**, así que la pared la para porque
+el BFS no la atraviesa, no porque un parche lo disimule. Comprobable en el código: `MC_DYN_CERCA` y
+`mcLuzLibre` **ya no existen**, y `uDynPos`/`uDynDir` (los 8 focos analíticos), `uDynCara` y `uDynCerca`
+solo sobreviven como el comentario que cuenta su entierro (`app.js:9590`). El coste angular del haz lo
+hace ahora el BFS, anisótropo, igual que en la siembra estática. Guardián:
+`tests/test_glow8_luz_una_sola.js` — la ley es **una sola**.
+
+De este ticket salió además algo más grande que el propio arreglo: la **Ley de la Luz**
+([`wiki/paginas/ley-de-la-luz.md`](wiki/paginas/ley-de-la-luz.md)), el documento maestro de la
+iluminación, con sus diez mandamientos. Y, por orden del dueño ese mismo día, un **candado en
+`CLAUDE.md`**: ⛔ no se toca la iluminación del motor sin haberla entendido antes. La frase que abre el
+documento es la suya de este ticket: «*la iluminación debe ser real y consistente para todo el motor;
+no puede haber apaños o trucos para quedar bien*».
+
+---
+
 
 
 <a id="-req-glow7"></a>

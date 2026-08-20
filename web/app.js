@@ -2812,7 +2812,9 @@ window.addEventListener('keyup',e=>{
   else if(e.key==='Alt'){ altHeld=false; refreshEditCursor(); update3dCursor(); }
 });
 window.addEventListener('blur',()=>{ ctrlHeld=false; altHeld=false; refreshEditCursor(); update3dCursor();
-  if(typeof mc!=='undefined'){ if(mc.keys){ for(const k in mc.keys) mc.keys[k]=false; } mc.vel=[0,0,0]; } });
+  if(typeof mc!=='undefined'){ if(mc.keys){ for(const k in mc.keys) mc.keys[k]=false; } mc.vel=[0,0,0];
+    mc.selCtrlHeld=false; mc.selPivoteHover=null; }   // sin foco no llega el keyup del Ctrl: el agarre a medio elegir se cancela (REQ-SEL1)
+});
 window.addEventListener('resize',()=>{ if(mode==='3d'){ resizeEdit3d(); drawEdit3d(); } else resizeEdit(); });
 
 // ---- Conmutar Capas / 3D ----
@@ -7070,7 +7072,7 @@ game.agentsLightTracking = function(v){
     mc.agentsLightTrack = nv;
     if(mc.grid){ mc._blEmiSig = null; mcMeshAll(); }               // re-siembra la luz de bloque con la nueva regla + re-malla todo
     for(const s of mc.structures) s._seg = mcEmisorSeguido(s);     // línea base ya sincronizada ⇒ mcDynSync no re-dispara
-    if(!nv) mc._dynN = 0;                                          // sin seguimiento no hay luces dinámicas
+    if(!nv) mcDynApaga();                                          // sin seguimiento no hay luces que se muevan
   }
   console.log('[agentsLightTracking] la luz de los agentes ' + (nv ? 'SIGUE al que se mueve (luz dinámica)' : 'se queda en la celda estampada (OFF)'));
   return nv;
@@ -7128,6 +7130,15 @@ game.fisicaAgua = _mcTunableFisica('WATER', { gravedad: MC_FISICA_FLUIDO.WATER.g
 game.fisicaLava = _mcTunableFisica('LAVA',  { gravedad: MC_FISICA_FLUIDO.LAVA.gravedad,  arrastre: MC_FISICA_FLUIDO.LAVA.arrastre,  empuje: MC_FISICA_FLUIDO.LAVA.empuje });
 const MC_CHUNK=16;              // lado del chunk en x/z (la columna vertical y entera va en un chunk)
 const MC_MAXLIGHT=15;               // NIVELES de luz (gradación) y alcance del skylight: se pierde 1 por bloque al difundirse. NO es la INTENSIDAD: lightLut normaliza /MC_MAXLIGHT ⇒ a tope siempre ×1. Para brillo mayor → game.glowGain (uGlowGain), no subir esto
+// BUG-GLOW8c · SUBNIVELES del campo de luz artificial (mc.blockLight / mc.dynLight): el byte guarda nivel×SUB, no
+// nivel. El BFS sigue costando 1 NIVEL por bloque (= SUB subniveles), así que un emisor plantado —que cae en el
+// centro exacto de su celda— sale en múltiplos de SUB y el campo es el de siempre, ×SUB. Los subniveles existen
+// para el emisor que se MUEVE: su semilla vale nivel fraccionario según a qué distancia real está del centro de
+// cada celda (mcLuzSiembra), y sin fracción no había forma de que la luz cambiara de forma continua — saltaba de
+// nivel entero, que es «*va a saltos*» (el dueño, 2026-08-20). Tope del byte 255 ⇒ SUB×alcance máximo ≤ 255; con
+// el alcance largo de una partícula (REQ-GLOW5, 40) da 160. Lo dividen: el shader (255/(MC_MAXLIGHT*SUB)) y
+// mcDynNivel, que sigue hablando en NIVELES de cara afuera.
+const MC_LUZ_SUB=4;
 // REQ-GLOW7 · tope de game.interiorDark. El mando es un FACTOR de sombra, `interiorDark^((MAX-lv)/MAX)`:
 // 0 = penumbra a negro · 1 = neutro (desactivado) · >1 = SOBREEXPONER la penumbra (lo que no tiene luz
 // sale MÁS claro que lo que la tiene). Lo pidió el dueño para poder ver qué está alumbrando la espada
@@ -7320,7 +7331,12 @@ const mc={
   boxGiro:0,                       // giro DENTRO de esa cara del volumen (0..3 = 0/90/180/270°; Shift+V); 24 posturas del volumen, ver mcBoxOri
   stampCenter:false,              // modo de pegado en pared lateral: false = por CANTO (flush, def) · true = CENTRADO (hundido); tecla S alterna MIENTRAS se mantiene el clic derecho
   selA:null,                      // herramienta Seleccionar (tool='select'): 1ª esquina pendiente [x,y,z] tras el 1er clic, o null
-  selBox:null,                    // selección confirmada {a:[x,y,z], b:[x,y,z]} (caja inclusiva de mundo) para resaltar y copiar (Ctrl+C)
+  selCajas:[],                    // REQ-SEL1 · selección confirmada = N cajas {a:[x,y,z], b:[x,y,z]} (inclusivas, de mundo). Ver el accesor mc.selBox
+  selSuma:false,                  // el clic que marcó la esquina A llevaba Shift ⇒ la caja que salga se AÑADE en vez de sustituir
+  selPivote:null,                 // REQ-SEL1 · AGARRE del giro: celda de mundo [x,y,z] que se queda quieta al rotar (Ctrl + apuntar). null = la esquina mínima, como siempre
+  selCtrlHeld:false,              // Ctrl mantenido en Seleccionar: se está eligiendo el agarre con el ratón
+  selPivoteHover:null,            // celda que señala el ratón mientras se mantiene Ctrl (aún sin fijar)
+  selCtrlUsado:false,             // ese Ctrl acabó siendo un atajo (rueda que extruye, Ctrl+C/X/V/S…) ⇒ al soltarlo NO se toca el agarre
   hotbarShown:1,                  // 0..1 · animación de ocultado de la hotbar en carrera (1 = en su sitio, 0 = hundida abajo y transparente)
   hbTarget:1,                     // objetivo de hotbarShown (0 ocultar / 1 mostrar)
   hbRunDist:0,                    // distancia recorrida (bloques) en marcha continua sin dibujar; al superar game.hotbarHide se oculta
@@ -7394,7 +7410,11 @@ const mc={
  glowFocus:0.2,                  // foco del haz emisivo 0..1 (game.glowFocus): 0=omnidireccional (antorcha), 1=haz estrecho hacia la normal neta de las caras emisivas
   shadowSuave:1,                  // REQ-SHADOW3 · radio del filtrado de la sombra proyectada, en téxeles (game.shadowSuave). 0 = borde duro, 1 = como siempre, 3 = muy difuminada
   sunShadeNoche:null,             // REQ-SHADOW3 · cuánto apaga la sombra proyectada con la exposición a 0 (game.sunShadeNoche). null = sin mando puesto: la misma fuerza a todas horas
-  luzOcluye:true,                 // BUG-GLOW6 · ¿la luz DINÁMICA respeta los sólidos? (game.luzOcluye). false = como antes de 2026-08-20: atraviesa paredes. Enciende las dos mitades a la vez, la cara de espaldas (shader) y la línea de visión ojo↔luz (mcDynSync)
+  luzDinamica:true,               // BUG-GLOW8 · ¿se siembra la caja de luz de lo que SE MUEVE (game.luzDinamica)? false = lo que llevas en la mano o lleva un agente no alumbra; lo QUIETO sigue igual. Está para medir fps con y sin
+  luzSuave:true,                  // BUG-GLOW8b · ¿esa caja se muestrea en la posición FINA del emisor (se desliza) o en el centro de su celda (salta de bloque en bloque)? Mismo campo, distinto punto de lectura (game.luzSuave)
+  luzDinCeldas:null,              // BUG-GLOW8 · presupuesto en CELDAS de esa caja (game.luzDinCeldas); null = MC_DYN_CELDAS
+  dynLight:null,                  // BUG-GLOW8 · campo de luz de lo que se mueve {BL,x0,y0,z0,W,H,P}: lo siembra mcDynBake con la MISMA ley que mcComputeBlockLight, lo lee dynLuzTex por fragmento
+  dynTex:null,                    // …y su textura 3D (unidad 4), gemela de blkTex
   glowGain:1,                     // INTENSIDAD de la luz artificial (game.glowGain): 1 = tope normal (pleno día); >1 sobreexpone (una antorcha/gafas brillan MÁS que el día). Es el techo del mix de exposición, no re-siembra ni re-malla (solo uniforme) ⇒ live y barato
   hasGlow:false,                  // ¿hay ≥1 voxel emisivo vivo (estructura o celda de rejilla)? cache para saltar BFS/mallado sin brillo
   _glowIds:null,                  // id de bloque → geometría fina con ≥1 celda emisiva (o null); lo hornea mcGlowCeldas
@@ -7407,6 +7427,19 @@ const mc={
   quads:0,                        // caras dibujadas este frame (→ game.voxels)
   agents:new Map(),               // agentes/NPC vivos (id → handle); ver «AGENTES» al final (game.defineAgent)
 };
+// REQ-SEL1 · La selección son N cajas (`mc.selCajas`), pero medio motor lleva desde el principio leyendo
+// `mc.selBox` — el dibujo, rotar, pegar, guardar recorte, los atajos. En vez de tocar los veinte sitios,
+// `selBox` se queda como accesor de LA ÚLTIMA caja marcada, que es lo que esos sitios querían decir:
+//   · leerlo   → la última caja, o null si no hay ninguna;
+//   · asignarlo → «la selección es ESTA», así que TIRA las demás (es justo lo que quiere quien pega, gira
+//                 o restaura una selección: no dejar cajas viejas sueltas por el mundo);
+//   · null      → limpia todo.
+// Añadir sin borrar tiene UNA sola puerta, `mc.selCajas.push(...)` en mcSelectClick con Shift. Quien
+// recorra la selección NO debe usar selBox: para eso está mcSelForEach, que pasa por todas.
+Object.defineProperty(mc,'selBox',{ enumerable:true,
+  get(){ const l=mc.selCajas; return l.length ? l[l.length-1] : null; },
+  set(v){ mc.selCajas = v ? [v] : []; }
+});
 function mcIdx(x,y,z){ return x + y*mc.dim.x + z*mc.dim.x*mc.dim.y; }
 function mcInside(x,y,z){ return x>=0&&y>=0&&z>=0&&x<mc.dim.x&&y<mc.dim.y&&z<mc.dim.z; }
 function mcSolid(x,y,z){ if(y<0) return true;   // suelo del mundo: sólido hacia abajo (no mesha la cara inferior, nunca se ve)
@@ -7515,6 +7548,29 @@ function mcCeldaFluida(x,y,z){
   const id = mc.grid[mcIdx(x,y,z)];
   return id!==0 && mcIsReplaceable(id, x, y, z);
 }
+// ¿cambiar `oldId` por `id` en una celda cambia la TOPOLOGÍA del mundo, o solo su color? Cambiarla obliga
+// a re-iluminar (mcRelightBox) y a re-hornear estructuras; no cambiarla se queda en re-mallar, que es
+// mucho más barato. Lo pregunta mcSetBlock celda a celda y las operaciones en bloque de la selección una
+// vez por ráfaga (mcTopologiaDeEdiciones) — el mismo predicado para las dos, o el mundo editado deja de
+// parecerse al recién cargado.
+function mcCambiaTopologia(oldId, id){
+  const tOld = (oldId===0) || (mc.finoRejilla&&mc.finoRejilla[oldId]) || (mc.recorte&&mc.recorte[oldId]);
+  const tNew = (id===0)    || (mc.finoRejilla&&mc.finoRejilla[id])    || (mc.recorte&&mc.recorte[id]);
+  const gOld = mc._glowIds && mc._glowIds[oldId];
+  const gNew = mc._glowIds && mc._glowIds[id];
+  return (oldId===0) !== (id===0) || tOld !== tNew || gOld !== gNew || !!(mc.finoRejilla && (mc.finoRejilla[oldId] || mc.finoRejilla[id]));
+}
+// Cortar, pegar, rotar y rellenar escriben `mc.grid` A PELO en vez de pasar por mcSetBlock: van por miles
+// de celdas y ya juntan sus propios `edits` para el historial y para UN solo remallado. El precio de ese
+// atajo era saltarse el contador de topología, y sin él mcRemeshAround entiende que solo cambió el color:
+// re-malla, pero NO re-ilumina. Al cortar, las caras que quedaban al aire se pintaban con el skylight de
+// cuando estaban enterradas —negras, como agujeros sin textura— hasta que ponías o rompías un bloque al
+// lado (bug del dueño, 2026-08-20). Se cuenta UNA vez por ráfaga: a mcRemeshAround solo le importa que el
+// número haya cambiado, no cuánto.
+function mcTopologiaDeEdiciones(edits){
+  for(const e of edits) if(mcCambiaTopologia(e.before, e.after)){ mc.gridGen = (mc.gridGen|0) + 1; return true; }
+  return false;
+}
 function mcSetBlock(x,y,z,id){
   if(mcInside(x,y,z)){
     const oldId = mc.grid[mcIdx(x,y,z)];
@@ -7525,13 +7581,7 @@ function mcSetBlock(x,y,z,id){
     mc.grid[mcIdx(x,y,z)]=id;
     // PERF-RS1: contador de topología. Cuenta cambios entre aire y sólido, o cambios entre materiales
     // con diferentes propiedades de luz/geometría fina/emisión para re-iluminar y re-mallar de inmediato.
-    const tOld = (oldId===0) || (mc.finoRejilla&&mc.finoRejilla[oldId]) || (mc.recorte&&mc.recorte[oldId]);
-    const tNew = (id===0) || (mc.finoRejilla&&mc.finoRejilla[id]) || (mc.recorte&&mc.recorte[id]);
-    const gOld = mc._glowIds && mc._glowIds[oldId];
-    const gNew = mc._glowIds && mc._glowIds[id];
-    if((oldId===0) !== (id===0) || tOld !== tNew || gOld !== gNew || (mc.finoRejilla && (mc.finoRejilla[oldId] || mc.finoRejilla[id]))){
-      mc.gridGen = (mc.gridGen|0) + 1;
-    }
+    if(mcCambiaTopologia(oldId, id)) mc.gridGen = (mc.gridGen|0) + 1;
     mcDirty(x,y,z);
     mcGlowTocada(x,y,z);
     if(typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.onBlockChange === 'function'){
@@ -8335,7 +8385,7 @@ game.volatiles = {
 // La luz de bloque nació cuando una pieza luminosa solo podía existir estampada suelta, así que
 // mcComputeBlockLight sembraba únicamente desde mc.structures. Desde que el clic derecho mete las piezas que
 // caben en una celda dentro de mc.grid, una antorcha puesta ahí se veía encendida pero no alumbraba nada:
-// sus celdas emisivas no las miraba nadie. La geometría fina YA trae emitCells/emitDir horneados
+// sus celdas emisivas no las miraba nadie. La geometría fina YA trae emitFinos/emitDir horneados
 // (mcStructGeom), que es exactamente lo que consume la siembra — lo único que faltaba era ENCONTRARLAS.
 // Barrer la rejilla entera en cada edición cuesta ~60 ms en 512×40×512, así que se mantiene un índice
 // DISPERSO: se rehace de cero solo cuando cambia qué materiales emiten (paleta nueva o geometría recién
@@ -8344,7 +8394,7 @@ function mcGlowCeldas(){
   const GEO=mcTablaFina();          // id → geometría fina real (la misma tabla que ya usan mallado y colisión)
   let EM=null, firma='';
   if(GEO) for(let id=1; id<GEO.length; id++){ const g=GEO[id];
-    if(g && g.emitCells && g.emitCells.length){ (EM||(EM=new Array(GEO.length).fill(null)))[id]=g; firma+=id+','; } }
+    if(g && g.emitFinos && g.emitFinos.length){ (EM||(EM=new Array(GEO.length).fill(null)))[id]=g; firma+=id+','; } }
   mc._glowIds=EM;
   if(firma!==mc._glowFirma || mc._glowRef!==mc.grid || !mc._glowCeldas){
     mc._glowFirma=firma; mc._glowRef=mc.grid;
@@ -8920,9 +8970,15 @@ async function mcStructGeom(srcKey, rot){
   for(const b of base){ b[0]-=cminx; b[1]-=cminy; b[2]-=cminz; if(b[0]+1>bx)bx=b[0]+1; if(b[1]+1>by)by=b[1]+1; if(b[2]+1>bz)bz=b[2]+1; }
   bx=Math.ceil(bx/MC_TILE)*MC_TILE; by=Math.ceil(by/MC_TILE)*MC_TILE; bz=Math.ceil(bz/MC_TILE)*MC_TILE;
   const solid=new Set(); const raw=[]; let mx=0,my=0,mz=0;
-  const emitCells=new Set();   // celdas-de-bloque locales (floor(fine/16)) con ≥1 voxel emisivo (Parte B: siembra de luz de bloque)
-  const emitDir=new Map();     // celda-bloque local → [dx,dy,dz]: suma de normales de sus caras emisivas EXPUESTAS = dirección del HAZ (Parte B foco)
-  const emitCol=new Map();     // celda-bloque local → [sumR, sumG, sumB, count] color de los voxeles emisivos
+  // BUG-GLOW8e · UN EMISOR POR VOXEL FINO. Esto agrupaba por celda-de-bloque (floor(fine/16)): una espada de 45
+  // voxeles emisivos entraba en el motor como UNA sola luz puntual en el centro de su celda, y al moverse iba
+  // dando bandazos de celda en celda. Orden del dueño, verbatim (2026-08-20): «*quiero que cada voxel de 1x1x1
+  // emisivo tenga su autonomia, nada de agrupar luces en una sola*». De aquí en adelante las coordenadas son
+  // FINAS (voxeles del modelo, MC_TILE por bloque) y las convierte quien siembra — de ahí el nombre nuevo, para
+  // que ningún consumidor las siga leyendo como celdas sin enterarse.
+  const emitFinos=new Set();   // voxel FINO local con material emisivo (Parte B: siembra de luz de bloque)
+  const emitDir=new Map();     // voxel fino → [dx,dy,dz]: suma de normales de sus caras emisivas EXPUESTAS = dirección del HAZ (Parte B foco)
+  const emitCol=new Map();     // voxel fino → [sumR, sumG, sumB, count] color del voxel emisivo
   const maskAt=new Map();      // voxel fino local → máscara de caras (TODOS, si el documento trae `caras`)
   const mueve=mcOriMove(rot, bx, by, bz);   // los tres cuartos de vuelta de la postura, en su único sitio
   const facePerm=carasDoc ? mcFacePerm(mueve) : null;   // la misma rotación, aplicada a las normales
@@ -8931,12 +8987,12 @@ async function mcStructGeom(srcKey, rot){
     const fx=q[0], fy=q[1], fz=q[2], v=b[3];       // todo queda en [0,ext)
     if(facePerm) maskAt.set(fx+','+fy+','+fz, permMask(b[4], facePerm));   // también el 63: es una marca, no un defecto
     solid.add(fx+','+fy+','+fz); raw.push([fx,fy,fz,v]);
-    if(isGlow(v)) emitCells.add(Math.floor(fx/MC_TILE)+','+Math.floor(fy/MC_TILE)+','+Math.floor(fz/MC_TILE));
+    if(isGlow(v)) emitFinos.add(fx+','+fy+','+fz);       // el voxel, no su celda (BUG-GLOW8e)
     if(fx+1>mx)mx=fx+1; if(fy+1>my)my=fy+1; if(fz+1>mz)mz=fz+1;
   }
   // Dirección del haz y color por celda emisiva: suma de las normales de las caras emisivas EXPUESTAS y promedio de color RGB.
   for(const r of raw){ if(!isGlow(r[3])) continue; const fx=r[0], fy=r[1], fz=r[2], v=r[3];
-    const ck=Math.floor(fx/MC_TILE)+','+Math.floor(fy/MC_TILE)+','+Math.floor(fz/MC_TILE);
+    const ck=fx+','+fy+','+fz;                            // BUG-GLOW8e · haz y color son del VOXEL, no de la celda
     let acc=emitDir.get(ck); if(!acc){ acc=[0,0,0]; emitDir.set(ck,acc); }
     for(let f=0;f<6;f++){ const d=MC_FACES[f].dir;
       if(!solid.has((fx+d[0])+','+(fy+d[1])+','+(fz+d[2]))){ acc[0]+=d[0]; acc[1]+=d[1]; acc[2]+=d[2]; } }
@@ -9079,9 +9135,9 @@ async function mcStructGeom(srcKey, rot){
   // mcStructColl y re-implementa el bucle sobre `g.bits` con un `if(!g || !g.bits) continue`, así que un
   // null no haría la mata atravesable — la borraría también del apuntado y ya no se podría ni romper.
   const bits = doc.atravesable ? new Uint8Array(mx*my*mz) : bitsAim;
-  // emitCells del Set → Int16Array plano [cx,cy,cz,…] (celdas-de-bloque locales con voxel emisivo) para sembrar luz de bloque.
-  const emitArr=new Int16Array(emitCells.size*3), emitDirArr=new Int16Array(emitCells.size*3), emitColArr=new Uint8Array(emitCells.size*3);
-  { let i=0, j=0; for(const k of emitCells){ const p=k.split(','), dd=emitDir.get(k)||[0,0,0], cc=emitCol.get(k)||[1,1,1,1];
+  // emitFinos del Set → Int16Array plano [fx,fy,fz,…] en voxeles FINOS locales, uno por emisor, para sembrar luz.
+  const emitArr=new Int16Array(emitFinos.size*3), emitDirArr=new Int16Array(emitFinos.size*3), emitColArr=new Uint8Array(emitFinos.size*3);
+  { let i=0, j=0; for(const k of emitFinos){ const p=k.split(','), dd=emitDir.get(k)||[0,0,0], cc=emitCol.get(k)||[1,1,1,1];
       emitArr[i]=+p[0]; emitDirArr[i]=dd[0]; i++; emitArr[i]=+p[1]; emitDirArr[i]=dd[1]; i++; emitArr[i]=+p[2]; emitDirArr[i]=dd[2]; i++;
       const cnt=cc[3]||1;
       emitColArr[j]=Math.min(255, Math.round((cc[0]/cnt)*255));
@@ -9094,9 +9150,9 @@ async function mcStructGeom(srcKey, rot){
                texLocal:new Float32Array(tex), texCount:tex.length/10,
                colSC:new Int16Array(colSC), alphaSC:new Int16Array(alphaSC), texSC:new Int16Array(texSC),  // celda-muestra de luz por CARA (3 int/cara)
                colFD:new Uint8Array(colFD), alphaFD:new Uint8Array(alphaFD), texFD:new Uint8Array(texFD), // dirección de la cara, 0..5 si está en la piel y 6 si no (REQ-FLUID4)
-               emitCells:emitArr,                                              // celdas-de-bloque locales con ≥1 voxel emisivo (Parte B)
-               emitDir:emitDirArr,                                             // dirección del haz por celda emisiva (normal neta de caras expuestas)
-               emitCol:emitColArr,                                             // color RGB de los voxeles emisivos por celda
+               emitFinos:emitArr,                                              // VOXELES FINOS locales emisivos, uno por luz (BUG-GLOW8e)
+               emitDir:emitDirArr,                                             // dirección del haz por voxel emisivo (normal neta de sus caras expuestas)
+               emitCol:emitColArr,                                             // color RGB de cada voxel emisivo
                ext:{x:mx*S, y:my*S, z:mz*S}, bits, bitsAim, fdim:[mx,my,mz] };
   const rec=(mc.structs[srcKey]=mc.structs[srcKey]||{}); (rec.meshRot=rec.meshRot||{})[rot]=mesh;
   // Copia de solo-colisión: {bits,fdim} y nada de vértices, para no retener los Float32Array de la malla vieja.
@@ -9156,7 +9212,7 @@ async function mcBuildStructMesh(srcKey, ox,oy,oz, rot, esc, noBakeLight, tinte)
   // tiene que poder volver a proyectar). mcRenderShadow se salta la pieza entera en vez de recortar sus vértices.
   // `tinte` viaja en la instancia (también vacío) porque está HORNEADO en el VBO: quien la re-malle
   // tiene que volver a pasarlo o el cartel perdería el color al editar un bloque al lado.
-  return {key:srcKey, ox,oy,oz, rot, esc:E, tinte:(T?mcNoteTinteNorm(tinte):''), colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitCells:geom.emitCells, emitDir:geom.emitDir, emitCol:geom.emitCol, sinProyectar:!!(ss&2)};
+  return {key:srcKey, ox,oy,oz, rot, esc:E, tinte:(T?mcNoteTinteNorm(tinte):''), colVbo,colCount, alphaVbo,alphaCount, texVbo,texCount, aabb, emitFinos:geom.emitFinos, emitDir:geom.emitDir, emitCol:geom.emitCol, sinProyectar:!!(ss&2)};
 }
 // Atlas de TEXTURAS de estructuras (gemelo de mcBuildPalette/mcUploadAtlas): compone las 6 caras de cada
 // CLAVE `tex:` distinta usada por las estructuras vivas (6 cols × Nclaves filas, NEAREST, medio téxel de
@@ -9478,84 +9534,71 @@ float sunFactor(vec3 w){
 const MC_BLK_LIB=`
 #ifdef BLK3D
 uniform highp sampler3D uBlkTex; uniform vec3 uBlkDim; uniform float uBlkOn;
-vec4 blkLuz(vec3 w){
-  if(uBlkOn < 0.5) return vec4(0.0);                               // sin emisivos vivos: no hay nada que leer
+// BUG-GLOW8 · la MISMA lectura para las luces que se MUEVEN, en su propia caja (mc.dynLight / mcDynBake):
+// otra textura, otro trozo de mundo, pero el mismo dato y la misma cuenta. uDynBox0 = esquina de la caja en
+// coordenadas de mundo, uDynBoxN = su tamaño en celdas.
+uniform highp sampler3D uDynTex; uniform vec3 uDynBox0; uniform vec3 uDynBoxN; uniform float uDynOn;
+// Celda de AIRE que da a esta cara: medio bloque hacia el ojo. Idéntico para los dos campos, y por eso una
+// antorcha plantada y la misma pieza en la mano iluminan una pared exactamente igual.
+vec3 mcCeldaAire(vec3 w){
   vec3 n=normalize(cross(dFdx(w),dFdy(w)));
   if(dot(n,uEye-w)<0.0) n=-n;                                // hacia el ojo = hacia el aire
-  vec3 pc=(w + n*0.5)/uBlkDim;                               // medio bloque hacia el aire: la celda vecina
-  return clamp(texture(uBlkTex,pc) * ${(255/MC_MAXLIGHT).toFixed(4)}, 0.0, 1.0);
+  return w + n*0.5;                                          // medio bloque hacia el aire: la celda vecina
 }
+vec4 dynLuzTex(vec3 w){
+  if(uDynOn < 0.5) return vec4(0.0);
+  vec3 pc=(mcCeldaAire(w) - uDynBox0)/uDynBoxN;
+  if(any(lessThan(pc, vec3(0.0))) || any(greaterThan(pc, vec3(1.0)))) return vec4(0.0);   // fuera de la caja
+  return clamp(texture(uDynTex,pc) * ${(255/(MC_MAXLIGHT*MC_LUZ_SUB)).toFixed(4)}, 0.0, 1.0);
+}
+// LA luz artificial del fragmento: los dos campos leídos de una vez y mezclados por max(), igual que dos antorchas
+// dentro de un mismo campo. Devuelve la mezcla (rgb + nivel en .a) y, por movil, SOLO el nivel de lo que se mueve.
+// Hacen falta las dos porque cada malla hornea cosas distintas y dynLift solo repone lo que NO está horneado:
+//   · terreno (mcMeshChunk) hornea SOLO skylight (lightLut ← mc.light) ⇒ lift por .a, la luz artificial entera;
+//   · estructuras (mcStructGeom) hornean max(skylight, luz de bloque) por cara ⇒ lift solo por movil.
+// Una sola llamada a mcCeldaAire: las derivadas no son gratis y antes se calculaban tres veces por fragmento.
+vec4 mcLuzArtificial(vec3 w, out float movil){
+  vec3 aire = mcCeldaAire(w);
+  vec4 d = vec4(0.0);
+  if(uDynOn > 0.5){
+    vec3 pc=(aire - uDynBox0)/uDynBoxN;
+    if(all(greaterThanEqual(pc, vec3(0.0))) && all(lessThanEqual(pc, vec3(1.0))))
+      d = clamp(texture(uDynTex,pc) * ${(255/(MC_MAXLIGHT*MC_LUZ_SUB)).toFixed(4)}, 0.0, 1.0);
+  }
+  movil = d.a;
+  if(uBlkOn < 0.5) return d;                                       // sin emisivos quietos: solo lo que se mueve
+  vec4 s = clamp(texture(uBlkTex, aire/uBlkDim) * ${(255/(MC_MAXLIGHT*MC_LUZ_SUB)).toFixed(4)}, 0.0, 1.0);
+  return max(s, d);
+}
+vec4 blkLuz(vec3 w){ float m; return mcLuzArtificial(w, m); }
 #else
 vec4 blkLuz(vec3 w){ return vec4(0.0); }
+vec4 dynLuzTex(vec3 w){ return vec4(0.0); }
+vec4 mcLuzArtificial(vec3 w, out float movil){ movil=0.0; return vec4(0.0); }
 #endif`;
-// BUG-GLOW3 · Luz DINÁMICA de agente. Los emisores montados en un agente que se mueve (voxels autoiluminados en sus
-// piezas) no se hornean en la luz de bloque —serían granulares a 1 bloque (trompicones) y caros de re-sembrar (BFS +
-// remallado por cada cruce de celda ⇒ caídas de fps)—; se pintan aquí, POR FRAGMENTO, desde la posición VIVA y continua
-// del emisor (uniform, sin cuantizar) ⇒ suave y sin retardo, sin BFS ni remallado. Se comporta como la luz de bloque:
-//   · dynLuz devuelve el mismo nivel [0,1] con el MISMO desvanecido lineal (−1 por bloque sobre MC_MAXLIGHT), que se
-//     mezcla con blkLuz por max() y resiste la exposición nocturna igual (mix(uExpo,1,·), REQ-ENV3/ENV4);
-//   · dynLift repone el brillo que la luz de bloque HORNEA en el vértice (lightLut): sin él, una cueva de día no se
-//     encendería (blkLuz solo actúa de noche). Sube el shade hacia pleno con la misma curva pow(interiorDark, nivel),
-//     con tope en el shade de cara pleno (MC_FACES máx = 1.12) para no pasarse en superficies ya iluminadas.
-// DIRECCIONAL como la luz de bloque: emite en el HEMISFERIO DELANTERO del haz (uDynDir = normal neta de la cara emisiva,
-// rotada por s.model) y lo estrecha con glowFocus (un voxel de las gafas alumbra HACIA DELANTE, no todo alrededor ni hacia
-// atrás). Sin haz (dir≈0, p.ej. una antorcha que asoma por todas las caras) o con foco 0 ⇒ omnidireccional, como antes.
-// No proyecta sombra (como blkLuz). No usa sampler3D ⇒ vale también en WebGL1.
-const MC_DYN_MAX=8;   // luces de agente simultáneas (las más cercanas al ojo); array fijo de uniforms
-// BUG-GLOW6 · afinado de la oclusión de la luz dinámica (game.luzOcluye).
-const MC_DYN_CERCA=0.6;   // por debajo de esta distancia (bloques) una cara SÍ recibe luz de espaldas: el emisor que uno
-                          // lleva en la mano es geometría, y sin margen sus propias caras traseras se apagarían
-const MC_DYN_PASOS=64;    // tope de celdas que recorre mcLuzLibre: una luz al otro lado del mundo no puede costar más
-const MC_DYN_FUNDE=0.18;  // segundos que tarda una luz en encenderse/apagarse al ganar o perder la línea de visión
+// BUG-GLOW3 + BUG-GLOW8 · Luz de lo que SE MUEVE (pieza en la mano, montada en un agente, partícula). Ya no hay
+// una segunda ley: `dynLuzTex` (arriba, con blkLuz) lee el MISMO tipo de campo, sembrado por el MISMO BFS, en la
+// caja que sigue a esos emisores (mcDynBake). Aquí solo queda lo que sí es propio de una luz que no está horneada
+// en el vértice:
+//   · dynLuz — el nivel [0,1] de esa caja, que blkLuz ya mezcla por max() con la del mundo;
+//   · dynLift — deshace el oscurecido de penumbra que la malla horneó en el vértice y que esta luz sí debería
+//     levantar. Lo que se mueve no re-malla nada (a propósito: re-mallar por cada cruce de celda es lo que hundía
+//     los fps en BUG-GLOW2), así que sin esto una cueva de DÍA no se encendería —el tinte de mcLitGlow solo se
+//     nota de noche—. Sube el shade hacia pleno con la misma curva pow(interiorDark, nivel), con tope en el
+//     shade de cara pleno (MC_FACES máx = 1.12) para no pasarse en superficies ya iluminadas. QUÉ nivel se le
+//     pasa depende de lo que hornee cada malla: ver mcLuzArtificial.
+// Lo que se fue de aquí el 2026-08-20, y con ello sus parches: uDynPos/uDynDir (8 focos analíticos), el coste
+// angular del haz (ahora lo hace el BFS, anisótropo, como en la siembra estática), uDynCara (la cara de espaldas)
+// y uDynCerca (el margen de cortesía de 0,6 bloques que dibujaba un disco de borde duro cuando el emisivo cruzaba
+// el plano de una pared). Nada de eso hace falta cuando la luz se propaga por el aire de verdad.
 const MC_DYNLIGHT_LIB=`
-uniform int uDynN; uniform vec4 uDynPos[${MC_DYN_MAX}]; uniform vec4 uDynDir[${MC_DYN_MAX}]; uniform float uDynDark; uniform float uGlowGain;
-uniform float uDynCara;    // BUG-GLOW6 · 1 = una cara no recibe la luz que le da por detrás (game.luzOcluye)
-uniform float uDynCerca;   // margen de cortesía en bloques: por debajo de esta distancia no se aplica (el emisor es geometría)
-// uDynPos = (x,y,z mundo, nivel 0..${MC_MAXLIGHT}) · uDynDir = (dx,dy,dz haz, foco 0..1); |dir|≈0 ó foco 0 ⇒ omnidireccional
-// BUG-GLOW6 · mitad POR FRAGMENTO de la oclusión: una cara no se ilumina si la luz le da POR DETRÁS. Es exacto para
-// luz directa y sale gratis — la normal de la cara es la misma que ya sacan sunFactor y blkLuz de las derivadas del
-// mundo (cross(dFdx,dFdy)), sin atributo nuevo ni una sola lectura de textura. Arregla las dos quejas de grosor
-// («pegado a una pared con la espada se ilumina la cara de enfrente», «con 2 bloques se ve más oscuro que con 1»):
-// la cara de enfrente mira al otro lado, así que deja de recibir. Sin derivadas (WebGL1 viejo) no se aplica y todo
-// queda como antes. La otra mitad —la luz encerrada en otro cuarto— NO se puede resolver aquí: sería un raycast por
-// fragmento y por luz. Va en la CPU, una vez por luz y por frame (mcLuzLibre, en mcDynSync).
-// El margen de cortesía uDynCerca existe porque el propio emisor es geometría: sin él, las caras traseras de la
-// espada que uno lleva en la mano se apagarían. Meterla DENTRO de un bloque no vuelve a colar luz fuera: de eso se
-// encarga la mitad de CPU, que ve el sólido entre la luz y el ojo.
+uniform float uDynDark; uniform float uGlowGain;
 float dynLuz(vec3 w){
-  float m=0.0;
-#ifdef SUN_DERIV
-  vec3 nCara=normalize(cross(dFdx(w),dFdy(w)));
-  if(dot(nCara,uEye-w)<0.0) nCara=-nCara;                     // orientada al ojo, como en sunFactor
+#ifdef BLK3D
+  return dynLuzTex(w).a;
+#else
+  return 0.0;
 #endif
-  for(int i=0;i<${MC_DYN_MAX};i++){ if(i>=uDynN) continue;
-    vec3 P=uDynPos[i].xyz; float d=distance(w, P);
-#ifdef SUN_DERIV
-    if(uDynCara>0.5 && d>uDynCerca && dot(nCara, P-w)<0.0) continue;   // la luz queda detrás de la cara
-#endif
-    // BUG-GLOW4 · el haz ENCARECE el camino, NO lo corta. Es la misma ley que la siembra estática de
-    // mcComputeBlockLight (paso a favor del haz = 1 nivel, de lado = 1+NARROW, con NARROW=glowFocus*5), y por eso
-    // se escribe como coste por bloque recorrido en vez de como factor. Antes era pow(cos, 1+foco*8), que ANULA
-    // todo lo que cae fuera del cono: el mismo dibujo alumbraba de una manera plantado en el suelo (BFS, la luz da
-    // la vuelta y llega debilitada) y de otra en la mano (cono duro, nada detrás) — que es justo lo que el dueño
-    // no quiere. Sin haz (|dir|≈0, una antorcha que asoma por todas las caras) o con foco 0 ⇒ coste 1: isótropo.
-    vec3 bd=uDynDir[i].xyz; float foco=uDynDir[i].w; float bl=length(bd);
-    float coste=1.0;
-    if(foco>0.0 && bl>0.5 && d>1e-4){
-      float c=dot((w-P)/d, bd/bl);                          // 1 = a favor del haz · 0 = de costado · -1 = detrás
-      coste=1.0+foco*5.0*(1.0-max(c,0.0));                  // a favor cuesta 1; de lado y detrás, hasta 1+foco*5
-    }
-    // La caída es RELATIVA AL ALCANCE de la luz, no una rampa fija de ${MC_MAXLIGHT} bloques: se apaga justo a
-    // los uDynPos[i].w bloques y reparte el degradado por todo ese camino. Con el alcance normal (${MC_MAXLIGHT})
-    // es LA MISMA CUENTA de antes —(${MC_MAXLIGHT}-d)/${MC_MAXLIGHT} == 1-d/${MC_MAXLIGHT}—, o sea que la ley del BFS
-    // estatico que exige BUG-GLOW4 se conserva exacta. Solo cambia para alcances mayores, y ahi arregla que el mando
-    // fuera inservible: con la rampa fija, una estrella a 34 bloques pasaba de NADA (luz 34) a SATURADA (luz 49) en
-    // 15 unidades, todo el margen util apretado en una ventana estrecha y lejos del origen. Queja del dueno: «en 40
-    // veo mucha luz, en 30 nada, en 35 un poco, el ajuste es complejo».
-    float rad=clamp(1.0 - d*coste/max(uDynPos[i].w, 1e-3), 0.0, 1.0);
-    if(rad<=0.0) continue;
-    m=max(m, rad); }
-  return m;
 }
 float dynLift(float shade, float dyn){
   if(uDynDark>=1.0 || dyn<=0.0) return shade;               // interiores no se oscurecen ⇒ nada que reponer. Aquí SÍ es >=1: con la sobreexposición de REQ-GLOW7 (uDynDark>1) la penumbra ya viene subida del vértice y dividir la BAJARÍA
@@ -9627,7 +9670,7 @@ uniform float uClipY;
 ${MC_SUN_LIB}${MC_BLK_LIB}${MC_DYNLIGHT_LIB}
 void main(){ if(uClipY > -999.0 && vWorld.y < uClipY) discard;
   vec4 t=texture2D(uTex,vUV); if(t.a<0.5) discard;
-  vec4 blk=blkLuz(vWorld); float dyn=dynLuz(vWorld);
+  float dyn; vec4 blk=mcLuzArtificial(vWorld, dyn);
   vec3 base=t.rgb*dynLift(vShade, max(blk.a, dyn))*mix(1.0,sunFactor(vWorld),vSol);
   vec3 col=mcLitGlow(base, blk, dyn, uExpo, uGlowGain);
   float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
@@ -9642,7 +9685,7 @@ uniform sampler2D uTex; uniform vec3 uSky; uniform float uFogNear; uniform float
 uniform float uClipY;
 ${MC_SUN_LIB}${MC_BLK_LIB}${MC_DYNLIGHT_LIB}
 void main(){ if(uClipY > -999.0 && vWorld.y < uClipY) discard;
-  vec4 blk=blkLuz(vWorld); float dyn=dynLuz(vWorld);
+  float dyn; vec4 blk=mcLuzArtificial(vWorld, dyn);
   vec3 base=texture2D(uTex,vUV).rgb*dynLift(vShade, max(blk.a, dyn))*mix(1.0,sunFactor(vWorld),vSol);
   vec3 col=mcLitGlow(base, blk, dyn, uExpo, uGlowGain);
   float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
@@ -9689,8 +9732,9 @@ function mcLocOf(p){ const gl=mc.gl; return {
   uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
   uExpo:gl.getUniformLocation(p,'uExpo'), uClipY:gl.getUniformLocation(p,'uClipY'),
   uBlkTex:gl.getUniformLocation(p,'uBlkTex'), uBlkDim:gl.getUniformLocation(p,'uBlkDim'), uBlkOn:gl.getUniformLocation(p,'uBlkOn'),
-    uDynN:gl.getUniformLocation(p,'uDynN'), uDynPos:gl.getUniformLocation(p,'uDynPos'), uDynDir:gl.getUniformLocation(p,'uDynDir'), uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · luz dinámica de agente
-    uDynCara:gl.getUniformLocation(p,'uDynCara'), uDynCerca:gl.getUniformLocation(p,'uDynCerca'),   // BUG-GLOW6 · oclusión
+    uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · reposición del brillo horneado (dynLift)
+    uDynTex:gl.getUniformLocation(p,'uDynTex'), uDynBox0:gl.getUniformLocation(p,'uDynBox0'),   // BUG-GLOW8 · campo de luz de lo que se mueve
+    uDynBoxN:gl.getUniformLocation(p,'uDynBoxN'), uDynOn:gl.getUniformLocation(p,'uDynOn'),
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
   uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
@@ -9734,7 +9778,7 @@ void main(){
   float refl = step(1.5, vEmit);
   if(uClipY > -999.0 && (vWorld.y < uClipY || refl > 0.5)) discard;
   float em = vEmit - 2.0*refl;
-  vec4 blk=blkLuz(vWorld); float dyn=dynLuz(vWorld);
+  float dyn; vec4 blk=mcLuzArtificial(vWorld, dyn);
   vec3 base=vColor*dynLift(vShade, max(blk.a, dyn))*mix(1.0,sunFactor(vWorld),vSol);
   vec3 lit=mix(mcLitGlow(base, blk, dyn, uExpo, uGlowGain), vColor, em);
   float aOut = vAlpha;
@@ -9816,8 +9860,9 @@ function mcBuildStructProgram(){
     uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
     uExpo:gl.getUniformLocation(p,'uExpo'), uClipY:gl.getUniformLocation(p,'uClipY'),
     uBlkTex:gl.getUniformLocation(p,'uBlkTex'), uBlkDim:gl.getUniformLocation(p,'uBlkDim'), uBlkOn:gl.getUniformLocation(p,'uBlkOn'),
-    uDynN:gl.getUniformLocation(p,'uDynN'), uDynPos:gl.getUniformLocation(p,'uDynPos'), uDynDir:gl.getUniformLocation(p,'uDynDir'), uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · luz dinámica de agente
-    uDynCara:gl.getUniformLocation(p,'uDynCara'), uDynCerca:gl.getUniformLocation(p,'uDynCerca'),   // BUG-GLOW6 · oclusión
+    uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · reposición del brillo horneado (dynLift)
+    uDynTex:gl.getUniformLocation(p,'uDynTex'), uDynBox0:gl.getUniformLocation(p,'uDynBox0'),   // BUG-GLOW8 · campo de luz de lo que se mueve
+    uDynBoxN:gl.getUniformLocation(p,'uDynBoxN'), uDynOn:gl.getUniformLocation(p,'uDynOn'),
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
     uReflejo:gl.getUniformLocation(p,'uReflejo'), uReflCurva:gl.getUniformLocation(p,'uReflCurva'),
     uReflColor:gl.getUniformLocation(p,'uReflColor'), uReflOpac:gl.getUniformLocation(p,'uReflOpac'),
@@ -9850,8 +9895,9 @@ uniform float uClipY;
 ${MC_SUN_LIB}${MC_BLK_LIB}${MC_DYNLIGHT_LIB}
 void main(){ if(uClipY > -999.0 && vWorld.y < uClipY) discard;
   vec2 uv=vRect.xy+(vRect.zw-vRect.xy)*fract(vTile); vec4 t=texture2D(uTex,uv); if(t.a<0.5) discard;
-  vec3 base=t.rgb*dynLift(vShade,dynLuz(vWorld))*mix(1.0,sunFactor(vWorld),vSol);
-  vec3 col=mcLitGlow(base, blkLuz(vWorld), dynLuz(vWorld), uExpo, uGlowGain);
+  float dyn; vec4 blk=mcLuzArtificial(vWorld, dyn);
+  vec3 base=t.rgb*dynLift(vShade,dyn)*mix(1.0,sunFactor(vWorld),vSol);
+  vec3 col=mcLitGlow(base, blk, dyn, uExpo, uGlowGain);
   float f=clamp((vDist-uFogNear)/(uFogFar-uFogNear),0.0,1.0);
   f=uFogMin+(1.0-uFogMin)*f;   // REQ-FLUID4 · suelo de tinte (0 fuera del agua = sin efecto)
   gl_FragColor=vec4(mix(col,mcFogSky(vWorld),f),1.0); }`;
@@ -9864,8 +9910,9 @@ function mcBuildStructTexProgram(){
     uFogMin:gl.getUniformLocation(p,'uFogMin'), uFogNear:gl.getUniformLocation(p,'uFogNear'), uFogFar:gl.getUniformLocation(p,'uFogFar'),
     uExpo:gl.getUniformLocation(p,'uExpo'), uClipY:gl.getUniformLocation(p,'uClipY'),
     uBlkTex:gl.getUniformLocation(p,'uBlkTex'), uBlkDim:gl.getUniformLocation(p,'uBlkDim'), uBlkOn:gl.getUniformLocation(p,'uBlkOn'),
-    uDynN:gl.getUniformLocation(p,'uDynN'), uDynPos:gl.getUniformLocation(p,'uDynPos'), uDynDir:gl.getUniformLocation(p,'uDynDir'), uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · luz dinámica de agente
-    uDynCara:gl.getUniformLocation(p,'uDynCara'), uDynCerca:gl.getUniformLocation(p,'uDynCerca'),   // BUG-GLOW6 · oclusión
+    uDynDark:gl.getUniformLocation(p,'uDynDark'),   // BUG-GLOW3 · reposición del brillo horneado (dynLift)
+    uDynTex:gl.getUniformLocation(p,'uDynTex'), uDynBox0:gl.getUniformLocation(p,'uDynBox0'),   // BUG-GLOW8 · campo de luz de lo que se mueve
+    uDynBoxN:gl.getUniformLocation(p,'uDynBoxN'), uDynOn:gl.getUniformLocation(p,'uDynOn'),
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
@@ -10337,6 +10384,28 @@ function mcUploadBlkTex(){
   gl.activeTexture(gl.TEXTURE0);
   mc._blkTexDirty=false;
 }
+// BUG-GLOW8 · sube la CAJA de luz de lo que se mueve (mc.dynLight, mcDynBake) a su textura 3D, unidad 4. Es la
+// gemela de mcUploadBlkTex y comparte formato y filtro: el mismo dato leído igual, para que la luz de la mano no
+// se distinga de la de una antorcha. Se re-sube solo cuando el campo se ha vuelto a sembrar (mc._dynTexDirty), no
+// cada frame. La caja cambia de tamaño ⇒ texImage3D (reasigna), no texSubImage3D.
+function mcUploadDynTex(){
+  const gl=mc.gl; if(!gl || !mc.gl2) return;
+  const D=mc.dynLight;
+  if(!mc.dynTex) mc.dynTex=gl.createTexture();
+  gl.activeTexture(gl.TEXTURE4);
+  gl.bindTexture(gl.TEXTURE_3D, mc.dynTex);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+  const al=gl.getParameter(gl.UNPACK_ALIGNMENT); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  if(D) gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA8, D.W, D.H, D.P, 0, gl.RGBA, gl.UNSIGNED_BYTE, D.BL.subarray(0, D.vol*4));
+  else  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA8, 1, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,0]));
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, al);
+  gl.activeTexture(gl.TEXTURE0);
+  mc._dynTexDirty=false;
+}
 function mcSunUniforms(L, S){
   const gl=mc.gl;
   // REQ-ENV3 · luz global (exposición): un factor que apaga el mundo entero de noche, sin re-mallar. Va aquí
@@ -10355,19 +10424,21 @@ function mcSunUniforms(L, S){
     // blkLuz orienta la normal con uEye, y mcSunUniforms solo lo subiría con mapa de sol: se fija aquí también.
     if(on && L.uEye) gl.uniform3f(L.uEye, mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]);
   }
-  // BUG-GLOW3 · luz dinámica de agente. Independiente de la textura de bloque (no usa sampler3D) ⇒ se sube siempre, WebGL2 y 1.
-  if(L.uDynN!==undefined && L.uDynN!==null){
-    const n = mc._dynN|0;
-    gl.uniform1i(L.uDynN, n);
-    if(n>0 && L.uDynPos && mc._dynArr) gl.uniform4fv(L.uDynPos, mc._dynArr);
-    if(n>0 && L.uDynDir && mc._dynDir) gl.uniform4fv(L.uDynDir, mc._dynDir);
-    if(L.uDynDark) gl.uniform1f(L.uDynDark, mc.interiorDark!=null?mc.interiorDark:1);
-    // BUG-GLOW6 · el mando es uno solo (game.luzOcluye) y enciende las DOS mitades: ésta (la cara de
-    // espaldas, aquí) y la línea de visión ojo↔luz (mcDynSync). Apagarlo devuelve el comportamiento viejo
-    // sin recargar, que es lo que pide medir fps con y sin.
-    if(L.uDynCara) gl.uniform1f(L.uDynCara, mc.luzOcluye?1:0);
-    if(L.uDynCerca) gl.uniform1f(L.uDynCerca, MC_DYN_CERCA);
+  // BUG-GLOW8 · el campo de luz de lo que SE MUEVE, en la unidad 4. Mismo trato que el del mundo: sampler3D
+  // SIEMPRE atado a su unidad (aunque uDynOn sea 0) o el draw se invalida en una GPU real, ver arriba.
+  if(L.uDynOn!==undefined && L.uDynOn!==null){
+    gl.uniform1i(L.uDynTex, 4);
+    const D = (mc.gl2 && mc.dynTex && mc.dynLight && mc.luzDinamica!==false) ? mc.dynLight : null;
+    gl.uniform1f(L.uDynOn, D?1:0);
+    if(D){
+      // La esquina es la de la caja, a secas: el deslizamiento sub-celda ya no se hace aquí (movía la caja ENTERA,
+      // BUG-GLOW8c) sino en la siembra, emisor por emisor.
+      gl.uniform3f(L.uDynBox0, D.x0, D.y0, D.z0);
+      gl.uniform3f(L.uDynBoxN, D.W, D.H, D.P);
+      if(L.uEye) gl.uniform3f(L.uEye, mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]);   // dynLuzTex orienta la normal con uEye
+    }
   }
+  if(L.uDynDark!==undefined && L.uDynDark!==null) gl.uniform1f(L.uDynDark, mc.interiorDark!=null?mc.interiorDark:1);
   if(L.uGlowGain!==undefined && L.uGlowGain!==null) gl.uniform1f(L.uGlowGain, mc.glowGain!=null?mc.glowGain:1);   // intensidad de la luz artificial
   if(L.uEye) gl.uniform3f(L.uEye, mc.pos[0], mc.pos[1]+MC_EYE*mc.scale, mc.pos[2]);
   if(L.uHorizonColor){
@@ -10963,7 +11034,7 @@ function mcRelightBox(bx,bz,bx1,bz1){
 // (game.agentsLightTracking) y su matriz de modelo NO es la identidad. Una pieza en REPOSO se dibuja en su celda estampada
 // (s.model = null/identidad) ⇒ se siembra allí, exactamente como siempre; solo cuando la pose la desplaza sigue a la pose.
 function mcEmisorSeguido(s){ const m=s.model;
-  return !!(mc.agentsLightTrack && s.emitCells && s.emitCells.length && m && m.length===16 &&
+  return !!(mc.agentsLightTrack && s.emitFinos && s.emitFinos.length && m && m.length===16 &&
     (m[12]||m[13]||m[14] || m[0]!==1||m[5]!==1||m[10]!==1 || m[1]||m[2]||m[4]||m[6]||m[8]||m[9])); }
 function mcComputeBlockLight(){
   mc._blkTexDirty=true;   // REQ-ENV4 · la luz de bloque va a cambiar ⇒ re-subir la textura 3D antes del próximo frame
@@ -10996,7 +11067,7 @@ function mcComputeBlockLight(){
   // esto ahorra decenas de ms por pulso — el motivo real por el que un solo observador tiraba fps.
   let emiSig = 0;
   for(const idx of GE) emiSig = (emiSig*31 + idx) | 0;
-  for(const s of mc.structures){ const ec=s.emitCells;
+  for(const s of mc.structures){ const ec=s.emitFinos;
     if(ec && ec.length){ emiSig = (emiSig*31 + s.ox*73 + s.oy*37 + s.oz*41 + ec.length) | 0; } }
   const gridGen = mc.gridGen|0;
   if(!nueva && mc._blEmiSig===emiSig && mc._blGridGen===gridGen){
@@ -11006,99 +11077,292 @@ function mcComputeBlockLight(){
   mc._blGridGen = gridGen;
   BL.fill(0); mc._blCero=false;
   const focus=Math.max(0, Math.min(1, mc.glowFocus));   // 0=omnidireccional (antorcha), 1=haz estrecho
-  const NARROW=Math.round(focus*5);   // penalización de paso PERPENDICULAR al haz: 0=isótropo (diamante ancho), 5=haz fino
   // Dirección del haz POR CELDA (Int8 ×3, componentes de la normal neta ×100): se propaga célula a célula para que el
   // BFS sea ANISÓTROPO — un paso a lo largo del haz cuesta 1 nivel; uno de lado cuesta 1+NARROW → la luz llega lejos
   // delante y se apaga pronto de costado (cono estrecho, no diamante). Sin haz (BD=0) el paso cuesta 1 (isótropo).
   const BD=(mc.blockLightDir&&mc.blockLightDir.length===N*3)?mc.blockLightDir:(mc.blockLightDir=new Int8Array(N*3));
   BD.fill(0);
   const PASA=mcTablaLuz();
-  const buckets=[]; for(let i=0;i<=MC_MAXLIGHT;i++) buckets.push([]);
-  const seedFull=(i, r, gCol, b, lvl)=>{
-    if(PASA[g[i]]){
-      const idx=i*4;
-      if(BL[idx+3]<lvl){
-        BL[idx]=Math.max(BL[idx], r);
-        BL[idx+1]=Math.max(BL[idx+1], gCol);
-        BL[idx+2]=Math.max(BL[idx+2], b);
-        BL[idx+3]=lvl;
-        buckets[lvl].push(i);
-      }
-    }
-  };
-  // Siembra: por cada estructura viva, cada emitCell (celda de bloque local → mundo). La celda emisiva SÓLIDA se marca
-  // a lv0 como MUESTRA para caras a ras (sin propagar). Con foco y haz definido (normal neta de caras emisivas expuestas
-  // ≠ 0) se siembran solo los vecinos de aire del HEMISFERIO delantero, con su dirección de haz → cono. Si el haz es ≈0
-  // (antorcha: emite igual por todas las caras) o focus=0 → omnidireccional a pleno (comportamiento clásico).
-  const siembra=(cx,cy,cz, ed,k, col)=>{
-    if(!mcInside(cx,cy,cz)) return; const i=cx+cy*NX+cz*sxy;
-    let nx=0,ny=0,nz=0,nl=0; if(ed){ nx=ed[k]; ny=ed[k+1]; nz=ed[k+2]; nl=Math.sqrt(nx*nx+ny*ny+nz*nz); }
-    const directional = focus>0 && nl>0.5;
-    const cr = col ? Math.min(15, Math.max(1, Math.round((col[k] / 255) * lv0))) : lv0;
-    const cg = col ? Math.min(15, Math.max(1, Math.round((col[k+1] / 255) * lv0))) : Math.round(lv0 * 0.85);
-    const cb = col ? Math.min(15, Math.max(1, Math.round((col[k+2] / 255) * lv0))) : Math.round(lv0 * 0.50);
-    const maxC = Math.max(1, cr, cg, cb);
-    const idx = i * 4;
-    if(!PASA[g[i]] && BL[idx+3]<maxC){
-      BL[idx]=Math.max(BL[idx], cr);
-      BL[idx+1]=Math.max(BL[idx+1], cg);
-      BL[idx+2]=Math.max(BL[idx+2], cb);
-      BL[idx+3]=maxC;
-    }
-    if(!directional){
-      seedFull(i, cr, cg, cb, maxC);
-      if(cx>0)    seedFull(i-1, cr, cg, cb, maxC);
-      if(cx<NX-1) seedFull(i+1, cr, cg, cb, maxC);
-      if(cy>0)    seedFull(i-NX, cr, cg, cb, maxC);
-      if(cy<NY-1) seedFull(i+NX, cr, cg, cb, maxC);
-      if(cz>0)    seedFull(i-sxy, cr, cg, cb, maxC);
-      if(cz<NZ-1) seedFull(i+sxy, cr, cg, cb, maxC);
-    } else {
-      const inv=1/nl; nx*=inv; ny*=inv; nz*=inv;
-      const qx=Math.round(nx*100), qy=Math.round(ny*100), qz=Math.round(nz*100);   // haz cuantizado a Int8 (−100..100)
-      if(BL[idx+3]<maxC){
-        BL[idx]=Math.max(BL[idx], cr);
-        BL[idx+1]=Math.max(BL[idx+1], cg);
-        BL[idx+2]=Math.max(BL[idx+2], cb);
-        BL[idx+3]=maxC;
-      }
-      const nb=(j,dx,dy,dz)=>{
-        if(!PASA[g[j]]) return;
-        if(dx*nx+dy*ny+dz*nz<=0.01) return;
-        const jdx=j*4;
-        if(BL[jdx+3]<maxC){
-          BL[jdx]=Math.max(BL[jdx], cr);
-          BL[jdx+1]=Math.max(BL[jdx+1], cg);
-          BL[jdx+2]=Math.max(BL[jdx+2], cb);
-          BL[jdx+3]=maxC;
-          BD[j*3]=qx; BD[j*3+1]=qy; BD[j*3+2]=qz;
-          buckets[maxC].push(j);
-        }
-      };
-      if(cx>0)    nb(i-1,-1,0,0);   if(cx<NX-1) nb(i+1,1,0,0);
-      if(cy>0)    nb(i-NX,0,-1,0);  if(cy<NY-1) nb(i+NX,0,1,0);
-      if(cz>0)    nb(i-sxy,0,0,-1); if(cz<NZ-1) nb(i+sxy,0,0,1);
-    }
-  };
-  for(const s of mc.structures){ const ec=s.emitCells; if(!ec||!ec.length) continue; const ed=s.emitDir, col=s.emitCol;
-    // BUG-GLOW3 · un emisor MONTADO en un agente movido NO se hornea aquí: lo pinta la luz dinámica del shader (mcDynSync),
-    // suave y sin BFS. La luz de bloque se queda solo para emisores QUIETOS (antorchas fijas), donde es correcta y barata.
+  // OR (de qué emisor viene cada celda) solo se reserva si hay foco: sin haz el coste del paso es constante y
+  // esta memoria no la mira nadie. Una antorcha corriente (focus=0) sigue costando exactamente lo de siempre.
+  let OR=null, DI=null, MX=null;
+  if(focus>0){ OR=(mc.blockLightOrg&&mc.blockLightOrg.length===N*3)?mc.blockLightOrg:(mc.blockLightOrg=new Int16Array(N*3));
+    DI=(mc.blockLightDist&&mc.blockLightDist.length===N)?mc.blockLightDist:(mc.blockLightDist=new Uint16Array(N));
+    MX=(mc.blockLightMax&&mc.blockLightMax.length===N)?mc.blockLightMax:(mc.blockLightMax=new Uint8Array(N)); }
+  else { mc.blockLightOrg=null; mc.blockLightDist=null; mc.blockLightMax=null; }
+  if(OR){ OR.fill(0); DI.fill(0); MX.fill(0); }
+  const C=mcCampoLuz(BL, BD, 0,0,0, NX,NY,NZ, OR, DI, MX);
+  // BUG-GLOW8h · dos pasadas, las SIN haz primero — misma razón, misma ley y mismo orden que en mcDynBake:
+  // quien gana una celda le impone su decaimiento a todo lo que cuelgue de ella, y un cono (×k, hasta 6 por
+  // bloque) estrangulaba la luz de una antorcha (1 por bloque) en cuanto le ganaba una sola celda por el camino.
+  for(let pasada=0; pasada<2; pasada++){
+  const buckets=mcLuzBuckets(lv0); let sembrada=false;
+  const conHaz=(ed,k)=> !!(ed && (ed[k]||ed[k+1]||ed[k+2]));
+  for(const s of mc.structures){ const ec=s.emitFinos; if(!ec||!ec.length) continue; const ed=s.emitDir, col=s.emitCol;
+    // BUG-GLOW3 · un emisor MONTADO en un agente movido NO se hornea aquí: lo siembra mcDynBake en su propia caja,
+    // con ESTA MISMA ley (BUG-GLOW8). El campo del mundo se queda solo para emisores QUIETOS, que es donde es barato.
     if(mcEmisorSeguido(s)) continue;
-    for(let k=0;k<ec.length;k+=3) siembra(s.ox+ec[k], s.oy+ec[k+1], s.oz+ec[k+2], ed, k, col); }
+    // BUG-GLOW8e · ec viene en voxeles FINOS: cada uno es su propia luz y siembra desde SU sitio dentro de la
+    // celda (mcLuzSiembra reparte por distancia real). Un emisor quieto centrado sale igual que siempre.
+    for(let k=0;k<ec.length;k+=3){
+      if(conHaz(ed,k)!==(pasada===1)) continue;
+      sembrada=true;
+      const fx=s.ox+(ec[k]+0.5)/MC_TILE, fy=s.oy+(ec[k+1]+0.5)/MC_TILE, fz=s.oz+(ec[k+2]+0.5)/MC_TILE;
+      mcLuzSiembra(C, PASA, buckets, lv0, focus, Math.floor(fx), Math.floor(fy), Math.floor(fz), ed, k, col, fx, fy, fz);
+    } }
   // …y lo MISMO desde la rejilla: una pieza que cabe en su celda (una antorcha puesta con setVoxel) trae los
-  // mismos emitCells/emitDir horneados en su geometría fina; lo único que cambia es de dónde sale el origen.
+  // mismos emitFinos/emitDir horneados en su geometría fina; lo único que cambia es de dónde sale el origen.
   for(const ci of GE){ const geo=mc._glowIds && mc._glowIds[g[ci]]; if(!geo) continue;
-    const ec=geo.emitCells, ed=geo.emitDir, col=geo.emitCol, cx=ci%NX, cy=((ci/NX)|0)%NY, cz=(ci/sxy)|0;
-    for(let k=0;k<ec.length;k+=3) siembra(cx+ec[k], cy+ec[k+1], cz+ec[k+2], ed, k, col); }
-  // BFS por buckets con COSTE VARIABLE (≥1) según alineación del paso con el haz de la celda origen; lleva el haz al vecino.
-  // Coste entero ≥1 ⇒ el nivel destino siempre baja ⇒ cae en un bucket inferior (procesado después): relajación válida.
-  const relax=(i,j,dx,dy,dz)=>{
-    if(!PASA[g[j]]) return; const bx=BD[i*3], by=BD[i*3+1], bz=BD[i*3+2];
-    let cost=1;
-    if(bx||by||bz){ const dot=(dx*bx+dy*by+dz*bz)/100; cost=1+Math.round(NARROW*(1-Math.max(0,Math.min(1,dot)))); }
+    const ec=geo.emitFinos, ed=geo.emitDir, col=geo.emitCol, cx=ci%NX, cy=((ci/NX)|0)%NY, cz=(ci/sxy)|0;
+    // La pieza cabe en SU celda, así que el voxel fino nunca se sale de ella: la celda es siempre (cx,cy,cz) y lo
+    // único que aporta el fino es DÓNDE dentro de la celda está la luz (BUG-GLOW8e, cada emisivo con su autonomía).
+    for(let k=0;k<ec.length;k+=3){
+      if(conHaz(ed,k)!==(pasada===1)) continue;
+      sembrada=true;
+      mcLuzSiembra(C, PASA, buckets, lv0, focus, cx, cy, cz, ed, k, col,
+        cx+(ec[k]+0.5)/MC_TILE, cy+(ec[k+1]+0.5)/MC_TILE, cz+(ec[k+2]+0.5)/MC_TILE); } }
+  if(sembrada) mcLuzDifunde(C, PASA, buckets, lv0, focus);
+  }
+}
+// ── BUG-GLOW8 · UN SOLO MODELO DE LUZ ARTIFICIAL ─────────────────────────────────────────────────────────────
+// Hasta 2026-08-20 había DOS y se veía la costura: el BFS de aquí (antorcha plantada, rombos escalonados, para
+// en la materia, tiñe con el color del voxel) y un punto analítico en el shader para lo que llevabas en la mano
+// (esfera euclídea perfecta, ciega a la materia, blanco cálido fijo, y apagada ENTERA cuando el emisivo caía en
+// celda sólida). Quejas del dueño, verbatim: «*sale una especie de círculo que es imposible*», «*si la voy
+// metiendo más, se va la luz*», «*no puede haber apaños o trucos para quedar bien*».
+//
+// Ahora la ley se escribe UNA vez —aquí— y la usan los dos campos de luz que hay:
+//   · el del MUNDO   (`mc.blockLight`, mcComputeBlockLight): emisores quietos, se rehornea al cambiar el mundo.
+//   · el de la CAJA  (`mc.dynLight`,  mcDynBake): los que se MUEVEN (pieza en la mano, montada en un agente,
+//     partículas de game.voxelesUI). Misma siembra, misma difusión, misma tabla de opacos, mismo color.
+// Lo ÚNICO que cambia entre los dos son los índices: un campo dice a qué trozo del mundo escribe. Por eso el
+// halo de lo que llevas en la mano es indistinguible del de una antorcha plantada en esa celda — es el mismo
+// código, no una imitación. Los dos se leen por fragmento de una textura 3D y se mezclan con max(), que es
+// exactamente cómo se mezclan dos antorchas dentro de un mismo campo.
+//
+// ⚠️ Los dos campos se combinan con max() y NO comparten celdas: el del mundo NO incluye a los emisores que se
+// mueven (mcEmisorSeguido los salta arriba) y el de la caja SOLO lleva a ésos. Sin esa exclusión, mover una luz
+// obligaría a re-sembrar el mundo entero y a re-mallar su halo, que es lo que hundía los fps en BUG-GLOW2.
+//
+// Un campo: BL (rgba por celda, nivel en .a), BD (haz por celda), esquina (x0,y0,z0) y tamaño (W,H,P). `sxy` es
+// el paso en Z DEL CAMPO; el paso en la rejilla del mundo es otro (mcIdx), y confundirlos es EL bug de esta
+// pieza: la caja tiene sus propios índices y la rejilla los suyos.
+// `OR` (opcional) = de QUÉ EMISOR viene la luz de cada celda: su posición de mundo ×MC_LUZ_ORG, Int16 ×3.
+// Solo hace falta con foco (BUG-GLOW8f): el coste de un paso depende del ángulo REAL entre la celda y su
+// emisor, y sin saber dónde está el emisor no se puede calcular. Sin foco no se toca ni se reserva.
+function mcCampoLuz(BL, BD, x0, y0, z0, W, H, P, OR, DI, MX){
+  return { BL, BD, OR:OR||null, DI:DI||null, MX:MX||null, x0, y0, z0, W, H, P, sxy:W*H };
+}
+// BUG-GLOW8h · estas dos resoluciones NO son un detalle de almacenaje: son escalones de la ley. Un salto de un
+// paso en OR mueve la distancia al emisor ese paso entero, y eso se cobra ×k (hasta 6 con foco cerrado) ×SUB ⇒
+// con 1/8 de bloque, cruzar un escalón valía 3 subniveles (0,75 niveles) de golpe. Para que el escalón quede por
+// debajo del suelo del campo (1 subnivel) hace falta paso ≤ 1/24; con 1/64 se queda en 0,37 subniveles.
+// Techo: OR es Int16 y guarda coordenada×ORG ⇒ con 1/32 llegan mundos de hasta 1023 bloques de lado (32767/32),
+// y los hay de 512 (test_luz_incremental_navegador.js), así que no se puede afinar más sin cambiar el tipo.
+const MC_LUZ_ORG=32;    // resolución con la que se guarda la posición del emisor en OR (1/32 de bloque)
+const MC_LUZ_DRES=128;  // resolución con la que se guarda en DI el camino recorrido por la luz (1/128 de bloque)
+// Cubos del BFS: uno por nivel. Se dimensiona por el ALCANCE que se va a sembrar, no por MC_MAXLIGHT: una
+// partícula de game.voxelesUI puede pedir 40 bloques (REQ-GLOW5) y ahí no hay 15 que valga.
+function mcLuzBuckets(lv0){ const b=[]; for(let i=0;i<=lv0*MC_LUZ_SUB;i++) b.push([]); return b; }   // un cubo por SUBNIVEL (BUG-GLOW8c)
+// LO QUE LE CUESTA AL HAZ desviarse: en SUBNIVELES, un solo sitio (BUG-GLOW8f). La usan las DOS mitades de la
+// ley —la siembra (mcLuzSiembra) y la difusión (mcLuzDifunde)—, y tienen que ser la misma cuenta o el borde del
+// cono sale como un escalón. `dot` = coseno entre el paso y el haz; de frente no cuesta nada extra, de lado o
+// hacia atrás cuesta el máximo. Se redondea a SUBNIVELES, no a niveles enteros: redondear a niveles era lo que
+// hacía que al girar el pico la luz del suelo pegara brincos de varios niveles de una vez.
+// LO QUE CUESTA AVANZAR UN BLOQUE en un ángulo dado, en NIVELES: 1 de frente, hasta 1+5 de lado o hacia atrás.
+// `dot` es el coseno entre la dirección de avance y el haz. Es la ley entera del foco, en una línea.
+function mcLuzFactorHaz(focus, dot){
+  const NARROW=Math.max(0, Math.min(1, focus))*5;   // 0=isótropo, 5=haz fino
+  return 1 + NARROW*(1-Math.max(0, Math.min(1, dot)));
+}
+// La misma ley vista por el BFS: lo que cuesta UN paso de celda, en SUBNIVELES (BUG-GLOW8f). Se redondea a
+// subniveles y no a niveles enteros; redondear a niveles era lo que hacía brincar la luz del suelo al girar.
+function mcLuzPenaHaz(focus, dot){ return Math.round(MC_LUZ_SUB*mcLuzFactorHaz(focus, dot)); }
+// Siembra de UN emisor en el campo. La celda emisiva SÓLIDA se marca a su nivel como MUESTRA para las caras a
+// ras (sin propagar). Con foco y haz definido (normal neta de caras emisivas expuestas ≠ 0) se siembran solo
+// los vecinos de aire del HEMISFERIO delantero, con su dirección de haz → cono. Sin haz (una antorcha emite
+// igual por todas sus caras) o focus=0 → omnidireccional a pleno.
+// Que el emisor esté DENTRO de un sólido no lo apaga: siembra sus vecinos de aire, igual que una antorcha
+// enterrada en la roca. Es lo que contesta a «*lo que ilumina está en el mango, no está dentro del bloque*».
+function mcLuzSiembra(C, PASA, buckets, lv0, focus, cx, cy, cz, ed, k, col, fx, fy, fz){
+  if(!mcInside(cx,cy,cz)) return;
+  if(fx===undefined){ fx=cx+0.5; fy=cy+0.5; fz=cz+0.5; }   // sin posición fina (mundo): el emisor ocupa su celda entera, o sea su centro
+  const BL=C.BL, BD=C.BD, OR=C.OR, DI=C.DI, MX=C.MX, g=mc.grid;
+  const dentro=(x,y,z)=> x>=C.x0 && y>=C.y0 && z>=C.z0 && x<C.x0+C.W && y<C.y0+C.H && z<C.z0+C.P && mcInside(x,y,z);
+  const li=(x,y,z)=> (x-C.x0)+(y-C.y0)*C.W+(z-C.z0)*C.sxy;
+  let nx=0,ny=0,nz=0,nl=0; if(ed){ nx=ed[k]; ny=ed[k+1]; nz=ed[k+2]; nl=Math.sqrt(nx*nx+ny*ny+nz*nz); }
+  const directional = focus>0 && nl>0.5;
+  if(directional){ const inv=1/nl; nx*=inv; ny*=inv; nz*=inv; }   // el haz, normalizado, antes de que lo use nadie
+  // El color se escala AL ALCANCE del emisor (no a 15): con lv0≤15 —todo lo que pasa por el campo del mundo—
+  // sale exactamente el mismo byte que antes; con el alcance largo de una partícula, el tinte la acompaña.
+  const cr = col ? Math.min(lv0, Math.max(1, Math.round((col[k] / 255) * lv0))) : lv0;
+  const cg = col ? Math.min(lv0, Math.max(1, Math.round((col[k+1] / 255) * lv0))) : Math.round(lv0 * 0.85);
+  const cb = col ? Math.min(lv0, Math.max(1, Math.round((col[k+2] / 255) * lv0))) : Math.round(lv0 * 0.50);
+  const maxC = Math.max(1, cr, cg, cb);
+  // BUG-GLOW8c · nivel×SUB que le toca a la celda (x,y,z) según dónde está el emisor DE VERDAD (fx,fy,fz), no en
+  // qué celda cae. La ley es la del BFS —se pierde 1 nivel por bloque de distancia Manhattan— leída como continua:
+  // pleno dentro del radio 1 (la meseta: la celda del emisor y sus 6 vecinas, que es justo lo que se siembra) y
+  // −1 nivel por bloque más allá. Un emisor QUIETO está en el centro de su celda ⇒ d vale 0 o 1 ⇒ meseta plena ⇒
+  // los mismos bytes de siempre ×SUB. Uno que se mueve reparte: al acercarse a la frontera la vecina de delante ya
+  // vale pleno y la de detrás se apaga poco a poco, en vez de saltar el campo entero de golpe al cruzarla.
+  // BUG-GLOW8f · LA PENALIZACIÓN DEL HAZ TAMBIÉN SE MIDE DESDE LA POSICIÓN REAL, no contando anillos de celda.
+  // Antes el alcance era continuo (usaba `fx,fy,fz` con decimales) pero el foco se cobraba UNA VEZ POR SALTO DE
+  // CELDA contado desde la celda del emisor: al cruzar un borde, una celda diagonal pasaba de pagar el desvío una
+  // vez a pagarlo dos, y con focus=1 eso son CINCO NIVELES de golpe — la mancha del suelo se apagaba entera con
+  // un pasito (fotos 79/80 del dueño). Aquí el coste por bloque lo da el coseno REAL contra el haz, así que todo
+  // se mueve suave. Y sigue siendo LA MISMA LEY que el BFS, no una aproximación: para una celda a un paso más
+  // lejos en la misma dirección, `maxC−d·k` es exactamente `maxC−(d−1)·k` menos el coste `k` de ese paso. Por eso
+  // la semilla y lo que el BFS habría propagado coinciden byte a byte, y el relevo entre los dos no se ve.
+  const valor=(x,y,z)=>{
+    const vx=(x+0.5)-fx, vy=(y+0.5)-fy, vz=(z+0.5)-fz;
+    const pasos=Math.max(0, Math.abs(vx)+Math.abs(vy)+Math.abs(vz) - 1);   // la meseta de radio 1, como siempre
+    let k=1;
+    if(directional){ const e=Math.sqrt(vx*vx+vy*vy+vz*vz);
+      k=mcLuzFactorHaz(focus, e>1e-6 ? (vx*nx+vy*ny+vz*nz)/e : 1); }
+    return Math.round(MC_LUZ_SUB*(maxC - pasos*k));
+  };
+  // `pena` va en SUBNIVELES y es lo que el haz le cobra a este paso: exactamente la misma cuenta que `relax` en
+  // `valor` ya lleva el foco dentro (ver arriba), así que aquí no hay ninguna excepción por ángulo: se siembra
+  // el valor de la ley y punto. Quien decide la forma del cono es la ley, no la siembra.
+  const pinta=(x,y,z, propaga, qx,qy,qz)=>{
+    if(!dentro(x,y,z)) return;
+    const v=valor(x,y,z); if(v<1) return;
+    const idx=li(x,y,z)*4;
+    if(BL[idx+3]>=v) return;
+    // CUÁNTO CAMINO lleva andado la luz al llegar aquí (BUG-GLOW8f). En la semilla es la distancia Manhattan real
+    // al emisor; la difusión le suma un bloque por paso. Junto con MX (el pleno del emisor) y OR (dónde está) es
+    // lo que le permite al BFS EVALUAR la ley de una vez en cada celda, en vez de encadenar restas — ver `relax`.
+    if(DI) DI[li(x,y,z)]=Math.round((Math.abs((x+0.5)-fx)+Math.abs((y+0.5)-fy)+Math.abs((z+0.5)-fz))*MC_LUZ_DRES);
+    if(MX) MX[li(x,y,z)]=Math.min(255, maxC*MC_LUZ_SUB);   // el pleno del emisor, en subniveles
+    const e=v/(maxC*MC_LUZ_SUB);                          // el tinte se atenúa con el nivel, igual que en el relax
+    BL[idx]=Math.max(BL[idx], Math.round(cr*MC_LUZ_SUB*e));
+    BL[idx+1]=Math.max(BL[idx+1], Math.round(cg*MC_LUZ_SUB*e));
+    BL[idx+2]=Math.max(BL[idx+2], Math.round(cb*MC_LUZ_SUB*e));
+    BL[idx+3]=v;
+    const j3=li(x,y,z)*3;
+    if(qx!==undefined){ BD[j3]=qx; BD[j3+1]=qy; BD[j3+2]=qz; }
+    else if(BD){ BD[j3]=0; BD[j3+1]=0; BD[j3+2]=0; }   // sin haz: se BORRA el del anterior dueño de la celda
+    // …y de QUÉ emisor viene, para que la difusión pueda medir el ángulo real celda↔emisor (BUG-GLOW8f).
+    // BUG-GLOW8h · esto se apunta SIEMPRE, con haz o sin él. Antes solo lo llevaban las celdas del cono, así que
+    // las de un emisor omnidireccional se propagaban por la otra rama de `relax` —la de coste constante, que
+    // encadena restas sobre el valor del vecino— y quien escribía una celda le imponía SU ley a todo lo que
+    // colgara de ella. Una celda ganada por el cono decae ×k (hasta 6/bloque) y estrangulaba ahí la luz de la
+    // antorcha, que decae 1/bloque: medido en la foto #94, mover los emisores de la espada un pelín cambiaba
+    // celdas entre 1,25 y 6,5 niveles según qué ley acabara mandando. Con OR/MX en todas, la ley es UNA:
+    // `MX − (camino−1)·k`, con k=1 cuando no hay haz. Es la misma cuenta que ya hacía `valor` al sembrar.
+    if(OR){ OR[j3]=Math.round(fx*MC_LUZ_ORG); OR[j3+1]=Math.round(fy*MC_LUZ_ORG); OR[j3+2]=Math.round(fz*MC_LUZ_ORG); }
+    if(propaga) buckets[v].push(li(x,y,z));
+  };
+  const aire=(x,y,z)=> mcInside(x,y,z) && !!PASA[g[mcIdx(x,y,z)]];
+  if(!aire(cx,cy,cz)) pinta(cx,cy,cz, false);            // muestra en el sólido: no propaga, solo tiñe la cara a ras
+  // BUG-GLOW8c · se siembran DOS anillos, no uno. El primero es la MESETA (radio 1), donde la ley ya vale pleno y
+  // por tanto NO guarda a qué distancia real está el emisor; si el BFS arrancara solo de ahí, cada paso restaría 1
+  // nivel entero desde la meseta y toda la fracción se perdería — el campo se quedaba quieto media celda y luego
+  // saltaba 0,5 al cruzar. Sembrando también el 2º anillo con el valor EXACTO de la ley, el BFS ya arranca de
+  // cifras que sí llevan la fracción y la propaga tal cual: el campo entero se vuelve continuo. Sigue siendo la
+  // misma ley —para un emisor plantado, en el centro de su celda, esos valores son exactamente los que el BFS
+  // habría puesto (nivel−1 a distancia 2), byte por byte— y sigue respetando la materia: al 2º anillo solo se
+  // llega ATRAVESANDO una celda de aire del 1º, que es justo lo que el BFS permite.
+  const D6=[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]];
+  // BUG-GLOW8f · aquí había `if(dot<=0.01) return;`, una puerta DURA por ángulo: al girar la pieza una celda
+  // pasaba de recibir el valor pleno de la ley a no ser semilla en absoluto, y eso son cinco niveles de golpe
+  // pegados al foco. Ya no hace falta ninguna puerta: `valor` cobra el desvío del haz por sí solo y a la
+  // celda de detrás le sale un número pequeño de forma natural. La forma del cono la pone la ley, no una
+  // excepción de la siembra.
+  // BUG-GLOW8h · y por eso la siembra es UNA SOLA, con haz o sin él: el caso con haz sembraba los dos anillos
+  // SOLO POR LOS 6 EJES —el comentario decía «los dos anillos completos» y el código no lo hacía—, así que las
+  // DIAGONALES pegadas al emisor (distancia 1,7 bloques, donde el error angular de una escalera de celdas es
+  // enorme) se las dejaba al BFS. El BFS llegaba a ellas por el vecino que ganase la carrera, que cambia con
+  // un grado de mira: medido en [46,15,47], camino 2,73 con la recta en 1,72 ⇒ un bloque entero de más ⇒ ~1,9
+  // niveles que aparecen y desaparecen. Sembrando el anillo entero, todo lo que está a ≤2 bloques vale
+  // EXACTAMENTE la ley, y el BFS arranca de un frente exacto en vez de improvisarlo.
+  const q=directional ? [Math.round(nx*100), Math.round(ny*100), Math.round(nz*100)] : null;  // haz cuantizado a Int8
+  if(q) pinta(cx,cy,cz, false);                       // con haz, la celda del emisor es MUESTRA: no propaga
+  else if(aire(cx,cy,cz)) pinta(cx,cy,cz, true);
+  for(const a of D6){
+    const x1=cx+a[0], y1=cy+a[1], z1=cz+a[2];
+    if(!aire(x1,y1,z1)) continue;
+    if(q) pinta(x1,y1,z1, true, q[0],q[1],q[2]); else pinta(x1,y1,z1, true);
+    for(const b of D6){
+      const x2=x1+b[0], y2=y1+b[1], z2=z1+b[2];
+      if(x2===cx && y2===cy && z2===cz) continue;
+      if(!aire(x2,y2,z2)) continue;                   // al 2º anillo solo se llega ATRAVESANDO aire del 1º
+      if(q) pinta(x2,y2,z2, true, q[0],q[1],q[2]); else pinta(x2,y2,z2, true);   // pinta() ya descarta si la
+    }                                                                           // celda vale más: repetir sale gratis
+  }
+}
+// BFS por buckets con COSTE VARIABLE (≥1) según alineación del paso con el haz de la celda origen; lleva el haz al
+// vecino. Coste entero ≥1 ⇒ el nivel destino siempre baja ⇒ cae en un bucket inferior (procesado después):
+// relajación válida. La luz se propaga SOLO por donde `PASA` deja pasar, que es la misma tabla que gobierna la del
+// cielo (mcTablaLuz): si aquí se preguntara otra cosa, el mundo tendría dos ideas de qué es opaco.
+function mcLuzDifunde(C, PASA, buckets, lv0, focus){
+  const BL=C.BL, BD=C.BD, OR=C.OR, DI=C.DI, MX=C.MX, g=mc.grid, W=C.W, H=C.H, P=C.P, sxy=C.sxy, x0=C.x0, y0=C.y0, z0=C.z0;
+  const gy=mc.dim.x, gz=mc.dim.x*mc.dim.y;     // pasos en la REJILLA (no en el campo): ver mcCampoLuz
+  const relax=(i,j,gj,dx,dy,dz,jx,jy,jz)=>{
+    if(!PASA[g[gj]]) return; const bx=BD[i*3], by=BD[i*3+1], bz=BD[i*3+2];
+    // El coste se cuenta en SUBNIVELES, no en niveles enteros (BUG-GLOW8f). Antes esto redondeaba la penalización
+    // del haz a un nivel entero: al girar la herramienta el `dot` cambia suave pero `Math.round` daba zancadas de
+    // UN NIVEL COMPLETO POR BLOQUE, así que a 5 bloques del foco la luz del suelo pegaba un salto de 5 niveles de
+    // golpe. Con muchos emisores (espada de luz, 45 haces en direcciones distintas) los saltos se promedian y no
+    // se ve; con pocos (pico de mango azul, 6 voxeles y un solo haz) se ve el bandazo — y la ley tiene que ser la
+    // misma lleves lo que lleves. Redondeando aquí, el haz se afila con la misma resolución que ya tiene el campo.
+    // Coste del paso en SUBNIVELES: sin haz, un nivel por bloque; con haz, lo que diga la ley del foco.
+    //
+    // BUG-GLOW8f · el ángulo se mide entre el EMISOR y LA CELDA DESTINO, no entre el haz y el eje del paso.
+    // Cobrando por el eje, una celda a 3 bloques de frente y 1 de lado —que está a 18° del haz, o sea casi
+    // dentro— pagaba el paso lateral a tarifa perpendicular (×6) y se apagaba del todo: 4,5 niveles de 8 por
+    // debajo de lo que dice la ley. Y como solo hay 6 ejes, el "cono" salía en realidad como una estrella de
+    // seis puntas que llegaba 1,47× más lejos por los ejes que en diagonal y giraba a tirones con la
+    // herramienta (medido: 18,7 de campo perdidos con UN grado). Midiendo contra la celda, el coste es una
+    // función continua de hacia dónde apunte el haz y el BFS converge a la ley continua de `mcLuzSiembra`.
+    // La sombra se conserva porque el coste se sigue ACUMULANDO a lo largo del camino: rodear una esquina
+    // sigue costando pasos de más.
     const idx=i*4, jdx=j*4;
     const curLvl=BL[idx+3];
-    const nl=curLvl-cost; if(nl<1 || BL[jdx+3]>=nl) return;
+    let nl, nd=DI ? DI[i]+MC_LUZ_DRES : 0;
+    if(OR && DI && MX && MX[i]){
+      // BUG-GLOW8f · aquí NO se suma un coste: se EVALÚA LA LEY. Sumar costes obligaba a redondear cada paso a
+      // subniveles enteros, y ese redondeo se multiplica por los pasos del camino: la penalización del haz cambia
+      // 0,076 subniveles por grado, así que cada ~13° cruzaba un entero y el escalón de 1 subnivel aparecía a la
+      // vez en los 6 pasos ⇒ 1,5 niveles de golpe en una celda con UN grado de mira (medido en probe_haz.js, es
+      // el brinco de las fotos 81/82). La ley `maxC−(d−1)·k` es una función CONTINUA de la distancia y del
+      // ángulo, así que se calcula entera y se redondea UNA sola vez, al guardar.
+      // Y se evalúa DE UNA VEZ, contra el pleno del emisor (MX), no restándole al valor del vecino: encadenar
+      // restas sobre un valor ya redondeado arrastra el error de redondeo de celda en celda y lo acumula con la
+      // distancia — medido, 0,75 niveles de desvío a 4 bloques, 1,00 a 5, 1,25 a 6, 1,50 a 7, cuando la ley
+      // apenas se movía 0,1. Así el error es el de UN redondeo (⅛ de nivel) esté la celda donde esté.
+      // La sombra se conserva: `d` es el camino REALMENTE andado por el aire (DI), no la línea recta, así que
+      // rodear una esquina sigue costando los pasos de más.
+      const ox=OR[i*3]/MC_LUZ_ORG, oy=OR[i*3+1]/MC_LUZ_ORG, oz=OR[i*3+2]/MC_LUZ_ORG;
+      const vx=(jx+0.5)-ox, vy=(jy+0.5)-oy, vz=(jz+0.5)-oz, e=Math.sqrt(vx*vx+vy*vy+vz*vz);
+      // BUG-GLOW8h · el paso NO cuesta siempre un bloque: cuesta lo que ALEJA del emisor. La siembra mide el
+      // camino con la distancia recta (Manhattan, fraccionaria) y la difusión le sumaba 1 por paso aunque el
+      // paso fuera de lado; al cruzar el plano del emisor (z 47,5 → 48,5 con el foco en z=48) la recta no se
+      // mueve y el camino sí, así que la misma celda valía 2,75 por un vecino y 3,75 por otro. Cuál de los dos
+      // gana depende del ángulo ⇒ un grado de mira cambiaba el camino un bloque entero y la luz pegaba el
+      // bandazo (3,5 niveles medidos en probe_termino.js, celda [50,16,48], pitch −39°→−38°).
+      // Con el coste = cuánto crece la recta, el aire libre da camino == recta exacta —la misma cuenta que la
+      // siembra, sin escalón entre celda sembrada y celda difundida— y rodear una esquina sigue costando: los
+      // pasos que se alejan para bordear el obstáculo se pagan todos.
+      const ri=Math.abs((jx-dx+0.5)-ox)+Math.abs((jy-dy+0.5)-oy)+Math.abs((jz-dz+0.5)-oz);
+      const rj=Math.abs(vx)+Math.abs(vy)+Math.abs(vz);
+      // …y nunca menos que la recta: un rodeo que primero se ACERCA al emisor no cobra nada al volver, y sin
+      // este suelo la celda acababa con un camino más corto que la línea recta (medido: −0,063 bloques, que
+      // con k≈4,6 son 1,2 subniveles de más, y su signo cambiaba con el ángulo).
+      const dj=Math.max(rj, DI[i]/MC_LUZ_DRES + Math.max(0, rj-ri));
+      nd=Math.round(dj*MC_LUZ_DRES);
+      // Sin haz el factor es 1: un nivel por bloque, la ley de toda la vida. Con haz, lo que diga el foco.
+      const fj=(bx||by||bz) ? mcLuzFactorHaz(focus, e>1e-6 ? (vx*bx+vy*by+vz*bz)/(100*e) : 1) : 1;
+      // El BFS por cubos exige que el destino BAJE de cubo (el suyo ya se procesará después). Acercarse al eje
+      // del haz puede subir el valor de la ley; ese caso lo cubre el camino que sí baja —el que rodea por el
+      // eje— así que topar aquí no le quita luz a nadie, solo mantiene válida la relajación.
+      nl=Math.min(curLvl-1, Math.round(MX[i] - Math.max(0, dj-1)*fj*MC_LUZ_SUB));
+    } else {
+      let cost=MC_LUZ_SUB;
+      if(bx||by||bz) cost=mcLuzPenaHaz(focus, (dx*bx+dy*by+dz*bz)/100);   // campo sin OR/DI: el modo de siempre
+      nl=curLvl-cost;
+    }
+    if(nl<1 || BL[jdx+3]>=nl) return;
     const r=Math.max(0, Math.round(BL[idx]*(nl/curLvl)));
     const gCol=Math.max(0, Math.round(BL[idx+1]*(nl/curLvl)));
     const b=Math.max(0, Math.round(BL[idx+2]*(nl/curLvl)));
@@ -11106,21 +11370,28 @@ function mcComputeBlockLight(){
     BL[jdx+1]=Math.max(BL[jdx+1], gCol);
     BL[jdx+2]=Math.max(BL[jdx+2], b);
     BL[jdx+3]=nl;
-    if(bx||by||bz){ BD[j*3]=bx; BD[j*3+1]=by; BD[j*3+2]=bz; } buckets[nl].push(j);
+    if(DI) DI[j]=nd;                                                           // el camino andado hasta j
+    if(MX) MX[j]=MX[i];                                                        // …del mismo emisor, con su mismo pleno
+    if(bx||by||bz){ BD[j*3]=bx; BD[j*3+1]=by; BD[j*3+2]=bz; }
+    else if(BD){ BD[j*3]=0; BD[j*3+1]=0; BD[j*3+2]=0; }      // sin haz: se BORRA el del anterior dueño de la celda
+    if(OR){ OR[j*3]=OR[i*3]; OR[j*3+1]=OR[i*3+1]; OR[j*3+2]=OR[i*3+2]; }       // el emisor viaja con la luz
+    buckets[nl].push(j);
   };
-  for(let lvl=lv0; lvl>=1; lvl--){
+  for(let lvl=lv0*MC_LUZ_SUB; lvl>=1; lvl--){
     const b=buckets[lvl];
     for(let bi=0;bi<b.length;bi++){
       const i=b[bi]; if(BL[i*4+3]!==lvl) continue;
-      const x=i%NX, y=((i/NX)|0)%NY, z=(i/sxy)|0;
-      if(x>0)    relax(i,i-1,-1,0,0);   if(x<NX-1) relax(i,i+1,1,0,0);
-      if(y>0)    relax(i,i-NX,0,-1,0);  if(y<NY-1) relax(i,i+NX,0,1,0);
-      if(z>0)    relax(i,i-sxy,0,0,-1); if(z<NZ-1) relax(i,i+sxy,0,0,1);
+      const lx=i%W, ly=((i/W)|0)%H, lz=(i/sxy)|0;             // índices DEL CAMPO…
+      const x=lx+x0, y=ly+y0, z=lz+z0;                        // …y los del mundo, para preguntarle a la rejilla
+      const gi=mcIdx(x,y,z);
+      if(lx>0)   relax(i,i-1,   gi-1, -1,0,0, x-1,y,z);   if(lx<W-1) relax(i,i+1,   gi+1,  1,0,0, x+1,y,z);
+      if(ly>0)   relax(i,i-W,   gi-gy, 0,-1,0, x,y-1,z);  if(ly<H-1) relax(i,i+W,   gi+gy, 0,1,0, x,y+1,z);
+      if(lz>0)   relax(i,i-sxy, gi-gz, 0,0,-1, x,y,z-1);  if(lz<P-1) relax(i,i+sxy, gi+gz, 0,0,1, x,y,z+1);
     }
   }
 }
 // Recalcula mc.hasGlow: ¿alguna estructura viva tiene ≥1 celda emisiva? (cache para saltar BFS/mallado de luz de bloque).
-function mcRecomputeHasGlow(){ mc.hasGlow=false; for(const s of mc.structures){ if(s.emitCells&&s.emitCells.length){ mc.hasGlow=true; return; } }
+function mcRecomputeHasGlow(){ mc.hasGlow=false; for(const s of mc.structures){ if(s.emitFinos&&s.emitFinos.length){ mc.hasGlow=true; return; } }
   if(mcGlowCeldas().size) mc.hasGlow=true; }   // …o alguna pieza emisiva puesta en la rejilla (mcGlowCeldas)
 function mcMeshAll(){
   mcComputeLight();
@@ -11135,54 +11406,90 @@ function mcMeshAll(){
   // terreno se quedaría a oscuras junto a una estructura recién encendida.
   mc.blockLightMeshed = mc.blockLight ? mc.blockLight.slice() : null;
 }
-// BUG-GLOW3 · Sincroniza las luces DINÁMICAS de agente una vez por frame (mcTick), DESPUÉS de que la pose haya escrito s.model.
-//  (1) Recolecta la posición VIVA y continua de cada celda emisiva montada en un agente (las MC_DYN_MAX más cercanas al ojo)
-//      y la deja en mc._dynArr para el uniform del shader ⇒ la luz sigue al agente POR-FRAGMENTO: suave, sin retardo, sin BFS
-//      ni remallado. Reemplaza el seguimiento por luz de bloque de BUG-GLOW2 (granular a 1 bloque = trompicones, y caro).
-//  (2) La luz de bloque horneada ya NO incluye estos emisores (mcComputeBlockLight los salta). Solo cuando la MEMBRESÍA del
-//      conjunto «seguido» cambia —un emisor empieza o deja de ir montado (montado↔quieto)— hay que re-sembrar la luz de
-//      bloque UNA vez (quitar/poner su semilla estática en la celda estampada) y re-mallar su halo. Eso ocurre al arrancar/
-//      parar, no en cada paso ⇒ cero hipos por movimiento. La 1ª vez que se ve un emisor solo se fija la línea base.
-// BUG-GLOW6 · ¿hay materia entre estos dos puntos? Recorrido de celdas (Amanatides-Woo) sobre `mc.grid`, con la
-// MISMA tabla que gobierna la difusión de la luz horneada (`mcTablaLuz`, que se pasa ya hecha): una vidriera deja
-// pasar la luz dinámica exactamente igual que deja pasar la del cielo, y una pared la para igual. Si aquí se usara
-// otro predicado, el mundo tendría dos ideas distintas de qué es opaco — que es el bug de siempre en esta casa.
-// Fuera del mundo por arriba o por los lados = aire (no tapa); por debajo del suelo sí tapa, como en mcSolid.
-function mcLuzLibre(ax, ay, az, bx, by, bz, P){
-  const dx=bx-ax, dy=by-ay, dz=bz-az;
-  if(dx*dx+dy*dy+dz*dz < 1e-8) return true;
-  let x=Math.floor(ax), y=Math.floor(ay), z=Math.floor(az);
-  const fx=Math.floor(bx), fy=Math.floor(by), fz=Math.floor(bz);
-  const sx=dx>0?1:(dx<0?-1:0), sy=dy>0?1:(dy<0?-1:0), sz=dz>0?1:(dz<0?-1:0);
-  const dtx=sx?Math.abs(1/dx):Infinity, dty=sy?Math.abs(1/dy):Infinity, dtz=sz?Math.abs(1/dz):Infinity;
-  let tx=sx?((sx>0?x+1-ax:ax-x)*dtx):Infinity,
-      ty=sy?((sy>0?y+1-ay:ay-y)*dty):Infinity,
-      tz=sz?((sz>0?z+1-az:az-z)*dtz):Infinity;
-  const g=mc.grid, dim=mc.dim;
-  // Tope de pasos: las celdas que separan los dos extremos, más margen. Nunca es un bucle abierto aunque la
-  // geometría venga rara, y así una luz lejanísima no cuesta más que una cercana.
-  const tope=Math.min(MC_DYN_PASOS, Math.abs(fx-x)+Math.abs(fy-y)+Math.abs(fz-z)+3);
-  for(let paso=0; paso<=tope; paso++){
-    if(y<0) return false;
-    if(x>=0 && z>=0 && y<dim.y && x<dim.x && z<dim.z){
-      const id=g[mcIdx(x,y,z)];
-      if(id && !P[id]) return false;
-    }
-    if(x===fx && y===fy && z===fz) return true;
-    if(tx<=ty && tx<=tz){ if(tx>1) return true; x+=sx; tx+=dtx; }
-    else if(ty<=tz){ if(ty>1) return true; y+=sy; ty+=dty; }
-    else { if(tz>1) return true; z+=sz; tz+=dtz; }
-  }
-  return true;   // se acabaron los pasos sin dar con nada: se da por visible (no oscurecer por dejar de mirar)
+// BUG-GLOW3 + BUG-GLOW8 · Sincroniza una vez por frame (mcTick, DESPUÉS de que la pose haya escrito s.model) las
+// luces que SE MUEVEN: la pieza que llevas en la mano, la montada en un agente y las partículas de game.voxelesUI.
+//  (1) Recolecta la CELDA viva de cada una y, si alguna ha cambiado de celda (o el mundo ha cambiado), re-siembra
+//      la caja de luz que las lleva (mcDynBake). Hasta 2026-08-20 esto llenaba 8 uniformes con puntos analíticos
+//      —esferas ciegas a la materia, con parches encima para disimularlo—; ahora es LUZ DE BLOQUE de verdad, la
+//      misma siembra y la misma difusión que una antorcha plantada (ver mcCampoLuz, BUG-GLOW8).
+//  (2) La luz de bloque del MUNDO no incluye estos emisores (mcComputeBlockLight los salta). Solo cuando la
+//      MEMBRESÍA del conjunto «seguido» cambia —un emisor empieza o deja de ir montado (montado↔quieto)— hay que
+//      re-sembrar la luz del mundo UNA vez (quitar/poner su semilla estática en la celda estampada) y re-mallar su
+//      halo. Eso ocurre al arrancar/parar, no en cada paso ⇒ cero hipos por movimiento. La 1ª vez que se ve un
+//      emisor solo se fija la línea base.
+// Voxeles emisivos móviles que se siembran, los más cercanos al ojo (tope de cordura).
+// BUG-GLOW8e · 32 era el tope cuando una pieza entera colapsaba a UNA luz por celda. Ahora cada voxel de 1×1×1
+// emisivo trae la suya (orden del dueño), y una sola espada-de-luz aporta 45: con 32 se caían la mitad de las
+// luces de la propia arma y volvía el bandazo. Sembrar de más es barato —el BFS por baldes descarta al instante
+// la semilla que cae donde ya hay más luz (BL[idx+3]>=v), y 45 voxeles pegados comparten casi todo el frente—;
+// lo caro es el VOLUMEN de la caja, y ése lo acota MC_DYN_CELDAS aparte.
+const MC_DYN_SEMILLAS=160;
+// Presupuesto de la caja en CELDAS: lo único que impide que un cielo de estrellas con alcance 40 (REQ-GLOW5)
+// pida sembrar el mundo entero cada vez que se mueven. Al pasarse se RECORTA LA CAJA hacia el ojo (mcDynBake):
+// se sacrifica la luz lejana, que es la que no se ve, pero no se apaga ninguna luz — apagarlas daba saltos
+// (BUG-GLOW8d). game.luzDinCeldas lo mueve; solo se paga cuando alguna luz cambia de sitio, no cada frame.
+// 450 k deja pasar entera la caja de un mundo de 96×48×96 sin recortar: el mundo por defecto (~300 k) caía JUSTO
+// en el filo del tope viejo, y ahí cualquier temblor de un bloque se notaba.
+const MC_DYN_CELDAS=450000;
+function mcDynApaga(){ mc.dynLight=null; mc._dynSig=null; mc._dynTexDirty=true; }
+// BUG-GLOW8g · ¿ESTE EMISOR PUEDE SEMBRAR ALGO? Es EXACTAMENTE la primera línea de mcLuzSiembra (`mcInside` de su
+// celda): un emisor cuya celda cae fuera del mundo se descarta allí y no aporta ni un nivel. Está aquí para que el
+// REPARTO pregunte lo mismo que la siembra, porque el tope de MC_DYN_SEMILLAS se decide por distancia al ojo y no
+// miraba esto: en /map/bugfinder2 hay 237 luces de game.voxelesUI (estrellas) y 232 están POR ENCIMA del mundo
+// (y hasta 50,1 en un mundo de 40 de alto), así que 154 de las 160 plazas se las llevaban emisores que no alumbran
+// nada. Consecuencia: cualquier luz REAL algo alejada se quedaba sin plaza y se apagaba ENTERA al cruzar el corte
+// mientras el jugador anda — un parchazo que la ley no puede suavizar, y de los que el dueño prohibió.
+// Preguntarlo aquí no cambia lo que se ve (esos emisores ya no pintaban nada), solo deja de malgastar el cupo.
+function mcLuzPuedeSembrar(wx, wy, wz){ return mcInside(Math.floor(wx), Math.floor(wy), Math.floor(wz)); }
+// BUG-GLOW8b · RADIOGRAFÍA de la luz en este instante, para que una captura del dueño traiga los datos y no haya
+// que adivinar. Va a la ficha .json de cada foto (mcFichaFoto) y se puede pedir a mano con game.luz.diag().
+// Lo que importa mirar cuando «la luz salta»:
+//   · semillas.usadas vs semillas.candidatas → si el tope de 32 está SATURADO, la espada compite con las estrellas
+//     y entra/sale de la siembra al moverte, que es un salto que el desplazamiento sub-celda no puede tapar;
+//   · reparto → cuántas semillas son de la mano, de estructuras o de la capa voxelesUI;
+//   · off → el desplazamiento sub-celda (±0.5). Si |off| se pega a 0.5 es que el recorte está actuando;
+//   · nivelMano/nivelApunta → el nivel de luz donde está la herramienta y donde apunta la mira.
+function mcLuzDiag(){
+  const D=mc.dynLight, sem=mc._dynSem||[];
+  const usadas=D?D.luces:0;
+  let mano=0, estruct=0, voxui=0;
+  for(let i=0;i<usadas && i<sem.length;i++){ const o=sem[i].org;
+    if(o==null) voxui++; else if(o===mc._heldToolStruct||o.mano||o.held) mano++; else estruct++; }
+  const t=mc._heldToolStruct&&mc._heldToolStruct.model;
+  const r={
+    modo:{ dinamica:mc.luzDinamica!==false, suave:mc.luzSuave!==false, glowLevel:mc.glowLevel,
+           glowFocus:mc.glowFocus, glowGain:mc.glowGain, interiorDark:mc.interiorDark,
+           luzGlobal:(mc.luzGlobal!=null?mc.luzGlobal:1) },
+    semillas:{ candidatas:(mc._dynCand?mc._dynCand.length/11:0), usadas, tope:MC_DYN_SEMILLAS,
+               saturado:(mc._dynCand?mc._dynCand.length/11:0)>=MC_DYN_SEMILLAS,
+               reparto:{ mano, estructuras:estruct, voxelesUI:voxui } },
+    caja: D?{ org:[D.x0,D.y0,D.z0], tam:[D.W,D.H,D.P], celdas:D.vol, tope:MC_DYN_CELDAS,
+              recortada:D.vol>=MC_DYN_CELDAS }:null,
+    sub: MC_LUZ_SUB,                     // subniveles por nivel: el escalón más fino que el campo sabe representar
+    centro: (D&&D.pos)?D.pos.map(v=>+v.toFixed(3)):null,
+    // las 6 semillas más cercanas al ojo, con su distancia: si el ORDEN o el reparto cambia al girar, se ve aquí
+    cerca: sem.slice(0,6).map((s,i)=>({ usada:i<usadas, de:(s.org==null?'voxelUI':(s.org===mc._heldToolStruct?'mano':'estruct')),
+             cel:[s.x,s.y,s.z], frac:[+(s.fx-s.x).toFixed(2),+(s.fy-s.y).toFixed(2),+(s.fz-s.z).toFixed(2)],
+             nivel:s.nivel, d:+Math.sqrt(s.d2||0).toFixed(2) })),
+  };
+  if(t) r.mano={ pos:[+t[12].toFixed(2), +t[13].toFixed(2), +t[14].toFixed(2)] };
+  try{
+    const p=mc.pos;
+    r.nivelOjo=mcDynNivel(Math.floor(p[0]), Math.floor(p[1]), Math.floor(p[2]));
+  }catch(e){}
+  return r;
 }
 function mcDynSync(){
-  if(!mc.grid){ mc._dynN=0; return; }
+  if(!mc.grid){ mcDynApaga(); return; }
   const eye=mc.pos, cand=mc._dynCand||(mc._dynCand=[]); cand.length=0;
+  // DEPURACIÓN (mcLuzDiag → ficha de la foto): de dónde sale cada candidato, en paralelo al array plano para no
+  // tocar el stride caliente. 0 = estructura seguida, 1 = LA HERRAMIENTA EN MANO, 2 = capa game.voxelesUI.
+  const orig=mc._dynOrig||(mc._dynOrig=[]); orig.length=0;
   const lvl=Math.max(1, Math.min(MC_MAXLIGHT, mc.glowLevel!=null?mc.glowLevel:MC_MAXLIGHT));
   let cambio=false, bx0=1e9, bz0=1e9, bx1=-1e9, bz1=-1e9;
-  for(const s of mc.structures){ const ec=s.emitCells; if(!ec||!ec.length) continue;
+  for(const s of mc.structures){ const ec=s.emitFinos; if(!ec||!ec.length) continue;
     const seg=mcEmisorSeguido(s);
-    if(seg){ const m=s.model, ed=s.emitDir;   // posición VIVA de cada celda emisiva = centro de la celda estampada por s.model (col-major, como el vértice)
+    if(seg){ const m=s.model, ed=s.emitDir, col=s.emitCol;   // posición VIVA de cada celda emisiva = centro de la celda estampada por s.model (col-major, como el vértice)
       // BUG-GLOW4 · el ancla que hay que meter en la matriz es con la que se HORNEÓ LA MALLA, que no siempre es `s.ox`.
       // Una estructura estampada hornea sus vértices ya en su celda ⇒ los dos coinciden. La HERRAMIENTA EN MANO no: su
       // malla se hornea en 0,0,0 (mcSyncHeldToolStruct) y luego se le pisa `s.ox` con `mc.pos` para el culling, así que
@@ -11190,14 +11497,20 @@ function mcDynSync(){
       // difiere; quien no lo ponga se comporta exactamente igual que antes.
       const gx=s.mox!=null?s.mox:s.ox, gy=s.moy!=null?s.moy:s.oy, gz=s.moz!=null?s.moz:s.oz;
       for(let k=0;k<ec.length;k+=3){
-        const ax=gx+ec[k]+0.5, ay=gy+ec[k+1]+0.5, az=gz+ec[k+2]+0.5;
+        // BUG-GLOW8e · `ec` son voxeles FINOS locales (MC_TILE por bloque), no celdas: cada emisivo de 1×1×1 lleva SU
+        // luz, sin agrupar. La malla también se hornea en esta escala, así que la matriz `m` recibe lo mismo que el vértice.
+        const ax=gx+(ec[k]+0.5)/MC_TILE, ay=gy+(ec[k+1]+0.5)/MC_TILE, az=gz+(ec[k+2]+0.5)/MC_TILE;
         const wx=m[0]*ax+m[4]*ay+m[8]*az+m[12], wy=m[1]*ax+m[5]*ay+m[9]*az+m[13], wz=m[2]*ax+m[6]*ay+m[10]*az+m[14];
-        // haz emisivo (normal neta de la cara del voxel) rotado por la pose ⇒ la dirección gira con la pieza; el shader lo normaliza
-        let bx=0, by=0, bz=0;
+        // haz emisivo (normal neta de la cara del voxel) rotado por la pose ⇒ la dirección gira con la pieza
+        let hx=0, hy=0, hz=0;
         if(ed){ const ex=ed[k], ey=ed[k+1], ez=ed[k+2];
-          bx=m[0]*ex+m[4]*ey+m[8]*ez; by=m[1]*ex+m[5]*ey+m[9]*ez; bz=m[2]*ex+m[6]*ey+m[10]*ez; }
+          hx=m[0]*ex+m[4]*ey+m[8]*ez; hy=m[1]*ex+m[5]*ey+m[9]*ez; hz=m[2]*ex+m[6]*ey+m[10]*ez; }
+        if(!mcLuzPuedeSembrar(wx, wy, wz)) continue;
         const dx=wx-eye[0], dy=wy-eye[1], dz=wz-eye[2];
-        cand.push(dx*dx+dy*dy+dz*dz, wx, wy, wz, bx, by, bz, lvl);   // plano: [d²,x,y,z, hazx,hazy,hazz, nivel, …]
+        // plano: [d², x,y,z, hazx,hazy,hazz, nivel, r,g,b] · color −1 = sin color propio (blanco cálido, como el BFS)
+        cand.push(dx*dx+dy*dy+dz*dz, wx, wy, wz, hx, hy, hz, lvl,
+                  col?col[k]:-1, col?col[k+1]:-1, col?col[k+2]:-1);
+        orig.push(s);            // depuración: la estructura de la que sale (null = capa voxelesUI)
       }
     }
     // transición de membresía (montado↔quieto): al cambiar, acumula el halo ESTAMPADO para re-sembrar/re-mallar.
@@ -11209,60 +11522,167 @@ function mcDynSync(){
     if(s._seg===undefined) s._seg=false;
     if(s._seg!==seg){ s._seg=seg;
       let e0=1e9, g0=1e9, e1=-1e9, g1=-1e9;
-      for(let k=0;k<ec.length;k+=3){ const cx=s.ox+ec[k], cz=s.oz+ec[k+2];
+      for(let k=0;k<ec.length;k+=3){ const cx=s.ox+((ec[k]/MC_TILE)|0), cz=s.oz+((ec[k+2]/MC_TILE)|0);
         if(cx<e0)e0=cx; if(cz<g0)g0=cz; if(cx>e1)e1=cx; if(cz>g1)g1=cz; }
       if(e0<bx0)bx0=e0; if(g0<bz0)bz0=g0; if(e1>bx1)bx1=e1; if(g1>bz1)bz1=g1; cambio=true;
     }
   }
-  // REQ-GLOW5 · la capa game.voxelesUI compite por las mismas plazas, con las mismas reglas: son cuerpos del mundo
-  // que emiten, y aquí ya no importa si vienen de una estructura o de una partícula. Sin haz (0,0,0 ⇒ isótropas:
-  // una llama alumbra a todos lados) y con su propio alcance por grupo.
+  // REQ-GLOW5 · la capa game.voxelesUI compite en igualdad: son cuerpos del mundo que emiten, y aquí ya no importa
+  // si vienen de una estructura o de una partícula. Sin haz (isótropas: una llama alumbra a todos lados) y con su
+  // propio alcance por grupo, que NO topa en 15 (una estrella a 34 bloques tiene que llegar al suelo).
   const vl=mcVoxUILuces();
   for(let k=0;k<vl.length;k+=4){
+    if(!mcLuzPuedeSembrar(vl[k], vl[k+1], vl[k+2])) continue;
     const dx=vl[k]-eye[0], dy=vl[k+1]-eye[1], dz=vl[k+2]-eye[2];
-    cand.push(dx*dx+dy*dy+dz*dz, vl[k], vl[k+1], vl[k+2], 0, 0, 0, vl[k+3]);
+    cand.push(dx*dx+dy*dy+dz*dz, vl[k], vl[k+1], vl[k+2], 0, 0, 0, vl[k+3], -1, -1, -1);
+    orig.push(null);         // depuración: null = capa game.voxelesUI (estrellas, partículas…)
   }
-  // las MC_DYN_MAX celdas más cercanas al ojo → uniforms (índices ordenados por d², sin reordenar el array plano)
-  const arr=mc._dynArr||(mc._dynArr=new Float32Array(MC_DYN_MAX*4)), dir=mc._dynDir||(mc._dynDir=new Float32Array(MC_DYN_MAX*4)), nC=cand.length/8;
-  const foco=Math.max(0, Math.min(1, mc.glowFocus!=null?mc.glowFocus:0));
-  const idx=mc._dynIdx||(mc._dynIdx=[]); idx.length=nC; for(let i=0;i<nC;i++) idx[i]=i;
-  idx.sort((a,b)=>cand[a*8]-cand[b*8]);
-  const n=Math.min(nC, MC_DYN_MAX);
-  // BUG-GLOW6 · mitad de CPU: una luz que no VE al ojo no se sube. Es lo que apaga las estrellas dentro de un cuarto
-  // cerrado y la espada metida dentro de un bloque («*se ilumina fuera? no es realista*»), y no se puede hacer en el
-  // shader: sería un raycast por fragmento y por luz. Aquí sale a UNA línea por luz y por frame (≤MC_DYN_MAX), o
-  // sea nada, a cambio de ser una aproximación: la luz se juzga por lo que ve el OJO, no cada fragmento. Lo que se
-  // le escapa —la cara de enfrente de una pared— lo tapa la otra mitad, la del shader.
-  // La visibilidad se DESVANECE en vez de conmutar (MC_DYN_FUNDE): cruzar una puerta con una antorcha fuera
-  // encendería y apagaría de golpe en un solo frame, y eso se ve peor que el fallo. El desvanecido va por posición
-  // redondeada porque las plazas se reparten por cercanía y su índice no identifica a nadie de un frame al otro.
-  const ocl = mc.luzOcluye && mc.grid;
-  if(ocl){
-    const P=mcTablaLuz(), ex=eye[0], ey=eye[1]+MC_EYE*mc.scale, ez=eye[2];
-    const vis=mc._dynVis||(mc._dynVis=new Map());
-    const ahora=performance.now(), ant=mc._dynVisT||ahora; mc._dynVisT=ahora;
-    const k=Math.min(1, (ahora-ant)/1000/Math.max(0.001, MC_DYN_FUNDE));
-    for(let i=0;i<n;i++){ const c=idx[i]*8;
-      const lx=cand[c+1], ly=cand[c+2], lz=cand[c+3];
-      const clave=Math.round(lx*2)+','+Math.round(ly*2)+','+Math.round(lz*2);
-      const meta=mcLuzLibre(lx,ly,lz, ex,ey,ez, P) ? 1 : 0;
-      let v=vis.get(clave); if(v===undefined) v=meta;          // recién aparecida: nace con su valor, sin fundido
-      v += (meta-v)*k; if(Math.abs(meta-v)<0.02) v=meta;
-      vis.set(clave, v); cand[c+7] *= v;
-    }
-    if(vis.size > MC_DYN_MAX*8) vis.clear();                   // no crece: se tira la memoria del fundido y ya
-  } else if(mc._dynVis) mc._dynVis.clear();
-  for(let i=0;i<n;i++){ const c=idx[i]*8;
-    arr[i*4]=cand[c+1]; arr[i*4+1]=cand[c+2]; arr[i*4+2]=cand[c+3]; arr[i*4+3]=cand[c+7];
-    dir[i*4]=cand[c+4]; dir[i*4+1]=cand[c+5]; dir[i*4+2]=cand[c+6]; dir[i*4+3]=foco; }
-  mc._dynN=n;
-  if(cambio){   // solo al arrancar/parar de seguir: re-siembra la luz de bloque (sin las montadas) y re-malla su halo estampado
+  // Las MC_DYN_SEMILLAS celdas más cercanas al ojo (índices ordenados por d², sin reordenar el array plano).
+  const nC=cand.length/11, idx=mc._dynIdx||(mc._dynIdx=[]);
+  idx.length=nC; for(let i=0;i<nC;i++) idx[i]=i;
+  idx.sort((a,b)=>cand[a*11]-cand[b*11]);
+  const sem=mc._dynSem||(mc._dynSem=[]); sem.length=0;
+  const n=Math.min(nC, MC_DYN_SEMILLAS);
+  for(let i=0;i<n;i++){ const c=idx[i]*11, nivel=Math.max(1, Math.round(cand[c+7]));
+    if(nivel<1) continue;
+    // wx/wy/wz (la posición REAL, con decimales) se conserva junto a la celda: el BFS solo entiende de celdas,
+    // pero el muestreo del shader sí puede seguir la posición fina (mcDynBake → off, BUG-GLOW8b).
+    sem.push({ x:Math.floor(cand[c+1]), y:Math.floor(cand[c+2]), z:Math.floor(cand[c+3]),
+               fx:cand[c+1], fy:cand[c+2], fz:cand[c+3],
+               nivel, haz:[cand[c+4], cand[c+5], cand[c+6]],
+               col: cand[c+8]>=0 ? [cand[c+8], cand[c+9], cand[c+10]] : null,
+               org: orig[idx[i]], d2: cand[c] });     // depuración (mcLuzDiag), no lo usa la siembra
+  }
+  mcDynBake(sem);
+  if(cambio){   // solo al arrancar/parar de seguir: re-siembra la luz del mundo (sin las montadas) y re-malla su halo estampado
     mc._blEmiSig=null; mcComputeBlockLight();
     const R=MC_MAXLIGHT+1, dim=mc.dim, ncx=Math.ceil(dim.x/MC_CHUNK), ncz=Math.ceil(dim.z/MC_CHUNK);
     const cx0=Math.max(0,Math.floor((bx0-R)/MC_CHUNK)), cx1=Math.min(ncx-1,Math.floor((bx1+R)/MC_CHUNK));
     const cz0=Math.max(0,Math.floor((bz0-R)/MC_CHUNK)), cz1=Math.min(ncz-1,Math.floor((bz1+R)/MC_CHUNK));
     for(let cz=cz0;cz<=cz1;cz++) for(let cx=cx0;cx<=cx1;cx++) mcMeshChunk(cx,cz);
   }
+}
+// BUG-GLOW8 · Siembra las luces que se mueven en su propia CAJA, con la ley de mcComputeBlockLight y ni una regla
+// aparte. Es la mitad cara del ticket y por eso está gobernada por una FIRMA: mientras ninguna luz cambie de celda
+// (y el mundo no cambie), esto no hace absolutamente nada — andar con la herramienta en la mano re-siembra 2-4
+// veces por segundo, no 60. Medido en /map/bugfinder (96×40×96): caja de 31³ = 1,09 ms + 0,22 ms de subir la
+// textura; el BFS del mundo entero, para comparar, son 7,8 ms.
+function mcDynBake(sem){
+  if(!sem.length || mc.luzDinamica===false || !mc.grid){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
+  const dim=mc.dim, tope=Math.max(1000, mc.luzDinCeldas!=null?mc.luzDinCeldas|0:MC_DYN_CELDAS);
+  // Caja = unión de (celda ± alcance) de las semillas que quepan en el presupuesto, recortada al mundo. Se recorren
+  // en orden de cercanía al ojo, así que lo que se cae por el tope es siempre lo más lejano.
+  // BUG-GLOW8d · el presupuesto NO decide quién alumbra. Antes esto era un `break`: se iban metiendo semillas por
+  // cercanía al ojo y a la primera que no cabía se cortaba la lista. Con la caja rozando el tope, mover la mano UN
+  // bloque cambiaba el alto de la unión (32→33) y el corte caía 13 semillas antes ⇒ 13 luces apagadas de golpe con
+  // 7° de giro (fotos 72/73 del dueño: `usadas` 32 vs 19, misma posición). Ahora entran TODAS las semillas —el
+  // tope de cuántas hay ya lo puso mcDynSync, por distancia al ojo, que no depende de hacia dónde se mira— y si la
+  // unión no cabe se RECORTA LA CAJA hacia el ojo. Recortar quita luz lejos, que es donde no se ve; tirar semillas
+  // la quitaba entera, y encima a saltos.
+  let x0=1e9, y0=1e9, z0=1e9, x1=-1e9, y1=-1e9, z1=-1e9, usadas=0, lv0=1;
+  for(const s of sem){
+    x0=Math.min(x0, Math.max(0, s.x-s.nivel)); x1=Math.max(x1, Math.min(dim.x-1, s.x+s.nivel));
+    y0=Math.min(y0, Math.max(0, s.y-s.nivel)); y1=Math.max(y1, Math.min(dim.y-1, s.y+s.nivel));
+    z0=Math.min(z0, Math.max(0, s.z-s.nivel)); z1=Math.max(z1, Math.min(dim.z-1, s.z+s.nivel));
+    usadas++; if(s.nivel>lv0) lv0=s.nivel;
+  }
+  if(!usadas){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
+  if((x1-x0+1)*(y1-y0+1)*(z1-z0+1) > tope){
+    // Recorte centrado en el OJO (su posición, no su rumbo ⇒ girar en el sitio no mueve la caja) y proporcional en
+    // los tres ejes, para no deformar el alcance. El bucle de guardia baja el eje más largo de uno en uno.
+    const ex=Math.round(mc.pos[0]), ey=Math.round(mc.pos[1]+MC_EYE*mc.scale), ez=Math.round(mc.pos[2]);
+    const f=Math.cbrt(tope/((x1-x0+1)*(y1-y0+1)*(z1-z0+1)));
+    const eje=(lo,hi,c)=>{ const h=Math.max(1, Math.floor((hi-lo+1)*f/2)); return [Math.max(lo, c-h), Math.min(hi, c+h)]; };
+    [x0,x1]=eje(x0,x1,ex); [y0,y1]=eje(y0,y1,ey); [z0,z1]=eje(z0,z1,ez);
+    for(let g=0; g<64 && (x1-x0+1)*(y1-y0+1)*(z1-z0+1)>tope; g++){
+      const W=x1-x0+1, H=y1-y0+1, P=z1-z0+1;
+      if(W>=H && W>=P){ if(x1-ex > ex-x0) x1--; else x0++; }
+      else if(H>=P){ if(y1-ey > ey-y0) y1--; else y0++; }
+      else { if(z1-ez > ez-z0) z1--; else z0++; }
+    }
+  }
+  // FIRMA: celda, alcance, haz cuantizado y color de cada semilla usada + topología del mundo + foco global. Si no
+  // ha cambiado nada de eso, el campo de la vez pasada sigue siendo el bueno, byte por byte.
+  const focus=Math.max(0, Math.min(1, mc.glowFocus!=null?mc.glowFocus:0));
+  let sig=(mc.gridGen|0)+'|'+focus+'|'+x0+','+y0+','+z0+','+x1+','+y1+','+z1;
+  // La POSICIÓN FINA y el HAZ entran en la firma cuantizados: eso es lo que acota el gasto (se re-siembra cada
+  // tanto de bloque recorrido, no cada frame). Pero el paso de la cuantización NO es libre — es exactamente
+  // cuánto se le deja al campo quedarse QUIETO antes de saltar de golpe, así que hay que elegirlo para que ese
+  // salto no llegue a un subnivel.
+  //   BUG-GLOW8f · antes eran 1/SUB de bloque y 1/8 de coseno, heredados de cuando el alcance caía 1 nivel por
+  //   bloque. Con foco, un bloque puede costar hasta 1+5 niveles, así que 1/SUB de bloque son 1,5 niveles de
+  //   congelación y 1/8 de coseno hasta 5: el campo se quedaba clavado y luego pegaba el brinco. Con paso p, el
+  //   error del nivel es ~p·(1+5·focus) en posición y ~p·alcance·5·focus en el haz; pedir que ambos queden por
+  //   debajo de 1/SUB da estas dos cifras. Cuando nada se mueve, la firma no cambia y esto sigue sin costar nada.
+  const qPos=MC_LUZ_SUB*8, qHaz=256;
+  for(let i=0;i<usadas;i++){ const s=sem[i];
+    sig+='|'+(s.fx!=null ? Math.round(s.fx*qPos)+','+Math.round(s.fy*qPos)+','+Math.round(s.fz*qPos)
+                         : s.x+','+s.y+','+s.z)+','+s.nivel
+       +(s.haz?','+Math.round(s.haz[0]*qHaz)+','+Math.round(s.haz[1]*qHaz)+','+Math.round(s.haz[2]*qHaz):',*')   // haz null = omnidireccional
+       +(s.col?','+s.col[0]+','+s.col[1]+','+s.col[2]:'');
+  }
+  // BUG-GLOW8c · aquí vivía un DESPLAZAMIENTO GLOBAL del muestreo (BUG-GLOW8b): el resto sub-celda medio de los
+  // emisores, aplicado a la caja entera para disimular el salto al cruzar de celda. Era falso en cuanto había más
+  // de una pieza. Lo cazaron las fotos 68/69 del dueño (mismo sitio, 4° de giro): 27 semillas sembradas, 26 eran
+  // estrellas del decorado a 35 bloques y 1 la espada de la mano, así que el resto real de la espada entraba
+  // diluido 1/27 — al cruzar la mano el plano z=57 su semilla subía una celda entera y el desplazamiento se movía
+  // 0,03. Una media no puede describir a la vez la espada de tu mano y 26 estrellas lejanas. Ahora cada emisor
+  // lleva su fracción a la SIEMBRA (mcLuzSiembra, subniveles), que es donde de verdad se decide la luz: sin
+  // promedios, sin desplazar nada, y con la misma ley para el que se mueve y el que está plantado.
+  let cen=null;
+  if(mc.luzSuave!==false){
+    // Solo las `usadas`: las que el presupuesto dejó fuera NO están sembradas en el campo.
+    let n=0, sfx=0, sfy=0, sfz=0;
+    for(let i=0;i<usadas;i++){ const s=sem[i]; if(s.fx==null) continue; n++; sfx+=s.fx; sfy+=s.fy; sfz+=s.fz; }
+    if(n) cen=[sfx/n, sfy/n, sfz/n];      // solo diagnóstico (mcLuzDiag): dónde están DE VERDAD los emisores sembrados
+  }
+  mc._dynSem=sem;                  // depuración (mcLuzDiag): las semillas tal cual entraron, en orden
+  if(sig===mc._dynSig && mc.dynLight){ mc.dynLight.pos=cen; return; }
+  mc._dynSig=sig;
+  const W=x1-x0+1, H=y1-y0+1, P=z1-z0+1, vol=W*H*P;
+  const BL=(mc._dynBL&&mc._dynBL.length>=vol*4)?mc._dynBL:(mc._dynBL=new Uint8Array(vol*4));
+  const BD=(mc._dynBD&&mc._dynBD.length>=vol*3)?mc._dynBD:(mc._dynBD=new Int8Array(vol*3));
+  BL.fill(0, 0, vol*4); BD.fill(0, 0, vol*3);
+  // Igual que en el campo del mundo: OR solo con foco (ver mcCampoLuz). Sin haz no se reserva ni se recorre.
+  let OR=null, DI=null, MX=null;
+  if(focus>0){ OR=(mc._dynOR&&mc._dynOR.length>=vol*3)?mc._dynOR:(mc._dynOR=new Int16Array(vol*3)); OR.fill(0, 0, vol*3);
+    DI=(mc._dynDI&&mc._dynDI.length>=vol)?mc._dynDI:(mc._dynDI=new Uint16Array(vol)); DI.fill(0, 0, vol);
+    MX=(mc._dynMX&&mc._dynMX.length>=vol)?mc._dynMX:(mc._dynMX=new Uint8Array(vol)); MX.fill(0, 0, vol); }
+  else { mc._dynOR=null; mc._dynDI=null; mc._dynMX=null; }
+  const C=mcCampoLuz(BL, BD, x0, y0, z0, W, H, P, OR, DI, MX), PASA=mcTablaLuz();
+  const fino=mc.luzSuave!==false;
+  // BUG-GLOW8h · DOS PASADAS, y en este orden: primero las luces SIN haz, después las de cono. Todas comparten la
+  // misma ley, pero cada celda solo puede guardar UN emisor, y quien la gana le impone su decaimiento a todo lo
+  // que cuelgue de ella: una celda ganada por un cono decae ×k (hasta 6 por bloque) y estrangulaba ahí la luz de
+  // una antorcha, que decae 1 por bloque. Resolviendo las omnidireccionales ENTERAS primero, el cono ya no puede
+  // robarles camino, y no es un apaño de orden: si un cono pierde en una celda tampoco puede ganar más allá
+  // —su k nunca baja de 1—, así que esta pasada da EXACTAMENTE el máximo de las dos leyes. Medido en la foto #96:
+  // celdas que brincaban 1,25 niveles al mover el emisor 1/32 de bloque, por cambiar de dueño y no de valor.
+  for(let pasada=0; pasada<2; pasada++){
+    const buckets=mcLuzBuckets(lv0);
+    let sembrada=false;
+    for(let i=0;i<usadas;i++){ const s=sem[i];
+      const conHaz=!!(s.haz && (s.haz[0]||s.haz[1]||s.haz[2]));
+      if(conHaz!==(pasada===1)) continue;
+      sembrada=true;
+      // La posición FINA del emisor (s.fx/fy/fz) va a la siembra: es lo único que distingue a una luz que se mueve
+      // de una plantada, y por eso no hay dos leyes. Sin ella (game.luzSuave=false) se siembra en el centro de la
+      // celda, que es exactamente el comportamiento del mundo.
+      mcLuzSiembra(C, PASA, buckets, s.nivel, focus, s.x, s.y, s.z, s.haz, 0, s.col,
+                   (fino&&s.fx!=null)?s.fx:undefined, s.fy, s.fz);
+    }
+    if(sembrada) mcLuzDifunde(C, PASA, buckets, lv0, focus);
+  }
+  mc.dynLight={ BL, x0, y0, z0, W, H, P, vol, luces:usadas, pos:cen };
+  mc._dynTexDirty=true;
+}
+// Nivel de luz móvil en una celda (0..alcance). Lo que el shader lee por fragmento de la textura 3D, pero desde JS:
+// es lo que permite probar la luz de la mano con números en vez de mirando píxeles (tests/test_glow8_*.js).
+function mcDynNivel(x, y, z){
+  const D=mc.dynLight; if(!D) return 0;
+  const lx=x-D.x0, ly=y-D.y0, lz=z-D.z0;
+  if(lx<0||ly<0||lz<0||lx>=D.W||ly>=D.H||lz>=D.P) return 0;
+  return D.BL[(lx+ly*D.W+lz*D.W*D.H)*4+3] / MC_LUZ_SUB;   // el campo va en subniveles; de cara afuera se habla en NIVELES (fraccionarios)
 }
 // t8 · redimensiona el mundo EN VIVO (game.resizeWorld). Reasigna la rejilla densa conservando los bloques
 // anclados en el origen (0,0,0), libera las VBO de todos los chunks, recoloca spawn/jugador dentro de los nuevos
@@ -11326,9 +11746,14 @@ function mcCajaDeEdiciones(edits){
   }
   return [x0,z0,x1,z1];
 }
+// Remalla de una tacada la caja que abarca una ráfaga de ediciones. Es la puerta de las operaciones EN
+// BLOQUE (cortar, pegar, rotar, rellenar, deshacer), así que aquí —y no en cada una de ellas— se apunta
+// si la ráfaga cambió la TOPOLOGÍA: las que escriben `mc.grid` a pelo no lo hacen por su cuenta y sin eso
+// no se re-ilumina (ver mcTopologiaDeEdiciones). Contarlo dos veces cuando el llamante ya pasó por
+// mcSetBlock no rompe nada: a mcRemeshAround solo le importa que el número haya cambiado.
 function mcRemeshEdiciones(edits){
   const c=mcCajaDeEdiciones(edits);
-  if(c) mcRemeshAround(c[0],c[1],c[2],c[3]);
+  if(c){ mcTopologiaDeEdiciones(edits); mcRemeshAround(c[0],c[1],c[2],c[3]); }
   return !!c;
 }
 // Re-mesha el chunk que contiene (x,z) y, si la celda toca borde, el vecino (para que las caras del borde cuadren).
@@ -12023,6 +12448,9 @@ function mcRender(){
     if(mc.hasGlow && mc._blkTexDirty) mcUploadBlkTex();
     if(!mc.blkTex) mcBlkTexDummy();
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_3D, mc.blkTex); gl.activeTexture(gl.TEXTURE0);
+    // BUG-GLOW8 · y la caja de luz de lo que se mueve, en la unidad 4 (misma regla: siempre atada, aunque esté a cero)
+    if(mc._dynTexDirty || !mc.dynTex) mcUploadDynTex();
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_3D, mc.dynTex); gl.activeTexture(gl.TEXTURE0);
   }
   const view=mcViewMatrix(), pj=mcProjMatrix(), pv=mat4.mul(pj.m,view);
   // Terreno: atlas opaco → shader sin discard (early-z); con huecos → alpha-test. Las estructuras texturadas
@@ -12425,7 +12853,7 @@ function mcGuardarTool(v){
     // Aquí se va TAMBIÉN la caja confirmada de Seleccionar, que un cambio de herramienta sí conserva (para
     // el Ctrl+C). Guardarse la herramienta no es cambiar de herramienta: es quedarse sin ninguna, y el dueño
     // la seguía viendo dibujada. Sin `mcSelectClear()` para no soltar su aviso en cada guardado.
-    mc.selA = null; mc.selBox = null;
+    mc.selA = null; mc.selSuma = false; mc.selBox = null; mc.selPivote = null;   // selBox=null se lleva las N cajas (REQ-SEL1)
     mcBoxClear();
     if(mc.pasteActive) mcPasteCancel();
     if(mc.notePlacing) mcCancelNotePlace();
@@ -12624,7 +13052,7 @@ async function mcSyncHeldToolStruct(){
     const t = mc._toolPend, sel = mc._toolSelPend;
     mc._toolPend = null; mc._toolSelPend = null;
     mcSetPlayerTool(t);          // saca sola la nueva (mcGuardarTool(false)) ⇒ sube desde el suelo
-    if(sel) mc.selBox = sel;     // …y la caja confirmada sobrevive, como en cualquier otro cambio de herramienta
+    if(sel && sel.length) mc.selCajas = sel;   // …y la selección entera sobrevive, como en cualquier otro cambio de herramienta
   }
   if(!mc.active || !mc.showTool || mc.osdSinTool || (mc._guardada && mc._guardaT >= 1)){
     if(mc._heldToolStruct){
@@ -13541,13 +13969,15 @@ function mcVoxUIGeom(){
 }
 // REQ-GLOW5 · las luces que aporta la capa, en coordenadas de MUNDO. Solo los voxeles marcados emisivos ('*#hex').
 //
-// Van por la vía DINÁMICA (mcDynSync → uDynPos, por fragmento), NUNCA por la siembra estática de bloque: una
-// partícula se mueve cada frame y mcComputeBlockLight es un BFS + re-mallado de chunk (BUG-GLOW3, la misma razón
-// por la que un emisor montado en un agente tampoco se hornea). El fuego puede parpadear a 60 fps sin coste.
+// Van por la CAJA que sigue a lo que se mueve (mcDynSync → mcDynBake), no por el campo del mundo: una partícula
+// cambia de sitio cada frame y re-sembrar el mundo entero obliga además a re-mallar su halo (BUG-GLOW2, la misma
+// razón por la que un emisor montado en un agente tampoco se hornea ahí). La LEY es la misma en los dos campos
+// desde BUG-GLOW8 —el mismo BFS por el aire—, lo que cambia es a qué trozo de mundo se escribe y cada cuánto.
 //
 // AGRUPADAS POR BLOQUE, no una luz por voxel: 200 voxeles de fuego son 200 partículas de 1/16 de bloque pegadas,
-// y sin agrupar se comerían las MC_DYN_MAX plazas con ocho luces prácticamente en el mismo punto —dejando fuera
-// la antorcha de al lado y sin alumbrar más—. Una luz por celda de mundo, en el centroide de sus voxeles.
+// y sin agrupar se comerían las MC_DYN_SEMILLAS plazas con decenas de luces prácticamente en el mismo punto
+// —dejando fuera la antorcha de al lado y sin alumbrar más—. Una luz por celda de mundo, en el centroide de sus
+// voxeles: que es, además, exactamente la resolución a la que siembra el BFS.
 function mcVoxUILuces(){
   if(!mc.voxUISucio && mc._voxUILuz) return mc._voxUILuz;          // ⚠️ NO limpia voxUISucio: eso es de mcVoxUIGeom
   const out=[];
@@ -13941,8 +14371,8 @@ function mcDrawOverlays(pj, view){
   if(mc.tool==='select' && !mc.escaparate && !mc.pasteActive && !mc._guardada){   // guardada: ni la caja confirmada (REQ-TOOL5)
     const cyan = [0.15, 0.95, 1.0];
     const amb = [1.0, 0.88, 0.15];
-    if(mc.selBox){
-      const a=mc.selBox.a, b=mc.selBox.b;
+    for(const caja of mc.selCajas){   // REQ-SEL1: N cajas, todas con los mismos corchetes — ninguna es «la buena»
+      const a=caja.a, b=caja.b;
       const x0=Math.min(a[0],b[0]), x1=Math.max(a[0],b[0])+1;
       const y0=Math.min(a[1],b[1]), y1=Math.max(a[1],b[1])+1;
       const z0=Math.min(a[2],b[2]), z1=Math.max(a[2],b[2])+1;
@@ -13961,6 +14391,18 @@ function mcDrawOverlays(pj, view){
         mcPushCornerBrackets(selLines, a[0], a[1], a[2], a[0]+1, a[1]+1, a[2]+1, 0.35, 1.0, 0.85, 0.2);
         mcPushCornerBrackets(selLines, b[0], b[1], b[2], b[0]+1, b[1]+1, b[2]+1, 0.35, 1.0, 0.85, 0.2);
       }
+    }
+    // AGARRE del giro (REQ-SEL1): el bloque sobre el que pivota R / ⇧R / ⌥R. Se pinta en magenta, que ni el
+    // amarillo de las esquinas ni el cian de la A lo usan. Mientras se mantiene Ctrl el ratón manda, y si
+    // apunta fuera de la selección el candidato queda en nada (soltar Ctrl así = soltar el agarre). Fijado,
+    // solo se dibuja si sigue dentro de alguna caja: fuera, mcRotaCajaEnSitio lo ignora, y lo que no hace
+    // nada no se enseña.
+    if(mc.selCtrlHeld && playing) mc.selPivoteHover = mcSelPivoteApuntado();
+    const piv = mc.selCtrlHeld ? mc.selPivoteHover : (mcSelCajaDe(mc.selPivote)>=0 ? mc.selPivote : null);
+    if(piv){
+      const mag=[1.0, 0.25, 0.85];
+      mcPushBoxEdges(selLines, piv[0], piv[1], piv[2], piv[0]+1, piv[1]+1, piv[2]+1, mag[0], mag[1], mag[2]);
+      corchete(piv[0], piv[1], piv[2], piv[0]+1, piv[1]+1, piv[2]+1, 0.45, mag[0], mag[1], mag[2], null);
     }
     if(mc.selA && playing){
       const near=mcRaycast();
@@ -14574,12 +15016,12 @@ async function mcRestampAll(){
   for(const k in mc.structs){ if(mc.structs[k]) mc.structs[k].meshRot={}; }   // solo la geometría; colRot (colisión) sigue viva
   const insts=mc.structures.filter(s => !s._isHeldTool);   // las instancias VIVAS de mapa (la herramienta en mano se excluye)
   await mcBuildStructAtlas();          // el atlas recolecta claves de las estructuras vivas (siguen en mc.structures)
-  // emitCells de cada inst desde su geom CACHEADO (posición-independiente). Las instancias cargadas de disco son
-  // {key,ox,oy,oz,rot} SIN emitCells, así que hay que poblarlo ANTES de la luz de bloque; si no, mcRecomputeHasGlow
+  // emitFinos de cada inst desde su geom CACHEADO (posición-independiente). Las instancias cargadas de disco son
+  // {key,ox,oy,oz,rot} SIN emitFinos, así que hay que poblarlo ANTES de la luz de bloque; si no, mcRecomputeHasGlow
   // da hasGlow=false → mcComputeBlockLight sale en 0 → las estructuras se horneaban a oscuras y solo se iluminaban
   // al re-estamparlas a mano (mcStampStruct forzaba hasGlow=true). mcStructGeom cachea en meshRot[rot], así que el
   // mcBuildStructMesh de abajo reutiliza el greedy (sin doble coste).
-  for(const s of insts){ const g=await mcStructGeom(s.key, mcOriNorm(s.rot)); s.emitCells=g.emitCells; s.emitDir=g.emitDir; s.emitCol=g.emitCol; }
+  for(const s of insts){ const g=await mcStructGeom(s.key, mcOriNorm(s.rot)); s.emitFinos=g.emitFinos; s.emitDir=g.emitDir; s.emitCol=g.emitCol; }
   // Luz de bloque FRESCA antes de reconstruir → mcBuildStructMesh hornea la luz correcta por cara (corrige luz
   // estructura-sobre-estructura y post-edición). El terreno se re-malla al final SOLO si el brillo cambió respecto
   // al que tienen HORNEADO los chunks (mc.blockLightMeshed, que pone mcMeshAll): las mallas del terreno dependen de
@@ -14650,7 +15092,7 @@ async function mcRefreshSaved(key){
 // Retira una estructura entera (se estampó de una pieza → se borra de una pieza): libera su VBO y la saca
 // de mc.structures (su colisión fina desaparece con ella: se sondea por instancia viva).
 function mcRemoveStruct(s, quiet){
-  const hadGlow=!!(s.emitCells&&s.emitCells.length);
+  const hadGlow=!!(s.emitFinos&&s.emitFinos.length);
   mcFreeStruct(s);
   const i=mc.structures.indexOf(s); if(i>=0) mc.structures.splice(i,1);
   if(hadGlow){ mcRecomputeHasGlow(); mcComputeBlockLight(); mcMeshAll(); }   // se fue una fuente: apagar paredes que encendía (terreno) y re-oscurecer estructuras vecinas requiere restamp aparte
@@ -14925,7 +15367,7 @@ function mcDoAction(btn, shift){
       return;
     }
   }
-  if(mc.tool==='select'){ if(btn===0) mcSelectClick(); else if(btn===2) mcSelectPickFill(shift); mcRevealHotbar(); return; }   // Seleccionar: izq marca esquinas, dcho pilla material y reemplaza (shift o sin caja: limpia). NO rompe/pone
+  if(mc.tool==='select'){ if(btn===0) mcSelectClick(shift); else if(btn===2) mcSelectPickFill(shift); mcRevealHotbar(); return; }   // Seleccionar: izq marca esquinas (con shift, caja ADEMÁS de las que haya), dcho pilla material y reemplaza (shift o sin caja: limpia). NO rompe/pone
   if(mc.tool==='pick'){ mcPickBlock(); mcRevealHotbar(); return; }   // Cuentagotas: los DOS botones pillan; ninguno rompe ni pone
   if(mc.tool==='paint'){ if(btn===0) mcPaint(); else if(btn===2) mcPickBlock(); mcRevealHotbar(); return; } // Pintar: izq pinta, dcho cuentagotas
   if(mc.tool==='box'){
@@ -15123,14 +15565,55 @@ function mcBoxStampVolume(px, py, pz, w, h, d){
 // ── Herramienta Seleccionar (tool='select') ────────────────────────────────────────────────────────────
 // Marca una CAJA de bloques del mundo con dos clics (esquina A, esquina B), la resalta y la copia a `clipboard`
 // (Ctrl+C) en el formato del editor para pegarla (Ctrl+V) y trabajarla en la vista de edición 3D.
-function mcSelectClick(){                                    // izq en modo Seleccionar: fija esquina A, luego B (= caja A→B)
+// REQ-SEL1 · con SHIFT, el clic que fija la esquina A dice «ésta va ADEMÁS»: la caja que salga se suma a
+// las que ya hay en vez de sustituirlas, y desde ese momento se corta, se pega, se guarda y se extruye
+// con todas a la vez. La decisión de suma o reemplazo se toma en la esquina **A** y se recuerda en
+// `mc.selSuma` hasta la B: si se mirase en la B, soltar Shift a mitad de gesto se cargaría las cajas
+// anteriores sin que nadie lo hubiera pedido. Sin nada seleccionado todavía, Shift no cambia nada.
+function mcSelectClick(suma){                                // izq en modo Seleccionar: fija esquina A, luego B (= caja A→B)
   const hit=mcRaycast(); if(!hit) return;
   const c=hit.cell; if(c[1]<0 || !mcSolid(c[0],c[1],c[2])) return;   // apunta a un bloque sólido real (no al suelo infinito)
-  if(!mc.selA){ mc.selA=c.slice(); mc.selBox=null; toast('Esquina A fijada — apunta a la opuesta y clic'); }
-  else { mc.selBox={a:mc.selA.slice(), b:c.slice()}; mc.selA=null;
-         const n=mcSelCount(); toast(n ? n+' bloque(s) — Ctrl+C copia · Shift+rueda extruye/cava' : 'Caja vacía (sin bloques)'); }
+  if(mc.selCtrlHeld) mc.selCtrlUsado=true;                   // un clic con Ctrl es marcar esquina, no elegir agarre
+  if(!mc.selA){
+    mc.selA=c.slice();
+    mc.selSuma = !!suma && mc.selCajas.length>0;
+    if(!mc.selSuma){ mc.selBox=null; mc.selPivote=null; }    // empezar caja nueva tira la anterior, y su agarre con ella
+    toast(mc.selSuma ? 'Esquina A de OTRA caja — apunta a la opuesta y clic' : 'Esquina A fijada — apunta a la opuesta y clic');
+  }
+  else { const caja={a:mc.selA.slice(), b:c.slice()};
+         if(mc.selSuma) mc.selCajas.push(caja); else mc.selBox=caja;
+         mc.selA=null; mc.selSuma=false;
+         const n=mcSelCount(), k=mc.selCajas.length;
+         toast(n ? n+' bloque(s)'+(k>1?' en '+k+' cajas':'')+' — Ctrl+C copia · Ctrl+rueda extruye/cava' : 'Caja vacía (sin bloques)'); }
 }
-function mcSelectClear(){ if(mc.selA||mc.selBox){ mc.selA=null; mc.selBox=null; toast('Selección limpiada'); } }
+function mcSelectClear(){ if(mc.selA||mc.selCajas.length){ mc.selA=null; mc.selSuma=false; mc.selBox=null; mc.selPivote=null; toast('Selección limpiada'); } }
+// Índice de la caja que contiene una celda de mundo, o -1. Con agarre solo importa la PRIMERA que lo
+// contenga: el agarre es de una caja, no del conjunto (el dueño lo pidió «pensando en una única selección»).
+function mcSelCajaDe(c){
+  if(!c) return -1;
+  for(let i=0;i<mc.selCajas.length;i++){
+    const s=mc.selCajas[i], a=s.a, b=s.b;
+    if(c[0]>=Math.min(a[0],b[0]) && c[0]<=Math.max(a[0],b[0]) &&
+       c[1]>=Math.min(a[1],b[1]) && c[1]<=Math.max(a[1],b[1]) &&
+       c[2]>=Math.min(a[2],b[2]) && c[2]<=Math.max(a[2],b[2])) return i;
+  }
+  return -1;
+}
+// Celda de la selección que señala el ratón, para elegir el agarre. Primero el bloque sólido apuntado, que
+// es lo que el ojo cree estar señalando; si el rayo no da en nada (o da fuera), se admite el hueco marchando
+// el rayo por dentro de cada caja. Con varias cajas gana la primera de la lista que atrape el rayo: basta,
+// porque el agarre está pensado para cuando hay UNA.
+function mcSelPivoteApuntado(){
+  const hit=mcRaycast();
+  if(hit && hit.cell[1]>=0 && mcSelCajaDe(hit.cell)>=0) return hit.cell.slice();
+  for(const s of mc.selCajas){
+    const x0=Math.min(s.a[0],s.b[0]), y0=Math.min(s.a[1],s.b[1]), z0=Math.min(s.a[2],s.b[2]);
+    const W=Math.abs(s.b[0]-s.a[0])+1, H=Math.abs(s.b[1]-s.a[1])+1, D=Math.abs(s.b[2]-s.a[2])+1;
+    const l=mcBoxRaycastLocal(x0,y0,z0,W,H,D);
+    if(l) return [x0+l[0], y0+l[1], z0+l[2]];
+  }
+  return null;
+}
 // Clic DERECHO con una caja ya confirmada: en vez de limpiar, pilla el material de lo que se esté
 // apuntando —bloque, textura o pieza— y reemplaza con él lo seleccionado, SIN perder la selección. Es
 // el mismo gesto que pulsar una ranura, pero eligiendo el material a ojo del propio mapa en vez del
@@ -15215,38 +15698,56 @@ function mcSelectFillId(id, yaHecha){
   toast(edits.length+' bloque(s) → '+mcNombreMat(mc.blockKey[id]||''));
   return true;
 }
-// Recorre los bloques SÓLIDOS del mundo dentro de la caja confirmada, llamando fn(x,y,z,id).
+// Recorre los bloques SÓLIDOS del mundo dentro de la selección, llamando fn(x,y,z,id,ci) — `ci` es DE QUÉ
+// caja salió el bloque, que casi nadie mira pero extruir necesita (dos cajas pueden compartir columna).
+// REQ-SEL1: pasa por TODAS las cajas, y ésta es LA puerta — contar, pintar, copiar, cortar, guardar un
+// recorte y extruir salieron multicaja sin tocarse porque los seis entran por aquí.
+// Las cajas pueden solaparse (Shift+clic no lo impide, y prohibirlo sería peor: obligaría a marcarlas
+// perfectas), así que a partir de la segunda se lleva un Set de celdas ya visitadas. Sin él, un bloque
+// en el solape se copiaría dos veces y se contaría dos veces. Con UNA sola caja no se paga nada.
 function mcSelForEach(fn){
-  const s=mc.selBox; if(!s) return;
-  const x0=Math.min(s.a[0],s.b[0]), x1=Math.max(s.a[0],s.b[0]);
-  const y0=Math.min(s.a[1],s.b[1]), y1=Math.max(s.a[1],s.b[1]);
-  const z0=Math.min(s.a[2],s.b[2]), z1=Math.max(s.a[2],s.b[2]);
-  for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){
-    if(!mcInside(x,y,z)) continue; const id=mc.grid[mcIdx(x,y,z)]; if(id) fn(x,y,z,id);
+  const cajas=mc.selCajas; if(!cajas.length) return;
+  const vistas = cajas.length>1 ? new Set() : null;
+  for(let ci=0; ci<cajas.length; ci++){
+    const s=cajas[ci];
+    const x0=Math.min(s.a[0],s.b[0]), x1=Math.max(s.a[0],s.b[0]);
+    const y0=Math.min(s.a[1],s.b[1]), y1=Math.max(s.a[1],s.b[1]);
+    const z0=Math.min(s.a[2],s.b[2]), z1=Math.max(s.a[2],s.b[2]);
+    for(let x=x0;x<=x1;x++) for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){
+      if(!mcInside(x,y,z)) continue;
+      const i=mcIdx(x,y,z);
+      if(vistas){ if(vistas.has(i)) continue; vistas.add(i); }
+      const id=mc.grid[i]; if(id) fn(x,y,z,id,ci);
+    }
   }
 }
 function mcSelCount(){ let n=0; mcSelForEach(()=>n++); return n; }
-// REQ-EXTRU1 · Shift+rueda con una caja confirmada: la selección SUBE construyendo o BAJA cavando
+// REQ-EXTRU1 · Ctrl+rueda con una caja confirmada: la selección SUBE construyendo o BAJA cavando
 // (nota del dueño en /map/bugfinder, 56,14,71: «*seleccionar, y una vez seleccionado, usar shift+wheel
 // up o down, para estruir hacia arriba o hacia abajo (hacia abajo cavaria)*»).
-// Trabaja por COLUMNAS (x,z), no por capas: hacia arriba copia el bloque más ALTO de cada columna una
-// celda por encima, así una selección sobre terreno desigual sube siguiendo su propia silueta en vez de
-// dejar una plancha plana; hacia abajo borra el bloque más BAJO de cada columna.
-// La caja se estira una celda por el lado del que se tira, y ahí está la gracia: la muesca siguiente ya
-// ve lo recién puesto (o el terreno que acaba de quedar dentro) y se sigue subiendo/cavando sin volver a
-// marcar esquinas.
-// ⚠️ Los dos sentidos NO son inversos: la rueda abajo no deshace la de arriba (eso es Ctrl+Z) — cava en
-// lo que haya debajo, que es lo que pidió el dueño.
+// Trabaja por COLUMNAS (x,z), no por capas, y SIEMPRE por el bloque más ALTO de cada una: arriba pone
+// uno encima de él, abajo se lo lleva. Así una selección sobre terreno desigual sube y baja siguiendo su
+// propia silueta en vez de dejar una plancha plana, y bajar del todo acaba cavando en el terreno.
+// ⚠️ Los dos sentidos SON inversos (corrección del dueño, 2026-08-20, fotos 62/63): una muesca arriba
+// seguida de una abajo deja los bloques exactamente como estaban. La primera versión cavaba por el
+// bloque más BAJO, que ni deshacía lo anterior ni se veía — el bloque que se comía estaba enterrado.
+// (Límite conocido: si al subir una columna NO pudo escribir porque ya tenía algo encima, la bajada se
+//  lleva ese bloque de antes. Deshacer de verdad es Ctrl+Z; esto es una regla sin memoria.)
+// La caja se mueve por su borde de ARRIBA, que es donde pasa todo: al subir se estira una celda, al bajar
+// se encoge una, y cuando ya no puede encogerse más (alto 1) baja entera y sigue cavando. La muesca
+// siguiente ve así lo recién puesto o el terreno que acaba de quedar dentro, sin volver a marcar esquinas.
 function mcSelExtruir(dir){
   if(mc.tool!=='select' || !mc.selBox || !dir) return false;
   const arriba = dir>0;
-  // Una sola pasada por la caja (la misma que cuenta y copia), quedándose con el extremo de cada columna.
+  // Una sola pasada por la selección (la misma que cuenta y copia), quedándose con la cima de cada columna.
+  // La columna es (caja, x, z) y NO (x, z): dos cajas pueden caer sobre el mismo sitio a distinta altura
+  // —una en el tejado y otra en el sótano— y son dos cimas, no una (REQ-SEL1).
   const col=new Map();
-  mcSelForEach((x,y,z,id)=>{
-    const k=x+','+z, v=col.get(k);
-    if(!v || (arriba ? y>v.y : y<v.y)) col.set(k,{x,y,z,id});
+  mcSelForEach((x,y,z,id,ci)=>{
+    const k=ci+':'+x+','+z, v=col.get(k);
+    if(!v || y>v.y) col.set(k,{x,y,z,id});
   });
-  if(!col.size){ toast('La caja no tiene bloques: nada que '+(arriba?'extruir':'cavar')); return false; }
+  if(!col.size){ toast('La selección no tiene bloques: nada que '+(arriba?'extruir':'cavar')); return false; }
   const edits=[];
   for(const c of col.values()){
     if(arriba){
@@ -15261,12 +15762,21 @@ function mcSelExtruir(dir){
       edits.push({x:c.x,y:c.y,z:c.z,before:c.id,after:0});
     }
   }
-  // La caja se mueve aunque alguna columna no haya podido escribir (tope del mundo, celda ocupada): lo que
-  // el marco cian enseña es DÓNDE va la siguiente muesca, no cuántos bloques salieron.
-  const y0=Math.min(mc.selBox.a[1],mc.selBox.b[1]), y1=Math.max(mc.selBox.a[1],mc.selBox.b[1]);
-  if(arriba){ const ny=Math.min(mc.dim.y-1, y1+1); if(mc.selBox.a[1]>=mc.selBox.b[1]) mc.selBox.a[1]=ny; else mc.selBox.b[1]=ny; }
-  else      { const ny=Math.max(0, y0-1);          if(mc.selBox.a[1]<=mc.selBox.b[1]) mc.selBox.a[1]=ny; else mc.selBox.b[1]=ny; }
+  // Si NINGUNA columna pudo escribir, no ha pasado nada: la caja tampoco se mueve. Moverla sería mentir, y
+  // además rompe lo que pidió el dueño («*un wup seguido de un wdown debería dejar los bloques iguales que
+  // como estaban al ppo*»): con la selección tapada por arriba, el wup no ponía nada pero subía el marco, y
+  // el wdown de vuelta se comía el bloque ajeno que estorbaba.
   if(!edits.length){ toast(arriba?'No cabe nada más arriba':'Nada que cavar'); return false; }
+  // Con alguna escrita sí se mueve, aunque otras se hayan quedado sin sitio (tope del mundo, celda ocupada):
+  // lo que el marco cian enseña es DÓNDE va la siguiente muesca, no cuántos bloques salieron.
+  // REQ-SEL1: se mueven TODAS, cada una por su cuenta y a la vez — se extruyó dentro de todas.
+  for(const s of mc.selCajas){
+    const y0=Math.min(s.a[1],s.b[1]), y1=Math.max(s.a[1],s.b[1]);
+    const alta = (s.a[1]>=s.b[1]) ? s.a : s.b;                                 // la esquina que lleva el techo
+    const baja = (alta===s.a) ? s.b : s.a;
+    if(arriba) alta[1]=Math.min(mc.dim.y-1, y1+1);
+    else { const ny=Math.max(0, y1-1); alta[1]=ny; if(y0>ny) baja[1]=ny; }     // alto 1 ⇒ la caja entera baja
+  }
   mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
   toast((arriba?'Extruido':'Cavado')+' — '+edits.length+' bloque(s)');
   return true;
@@ -15325,13 +15835,38 @@ function mcNearestMaterial(hex){
   return best;
 }
 // Tecla R con la herramienta Seleccionar y una caja marcada (sin ranura de estructura armada, ver abajo): gira los
-// bloques de esa caja 90° en el plano horizontal (X/Z), igual que rotXY en el editor. Reutiliza mcRotXZ; el eje
-// vertical (altura) no cambia. La caja se ancla por su esquina min (x0,z0) — si W≠D (no es cuadrada), el nuevo
-// ancho/fondo cambia y la caja puede invadir celdas vecinas fuera de la selección original (igual que al rotar
-// una estructura). mc.selBox se actualiza a la caja rotada para poder seguir girando o copiando lo mismo.
-function mcRotateSelBox(){
-  if(!mc.selBox) return false;
-  const s=mc.selBox;
+// bloques de esa caja un cuarto de vuelta. La caja se ancla por su esquina min (x0,y0,z0) — si el giro cambia la
+// huella, la caja puede invadir celdas vecinas fuera de la selección original (igual que al rotar una
+// estructura). Las cajas se actualizan a las giradas para poder seguir girando o copiando lo mismo.
+//
+// LOS TRES EJES, no solo el horizontal (dueño, 2026-08-20: «*hay que tener en cuenta las 6x4 rotaciones
+// posibles como hacen otras herramientas*»):
+//     R  → giro sobre Y (el de siempre: la pieza gira en planta)
+//   ⇧+R  → vuelco sobre X (se tumba hacia ti)
+//   ⌥+R  → rodar sobre Z (cae de lado)
+// Encadenándolos se llega a las 24 posturas del cubo, y NO hay aquí ninguna matriz nueva: se piden a la
+// tabla MC_ORI del motor (`mcOriMove` mueve la celda, `mcOriDims` dice la huella nueva), la misma que usan
+// el fantasma de estampado y las estructuras. Escribir aquí otra rotación es cómo se acaba con dos mundos
+// que no encajan. El giro sobre Y sale, celda a celda, exactamente igual que la versión que solo giraba en
+// planta: `[D-1-z, y, x]`.
+const MC_SEL_GIRO={              // el código de postura de UN cuarto de vuelta en cada eje, derivado de MC_ORI
+  z: MC_ORI.findIndex(p=>p[0]===1 && p[1]===0 && p[2]===0),   // roll
+  x: MC_ORI.findIndex(p=>p[0]===0 && p[1]===1 && p[2]===0),   // tilt (vuelco)
+  y: MC_ORI.findIndex(p=>p[0]===0 && p[1]===0 && p[2]===1),   // yaw  (giro en planta)
+};
+// REQ-SEL1 · Con VARIAS cajas, cada una gira SOBRE SU PROPIA BASE y sin enterarse de las demás — no todas
+// juntas alrededor de la caja que las envuelve. Es literal del dueño (2026-08-20, foto 64, dos ventanas en
+// un muro): «*si cada una se hace desde su base se pueden "abrir las ventanas", o sea, roto primero lo que
+// esta seleccionado en 1, y luego lo que esta seleccionado en 2 (1 no sabe de 2)*». Girarlas en bloque
+// abría las dos ventanas como si fueran una hoja sola, que es justo lo que no quería.
+// Se aplican EN ORDEN: si dos cajas se pisan, la segunda ya ve lo que dejó la primera, como si hubieras
+// dado dos veces a la R. Y la selección sigue siendo de N cajas, cada una en su sitio nuevo.
+//
+// Gira 90° en horizontal el contenido de UNA caja y lo escribe en el mundo, apuntando en `acum` (mapa
+// celda→edición, para que dos cajas que se pisen no metan dos entradas de la misma celda en el historial:
+// deshacer las aplica hacia delante y la segunda pisaría el `before` bueno). Devuelve la caja ya girada.
+function mcRotaCajaEnSitio(s, acum, eje){
+  const rot=MC_SEL_GIRO[eje] || MC_SEL_GIRO.y;
   const x0=Math.min(s.a[0],s.b[0]), x1=Math.max(s.a[0],s.b[0]);
   const y0=Math.min(s.a[1],s.b[1]), y1=Math.max(s.a[1],s.b[1]);
   const z0=Math.min(s.a[2],s.b[2]), z1=Math.max(s.a[2],s.b[2]);
@@ -15341,29 +15876,59 @@ function mcRotateSelBox(){
     const wx=x0+x, wz=z0+z;
     old[(y*W+x)*D+z]=mcInside(wx,y0+y,wz) ? mc.grid[mcIdx(wx,y0+y,wz)] : 0;
   }
-  const nx1=x0+D-1, nz1=z0+W-1;                        // rot 90°: ancho↔fondo se intercambian
+  const [nW,nH,nD]=mcOriDims(W,H,D,rot);               // la huella nueva la dice el motor, no se supone
+  const mueve=mcOriMove(rot, W, H, D);
+  // AGARRE (mc.selPivote, Ctrl + apuntar): esa celda se queda EXACTAMENTE donde está y la caja gira a su
+  // alrededor. Se mira dónde caería tras el giro y se corre la huella entera lo que haga falta para
+  // devolverla a su sitio. Sin agarre —o con el agarre fuera de ESTA caja, que las demás no son suyas— el
+  // desplazamiento es 0 y sale el giro de siempre, anclado en la esquina mínima.
+  let dx=0, dy=0, dz=0, piv=mc.selPivote;
+  if(piv && piv[0]>=x0 && piv[0]<=x1 && piv[1]>=y0 && piv[1]<=y1 && piv[2]>=z0 && piv[2]<=z1){
+    const [qx,qy,qz]=mueve(piv[0]-x0, piv[1]-y0, piv[2]-z0);
+    dx=(piv[0]-x0)-qx; dy=(piv[1]-y0)-qy; dz=(piv[2]-z0)-qz;
+  }
+  const nx0=x0+dx, ny0=y0+dy, nz0=z0+dz;
+  const nx1=nx0+nW-1, ny1=ny0+nH-1, nz1=nz0+nD-1;
   const rotated=new Map();
   for(let y=0;y<H;y++) for(let x=0;x<W;x++) for(let z=0;z<D;z++){
     const v=old[(y*W+x)*D+z]; if(!v) continue;         // 0 = aire, no hace falta anotarlo (se limpia por defecto)
-    const [nx,nz]=mcRotXZ(x,z,1,W,D);
-    rotated.set((x0+nx)+','+(y0+y)+','+(z0+nz), v);
+    const [nx,ny,nz]=mueve(x,y,z);
+    rotated.set((nx0+nx)+','+(ny0+ny)+','+(nz0+nz), v);
   }
-  const edits=[];
-  for(let y=y0; y<=y1; y++)
-    for(let x=x0; x<=Math.max(x1,nx1); x++)
-      for(let z=z0; z<=Math.max(z1,nz1); z++){
+  // Se recorre la UNIÓN de la huella vieja y la nueva: la vieja para vaciar lo que se fue, la nueva para
+  // escribir lo que llegó. Con el vuelco y el rodar la caja también cambia de ALTO, así que la unión va
+  // por los tres ejes; cuando solo se giraba en planta bastaba con X/Z. Con agarre la nueva puede además
+  // empezar ANTES que la vieja, así que los dos extremos del barrido son mínimo y máximo de las dos.
+  for(let y=Math.min(y0,ny0); y<=Math.max(y1,ny1); y++)
+    for(let x=Math.min(x0,nx0); x<=Math.max(x1,nx1); x++)
+      for(let z=Math.min(z0,nz0); z<=Math.max(z1,nz1); z++){
         if(!mcInside(x,y,z)) continue;
-        const inOld=x<=x1 && z<=z1, inNew=x<=nx1 && z<=nz1;
+        const inOld=x>=x0 && x<=x1 && y>=y0 && y<=y1 && z>=z0 && z<=z1;
+        const inNew=x>=nx0 && x<=nx1 && y>=ny0 && y<=ny1 && z>=nz0 && z<=nz1;
         if(!inOld && !inNew) continue;
         const after=rotated.get(x+','+y+','+z)||0;
         const before=mc.grid[mcIdx(x,y,z)];
         if(before===after) continue;
-        mc.grid[mcIdx(x,y,z)]=after; mcDirty(x,y,z); mcGlowTocada(x,y,z); edits.push({x,y,z,before,after});
+        mc.grid[mcIdx(x,y,z)]=after; mcDirty(x,y,z); mcGlowTocada(x,y,z);
+        const k=x+','+y+','+z, ya=acum.get(k);
+        if(ya) ya.after=after; else acum.set(k,{x,y,z,before,after});   // la 2ª pasada por la misma celda NO es otra edición
       }
-  if(!edits.length){ toast('Nada que rotar'); return false; }
+  return {a:[nx0,ny0,nz0], b:[nx1,ny1,nz1]};
+}
+const MC_SEL_EJE_NOMBRE={ y:'en planta', x:'de vuelco', z:'de lado' };
+function mcRotateSelBox(eje){
+  if(!mc.selCajas.length) return false;
+  const acum=new Map();
+  const nuevas=mc.selCajas.map(s=>mcRotaCajaEnSitio(s, acum, eje));   // en orden: la 2ª ya ve lo que dejó la 1ª
+  const edits=[];
+  for(const e of acum.values()) if(e.before!==e.after) edits.push(e);
+  if(!edits.length){ mc.selCajas=nuevas; toast('Nada que rotar'); return false; }   // la caja SÍ ha girado (cambia de huella, y con agarre hasta de sitio) aunque su contenido salga igual
   mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
-  mc.selBox={a:[x0,y0,z0], b:[nx1,y1,nz1]};
-  toast('Selección rotada 90°');
+  mc.selCajas=nuevas;
+  const como=MC_SEL_EJE_NOMBRE[eje] || MC_SEL_EJE_NOMBRE.y;
+  const sobre=(mcSelCajaDe(mc.selPivote)>=0) ? ' sobre el agarre' : '';   // REQ-SEL1: sin agarre, sobre la esquina de siempre
+  toast(nuevas.length>1 ? 'Giro '+como+' de las '+nuevas.length+' cajas, cada una sobre su base'+(sobre?' (una, sobre el agarre)':'')
+                        : 'Selección: giro '+como+' (90°)'+sobre);
   return true;
 }
 function mcPasteWorld(){
@@ -16882,6 +17447,70 @@ game.osd = {
 // misma regla que ya siguen los tests de navegador.
 const MC_RUMBOS=['N','NO','O','SO','S','SE','E','NE'];   // yaw=0 mira a −Z (Norte) y crece hacia −X (Oeste)
 
+// ---- REQ-INF1 · UNA FOTO ES UN ESTUDIO, NO UNA FOTO ----
+// Orden del dueño (2026-08-20): «que sacar una foto sea generar informes también, que se apoye en scripts que
+// reutilices, para que no tengas que estar constantemente editando snippets». El problema que resuelve: cuando él
+// dice «la luz salta, mira estas dos fotos», la imagen enseña el síntoma pero no trae ni un número, y cada
+// pregunta obligaba a escribir y lanzar otra sonda de Playwright a mano.
+//
+// Reparto de responsabilidades — `app.js` es AGNÓSTICO de lo que mide cada informe:
+//   · aquí solo viven el REGISTRO y el orden de ejecución;
+//   · cada informe es un módulo suelto en `data/informes/<nombre>.js`, listado en `data/informes/index.json`.
+//     Se sirven por GET (`data/` sale del repo, ver Handler.translate_path) y se cargan con AsyncFunction en
+//     ámbito global, igual que los snippets ⇒ alcanzan los internos (`mc`, `mcDynNivel`, `mcLuzFactorHaz`…).
+//     Añadir o afinar una medición es EDITAR UN FICHERO DEL REPO: ni tocar el motor ni republicar snippets.
+//   · la ficha de la foto guarda solo el ÍNDICE (nombre, título, resumen de una línea y en qué fichero está el
+//     detalle); el cuerpo entero se escribe aparte, en `data/fotos/informes/<id>/<nombre>.json`. Así la ficha
+//     sigue siendo legible de un vistazo y el detalle puede ser tan largo como haga falta.
+// Detalle y catálogo → docs/informes-de-foto.md.
+const MC_INFORMES=new Map();
+// `definir(nombre, cfg)` es lo ÚNICO que ve un módulo de informe. cfg: {titulo, calcula(), resumen(datos), pesado}.
+// `pesado:true` = barrido caro (sondas sintéticas): no corre en cada foto, solo si se pide.
+function mcInformeDefine(nombre, cfg){
+  if(typeof cfg==='function') cfg={ calcula:cfg };
+  if(!cfg || typeof cfg.calcula!=='function') throw new Error('informe «'+nombre+'» sin calcula()');
+  MC_INFORMES.set(nombre, Object.assign({ nombre, titulo:nombre, pesado:false }, cfg));
+}
+let mcInformesProm=null;
+// Se cargan UNA vez y se cachean. La carga es asíncrona pero la foto es SÍNCRONA (el buffer de dibujo se
+// descarta tras un await, ver el aviso de arriba), así que esto se dispara al abrir el Mundo y para cuando
+// alguien pulsa Alt+F ya están dentro. Si aún no lo están, la foto sale igual y lo dice en su índice.
+function mcInformesCarga(){
+  if(mcInformesProm) return mcInformesProm;
+  const AF=Object.getPrototypeOf(async function(){}).constructor;
+  return mcInformesProm=fetch('/data/informes/index.json',{cache:'no-store'})
+    .then(r=>r.ok?r.json():{informes:[]})
+    .then(async ix=>{
+      for(const n of (ix.informes||[])){
+        try{
+          const src=await fetch('/data/informes/'+n+'.js',{cache:'no-store'}).then(r=>r.ok?r.text():null);
+          if(src) await (new AF('definir', src))(mcInformeDefine);
+        }catch(e){ console.warn('[informes] «'+n+'» no se pudo cargar:', e); }
+      }
+      return MC_INFORMES;
+    })
+    .catch(e=>{ console.warn('[informes] sin índice:', e); return MC_INFORMES; });
+}
+// Corre los informes registrados y devuelve {idx, cuerpos}: `idx` va a la ficha, `cuerpos` a ficheros aparte.
+// Un informe que peta NO tumba la foto: se anota el error en su hueco del índice y se sigue con el siguiente.
+function mcCorreInformes(opts){
+  const todos=!!(opts&&opts.todos), cuerpos={}, idx={};
+  if(!MC_INFORMES.size){ mcInformesCarga(); return { idx:{ _aviso:'los informes aún no estaban cargados' }, cuerpos }; }
+  for(const inf of MC_INFORMES.values()){
+    if(inf.pesado && !todos){ idx[inf.nombre]={ titulo:inf.titulo, saltado:'pesado · se pide con game.informes.foto()' }; continue; }
+    const t0=performance.now();
+    try{
+      const d=inf.calcula();
+      if(d==null){ idx[inf.nombre]={ titulo:inf.titulo, vacio:true }; continue; }
+      cuerpos[inf.nombre]=d;
+      const e={ titulo:inf.titulo, ms:+(performance.now()-t0).toFixed(1) };
+      if(typeof inf.resumen==='function'){ try{ e.resumen=String(inf.resumen(d)); }catch(x){} }
+      idx[inf.nombre]=e;                       // `fichero` lo rellena el servidor: es él quien sabe el id de la foto
+    }catch(e){ idx[inf.nombre]={ titulo:inf.titulo, error:String(e&&e.message||e) }; }
+  }
+  return { idx, cuerpos };
+}
+
 function mcFichaFoto(){
   const cv=mc.canvas, g=Math.floor;
   const yaw360=((mc.yaw*180/Math.PI)%360+360)%360;
@@ -16910,6 +17539,12 @@ function mcFichaFoto(){
     escala: +mc.scale.toFixed(2),
     apunta,
     tool: mc.showTool ? { key: mc._heldToolKey, vbo: mc._heldToolStruct ? (mc._heldToolStruct.colCount || mc._heldToolStruct.texCount) : 0, pos: mc.toolPos, rot: mc.toolRot, scale: mc.toolScale } : null,
+    // BUG-GLOW8b · radiografía de la luz en el instante del disparo. Va en la ficha porque los fallos de luz que
+    // reporta el dueño («al girar salta») se ven en la foto pero no se explican con ella: hace falta saber cuántas
+    // semillas entraron, de dónde salían y si el tope estaba saturado. Si algo peta, la foto se guarda igual.
+    luz: (()=>{ try{ return mcLuzDiag(); }catch(e){ return { error:String(e) }; } })(),
+    // Y la celda que se está apuntando, medida en el campo de luz móvil: es «la mancha del suelo» de las fotos.
+    luzApunta: (()=>{ try{ return apunta&&apunta.celda ? mcDynNivel(apunta.celda[0], apunta.celda[1], apunta.celda[2]) : null; }catch(e){ return null; } })(),
     ancho: cv.width, alto: cv.height,
     fecha: new Date().toISOString()
   };
@@ -16958,9 +17593,13 @@ function mcFotoMini(out){
 }
 
 // Devuelve una promesa con {id, url, bytes, ficha, portapapeles}. `game.foto()` la expone tal cual.
-function mcFoto(){
+function mcFoto(opts){
   if(!mc.active || !mc.gl){ toast('📷 abre el Mundo primero'); return Promise.resolve(null); }
   const ficha=mcFichaFoto();
+  // REQ-INF1 · los informes se calculan ANTES del mcRender de abajo y sin ningún await por medio: leen `mc`, que
+  // no se mueve, así que miden exactamente el instante que se está fotografiando.
+  const est=mcCorreInformes(opts);
+  ficha.informes=est.idx;
   mcRender();                                            // fotograma fresco: lo de abajo lee ESTE buffer
   const cv=mc.canvas, w=cv.width, px=Math.max(11,Math.min(24,Math.round(w/64))), franja=Math.round(px*3.2);
   const out=document.createElement('canvas');
@@ -16993,7 +17632,7 @@ function mcFoto(){
   }catch(e){}
 
   return fetch('/api/fotos',{ method:'POST', headers:{'Content-Type':'application/json'},
-                              body:JSON.stringify({png:b64, mini:mcFotoMini(out), ficha}) })
+                              body:JSON.stringify({png:b64, mini:mcFotoMini(out), ficha, informes:est.cuerpos}) })
     .then(r=>r.ok?r.json():r.json().then(j=>Promise.reject(j.error||r.status)))
     .then(res=>{
       toast('📷 '+res.id.split('_')[0]+' · '+ficha.mapa+' '+ficha.celda.join(',')+' · '+ficha.rumbo+
@@ -17496,7 +18135,7 @@ async function mcStampStruct(srcKey, ox, oy, oz, rot, quiet, esc, tinte, marca){
     await mcRestampAll();                                       // el atlas creció de escalón → re-malla todas (ya recomputa luz de bloque)
   } else {
     Object.assign(s, await mcBuildStructMesh(srcKey, ox, oy, oz, rot, E, false, TT));   // cachea también el bitset de colisión fina
-    if(s.emitCells && s.emitCells.length){                      // la nueva estructura tiene voxeles emisivos:
+    if(s.emitFinos && s.emitFinos.length){                      // la nueva estructura tiene voxeles emisivos:
       mc.hasGlow=true; mcComputeBlockLight();                   // …enciende su luz de bloque…
       if(mc.structures.length>1) await mcRestampAll(); else mcMeshAll();   // …y re-oscurece/ilumina terreno (y estructuras vecinas vía restamp)
     }
@@ -18353,6 +18992,19 @@ game.aim=function(alcance){
 // {id, url, bytes, ficha}: `const f = await game.foto()` deja en f.ficha las coordenadas exactas
 // desde las que se sacó, y en f.url la ruta para verla o descargarla (galería completa en /fotos).
 game.foto=mcFoto;
+// REQ-INF1 · los INFORMES que acompañan a cada foto (docs/informes-de-foto.md).
+//   game.informes.lista()            → qué informes hay cargados y cuáles son pesados
+//   game.informes.corre('luz-campo') → un informe suelto, en consola, sin sacar foto
+//   game.informes.foto()             → foto CON los informes pesados incluidos (barridos sintéticos)
+//   game.informes.recarga()          → releer data/informes/ sin recargar la página, tras editarlos
+game.informes={
+  lista:()=>[...MC_INFORMES.values()].map(i=>({nombre:i.nombre, titulo:i.titulo, pesado:!!i.pesado})),
+  corre:(n)=>{ const i=MC_INFORMES.get(n); if(!i) throw new Error('no hay informe «'+n+'»'); return i.calcula(); },
+  foto:(o)=>mcFoto(Object.assign({todos:true}, o)),
+  recarga:()=>{ MC_INFORMES.clear(); mcInformesProm=null; return mcInformesCarga().then(m=>m.size); },
+  carga:mcInformesCarga
+};
+mcInformesCarga();          // en marcha ya, para que la 1ª foto no llegue con el registro vacío
 // game.video([segundos]) · inicia o detiene la grabación de vídeo de gameplay (Alt+V).
 game.video=mcToggleGrabarVideo;
 game.grabar=mcToggleGrabarVideo;
@@ -19588,7 +20240,7 @@ function mcSetPlayerTool(v, announce){    // centraliza mc.tool (setter de conso
   mcGuardarTool(false);              // REQ-TOOL5: cambiar de herramienta estando guardada la SACA (el viaje de vuelta), nunca deja la mano vacía
   mcPintaSlotHerramienta();          // la ranura 10 se entera aquí, venga el cambio de P, de la galería o de consola
   mcSetCrosshair(mcMiraDe(v));
-  mc.selA=null;                                      // al cambiar de herramienta, olvida la esquina a medio marcar (la caja confirmada se conserva para Ctrl+C)
+  mc.selA=null; mc.selSuma=false; mc.selCtrlHeld=false; mc.selPivoteHover=null;   // al cambiar de herramienta, olvida la esquina a medio marcar y el agarre a medio elegir (las cajas confirmadas y el agarre FIJADO se conservan para Ctrl+C)
   if(v!=='box') mcBoxClear();
   if(mc.pasteActive) mcPasteCancel();
   if(announce && mc.active) toast(v==='box' ? 'Volumen: arrastra base con clic izq · fija altura con clic izq · clic dcho planta · clic izq reinicia'
@@ -19645,7 +20297,7 @@ function mcCambiaToolConGesto(t){
   // Cambio directo si el gesto está apagado, o si no hay nada que bajar: ya guardada (la subida con la nueva
   // YA es el movimiento correcto), sin herramienta en mano, o tapada por una pantalla OSD.
   if(!mc.ruedaGesto || mc._guardada || !mc.showTool || mc.osdSinTool || !mc._heldToolStruct) return mcSetPlayerTool(t);
-  mc._toolSelPend = mc.selBox;   // guardarse la herramienta tira la caja confirmada; cambiar de herramienta no ⇒ se rescata
+  mc._toolSelPend = mc.selCajas.slice();   // guardarse la herramienta tira la selección; cambiar de herramienta no ⇒ se rescata ENTERA (REQ-SEL1: son N cajas)
   mc._toolPend = t;
   mcGuardarTool(true);
   return t;
@@ -20105,23 +20757,40 @@ try{ const gg=parseFloat(localStorage.getItem('vf_mcGlowGain')); if(isFinite(gg)
 Object.defineProperty(game,'glowGain',{ enumerable:true, get:()=>mc.glowGain,
   set:v=>{ v=Math.max(0,Math.min(16, isFinite(+v)?+v:1)); mc.glowGain=v; try{localStorage.setItem('vf_mcGlowGain',v);}catch(e){}
     return v; } });   // solo uniforme: el bucle de render lo aplica en el siguiente frame, sin recalcular nada
-// game.luzOcluye (BUG-GLOW6) = la luz DINÁMICA (la que sigue a un agente, la que llevas en la mano, las estrellas de
-// game.voxelesUI) respeta los sólidos. La HORNEADA siempre lo hizo —mcComputeBlockLight es un BFS por el aire—, pero
-// la dinámica se sumaba por distancia y ángulo sin preguntar si había una pared en medio: estrellas alumbrando un
-// cuarto cerrado, la espada de luz iluminando el otro lado del muro, y 2 bloques de grosor filtrando menos que 1.
-// Son DOS mitades y hacen falta las dos, porque ninguna sola llega:
-//   · por fragmento (shader) — una cara no recibe la luz que le da POR DETRÁS. Exacto y gratis: la normal sale de las
-//     derivadas de la posición de mundo, que ya se calculan para la sombra del sol. Arregla el grosor de la pared.
-//   · por luz (CPU, mcDynSync) — una luz que no ve al ojo no se sube al shader (mcLuzLibre). Arregla el cuarto
-//     cerrado. Es una aproximación de una línea por luz y por frame; la alternativa exacta sería un raycast por
-//     fragmento y por luz, que es justo lo que no se puede pagar.
-// NO re-siembra ni re-malla: un uniforme y un filtro por frame ⇒ conmutarlo cuesta cero y sirve para medir. Persiste
-// en vf_mcLuzOcluye. false = comportamiento anterior al 2026-08-20, la luz atraviesa la materia.
-try{ const lo=localStorage.getItem('vf_mcLuzOcluye'); if(lo!==null) mc.luzOcluye = lo==='1'; }catch(e){}
-Object.defineProperty(game,'luzOcluye',{ enumerable:true, get:()=>mc.luzOcluye,
-  set:v=>{ v=!!v; mc.luzOcluye=v; try{localStorage.setItem('vf_mcLuzOcluye', v?'1':'0');}catch(e){}
-    if(!v && mc._dynVis) mc._dynVis.clear();
-    toast(v?'La luz dinámica respeta los sólidos':'La luz dinámica atraviesa los sólidos (como antes)'); return v; } });
+// game.luzOcluye (BUG-GLOW6) ya NO hace nada, y no es un olvido: desde BUG-GLOW8 la luz de lo que se mueve ES luz
+// de bloque —se propaga por el aire con el mismo BFS que la de una antorcha—, así que respetar los sólidos dejó de
+// ser una opción que se pueda apagar. Se queda como aviso, no como mando, porque el dueño la tiene en los dedos.
+Object.defineProperty(game,'luzOcluye',{ enumerable:true, get:()=>true,
+  set:v=>{ console.warn('game.luzOcluye ya no hace nada: la luz de lo que se mueve es luz de bloque y siempre respeta los sólidos (BUG-GLOW8). Para medir fps con y sin, game.luzDinamica.');
+    toast('game.luzOcluye ya no existe → game.luzDinamica'); return true; } });
+// BUG-GLOW8 · game.luzDinamica = ¿se siembra la caja de luz de lo que SE MUEVE (pieza en la mano, montada en un
+// agente, partículas)? Es el interruptor para medir fps con y sin, que es lo único que el otro ya no puede dar.
+// false = lo que se mueve no alumbra (lo quieto sigue igual). No re-siembra ni re-malla el mundo: el frame
+// siguiente ya va sin ella. Persiste en vf_mcLuzDinamica.
+try{ const ld=localStorage.getItem('vf_mcLuzDinamica'); if(ld!==null) mc.luzDinamica = ld==='1'; }catch(e){}
+Object.defineProperty(game,'luzDinamica',{ enumerable:true, get:()=>mc.luzDinamica!==false,
+  set:v=>{ v=!!v; mc.luzDinamica=v; try{localStorage.setItem('vf_mcLuzDinamica', v?'1':'0');}catch(e){}
+    mcDynApaga(); if(mc.grid) mcDynSync();
+    toast(v?'Lo que se mueve vuelve a alumbrar':'Lo que se mueve deja de alumbrar (para medir fps)'); return v; } });
+// BUG-GLOW8b · game.luzSuave = ¿el campo de lo que se mueve se muestrea en la posición FINA del emisor (true) o
+// en el centro de su celda (false)? El campo es el mismo en los dos casos —una sola ley, celda a celda—; lo que
+// cambia es dónde se lee. Con true la luz se DESLIZA con la mano; con false salta de bloque en bloque, que es lo
+// que el dueño vio («va a saltos, estaría genial que fuese más continua»). Gratis: son dos uniformes, no re-siembra
+// nada. Persiste en vf_mcLuzSuave.
+try{ const ls=localStorage.getItem('vf_mcLuzSuave'); if(ls!==null) mc.luzSuave = ls==='1'; }catch(e){}
+// BUG-GLOW8b · game.luzDiag() = la misma radiografía que se guarda en la ficha de cada foto, a mano y en el momento.
+// Útil para ver en vivo qué cambia al GIRAR sin soltar el ratón: game.luzDiag().semillas.reparto y .off.
+game.luzDiag = ()=>mcLuzDiag();
+Object.defineProperty(game,'luzSuave',{ enumerable:true, get:()=>mc.luzSuave!==false,
+  set:v=>{ v=!!v; mc.luzSuave=v; try{localStorage.setItem('vf_mcLuzSuave', v?'1':'0');}catch(e){}
+    mc._dynSig=null; if(mc.grid) mcDynSync();
+    toast(v?'La luz de lo que se mueve se desliza':'La luz de lo que se mueve salta por celdas'); return v; } });
+// BUG-GLOW8 · game.luzDinCeldas = presupuesto en CELDAS de esa caja. Lo único que impide que un cielo de estrellas
+// con alcance 40 (REQ-GLOW5) pida sembrar el mundo entero cada vez que se mueve. Al pasarse se dejan fuera las
+// luces MÁS LEJANAS al ojo. Subirlo alumbra más lejos y cuesta más BFS; bajarlo, al revés.
+Object.defineProperty(game,'luzDinCeldas',{ enumerable:true, get:()=>mc.luzDinCeldas!=null?mc.luzDinCeldas:MC_DYN_CELDAS,
+  set:v=>{ v=Math.max(1000, isFinite(+v)?(+v|0):MC_DYN_CELDAS); mc.luzDinCeldas=v;
+    mc._dynSig=null; if(mc.grid) mcDynSync(); return v; } });
 // REQ-SHADOW3 · los dos mandos de la SOMBRA PROYECTADA que faltaban. Ninguno re-malla ni re-siembra nada: los dos son
 // uniformes que el frame siguiente ya usa. Ojo a la confusión de siempre (docs/luz-y-sombra.md): esto es la sombra
 // del sol en el mapa de sombra de la GPU, NO la skylight horneada en el vértice (ésa es game.interiorDark).
@@ -20329,6 +20998,9 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     if(i<mc.hotbar.length){ if(e.altKey) mcOpenPicker(i); else { mc.sel=i; mcSelectSlot(); if(!mcPasteMaterial(i)) mcSelectFill(i); } }
     e.preventDefault(); return; }
   const k=e.key.toLowerCase();
+  // REQ-SEL1 · cualquier Ctrl+<tecla> reclama ese Ctrl (Ctrl+C/X/V/S…): al soltarlo NO fija el agarre del
+  // giro, que es un gesto de Ctrl a secas + ratón. Va aquí arriba porque cada atajo se va por su `return`.
+  if((e.ctrlKey||e.metaKey) && e.key!=='Control' && e.key!=='Meta' && mc.selCtrlHeld) mc.selCtrlUsado = true;
   if((e.ctrlKey||e.metaKey) && k==='c'){ mcCopySelection(); e.preventDefault(); return; }   // Ctrl+C: copia la selección (tool=select) al portapapeles compatible con el editor
   if((e.ctrlKey||e.metaKey) && k==='x'){ mcCutSelection(); e.preventDefault(); return; }    // Ctrl+X: corta la selección al portapapeles y limpia los bloques del mapa
   if((e.ctrlKey||e.metaKey) && k==='v'){ mcPasteWorld(); e.preventDefault(); return; }        // Ctrl+V: pega el portapapeles EN EL MAPA, apoyado en la cara apuntada (el Mundo no se cierra)
@@ -20410,7 +21082,13 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     // se vuelve a aplicar el relleno con la postura nueva. Si no, el aviso de giro sale y no cambia nada.
     if(mc.tool==='select' && mc.selBox && mc.slotStruct[mc.sel]) listo.then(()=>mcSelectFill(mc.sel));
     e.preventDefault(); return; }
-  if(k==='r' && mc.tool==='select' && mc.selBox){ mcRotateSelBox(); e.preventDefault(); return; }              // gira 90° (horizontal) los bloques de la caja seleccionada — p.ej. tras Ctrl+V pegar
+  // Gira 90° los bloques de la selección — p.ej. tras Ctrl+V pegar. Tres ejes, que encadenados llegan a las
+  // 24 posturas (REQ-SEL1): R en planta, Shift+R de vuelco, Alt+R de lado. Ojo, esto va DESPUÉS del bloque
+  // de arriba a propósito: con una ranura de estructura armada, R sigue siendo el fantasma, no esto.
+  if((k==='r' || e.code==='KeyR') && mc.tool==='select' && mc.selBox){   // con Alt, `e.key` puede no ser 'r' según el teclado
+    mcRotateSelBox(e.altKey ? 'z' : e.shiftKey ? 'x' : 'y');
+    e.preventDefault(); return;
+  }
   // S SOLO mientras se MANTIENE el clic derecho colocando una estructura: alterna pegado canto↔centrado (la
   // vista-previa se re-malla sola). Fuera de ese gesto, S sigue siendo andar hacia atrás (no lo tocamos). !e.repeat
   // evita que mantener S pulsado parpadee entre modos.
@@ -20450,6 +21128,15 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     mc._pasteCache = null;
     toast('Ajustando agarre: apunta al bloque del pegado · Suelta Control para fijar');
   }
+  // REQ-SEL1 · Y lo mismo en Seleccionar: con la caja ya hecha, Ctrl + apuntar elige el AGARRE, el bloque
+  // sobre el que pivota el giro (R / ⇧R / ⌥R). Aquí Ctrl es tecla MUY ocupada —extruye con la rueda y
+  // lleva los Ctrl+C/X/V/S—, así que el agarre solo se fija si al soltarlo no se usó nada de eso:
+  // `selCtrlUsado` lo marca quien atienda el atajo, y el gesto del agarre queda en «Ctrl a secas + ratón».
+  if(e.key==='Control' && !e.repeat && mc.tool==='select' && mc.selCajas.length && !mc.selCtrlHeld){
+    mc.selCtrlHeld = true; mc.selCtrlUsado = false;
+    mc.selPivoteHover = mcSelPivoteApuntado();
+    toast('Agarre del giro: apunta un bloque de la selección · Suelta Control para fijar');
+  }
   if(MC_KEYS.includes(k)){
     mc.keys[k]=true; if(k!=='shift') e.preventDefault();
     // Si el ratón no está capturado, moverse con WASD/salto lo captura (como un clic) — keydown es gesto de usuario.
@@ -20481,6 +21168,19 @@ window.addEventListener('keyup',e=>{
     mc._pasteCache = null;
     const [ax, ay, az] = mc.pasteAnchor || [0, 0, 0];
     toast('Agarre del pegado fijado en [' + ax + ', ' + ay + ', ' + az + ']');
+  }
+  if(e.key==='Control' && mc.selCtrlHeld){
+    mc.selCtrlHeld = false;
+    const hover = mc.selPivoteHover;
+    mc.selPivoteHover = null;
+    if(mc.selCtrlUsado) return;                  // ese Ctrl era un atajo (rueda, Ctrl+C/X…): el agarre no se toca
+    if(hover){
+      mc.selPivote = hover.slice();
+      toast('Agarre del giro fijado en [' + hover[0] + ', ' + hover[1] + ', ' + hover[2] + ']');
+    } else if(mc.selPivote){                     // Ctrl a secas apuntando fuera = soltar el agarre
+      mc.selPivote = null;
+      toast('Agarre suelto: el giro vuelve a la esquina de la caja');
+    }
   }
 });
 
@@ -21247,10 +21947,14 @@ $('#mc-canvas').addEventListener('contextmenu',e=>{ if(mc.active) e.preventDefau
 // sin esto un gesto suave recorrería la escalera entera de golpe.
 $('#mc-canvas').addEventListener('wheel',e=>{
   if(!mc.active || document.pointerLockElement!==mc.canvas) return;
-  // REQ-EXTRU1 · con SHIFT, la herramienta Seleccionar y una caja confirmada, la misma rueda extruye/cava
-  // (mcSelExtruir). Se mira ANTES que la rosca y sin consultar `mc.ruedaTool`: es otro gesto (lleva Shift)
+  // REQ-EXTRU1 · con CTRL, la herramienta Seleccionar y una caja confirmada, la misma rueda extruye/cava
+  // (mcSelExtruir). Se mira ANTES que la rosca y sin consultar `mc.ruedaTool`: es otro gesto (lleva Ctrl)
   // y quien haya apagado la rosca sigue queriendo extruir.
-  const extru = e.shiftKey && mc.tool==='select' && !!mc.selBox;
+  // Era Shift+rueda hasta el 2026-08-20, cuando el dueño lo pidió en Ctrl (Shift se le quedó para añadir
+  // cajas a la selección, REQ-SEL1). Ojo: Ctrl+rueda es el ZOOM del navegador, así que se le corta el
+  // paso a cualquier Ctrl+rueda dentro del Mundo aunque no toque extruir — el mapa se iría de escala.
+  const extru = e.ctrlKey && mc.tool==='select' && !!mc.selBox;
+  if(e.ctrlKey){ e.preventDefault(); if(mc.selCtrlHeld) mc.selCtrlUsado = true; }   // este Ctrl ya tiene dueño: al soltarlo no fija agarre
   if(!extru && !mc.ruedaTool) return;
   e.preventDefault();
   // El acumulador es el mismo para los dos gestos, pero se vacía al cambiar de gesto: media muesca de

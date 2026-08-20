@@ -19,6 +19,9 @@ AGENTS = os.path.join(BASE, 'data', 'agentes')             # agentes articulados
 FOTOS = os.path.join(BASE, 'data', 'fotos')                # fotos del Mundo (tecla F): <n>_<mapa>_<fecha>.png + .json con la ficha
 FOTOS_MINI = os.path.join(FOTOS, 'mini')                   # la MISMA foto a 800 px de ancho, que es la que puede abrir un asistente:
                                                            # la de tamaño completo está vetada en .claude/settings.json (tokens)
+FOTOS_INF = os.path.join(FOTOS, 'informes')                # REQ-INF1 · el ESTUDIO de cada foto: data/fotos/informes/<id>/<nombre>.json.
+                                                           # La ficha solo lleva el índice; el detalle vive aquí para no hincharla.
+RE_INFORME = re.compile(r'^[a-z0-9][a-z0-9-]{0,47}$')      # el nombre acaba siendo una RUTA: ni '..', ni '/', ni sorpresas
 VIDEOS = os.path.join(BASE, 'data', 'videos')              # vídeos del Mundo (Alt+V): <n>_<mapa>_<fecha>.mp4/.webm + .json
 UI = os.path.join(BASE, 'data', 'ui')                      # iconos de la aplicación horneados desde /images (favicon, marca, herramientas)
 UIFILE = os.path.join(UI, 'ranuras.json')                  # la ASIGNACIÓN (ranura → dibujo@postura, modo, aa): la fuente de verdad de los .png
@@ -794,9 +797,26 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     os.makedirs(FOTOS_MINI, exist_ok=True)
                     with open(os.path.join(FOTOS_MINI, idd + '.png'), 'wb') as f:
                         f.write(chico)
+            # REQ-INF1 · los INFORMES van a ficheros hermanos, no dentro de la ficha: un barrido de luz ocupa
+            # más que todo lo demás junto y la ficha tiene que seguir siendo legible de un vistazo. La ficha se
+            # queda con el índice que mandó el navegador y aquí solo se le añade DÓNDE está cada cuerpo.
+            informes = d.get('informes') if isinstance(d.get('informes'), dict) else {}
+            if informes:
+                idx = ficha.get('informes') if isinstance(ficha.get('informes'), dict) else {}
+                dst = os.path.join(FOTOS_INF, idd)
+                os.makedirs(dst, exist_ok=True)
+                for nom, cuerpo in informes.items():
+                    if not RE_INFORME.match(str(nom)):
+                        continue
+                    atomic_dump(cuerpo, os.path.join(dst, nom + '.json'))
+                    e = idx.get(nom)
+                    if not isinstance(e, dict):
+                        e = idx[nom] = {}
+                    e['fichero'] = 'data/fotos/informes/%s/%s.json' % (idd, nom)
+                ficha['informes'] = idx
             atomic_dump(ficha, os.path.join(FOTOS, idd + '.json'))
             return self._send(200, {'ok': True, 'id': idd, 'url': '/data/fotos/' + idd + '.png',
-                                    'bytes': len(crudo)})
+                                    'bytes': len(crudo), 'informes': sorted(informes.keys())})
         if ruta_post == '/api/videos':                            # Alt+V en el Mundo: guarda el clip de vídeo + su ficha
             if int(self.headers.get('Content-Length', 0) or 0) > VIDEO_MAX_BYTES:
                 return self._send(413, {'error': 'el vídeo pesa demasiado'})

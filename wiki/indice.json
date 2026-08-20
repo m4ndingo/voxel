@@ -20,7 +20,8 @@
     {
       "titulo": "Aspecto del mundo",
       "paginas": [
-        { "id": "iluminacion", "titulo": "Iluminación y ambiente" }
+        { "id": "ley-de-la-luz", "titulo": "La Ley de la Luz" },
+        { "id": "iluminacion",   "titulo": "Iluminación y ambiente" }
       ]
     },
     {
