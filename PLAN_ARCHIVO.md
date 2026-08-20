@@ -32,6 +32,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[REQ-EXTRU1](#-req-extru1)~~ | ~~**extrusión con la herramienta de selección**: seleccionar y con Shift+rueda subir (extruir) o bajar (cavar)~~ | ✅ resuelto 2026-08-20 | `mcSelExtruir(±1)` colgado del manejador de rueda de REQ-TOOL6. Va **por columnas `(x,z)`**, no por capas: la extrusión sigue la **silueta** del terreno. La caja se estira una celda por el lado del que se tira, así que la muesca siguiente sigue subiendo/cavando sola. Arriba y abajo **no son inversos** (deshacer es `z`: un gesto `'bb'` por muesca). Con Shift no pisa la rosca y funciona aunque `mc.ruedaTool` esté apagado. `tests/test_extru1_seleccion.js` |
 | ~~[BUG-RS27](#-bug-rs27)~~ | ~~los **botones y palancas de redstone se conmutan también con el botón derecho**, y debería ser solo con el central~~ | ✅ resuelto 2026-08-20 | fuera la envoltura de `mcUseRight` en `redstone/redstone-piezas.js`: el derecho **construye y punto**, accionar es del central. Se **desenvuelve en caliente** (`mcUseRight._orig`) en vez de borrar el código y ya, para que una pestaña con la versión vieja cargada se cure sola. `tests/test_bug_rs27_boton_derecho.js` (con tramo anti-falso-verde). ⚠️ **no llega al mundo vivo hasta republicar**: `node redstone/make_snippets.js` |
 | ~~[REQ-CART6](#-req-cart6)~~ | ~~el **panel de la nota es demasiado alto**: no se llena nunca de texto, bajarlo al 70 %~~ | ✅ resuelto 2026-08-20 | 10 → 7 líneas de cuerpo y tope 46vh → 32vh, en `web/style.css`. El alto se **deriva de la letra** (`--note-fs` × 1.8 × 7), así que subirle el tamaño al texto no vuelve a descuadrar la caja. `test_notas_panel.js` en verde con dos comprobaciones nuevas (caben los 280 del `maxlength`, y no se come la pantalla) |
 | ~~[REQ-GLOW7](#-req-glow7)~~ | ~~los **topes de los mandos de luz** se quedan cortos: `interiorDark` no pasa de 1, `glowFocus` tampoco, y un punto emisivo alumbra demasiado de noche~~ | ✅ resuelto 2026-08-20 | `game.interiorDark` llega a **4** (`MC_INTERIOR_DARK_MAX`) y pasar de 1 **sobreexpone** la penumbra: es un revelado para ver qué alumbra. La trampa era otra: el «apagado» se probaba con `>=1`, así que con 2 puesto el mundo se quedaba **sin `mc.light` calculado** y no se veía nada ⇒ ahora es el **1 EXACTO**. `game.flowFocus` (que no existe) avisa y reenvía a `glowFocus`. `tests/test_glow7_topes_luz.js` |
@@ -180,6 +181,49 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 ---
 
+
+
+<a id="-req-extru1"></a>
+
+### ✅ REQ-EXTRU1 · Extrusión con la herramienta de selección — ✅ resuelto 2026-08-20
+
+Nota `56,14,71` de **`/map/bugfinder`**: «*me gustaria hacer una extrusion con la herramienta de
+seleccion, podria ser seleccionar, y una vez seleccionado, usar shift+wheel up o down, para estruir
+hacia arriba o hacia abajo (hacia abajo cavaria)*🙌».
+
+Sin investigar. Contexto: la varita de selección ya corta, pega, cambia de material y rota estructuras
+finas (él mismo lo da por bueno en la nota `56,15,65`), así que esto se suma a lo que hay. La rueda con
+Shift está libre en el Mundo, pero **comprobarlo**, que la rueda cambia de ranura.
+
+⚠️ Todo lo que escriba voxels va **por gesto** (`beginGesture`/`endGesture` o `edit(fn)`): una extrusión
+de 5 pasos con la rueda son 5 gestos deshacibles, no 5 000 voxels sueltos en el historial.
+
+**Criterio de cierre:** seleccionar una caja, Shift+rueda arriba la extruye una capa por muesca, abajo
+la excava, y `z` deshace muesca a muesca.
+
+**Lo hecho (2026-08-20)** — `mcSelExtruir(±1)` en `web/app.js`, colgado del manejador de rueda que ya
+tenía la rosca de herramientas (REQ-TOOL6). Detalle en
+[`docs/rejilla-y-estructuras.md`](docs/rejilla-y-estructuras.md), guardián
+`tests/test_extru1_seleccion.js` (27 comprobaciones, verde). Lo que costó decidir:
+
+- **Va por columnas `(x,z)`, no por capas.** Cada columna crece desde **su** techo (o se cava desde su
+  suelo), así que sobre terreno desigual la extrusión sigue la **silueta** en vez de dejar una plancha
+  plana flotando sobre los valles. El material que se copia es el id de ese mismo bloque.
+- **La caja se estira una celda por el lado del que se tira**, y ahí está la gracia: la muesca siguiente
+  ya ve lo recién puesto (o el terreno que acaba de entrar en la caja) y sigue subiendo/cavando sin
+  volver a marcar esquinas. Sin eso el gesto solo servía una vez.
+- **La rueda abajo NO deshace la de arriba**: cava, como él pidió. Deshacer es `z` — cada muesca es
+  **un** gesto `'bb'`, comprobado en el tramo C del test.
+- La sospecha de la nota («*la rueda con Shift está libre, pero comprobarlo*») era fundada a medias: la
+  rueda **sola** ya movía la rosca de herramientas. Con Shift no pisa nada, y el gesto se mira **antes**
+  que la rosca y **sin** consultar `mc.ruedaTool` — quien haya apagado la rosca sigue queriendo extruir.
+  El acumulador de muescas se vacía al cambiar de gesto o media rosca acabaría extruyendo.
+- Se escribe con `mcSetBlock` y no con `mc.grid[i]=`: cambia la **topología**, y es `mcSetBlock` quien
+  mueve `mc.gridGen`, que es lo que hace que `mcRemeshAround` re-ilumine en vez de saltárselo (PERF-RS1).
+
+---
+
+---
 
 
 <a id="-req-glow7"></a>

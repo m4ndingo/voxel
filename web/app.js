@@ -15006,7 +15006,7 @@ function mcSelectClick(){                                    // izq en modo Sele
   const c=hit.cell; if(c[1]<0 || !mcSolid(c[0],c[1],c[2])) return;   // apunta a un bloque sólido real (no al suelo infinito)
   if(!mc.selA){ mc.selA=c.slice(); mc.selBox=null; toast('Esquina A fijada — apunta a la opuesta y clic'); }
   else { mc.selBox={a:mc.selA.slice(), b:c.slice()}; mc.selA=null;
-         const n=mcSelCount(); toast(n ? n+' bloque(s) — Ctrl+C para copiar' : 'Caja vacía (sin bloques)'); }
+         const n=mcSelCount(); toast(n ? n+' bloque(s) — Ctrl+C copia · Shift+rueda extruye/cava' : 'Caja vacía (sin bloques)'); }
 }
 function mcSelectClear(){ if(mc.selA||mc.selBox){ mc.selA=null; mc.selBox=null; toast('Selección limpiada'); } }
 // Clic DERECHO con una caja ya confirmada: en vez de limpiar, pilla el material de lo que se esté
@@ -15104,6 +15104,51 @@ function mcSelForEach(fn){
   }
 }
 function mcSelCount(){ let n=0; mcSelForEach(()=>n++); return n; }
+// REQ-EXTRU1 · Shift+rueda con una caja confirmada: la selección SUBE construyendo o BAJA cavando
+// (nota del dueño en /map/bugfinder, 56,14,71: «*seleccionar, y una vez seleccionado, usar shift+wheel
+// up o down, para estruir hacia arriba o hacia abajo (hacia abajo cavaria)*»).
+// Trabaja por COLUMNAS (x,z), no por capas: hacia arriba copia el bloque más ALTO de cada columna una
+// celda por encima, así una selección sobre terreno desigual sube siguiendo su propia silueta en vez de
+// dejar una plancha plana; hacia abajo borra el bloque más BAJO de cada columna.
+// La caja se estira una celda por el lado del que se tira, y ahí está la gracia: la muesca siguiente ya
+// ve lo recién puesto (o el terreno que acaba de quedar dentro) y se sigue subiendo/cavando sin volver a
+// marcar esquinas.
+// ⚠️ Los dos sentidos NO son inversos: la rueda abajo no deshace la de arriba (eso es Ctrl+Z) — cava en
+// lo que haya debajo, que es lo que pidió el dueño.
+function mcSelExtruir(dir){
+  if(mc.tool!=='select' || !mc.selBox || !dir) return false;
+  const arriba = dir>0;
+  // Una sola pasada por la caja (la misma que cuenta y copia), quedándose con el extremo de cada columna.
+  const col=new Map();
+  mcSelForEach((x,y,z,id)=>{
+    const k=x+','+z, v=col.get(k);
+    if(!v || (arriba ? y>v.y : y<v.y)) col.set(k,{x,y,z,id});
+  });
+  if(!col.size){ toast('La caja no tiene bloques: nada que '+(arriba?'extruir':'cavar')); return false; }
+  const edits=[];
+  for(const c of col.values()){
+    if(arriba){
+      const y=c.y+1;
+      if(!mcInside(c.x,y,c.z)) continue;                  // techo del mundo
+      const before=mc.grid[mcIdx(c.x,y,c.z)];
+      if(before) continue;                                // ya hay algo ahí: extruir no pisa lo que hay
+      mcSetBlock(c.x,y,c.z,c.id);                         // mcSetBlock y no mc.grid[..]=: es un cambio de
+      edits.push({x:c.x,y,z:c.z,before,after:c.id});      // TOPOLOGÍA y tiene que re-iluminar (mc.gridGen)
+    } else {
+      mcSetBlock(c.x,c.y,c.z,0);
+      edits.push({x:c.x,y:c.y,z:c.z,before:c.id,after:0});
+    }
+  }
+  // La caja se mueve aunque alguna columna no haya podido escribir (tope del mundo, celda ocupada): lo que
+  // el marco cian enseña es DÓNDE va la siguiente muesca, no cuántos bloques salieron.
+  const y0=Math.min(mc.selBox.a[1],mc.selBox.b[1]), y1=Math.max(mc.selBox.a[1],mc.selBox.b[1]);
+  if(arriba){ const ny=Math.min(mc.dim.y-1, y1+1); if(mc.selBox.a[1]>=mc.selBox.b[1]) mc.selBox.a[1]=ny; else mc.selBox.b[1]=ny; }
+  else      { const ny=Math.max(0, y0-1);          if(mc.selBox.a[1]<=mc.selBox.b[1]) mc.selBox.a[1]=ny; else mc.selBox.b[1]=ny; }
+  if(!edits.length){ toast(arriba?'No cabe nada más arriba':'Nada que cavar'); return false; }
+  mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
+  toast((arriba?'Extruido':'Cavado')+' — '+edits.length+' bloque(s)');
+  return true;
+}
 // Ctrl+C: vuelca la caja seleccionada a `clipboard` (portapapeles global del editor). Cada bloque de mundo se
 // convierte en un voxel `tex:`+clave, y se REMAPEAN los ejes al convenio del editor (importa igual que estampar,
 // a la inversa): mundo-X→editor-X, mundo-Z(profundidad)→editor-Y, mundo-Y(altura)→editor-Z(capa). Así la pieza
@@ -20758,14 +20803,22 @@ $('#mc-canvas').addEventListener('contextmenu',e=>{ if(mc.active) e.preventDefau
 // pasar un umbral: un ratón manda ~100 por muesca, pero un trackpad manda una lluvia de deltas pequeños y
 // sin esto un gesto suave recorrería la escalera entera de golpe.
 $('#mc-canvas').addEventListener('wheel',e=>{
-  if(!mc.active || document.pointerLockElement!==mc.canvas || !mc.ruedaTool) return;
+  if(!mc.active || document.pointerLockElement!==mc.canvas) return;
+  // REQ-EXTRU1 · con SHIFT, la herramienta Seleccionar y una caja confirmada, la misma rueda extruye/cava
+  // (mcSelExtruir). Se mira ANTES que la rosca y sin consultar `mc.ruedaTool`: es otro gesto (lleva Shift)
+  // y quien haya apagado la rosca sigue queriendo extruir.
+  const extru = e.shiftKey && mc.tool==='select' && !!mc.selBox;
+  if(!extru && !mc.ruedaTool) return;
   e.preventDefault();
+  // El acumulador es el mismo para los dos gestos, pero se vacía al cambiar de gesto: media muesca de
+  // rosca a medias no puede acabar extruyendo (ni al revés).
+  if(mc._ruedaExtru !== extru){ mc._ruedaExtru = extru; mc._ruedaAcum = 0; }
   mc._ruedaAcum = (mc._ruedaAcum || 0) + e.deltaY;
   const umbral = (isFinite(+mc.ruedaUmbral) && +mc.ruedaUmbral > 0) ? +mc.ruedaUmbral : 30;
   if(Math.abs(mc._ruedaAcum) < umbral) return;
   const paso = mc._ruedaAcum > 0 ? -1 : 1;   // deltaY > 0 = rosca hacia abajo = bajar en la escalera
   mc._ruedaAcum = 0;
-  mcRuedaHerramienta(paso);
+  if(extru) mcSelExtruir(paso); else mcRuedaHerramienta(paso);
 }, {passive:false});
 
 buildPalette();

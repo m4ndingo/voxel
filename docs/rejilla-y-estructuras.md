@@ -521,3 +521,36 @@ El patrón para atar una pieza a algo del motor es al revés de lo que parece: *
 en su `meta` y el motor lo derive del catálogo, como hace la ranura de herramienta
 (`meta.categoria:'herramienta'` + `meta.herramienta`, REQ-TOOL1). Escribir la tabla en el motor obliga a
 poner claves `hab:` a mano, que es exactamente lo que rompió BUG-RS23 y BUG-FLUID3.
+
+## Extruir y cavar con la selección (REQ-EXTRU1)
+
+*(2026-08-20, nota del dueño en `/map/bugfinder`, 56,14,71: «*me gustaria hacer una extrusion con la
+herramienta de seleccion, podria ser seleccionar, y una vez seleccionado, usar shift+wheel up o down,
+para estruir hacia arriba o hacia abajo (hacia abajo cavaria)*»)*
+
+Con la herramienta **Seleccionar** y una caja confirmada (`mc.selBox`), **Shift + rueda** llama a
+`mcSelExtruir(±1)`: arriba **construye**, abajo **cava**.
+
+Tres decisiones que no son obvias y que sujeta `tests/test_extru1_seleccion.js`:
+
+- **Por columnas, no por capas.** Para cada `(x,z)` se busca el bloque sólido más **alto** (extruir) o
+  más **bajo** (cavar) *de dentro de la caja*, y se escribe una celda más allá. Sobre terreno desigual
+  eso sube siguiendo la **silueta**; una capa plana sobre `y1` habría dejado una plancha flotando sobre
+  los valles. El material que se copia es el **id** de ese bloque, columna a columna.
+- **La caja se estira una celda por el lado del que se tira**, aunque alguna columna no haya podido
+  escribir (tope del mundo, celda ocupada — extruir **no pisa** lo que ya hay). Ahí está la gracia: la
+  muesca siguiente ya ve lo recién puesto, o el terreno que acaba de entrar en la caja, y se sigue
+  subiendo/cavando sin volver a marcar esquinas. Sin eso el gesto solo serviría una vez.
+- **Los dos sentidos no son inversos.** La rueda abajo no deshace la de arriba: cava en lo que haya
+  debajo (es lo que pidió el dueño). Lo que deshace es **Ctrl+Z**, y cada muesca es **un** gesto `'bb'`.
+
+Se escribe con **`mcSetBlock`**, no con `mc.grid[i]=`: aquí cambia la **topología** (aire↔sólido) y es
+`mcSetBlock` quien mueve `mc.gridGen`, que es lo que hace que `mcRemeshEdiciones` → `mcRemeshAround`
+re-ilumine la caja en vez de saltárselo (PERF-RS1). Rellenar de material (`mcSelectFillId`) sí puede
+escribir directo porque no cambia la topología.
+
+En el manejador de la rueda (`#mc-canvas`, junto a la rosca de herramientas de REQ-TOOL6) el gesto se
+mira **antes** que la rosca y **sin** consultar `mc.ruedaTool`: lleva Shift, así que es otro gesto, y
+quien haya apagado la rosca sigue queriendo extruir. El acumulador `mc._ruedaAcum` es el mismo para los
+dos, pero se **vacía al cambiar de gesto** (`mc._ruedaExtru`) o media muesca de rosca acabaría
+extruyendo.
