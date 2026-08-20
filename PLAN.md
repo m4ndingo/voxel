@@ -50,7 +50,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [BUG-CART1](#-bug-cart1) | **carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce | 🟡 arreglado 2026-08-20, **falta una pasada del dueño** | encontrado tirando de un guardián en rojo, no pedido. La causa (la marca `efimera` se ponía DESPUÉS del `await` de estampar) está arreglada y el motor se cura solo en caliente. Queda lo que ya está escrito en los ficheros: `python3 herramientas/carteles_fantasma.py` (en seco) y luego `--escribe`. **No lo puedo lanzar yo**: la caja de arena me deniega escribir en `data/worlds/` |
 | [REQ-RANURA1](#-req-ranura1) | **guardar la selección en una ranura** para volver a plantarla: ranura 11, tecla `K` | 🟡 abierto 2026-08-19 | nota de `/map/bugfinder`. Es una galería de recortes, no un portapapeles: pide varias guardadas y poder elegir. Roza [REQ-TOOL6/7](PLAN_ARCHIVO.md) (la rosca de ranuras) y el pegado de 24 posturas |
 | [REQ-MULTI1](#-req-multi1) | **multijugador colaborativo**: varios jugadores en el mismo mapa, viéndose entre sí (con el arma en la mano y su etiqueta de nombre) y con los cambios del mundo sincronizados | 🟢 abierto 2026-08-19 | pedido por el dueño el 2026-08-19 al hilo de «pisar el mundo»: si el mapa es de todos, **nadie pisa a nadie**. Es el ticket más grande del plan. **Acotado ya por él (2026-08-19)**: tope **10** jugadores de momento (idealmente sin tope), **internet y red local**, y se **juega Y se construye** a la vez. A favor: medio camino hecho sin querer — `POST /api/mundo/edits` ya manda **el delta**, no el mundo. En contra: hoy no hay proceso servidor con estado (stdlib, un `Handler` por petición), ni identidad, ni cuerpo de jugador dibujable. Construir a la vez obliga a que **el servidor sea el árbitro**, no el navegador |
-| [REQ-SPAWN1](#-req-spawn1) | **pensar el tema de los puntos de aparición** (spawn) | 🟢 abierto 2026-08-19 | nota del dueño en `/map/bugfinder`, tal cual: es un **encargo de pensar**, no un arreglo. Hoy hay un único `spawn` en la cabecera del mundo |
+| [REQ-SPAWN1](#-req-spawn1) | **pensar el tema de los puntos de aparición** (spawn) | 🟢 **propuesta escrita 2026-08-20**, esperando su visto bueno | nota del dueño en `/map/bugfinder`, tal cual: es un **encargo de pensar**, no un arreglo. Hoy hay un único `spawn` en la cabecera del mundo |
 
 ---
 
@@ -575,6 +575,51 @@ tickets que salgan. No se toca código hasta que la apruebe.
 
 Engancha con [REQ-MULTI1](#-req-multi1): con varios jugadores, «dónde aparece cada uno» deja de ser un
 punto y pasa a ser una regla.
+
+---
+
+#### 📝 Propuesta escrita (2026-08-20) — pendiente de su visto bueno
+
+**Lo que hay hoy, comprobado, no de oídas.** `mc.spawn` = `{x,y,z}`, un solo punto, en la cabecera del
+mundo. Lo escribe `mcNewWorld` (centro del mapa, sobre la hierba) y lo recoloca `mcResizeWorld` si el
+mundo encoge. Lo leen dos sitios: la carga del mundo (`mc.pos = spawn`) y `mcForceUnstick` (tecla `U`),
+que te teletransporta ahí si no consigue sacarte hacia arriba. Y ahí se acaba:
+
+- **no hay `game.spawn`** — ni para leerlo ni para moverlo. Ni desde un snippet ni desde la UI. Cambiar
+  dónde apareces hoy pasa por editar `mundo.json` a mano.
+- **no se valida**: si construyes encima del spawn, apareces dentro de la roca. Lo tapa `mcUnstick` por
+  casualidad, no por diseño.
+- **no hay muerte**: no existe vida ni morir, así que «reaparecer al morir» hoy **no tiene dónde
+  engancharse**. La espada y los esqueletos no matan al jugador.
+
+**Cuatro cosas distintas se llaman «spawn point»; van por separado y en este orden.**
+
+**A · Poder mover el punto (lo que falta de verdad, y es pequeño).** `game.spawn` como lectura y
+escritura, más un «aquí se aparece» desde el Mundo (⋯ del menú, o `Alt`+tecla) que lo fija donde estás
+mirando y guarda la cabecera. Con dos cautelas: pasar el sitio por el mismo buscador de hueco que ya usa
+el desatasco (aparecer dentro de una pared es el fallo que se va a dar), y guardar también **hacia dónde
+miras** — hoy apareces siempre con la misma orientación. **Recomendación: hacer esto ya, independiente
+de todo lo demás.** Ticket propio, chico.
+
+**B · Varios puntos con nombre.** `mc.spawns` = lista de `{nombre,x,y,z,mira}` en la cabecera, con el
+`spawn` de hoy como el primero de la lista (así los mundos viejos siguen valiendo). Sirve para dos cosas
+a la vez: elegir dónde entras, y **viaje rápido** entre sitios de un mapa grande — que es probablemente
+lo que más se va a usar. Se pega bien con la galería de recortes de [REQ-RANURA1](#-req-ranura1): misma
+idea de «cosas guardadas con nombre a las que se vuelve». **Recomendación: sí, pero después de A**, y
+preguntándole antes si lo quiere como *viaje rápido* (mi apuesta) o solo como *punto de entrada*.
+
+**C · Reaparecer donde moriste / cama.** **Recomendación: NO ahora.** No es un ticket de spawn, es un
+ticket de reglas de juego: primero hace falta vida, daño y morir. Si algún día se hace, el punto de
+reaparición es un dato del **jugador**, no del mundo, y no debe ir en `mundo.json`.
+
+**D · Con varios jugadores ([REQ-MULTI1](#-req-multi1)).** Ahí «dónde aparece cada uno» deja de ser un
+punto y pasa a ser una **regla del servidor**: o todos en el mismo sitio (se apilan y se empujan), o
+repartidos en un anillo alrededor, o cada uno **donde lo dejó** (mi apuesta: es lo que espera cualquiera
+que vuelve a un mundo). Eso es **estado por jugador en el servidor**, o sea que pertenece a REQ-MULTI1 y
+no a este ticket; lo único que hay que hacer aquí es no cerrarle la puerta — y A + B no se la cierran.
+
+**Tickets que saldrían si lo aprueba:** `REQ-SPAWN2` (A, chico), `REQ-SPAWN3` (B, mediano), y nada más:
+C y D son de otros dueños.
 
 ---
 
