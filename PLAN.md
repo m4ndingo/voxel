@@ -50,6 +50,19 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [BUG-CART1](#-bug-cart1) | **carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce | 🟡 arreglado 2026-08-20, **falta una pasada del dueño** | encontrado tirando de un guardián en rojo, no pedido. La causa (la marca `efimera` se ponía DESPUÉS del `await` de estampar) está arreglada y el motor se cura solo en caliente. Queda lo que ya está escrito en los ficheros: `python3 herramientas/carteles_fantasma.py` (en seco) y luego `--escribe`. **No lo puedo lanzar yo**: la caja de arena me deniega escribir en `data/worlds/` |
 | [REQ-MULTI1](#-req-multi1) | **multijugador colaborativo**: varios jugadores en el mismo mapa, viéndose entre sí (con el arma en la mano y su etiqueta de nombre) y con los cambios del mundo sincronizados | 🟢 abierto 2026-08-19 | pedido por el dueño el 2026-08-19 al hilo de «pisar el mundo»: si el mapa es de todos, **nadie pisa a nadie**. Es el ticket más grande del plan. **Acotado ya por él (2026-08-19)**: tope **10** jugadores de momento (idealmente sin tope), **internet y red local**, y se **juega Y se construye** a la vez. A favor: medio camino hecho sin querer — `POST /api/mundo/edits` ya manda **el delta**, no el mundo. En contra: hoy no hay proceso servidor con estado (stdlib, un `Handler` por petición), ni identidad, ni cuerpo de jugador dibujable. Construir a la vez obliga a que **el servidor sea el árbitro**, no el navegador |
 | [REQ-SPAWN1](#-req-spawn1) | **pensar el tema de los puntos de aparición** (spawn) | 🟢 **propuesta escrita 2026-08-20**, esperando su visto bueno | nota del dueño en `/map/bugfinder`, tal cual: es un **encargo de pensar**, no un arreglo. Hoy hay un único `spawn` en la cabecera del mundo |
+| [BUG-VID1](#-bug-vid1) | un clip de vídeo **muy corto se guarda con 0 bytes** y el servidor lo acepta tan tranquilo | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. **Reproducido en disco**: `data/videos/0001…mp4` y `0002…mp4` pesan 0 B, con `"duracion": 0.05` en su ficha. Dos fallos, uno cada lado: `start(100)` no llega a soltar un solo trozo en 50 ms, y el `POST /api/videos` mira que el base64 no esté vacío **antes** de quitarle el prefijo `data:` ⇒ una carga vacía se cuela | 
+| [BUG-RANURA2](#-bug-ranura2) | con un recorte de `K` cargado, pulsar **1-9 repinta el recorte** en vez de elegir bloque para construir | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`, estrena [REQ-RANURA1](PLAN_ARCHIVO.md#-req-ranura1) (commit `dcfabf7`, de anteanoche). **Localizado**: `mcPasteMaterial` (`app.js:16003`) dispara con solo `mc.pasteActive`, sin mirar qué herramienta hay en la mano. El repintado se escribió a propósito para el Ctrl+V; lo que falta es acotarlo | 
+| [BUG-GLOW9](#-bug-glow9) | las **estrellas del cielo no parecen autoiluminadas** (puntitos oscuros y cúbicos) y la **niebla no las tapa** | 🔴 abierto 2026-08-20 | **dos** notas de `/map/bugfinder2` sobre lo mismo. Lo de la niebla está escrito a propósito en `mcDrawVoxUI` (`app.js:14026`: `uFogNear = far*8`, `aEmit=1`) ⇒ es una **decisión que él quiere revisar**, no un descuido. Lo de «se nota que son voxels» es otra cosa y falta medirlo. Vecino de [REQ-GLOW5](#-req-glow5) | 
+| [REQ-GLOW10](#-req-glow10) | el brillo de los **emisivos debe adaptarse a la luz ambiente**: de noche brillan, de día no hace falta tanto | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Pide **dos tunables**: la adaptación y el brillo máximo. Redactado, sin investigar. Se apoya en lo que salga de [BUG-GLOW8](#-bug-glow8) — conviene no tocarlo antes | 
+| [BUG-SEL5](#-bug-sel5) | en selección, **Ctrl+Z revierte los bloques pero deja los corchetes** donde estaban | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. La caja de selección no entra en el gesto del historial. Redactado, sin investigar | 
+| [BUG-SEL3](#-bug-sel3) | al **rotar una selección**, las piezas finas u orientadas no giran con ella (la puerta se sale de su marco) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`, con su ejemplo: marco de bloques bien, puerta no. Es el giro **local** de cada pieza, no el de la caja. Ojo: las 24 posturas van **en la clave** (`mcOriNorm`/`mcOriParts`), ⛔ nada de `(rot\|0)&15` | 
+| [REQ-SEL4](#-req-sel4) | con selección, **`r` debe girar en horizontal y `R` en profundidad** (4×4 posturas) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «así se puede con `r` abrir una ventana de bloques, o con `R` levantar una cornisa». Hermano de [BUG-SEL3](#-bug-sel3): el mismo giro, visto desde el mando | 
+| [REQ-SEL6](#-req-sel6) | **ver el pivote de la selección** sin tener que pulsar Ctrl (al pulsarlo ya cambia al apuntado) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «hay que conocerlo antes». Redactado, sin investigar | 
+| [REQ-SEL2](#-req-sel2) | copiar/pegar debería llevarse el **redstone pegado a la cara** de los bloques copiados | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «son difíciles de seleccionar». Toca la frontera `mc.grid` ↔ `mc.structures`, la misma que [BUG-RS10](#-bug-rs10) | 
+| [REQ-TOOL9](#-req-tool9) | poder **elegir qué herramientas entran con `e` y cuáles con `E`** desde el editor (primarias / secundarias) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «cambiar el orden de las herramientas empieza a ser algo habitual». Redactado, sin investigar | 
+| [REQ-CART7](#-req-cart7) | poder **elegir el tipo de cartel** de una nota desde su editor, con los carteles definidos en un sitio | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Él mismo propone la puerta: categoría **«Cartel de Notas»** en la galería. Encaja con que los carteles ya **se derivan** de `mc.notes` y no viven en `mundo.json` ([BUG-CART1](#-bug-cart1)) | 
+| [REQ-FX1](#-req-fx1) | **temblor de cámara al caer** desde 15 bloques o más, con altura/amplitud/duración ajustables | 🟢 abierto 2026-08-20 | nota de `/map/bugfinder2`. El sitio natural es el aterrizaje que ya detecta `mcCaidaPaso`. Redactado, sin investigar | 
+| [BUG-GLOW8](#-bug-glow8) | la luz de un emisivo **en la mano** es un **círculo pintado encima**, no la luz del mundo: halo redondo donde el mundo hace rombos, se apaga entera al meter la pieza en un bloque, y no lleva el color del voxel | 🔴 abierto 2026-08-20 | el dueño, tras [BUG-GLOW6](PLAN_ARCHIVO.md#-bug-glow6): «*la iluminación debe ser real y consistente para todo el motor, no puede haber apaños o trucos para quedar bien*». **Investigado y medido**: la causa es que hay **dos modelos de luz** (BFS por el aire vs punto analítico en el shader) y el arreglo es dejar **uno**. Propuesta escrita, esperando su visto bueno |
 
 ---
 
@@ -600,6 +613,99 @@ C y D son de otros dueños.
 
 ---
 
+<a id="-bug-glow8"></a>
+
+### 🔴 BUG-GLOW8 · La luz de un emisivo en la mano es un parche, no la luz del mundo — 🔴 abierto 2026-08-20
+
+**De dónde sale.** Del dueño, 2026-08-20, mirando el arreglo de [BUG-GLOW6](PLAN_ARCHIVO.md#-bug-glow6)
+con **dos voxeles del mango de la varita de selección puestos a emisivos por él mismo**
+(`data/habitantes/varita-de-selecci-n.json`, `13,2,2` y `13,3,2` → `*#8a5a3b`, guardado a las 09:50; las
+capturas son de las 09:58). Palabras suyas, y son el criterio del ticket:
+
+> «*la corrección funciona a medias […] como iluminan los bloques del mundo de su derecha no es
+> realista, sale una especie de "círculo" que es imposible, la emisión de luz tiene que ser como la que
+> hacen los bloques/voxels del mundo y no un parche […] si la voy metiendo más, se va la luz, cuando en
+> realidad lo que ilumina está en el mango, no está dentro del bloque, se nota demasiado que es un
+> "truco visual" […] la iluminación debe de ser real y consistente para todo el motor, no puede haber
+> apaños o trucos para quedar bien*»
+
+Capturas y texto entero en [`data/tickets/BUG-GLOW8/`](data/tickets/BUG-GLOW8/contexto.md).
+
+**Diagnóstico (leído en el código y medido en el navegador, no de oídas).** No son tres fallos: es
+**uno**, y BUG-GLOW6 no lo tocó porque lo dio por bueno. **Hay dos modelos de luz artificial distintos y
+el dueño está viendo la costura entre ellos**:
+
+| | **luz horneada** (una antorcha plantada) | **luz dinámica** (lo que llevas en la mano) |
+|---|---|---|
+| dónde | `mcComputeBlockLight` → `mc.blockLight` → textura 3D → `blkLuz(w)` por fragmento | `mcDynSync` → `uDynPos[]` → `dynLuz(w)` por fragmento |
+| forma | **BFS por el aire**, 6 vecinos, −1 por paso ⇒ **rombo escalonado**, celda a celda | `rad = 1 − d·coste/nivel` con `d = distance()` ⇒ **esfera perfecta** |
+| materia | la para: no se propaga por sólido | no la ve: se sumaba a través de la pared (eso es lo que BUG-GLOW6 recortó **por fuera**) |
+| color | lleva el rgb del voxel emisivo (`s.emitCol`) | **no lo lleva**: `mcLitGlow` pinta un blanco cálido fijo `vec3(1.15,0.98,0.75)` |
+
+De ahí salen, una por una, las cuatro cosas que él ve:
+
+1. **El «círculo imposible».** Es literal: el halo dinámico es una **esfera euclídea** cortada por la
+   pared ⇒ un disco redondo y liso, mientras que a un palmo, la misma pared, iluminada por cualquier
+   antorcha del mundo, hace **rombos escalonados por celdas**. No es que esté mal calculado: es que es
+   **otra ley**. Ninguna cantidad de afinado lo va a hacer parecerse al mundo, porque no es la del mundo.
+2. **El segundo círculo, con borde duro.** `MC_DYN_CERCA = 0.6`: por debajo de esa distancia una cara
+   recibe luz **aunque le dé por detrás** (margen que BUG-GLOW6 metió para que la propia pieza en la
+   mano no se apagara). Cuando el emisivo cruza el plano de la pared, lo único que sigue iluminado es la
+   esfera de radio 0,6 recortada contra la cara ⇒ **un disco con borde de cuchillo**. Es el parche del
+   parche.
+3. **«Si la voy metiendo más, se va la luz».** `mcLuzLibre` juzga la luz **entera, sí o no**, y por la
+   línea que va **del emisivo al OJO**; su primera comprobación es la celda del propio emisivo
+   (comprobado en el navegador: emisor en celda sólida ⇒ `false`). En cuanto el voxel del mango entra en
+   la celda del bloque, **la luz se apaga del todo** — no se ocluye por un lado: desaparece. Y por eso
+   da igual dónde ponga los emisivos: no es «un fallo del mango», es que el modelo apaga la luz entera.
+4. **No tiñe.** Sus `*#8a5a3b` deberían dar luz parda; en la mano dan el mismo blanco cálido que
+   cualquier otra cosa. Plantado el mismo dibujo, tiñe. Es la misma costura.
+
+**Lo que propongo, y es lo que él pide: quitar el segundo modelo, no mejorarlo.** Que la luz de lo que
+llevas en la mano **sea luz de bloque**, la misma tabla, el mismo BFS, el mismo color, la misma textura
+3D — la pieza en la mano deja de tener luz «suya» y pasa a sembrar en el mundo como una antorcha. Con
+eso los cuatro puntos de arriba se caen solos, y `dynLuz`, `uDynPos`, `uDynDir`, `uDynCara`,
+`uDynCerca`, `mcLuzLibre` y `MC_DYN_CERCA` **se borran**: menos motor, no más.
+
+Lo que en su día lo impidió ([BUG-GLOW2](PLAN_ARCHIVO.md#-bug-glow2)) **ya no existe**: entonces mover
+la luz horneada obligaba a **re-mallar** el halo (la luz iba horneada en el vértice) y eso sí tiraba los
+fps. Desde [REQ-ENV4](PLAN_ARCHIVO.md#-req-env4) la luz de bloque se lee **por fragmento de una textura
+3D** (`blkLuz`): mover una luz es re-sembrar un array y subir una caja de téxeles. **Nada de mallas.**
+
+**Medido hoy en `/map/bugfinder` (96×40×96), no estimado:**
+
+| | coste |
+|---|---|
+| BFS completo del mundo (lo que ya se paga al poner un bloque) | **7,8 ms** |
+| BFS acotado a la caja de la luz (31³, alcance 15), buffers reusados | **1,09 ms** |
+| subir esa caja a la textura 3D (`texSubImage3D`, 119 KB) | **0,22 ms** |
+
+Y **solo hay que pagarlo cuando la luz cambia de celda**, no cada frame: andando son 2–4 veces por
+segundo ⇒ **≈0,05 ms/frame amortizado**. La pieza clave a escribir es una **re-siembra exacta en caja**
+para la luz de bloque, hermana de la que ya existe para el cielo (`mcRelightBox`): se recalcula la caja
+`[celda vieja, celda nueva] ± alcance`, sembrando el **borde** con lo que ya hay. Es exacta —la luz que
+se mueve no puede influir más allá de su alcance, o sea que el borde no está contaminado— y de regalo
+arregla que **plantar o romper una antorcha hoy relance el BFS del mundo entero** (7,8 ms).
+
+**El único punto que quiero que decida él, porque es de gusto y no de código:** hecho así, la luz que
+llevas en la mano **avanza a saltos de una celda** (rombo que salta un bloque al cruzar la frontera),
+igual que si fueras plantando y quitando una antorcha. Es exactamente «*como la que hacen los
+bloques/voxels del mundo*», que es lo que pide, pero es **menos suave** que el foco de hoy. Yo lo haría
+así (consistencia > suavidad, y él lo ha escrito con todas las letras). Si el salto le molesta, la
+salida **no** es volver al parche: es sembrar en las 8 celdas vecinas con peso por la posición
+fraccionaria, que quita el salto sin cambiar de modelo — más caro y lo dejaría para un segundo paso, con
+su ticket.
+
+**Criterio de cierre:** con los dos voxeles emisivos del mango, (a) el halo en la pared es **del mismo
+tipo** que el de una antorcha plantada al lado —rombos por celda, no un disco—, (b) meter la punta o la
+cabeza de la herramienta dentro de un bloque **no apaga la luz**, sigue alumbrando desde donde está el
+voxel emisivo, (c) la luz **tiñe** con el color del voxel, y (d) los fps con `game.osd` no bajan
+respecto a hoy andando con la herramienta en la mano. Guardián nuevo del estilo de
+`test_luz_incremental_navegador.js`: la caja re-sembrada tiene que dar **celda por celda** lo mismo que
+un `mcComputeBlockLight` desde cero.
+
+---
+
 <a id="-req-multi1"></a>
 
 ### 🟢 REQ-MULTI1 · Multijugador colaborativo: el mismo mapa, varios jugadores — 🟢 abierto 2026-08-19
@@ -698,6 +804,281 @@ arma en la mano y su nombre encima, sin que ninguno de los dos note que los fps 
 **Criterio de cierre (el ticket entero):** 10 jugadores en el mismo mapa por internet, construyendo a la
 vez; lo que pone uno lo ve el otro, y al cerrar todos y volver a abrir el mundo está como lo dejaron —
 sin que ninguna edición se haya perdido por el camino.
+
+---
+
+<a id="-bug-vid1"></a>
+
+### BUG-VID1 · un vídeo muy corto se guarda con 0 bytes — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `38,14,76`): «al intentar grabar un video muy
+corto, se ha guardado como 0 bytes en el servidor, a pesar de que dice que dura 0.1s».
+
+**Reproducido sin tocar nada**, está en el disco:
+
+| fichero | tamaño | `duracion` de su ficha |
+|---|---|---|
+| `data/videos/0001_bugfinder2_20260820-121514.mp4` | **0 B** | 0.05 s |
+| `data/videos/0002_bugfinder2_20260820-121616.mp4` | **0 B** | 0.05 s |
+| `data/videos/0003_bugfinder2_20260820-121700.mp4` | 1,2 MB | (bien) |
+
+Y las fichas de los dos primeros lo dicen a la cara: `"bytes": 0`.
+
+**Son dos fallos encadenados, uno a cada lado:**
+
+1. **Navegador** — `mcIniciarGrabacion` (`app.js:17868`) arranca con `mcMediaRecorder.start(100)`:
+   el `MediaRecorder` suelta un trozo **cada 100 ms**. Parar a los 50 ms ⇒ `ondataavailable`
+   (`app.js:17855`) no llega a correr ni una vez ⇒ `mcVideoChunks` vacío ⇒ `Blob` de tamaño 0. La
+   duración que se enseña sale de `performance.now()`, no del vídeo, y por eso dice «0.1 s» de algo
+   que no existe.
+2. **Servidor** — `POST /api/videos` (`server.py:825`) valida `if not isinstance(vid, str) or not vid`
+   **antes** de quitarle el prefijo `data:`. Un `data:video/mp4;base64,` con la carga vacía es una
+   cadena no vacía ⇒ pasa el filtro, `b64decode('')` devuelve `b''`, y se escribe el fichero de 0 B
+   con su ficha al lado. La comprobación tiene que ser sobre `crudo`, después de decodificar.
+
+**Criterio de cierre:** parar la grabación antes de que haya un solo fotograma avisa («clip demasiado
+corto») y **no** deja fichero; y un `POST /api/videos` con carga vacía contesta 400 en vez de crear un
+0 B. Los dos `.mp4` vacíos que ya están en `data/videos/` los borra el dueño desde `/videos`, no yo.
+
+---
+
+<a id="-bug-ranura2"></a>
+
+### BUG-RANURA2 · con un recorte cargado, 1-9 repinta el recorte en vez de elegir bloque — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `69,14,59`): «cuando elijo un conjunto de bloques
+con "k" y la herramienta de construir (pico), si luego cambio de ranura ej pulsando "1" se ha de elegir
+ese bloque para construir; no reemplazar los bloques de la estructura seleccionada por bloques de esa
+ranura nueva elegida».
+
+**Localizado.** El repintado no es un accidente: se escribió a propósito para el Ctrl+V y está
+razonado en el comentario de `app.js:15999` — sin él, el número caía en `mcSelectFill` y le cambiaba el
+material a la selección de atrás, «lo de su espalda», que ya no es la caja que ve. Y el commit de
+[REQ-RANURA1](PLAN_ARCHIVO.md#-req-ranura1) (`dcfabf7`, 2026-08-20) presume justo de eso: armar un
+recorte = ponerlo en `clipboard` y llamar a `mcPasteWorld()`, y de ahí salen «gratis» las 24 posturas,
+el plantado con el derecho **y el material con 1-9**.
+
+El precio de esa herencia es este ticket: `mcPasteMaterial` (`app.js:16003`) dispara mirando **solo**
+`mc.pasteActive`, sin preguntar qué herramienta hay en la mano, y quien llama es la línea
+`app.js:20998`:
+
+```js
+if(i<mc.hotbar.length){ if(e.altKey) mcOpenPicker(i); else { mc.sel=i; mcSelectSlot(); if(!mcPasteMaterial(i)) mcSelectFill(i); } }
+```
+
+⚠️ **No es «quitar el repintado»**: en el Ctrl+V lo quiere. Lo que hay que acotar es **cuándo** se
+repinta y cuándo el número es simplemente cambiar de ranura. Preguntarle si la línea que separa los dos
+casos es la herramienta (pico ⇒ elegir bloque) o el origen del cúmulo (recorte de `K` ⇒ elegir bloque,
+Ctrl+V ⇒ repintar), porque no son la misma regla y él ha descrito solo el primer caso.
+
+**Criterio de cierre:** con el recorte de `K` cargado y el pico en la mano, pulsar `1` cambia el bloque
+de construcción y **el recorte no cambia de material**; con Ctrl+V, `1` sigue repintando el cúmulo como
+hasta ahora (`tests/test_ranura1_recortes.js` en verde).
+
+---
+
+<a id="-bug-glow9"></a>
+
+### BUG-GLOW9 · las estrellas ni parecen emisivas ni las tapa la niebla — 🔴 abierto 2026-08-20
+
+**Dos notas del dueño en `/map/bugfinder2`, sobre lo mismo:**
+
+- `51,14,58`: «aunque ponga efecto de niebla, se siguen viendo las estrellas en el cielo, ademas se
+  nota que son voxels, teoricamente son autoiluminadas, no deberian verse como puntitos oscuros, a lo
+  sumo puntos luminosos si se hace bien y sin trucos ya que son emisivas de luz».
+- `37,39,62` (puesta arriba del todo, `y=39`, al lado de las estrellas): «Estas estrellas no parecen
+  autoiluminadas».
+
+**Son tres quejas, y conviene no mezclarlas:**
+
+1. **La niebla no las toca — y eso está escrito a propósito.** `mcDrawVoxUI` (`app.js:14026`) dibuja
+   la capa VIVA con `uFogNear = pj.far*8`, `uFogFar = pj.far*10` y `aEmit = 1.0`, y el comentario de
+   `app.js:14049` dice literalmente que con `emit=1` «la niebla sale 0», que es «lo que quieren las
+   estrellas de la capa viva». O sea: **es una decisión que él quiere revisar**, no un descuido.
+   Preguntarle qué quiere exactamente — ¿que la niebla las apague, o que se apaguen solo con la niebla
+   de `game.niebla` y no con la del agua?
+2. **«Se nota que son voxels».** Una estrella es **un voxel fino** y `game.voxelesUI.grosor` la
+   engorda; a `grosor 16` es un bloque entero en el cielo. Hay que medir con qué grosor las está
+   viendo antes de tocar nada.
+3. **«Puntitos oscuros».** Ésta es la que no cuadra con el código y la que hay que reproducir primero:
+   con `aEmit=1` deberían salir a pleno color. Sospechas sin comprobar: `mc.voxUIAlfa < 1` mezcla la
+   estrella con el cielo (`app.js:14039`, `blendFunc(CONSTANT_ALPHA, …)`), o las está viendo por la
+   capa **horneada** (`mc.voxFino`), que sí va con `aEmit = 0.0` y niebla normal (`app.js:14052`) —
+   y ésa sí saldría oscura.
+
+Vecino de [REQ-GLOW5](#-req-glow5) (declarar emisivo un voxel de `game.voxelesUI` con el prefijo `*`),
+que probablemente sea media respuesta a la queja 3.
+
+**Criterio de cierre:** una captura de noche con niebla puesta, y él diciendo que las estrellas se ven
+como quiere. Sin su visto bueno esto no se cierra: es un juicio suyo, no una medida.
+
+---
+
+<a id="-req-glow10"></a>
+
+### REQ-GLOW10 · el brillo de los emisivos debe adaptarse a la luz ambiente — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `51,14,64`): «la iluminacion de las herramientas,
+voxels emisivos, deben ser más brillantes cuando las condiciones de luz son bajas, han de ser
+adaptativos. Ej: de noche esta bien que brillen, de dia no hace falta que brillen tanto. que sea un
+tunnable, que se pueda elegir el brillo maximo tmb».
+
+**Redactado, sin investigar.** Pide **dos** mandos: la adaptación (cuánto sube el brillo al bajar la
+luz) y el **brillo máximo**.
+
+⚠️ **No empezar esto antes de cerrar [BUG-GLOW8](#-bug-glow8)**: ahí se está decidiendo cómo se dibuja
+la luz de un emisivo en la mano, y este ticket es un tunable **encima** de eso. Hacerlos a la vez
+significa retocar dos veces la misma fórmula.
+
+---
+
+<a id="-bug-sel5"></a>
+
+### BUG-SEL5 · Ctrl+Z en selección deja los corchetes sin revertir — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `70,14,30`): «en seleccion control+z va bien pero
+deja los corchetes sin revertir, esos tambien deberian de volver a la posicion previa del historial
+como sí hacen los bloques».
+
+**Redactado, sin investigar.** Los bloques vuelven bien, luego el historial por gesto funciona; lo que
+no entra en el gesto es **la caja de selección** (los corchetes). Dicho de otro modo: la posición de la
+selección debería ser parte de lo que se guarda y se restaura, no solo el contenido.
+
+**Criterio de cierre:** mover la selección, editar, Ctrl+Z → los corchetes vuelven a donde estaban a la
+vez que los bloques, sin un repintado de más.
+
+---
+
+<a id="-bug-sel3"></a>
+
+### BUG-SEL3 · rotar una selección no rota las piezas finas u orientadas — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `48,14,11`): «Cuando se rotan selecciones, se han
+de rotar tambien las posiciones de las estructuras finas o con huecos localmente, ya que por ejemplo,
+si se selecciona una puerta con su marco, el marco si son bloques quedan bien, pero la puerta no rota
+y se sale del marco».
+
+Son **dos giros distintos** y hoy solo se aplica uno: el de la **caja** (dónde cae cada celda) sí, el
+**local de cada pieza** (hacia dónde mira la puerta) no. Por eso el marco —bloques macizos, sin
+orientación— aguanta y la puerta se desencaja.
+
+⛔ **Ojo al tocarlo**: las 24 posturas **se derivan de la clave** (`flor@7`) y se decodifican con
+`mcOriNorm` / `mcOriParts` — nada de `(rot|0)&15` (ver BUG-RS7, BUG-RS8, BUG-ROT2 en el archivo).
+
+**Criterio de cierre:** el ejemplo que él da — seleccionar puerta + marco, rotar, y la puerta sigue en
+su hueco mirando a donde toca. Vale como test automático.
+
+---
+
+<a id="-req-sel4"></a>
+
+### REQ-SEL4 · `r` gira en horizontal y `R` en profundidad — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `71,14,27`): «seleccion y "r" deberia de rotar en
+el plano horizontal (eje de giro vertical), y "R" en el plano profundidad. se limitaria entonces a 4
+horizontal x 4 profundidad, asi se puede con "r" abrir una ventana de bloques, o con "R" levantar una
+cornisa».
+
+Hermano de [BUG-SEL3](#-bug-sel3): el mismo giro, visto desde el mando en vez de desde la pieza. El
+**4×4 = 16** que él describe encaja con las 24 posturas que ya existen (`mcOriNorm`), así que casi
+seguro no hay que inventar geometría nueva, solo atar las dos teclas a los dos ejes.
+
+**Redactado, sin investigar.** Conviene hacerlo **después** de BUG-SEL3, o se estará girando bien una
+caja cuyo contenido aún no gira.
+
+---
+
+<a id="-req-sel6"></a>
+
+### REQ-SEL6 · ver el pivote de la selección sin pulsar Ctrl — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `72,14,38`): «cuando se seleccionan los bloques,
+deberia de verse de alguna forma cual es el pivote sin necesidad de pulsar control y apuntar, ya que en
+el momento en el que se pulsa cambia al apuntado; hay que conocerlo antes».
+
+El problema es que el único modo de **ver** el pivote es el mismo gesto que lo **cambia** — mirarlo ya
+lo mueve. Hace falta que se vea en reposo.
+
+**Redactado, sin investigar.** Si acaba siendo un adorno que se dibuja cada frame, mirar
+`game.voxelesUI` antes que el overlay ([BUG-VOXUI1](PLAN_ARCHIVO.md#-bug-voxui1): el translúcido del
+overlay no escribe z).
+
+---
+
+<a id="-req-sel2"></a>
+
+### REQ-SEL2 · copiar/pegar debe llevarse el redstone pegado a las caras — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `41,14,38`): «la herramienta de seleccion cuando
+hace copia y pega deberia comprobar si hay elementos redstone pegados a la superficie de los bloques a
+copiar, en tal caso, copiarlos tambien ya que son dificiles de seleccionar».
+
+El motivo que da es de manejo, no de modelo: una palanca o un cable pegado a una cara es **difícil de
+meter en la caja** a mano, y al pegar el resultado llega desnudo.
+
+Toca la misma frontera que [BUG-RS10](#-bug-rs10): el portapapeles trabaja sobre `mc.grid` y el redstone
+adherido vive en `mc.structures`. Cerrar uno de los dos abarata el otro.
+
+**Redactado, sin investigar.** Preguntarle si quiere que sea **siempre** o un modificador, porque
+«copiar lo que no seleccioné» sorprende a quien no lo espera.
+
+---
+
+<a id="-req-tool9"></a>
+
+### REQ-TOOL9 · elegir qué herramientas entran con `e` y cuáles con `E` — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `55,14,10`): «cambiar el orden de las herramientas
+empieza a ser algo habitual, se deberia poder elegir que herramientas entran con "e" y cuales con "E"
+desde el editor. Separar categorias en "herramientas primarias" y "herramientas secundarias"».
+
+Lo importante de la nota es la primera frase: **el orden ya se lo cambia a menudo a mano**, y eso es lo
+que quiere dejar de hacer.
+
+**Redactado, sin investigar.** Ojo con la palabra «herramientas»: en el panel del editor las hay de
+**dibujo** y de **vista**, y no son la misma familia (mismo tropiezo que en [REQ-ED3](#-req-ed3)).
+Aclarar con él a cuáles se refiere antes de empezar.
+
+---
+
+<a id="-req-cart7"></a>
+
+### REQ-CART7 · elegir el tipo de cartel de una nota — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `45,14,43`): «feature nueva: poder elegir entre
+diferentes carteles para las notas. La idea es que se elija el tipo de cartel desde el editor de notas,
+deberia de haber algun sitio donde se definan los carteles. Propongo: categoria "Cartel de Notas" ya
+que son elementos especiales».
+
+Trae la puerta ya propuesta por él: una **categoría propia en la galería**, «Cartel de Notas», como
+tienen los habitantes y las habitaciones.
+
+Encaja bien con lo que se acaba de cerrar en [BUG-CART1](#-bug-cart1): los carteles **se derivan** de
+`mc.notes` al cargar y ya **no** se guardan en `mundo.json`. Luego el tipo de cartel es un dato **de la
+nota**, no un voxel del mundo — y ahí es donde debe guardarse, junto a `noteRots` / `noteTints`.
+
+**Criterio de cierre:** dos notas del mismo mundo con carteles distintos, guardar, recargar, y siguen
+distintas — sin que aparezca ni un voxel de cartel en `mundo.json`
+(`herramientas/carteles_fantasma.py` en cero).
+
+---
+
+<a id="-req-fx1"></a>
+
+### REQ-FX1 · temblor de cámara al caer desde alto — 🟢 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `45,14,50`): «Al caer desde una gran atura,
+pongamos que 15 bloques o más, deberia de haber algun efecto de temblor en la escena; que sea un
+tunable ajustable la altura, aplitud del temblor y duracion».
+
+Tres tunables, dichos por él: **altura** a partir de la cual tiembla, **amplitud** y **duración**.
+
+**Redactado, sin investigar.** El sitio natural es el aterrizaje que ya conoce `mcCaidaPaso` — que es
+**la** pieza por la que pasan el jugador y los dos integradores del snippet, así que la altura de caída
+ya está a mano ahí. ⛔ Y por lo mismo, ojo: si se la envuelve hay que pasarle **todos** los argumentos
+(comerse el 6º apaga el nadar, el 7º la mirada, sin fallar nada).
+
+Verde y no rojo porque es adorno: no rompe nada mientras no exista.
 
 ---
 

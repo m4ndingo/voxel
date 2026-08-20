@@ -27,33 +27,27 @@ import urllib.error
 import urllib.request
 
 BASE = 'http://localhost:8500'
-MAPA = 'bugfinder'
+MAPA = 'bugfinder2'
 MARCA = '[PROCESADA]'
 
 # nota (su coordenada, que es su clave) → qué ticket salió de ella. '' = leída y sin ticket.
 TRIAJE = {
-    '45,14,69': 'BUG-GLOW6',
-    '24,14,67': 'BUG-GLOW6',
-    '26,14,78': 'BUG-GLOW6',
-    '15,10,76': 'BUG-GLOW6',
-    '34,14,46': 'BUG-GLOW6',
-    '34,14,51': 'BUG-GLOW6',
-    '43,14,69': 'REQ-GLOW7',
-    '29,14,70': 'REQ-GLOW7',
-    '35,14,37': 'REQ-GLOW7',
-    '34,14,59': 'REQ-SHADOW3',
-    '42,14,44': 'REQ-SHADOW3',
-    '40,14,65': 'BUG-RS27',
-    '53,14,40': 'BUG-SPLIT2 (cerrado: era el Alt+C, que disparaba también la tecla C del snippet)',
-    '50,14,40': 'REQ-SNP7',
-    '57,14,58': 'REQ-CART5',
-    '47,14,40': 'REQ-CART6',
-    '56,14,71': 'REQ-EXTRU1',
-    '46,14,65': 'REQ-RANURA1',
-    '52,14,45': 'REQ-SPAWN1',
-    '57,15,43': '',
-    '56,14,52': '',
-    '56,15,65': '',
+    '38,14,76': 'BUG-VID1',
+    '69,14,59': 'BUG-RANURA2',
+    '51,14,58': 'BUG-GLOW9',
+    '37,39,62': 'BUG-GLOW9',
+    '51,14,64': 'REQ-GLOW10',
+    '70,14,30': 'BUG-SEL5',
+    '48,14,11': 'BUG-SEL3',
+    '71,14,27': 'REQ-SEL4',
+    '72,14,38': 'REQ-SEL6',
+    '41,14,38': 'REQ-SEL2',
+    '55,14,10': 'REQ-TOOL9',
+    '45,14,43': 'REQ-CART7',
+    '45,14,50': 'REQ-FX1',
+    '67,14,67': 'no es bug: el servidor llevaba en pie desde antes de e0e8f9c '
+                '(REQ-SNP6). /api/snippets?q=nube contesta 200 al reiniciarlo',
+    '45,14,46': '',
 }
 
 
