@@ -268,6 +268,46 @@ sale una pieza fina, su sombreado no está en `ch.vbo` y el test mide el búfer 
 
 ---
 
+## Mandos de la sombra proyectada — `game.shadowSuave` y `game.sunShadeNoche` (REQ-SHADOW3)
+
+Ojo a la confusión de siempre: esto es la **sombra proyectada del sol** (mapa de sombra en la GPU), no
+la skylight horneada en el vértice (ésa es `game.interiorDark`).
+
+**`game.shadowSuave`** — radio del filtrado PCF, **en téxeles** del mapa de sombra. `0` = **borde
+duro**, `1` = el difuminado de siempre, hasta `MC_SHADOW_SUAVE_MAX` = 4. Sale gratis: el filtro de 9
+muestras ya estaba y **sus pesos suman 1**, así que con radio 0 las nueve caen en el mismo téxel y el
+resultado *es* la sombra dura. Ni una rama nueva por fragmento.
+
+```glsl
+vec2 texel = uSunSuave / vec2(uSunDim.x * 16.0, uSunDim.z * 16.0);
+```
+
+Por encima de 4 el filtro deja de difuminar y empieza a hacer **ruido** (los taps caen en sombras
+distintas y la silueta se rompe en manchas). Si hiciera falta más suave, la respuesta no es subir el
+tope sino **tomar más muestras**.
+
+**`game.sunShadeNoche`** — cuánto apaga la sombra con la exposición (`game.luz`) a 0; se interpola con
+ella, así que `game.sunShade` sigue mandando de día. **`null` = sin mando puesto**, la misma fuerza a
+todas horas (comportamiento de siempre).
+
+Por qué hacía falta: la sombra es un **factor** que multiplica el color, y de noche ese color ya viene
+multiplicado por la exposición. Un 0,55 sobre algo casi negro no se distingue de nada — de ahí «*de
+noche la sombra sale muy difuminada y casi no se ve*». No era un problema de difuminado: era de
+contraste. Se resuelve en la CPU (`mcSunShadeEf`), que es un número por frame y no por fragmento.
+
+⚠️ El «apagado» del mapa de sombra mira el valor **efectivo**: con `sunShade = 1` (sin sombra de día) y
+`sunShadeNoche` puesto, preguntar por `mc.sunShade` a secas dejaría el mapa sin reservar y la sombra de
+noche no llegaría a existir.
+
+**¿La espada de luz proyecta sombra?** No. El mapa de sombra tiene **una sola fuente, el sol**, y las
+luces dinámicas no entran en él; otra fuente sería otro mapa, otra pasada de geometría y otro coste. Lo
+que se veía «poco definido» era el degradado de su propia caída. Lo que sí da desde BUG-GLOW6 un corte
+limpio es la oclusión: una cara **de espaldas** a la espada deja de recibirla (sección de abajo).
+
+Guardián: `node tests/test_shadow3_mandos.js`.
+
+---
+
 ## La luz dinámica respeta los sólidos — `game.luzOcluye` (BUG-GLOW6)
 
 Hay **dos** luces artificiales y hasta el 2026-08-20 solo una respetaba la materia:

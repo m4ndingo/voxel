@@ -32,6 +32,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[REQ-SHADOW3](#-req-shadow3)~~ | ~~de noche la **sombra proyectada** sale tan difuminada que casi no se ve, y no se sabe si la espada de luz proyecta la suya~~ | ✅ resuelto 2026-08-20 | dos mandos: **`game.shadowSuave`** (radio del PCF en téxeles, **0 = borde duro**, tope 4 — gratis, porque los 9 pesos del filtro ya sumaban 1) y **`game.sunShadeNoche`** (cuánto aprieta con la exposición a 0, interpolado; `null` = como siempre). El diagnóstico de la nota estaba a medias: **no era difuminado, era contraste** — la sombra es un factor y de noche multiplica algo que `game.luz` ya dejó casi negro. Y la respuesta a la 2ª nota: **la espada NO proyecta sombra**, el mapa tiene una sola fuente; lo que le da corte limpio es [BUG-GLOW6](#-bug-glow6). `tests/test_shadow3_mandos.js` |
 | ~~[BUG-GLOW6](#-bug-glow6)~~ | ~~**la luz dinámica atraviesa los sólidos**: las estrellas alumbran cuartos cerrados y la espada alumbra al otro lado de la pared~~ | ✅ resuelto 2026-08-20 | `game.luzOcluye`. **Dos mitades, ninguna sola llega**: en el **shader**, una cara no recibe la luz que le da por detrás (exacto y gratis — la normal ya la sacan `sunFactor`/`blkLuz` de `cross(dFdx,dFdy)`), y eso arregla el grosor de la pared; en la **CPU**, una luz que no ve al ojo no se sube (`mcLuzLibre`, con la MISMA tabla que la difusión horneada, `mcTablaLuz`), y eso apaga el cuarto cerrado y la espada metida dentro de un bloque. La exacta sería un raycast por fragmento y por luz ⇒ descartada por fps. Visibilidad **con fundido** de 0,18 s: conmutar de golpe se ve peor que el fallo. `tests/test_glow6_luz_ocluida.js` |
 | ~~[REQ-CART5](#-req-cart5)~~ | ~~poder **mover una nota ya plantada**, con un botón «mover» en su propio panel~~ | ✅ resuelto 2026-08-20 | botón «Mover» en el panel: `mcStartNoteMove()` **guarda lo tecleado** y reentra en el Modo Cartel que ya existía para plantar (fantasma, `R`, `Esc`); `mcMoveNoteA()` aterriza. Mover **es cambiar de clave**, así que texto, giro y tinte cambian los tres a la vez o el cartel nuevo sale sin color y el viejo se queda huérfano. No pisa otra nota ni se borra al soltarla en su sitio. El cartel se replanta solo (`mcSyncNoteSigns`). `tests/test_cart5_mover_nota.js` |
 | ~~[REQ-EXTRU1](#-req-extru1)~~ | ~~**extrusión con la herramienta de selección**: seleccionar y con Shift+rueda subir (extruir) o bajar (cavar)~~ | ✅ resuelto 2026-08-20 | `mcSelExtruir(±1)` colgado del manejador de rueda de REQ-TOOL6. Va **por columnas `(x,z)`**, no por capas: la extrusión sigue la **silueta** del terreno. La caja se estira una celda por el lado del que se tira, así que la muesca siguiente sigue subiendo/cavando sola. Arriba y abajo **no son inversos** (deshacer es `z`: un gesto `'bb'` por muesca). Con Shift no pisa la rosca y funciona aunque `mc.ruedaTool` esté apagado. `tests/test_extru1_seleccion.js` |
@@ -184,6 +185,59 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 ---
 
 
+
+<a id="-req-shadow3"></a>
+
+### ✅ REQ-SHADOW3 · Las sombras de noche y las de la espada, configurables — ✅ resuelto 2026-08-20
+
+Dos notas de **`/map/bugfinder`**:
+
+- `34,14,59` — «*╰(*°▽°*)╯ la sombra sale muy difuminada por la noche y casi no se ve*»
+- `42,14,44` — «*la espada de luz proyecta alguna sombra? no definidas pero parece que sí, aunque
+  podrian estar más definidas. estaria bien configurar estas sombras*»
+
+Sin investigar. Ojo con la confusión de siempre (`docs/luz-y-sombra.md`): la **sombra proyectada del
+sol** (mapa de sombra en GPU, `game.sunShade`, `game.shadowSize`) no es la **skylight** horneada en el
+vértice. La segunda nota mezcla las dos: la espada es luz **dinámica** y hoy **no proyecta sombra
+ninguna** — lo que ve «poco definido» es el degradado de su propia caída, no una sombra. Aclarar eso al
+contestar; si de verdad quiere sombra de la espada, eso es otra luz en el mapa de sombra y es caro.
+
+**Criterio de cierre:** de noche la sombra del sol/luna se ve tanto como él quiera, con un mando que
+persista, y está escrito en la wiki qué proyecta sombra y qué no.
+
+**Lo hecho (2026-08-20)** — dos mandos, ninguno re-malla ni re-siembra nada (son uniformes: el frame
+siguiente ya los usa). Detalle en [`docs/luz-y-sombra.md`](docs/luz-y-sombra.md), guardián
+`tests/test_shadow3_mandos.js`.
+
+- **`game.shadowSuave`** = radio del filtrado PCF **en téxeles**. `0` = **borde duro**, `1` = el
+  difuminado de siempre, tope 4. Es la respuesta a «*podrían estar más definidas*», y salió **gratis**:
+  el filtro de 9 muestras ya estaba y sus pesos suman 1, así que con radio 0 las nueve caen en el mismo
+  téxel y el resultado *es* la sombra dura — ni una rama nueva por fragmento. El tope no es capricho:
+  por encima los taps caen en sombras distintas y la silueta se rompe en manchas; si un día hace falta
+  más suave, la respuesta es **más muestras**, no subir el tope.
+- **`game.sunShadeNoche`** = cuánto apaga la sombra con la exposición (`game.luz`) a 0, interpolado con
+  ella; `null` = sin mando, la misma fuerza a todas horas (comportamiento viejo). **El diagnóstico de la
+  nota estaba a medias**: no era difuminado, era **contraste**. La sombra es un FACTOR que multiplica el
+  color, y de noche ese color ya viene multiplicado por la exposición ⇒ un 0,55 sobre algo casi negro no
+  se distingue de nada. Se resuelve en la CPU (`mcSunShadeEf`), que es un número por frame, no por
+  fragmento.
+
+⚠️ La trampa que costó, y que el tramo D del test vigila: el «apagado» del mapa de sombra tenía que
+pasar a mirar el valor **efectivo**. Con `sunShade=1` (sin sombra de día) y `sunShadeNoche` puesto,
+preguntar por `mc.sunShade` a secas dejaba el mapa sin reservar y la sombra de noche no llegaba a
+existir.
+
+**La segunda nota, contestada: la espada de luz NO proyecta sombra.** El mapa de sombra tiene **una
+sola fuente, el sol**; las luces dinámicas no entran en él, y meter otra sería otro mapa, otra pasada de
+geometría y otro coste — no se ha hecho a propósito. Lo que él veía «poco definido» era el degradado de
+la propia caída de la luz, no una sombra. Lo que sí le da un corte limpio desde el mismo día es
+[BUG-GLOW6](#-bug-glow6): una cara **de espaldas** a la espada deja de recibirla. Si después de verlo
+sigue queriendo sombra de la espada, eso es un ticket nuevo y caro.
+
+Queda **1 línea en `wiki/PENDIENTE.md`** con los dos mandos y con qué proyecta sombra y qué no, que es
+la otra mitad del criterio de cierre (la wiki no se toca sin que él lo pida).
+
+---
 
 <a id="-bug-glow6"></a>
 

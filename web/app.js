@@ -7134,6 +7134,11 @@ const MC_MAXLIGHT=15;               // NIVELES de luz (gradación) y alcance del
 // en una escena a oscuras, así que es un revelado de inspección, no un modo de juego. El 4 no es
 // mágico: a 4 el fondo sin luz ya sale a tope y subir más no enseña nada nuevo.
 const MC_INTERIOR_DARK_MAX=4;
+// REQ-SHADOW3 · tope del difuminado de la sombra proyectada (game.shadowSuave), en téxeles del mapa de sombra. Por
+// encima de esto el filtro de 9 muestras deja de ser un difuminado y empieza a ser ruido: los taps se separan tanto
+// que caen en sombras distintas y la silueta se rompe en manchas. Si algún día hiciera falta más suave, la respuesta
+// no es subir esto sino tomar más muestras.
+const MC_SHADOW_SUAVE_MAX=4;
 const MC_TILE=16;                 // px por cara en el atlas (las texturas son 16³)
 const MC_ATLAS_STEP=16;           // el atlas de estructuras crece de 16 en 16 filas: si se ajustase al recuento, cada
                                   // textura nueva cambiaría AH y con ella la v de TODAS las estructuras (re-mallar todas)
@@ -7386,6 +7391,8 @@ const mc={
   blockLight:null,                // Uint8Array 0..MC_MAXLIGHT por celda: luz de BLOQUE emisiva (*#hex) difundida por el aire (mcComputeBlockLight); escalar/neutra (no tiñe)
   glowLevel:15,                   // nivel de siembra de la luz emisiva (game.glowLevel; 0 = sin luz de bloque; 15 = MC_MAXLIGHT = alcance máximo)
  glowFocus:0.2,                  // foco del haz emisivo 0..1 (game.glowFocus): 0=omnidireccional (antorcha), 1=haz estrecho hacia la normal neta de las caras emisivas
+  shadowSuave:1,                  // REQ-SHADOW3 · radio del filtrado de la sombra proyectada, en téxeles (game.shadowSuave). 0 = borde duro, 1 = como siempre, 3 = muy difuminada
+  sunShadeNoche:null,             // REQ-SHADOW3 · cuánto apaga la sombra proyectada con la exposición a 0 (game.sunShadeNoche). null = sin mando puesto: la misma fuerza a todas horas
   luzOcluye:true,                 // BUG-GLOW6 · ¿la luz DINÁMICA respeta los sólidos? (game.luzOcluye). false = como antes de 2026-08-20: atraviesa paredes. Enciende las dos mitades a la vez, la cara de espaldas (shader) y la línea de visión ojo↔luz (mcDynSync)
   glowGain:1,                     // INTENSIDAD de la luz artificial (game.glowGain): 1 = tope normal (pleno día); >1 sobreexpone (una antorcha/gafas brillan MÁS que el día). Es el techo del mix de exposición, no re-siembra ni re-malla (solo uniforme) ⇒ live y barato
   hasGlow:false,                  // ¿hay ≥1 voxel emisivo vivo (estructura o celda de rejilla)? cache para saltar BFS/mallado sin brillo
@@ -9407,6 +9414,7 @@ async function mcAddBlock(key, name){
 const MC_SUN_LIB=`
 uniform sampler2D uSunMap; uniform vec3 uSunOrg; uniform vec3 uSunDim; uniform float uSunShade; uniform vec3 uEye;
 uniform float uSunProbe;   // cuánto se sale la sonda de la propia cara (game.sunProbe)
+uniform float uSunSuave;   // REQ-SHADOW3 · radio del filtrado suave en téxeles (game.shadowSuave): 0 = borde duro, 1 = como siempre
 uniform vec3 uHorizonColor;
 uniform vec3 uZenithColor;
 uniform vec3 uGroundColor;
@@ -9444,7 +9452,10 @@ float sunFactor(vec3 w){
 
   // Filtrado suave PCF (Percentage-Closer Filtering) 9-tap con distribución gaussiana:
   // Suaviza la silueta de los vóxeles y elimina bordes pixelados/rectangulares en terreno y arena.
-  vec2 texel = 1.0 / vec2(uSunDim.x * 16.0, uSunDim.z * 16.0);
+  // REQ-SHADOW3 · el radio del PCF es un mando (game.shadowSuave). Sale gratis porque el filtro ya estaba: los 9
+  // pesos suman 1, así que con radio 0 las nueve muestras caen en el mismo téxel y el resultado ES la sombra dura
+  // («*podrían estar más definidas*»); por encima de 1 se difumina más. No hay ninguna rama nueva por fragmento.
+  vec2 texel = uSunSuave / vec2(uSunDim.x * 16.0, uSunDim.z * 16.0);
   float s0 = sunSample(uv, p.y);
   float s1 = sunSample(uv + vec2( texel.x,  0.0), p.y);
   float s2 = sunSample(uv + vec2(-texel.x,  0.0), p.y);
@@ -9682,7 +9693,7 @@ function mcLocOf(p){ const gl=mc.gl; return {
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
   uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
-  uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
+  uSunShade:gl.getUniformLocation(p,'uSunShade'), uSunSuave:gl.getUniformLocation(p,'uSunSuave'), uEye:gl.getUniformLocation(p,'uEye'),
   uWind:gl.getUniformLocation(p,'uWind'),
   uSunProbe:gl.getUniformLocation(p,'uSunProbe') }; }
 function mcBuildProgram(){
@@ -9815,7 +9826,7 @@ function mcBuildStructProgram(){
     uScreenSize:gl.getUniformLocation(p,'uScreenSize'), uReflOndas:gl.getUniformLocation(p,'uReflOndas'), uTime:gl.getUniformLocation(p,'uTime'),
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
-    uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
+    uSunShade:gl.getUniformLocation(p,'uSunShade'), uSunSuave:gl.getUniformLocation(p,'uSunSuave'), uEye:gl.getUniformLocation(p,'uEye'),
     uAnimSpine:gl.getUniformLocation(p,'uAnimSpine'), uAnimState:gl.getUniformLocation(p,'uAnimState'),
     uWind:gl.getUniformLocation(p,'uWind'),
     uSunProbe:gl.getUniformLocation(p,'uSunProbe') };
@@ -9857,7 +9868,7 @@ function mcBuildStructTexProgram(){
     uGlowGain:gl.getUniformLocation(p,'uGlowGain'),   // intensidad de la luz artificial (game.glowGain)
     uSunMap:gl.getUniformLocation(p,'uSunMap'), uSunDim:gl.getUniformLocation(p,'uSunDim'),
     uSunOrg:gl.getUniformLocation(p,'uSunOrg'),
-    uSunShade:gl.getUniformLocation(p,'uSunShade'), uEye:gl.getUniformLocation(p,'uEye'),
+    uSunShade:gl.getUniformLocation(p,'uSunShade'), uSunSuave:gl.getUniformLocation(p,'uSunSuave'), uEye:gl.getUniformLocation(p,'uEye'),
     uWind:gl.getUniformLocation(p,'uWind'),
     uSunProbe:gl.getUniformLocation(p,'uSunProbe') };
 }
@@ -9946,6 +9957,16 @@ function mcShadowMoved(){ if(mc.shadow) mc.shadow.moved=true; }
 // dando 0.001 bloques de error. Sale de aquí para el vertex shader del sol Y para sunFactor: si los dos no
 // usan EXACTAMENTE el mismo encuadre, la sombra sale desplazada.
 const MC_SUN_MARGIN=16;
+// REQ-SHADOW3 · «*la sombra sale muy difuminada por la noche y casi no se ve*». La fuerza de la sombra proyectada
+// (game.sunShade) es la MISMA a las 12 y a las 3 de la mañana, pero de noche el color ya viene apagado por la
+// exposición global (game.luz) y ese mismo factor deja de notarse. `game.sunShadeNoche` es lo que vale sunShade con
+// la exposición a 0, y se interpola con ella: null ⇒ no hay mando puesto y todo se comporta como siempre.
+function mcSunShadeEf(){
+  const dia = mc.sunShade, noche = mc.sunShadeNoche;
+  if(noche==null || !isFinite(+noche)) return dia;
+  const e = Math.max(0, Math.min(1, mc.luzGlobal!=null?mc.luzGlobal:1));
+  return +noche + (dia - +noche)*e;
+}
 function mcSunFrustum(L){
   const gl=mc.gl, M=MC_SUN_MARGIN;
   gl.uniform3f(L.uSunOrg, -M, -1, -M);                                 // esquina baja del volumen
@@ -9956,7 +9977,10 @@ function mcSunFrustum(L){
 // (un cristal no proyecta un agujero negro) y el fantasma de colocación.
 function mcRenderShadow(){
   const gl=mc.gl;
-  if(!mc.deriv || mc.sunShade>=1) return null;                      // sombra apagada: ni se reserva el mapa
+  // REQ-SHADOW3 · el «apagado» se mira sobre el valor EFECTIVO: con game.sunShadeNoche puesto, sunShade puede valer
+  // 1 (sin sombra de día) y aun así haber sombra de noche. Preguntar por mc.sunShade a secas dejaría el mapa sin
+  // reservar y la sombra nocturna no llegaría a existir.
+  if(!mc.deriv || mcSunShadeEf()>=1) return null;                   // sombra apagada: ni se reserva el mapa
   const S=mcInitShadow(); if(!S) return null;
   if(!mc.sunProg) mcBuildSunProgram();
   // Las estructuras se estampan/liberan por muchos sitios (mcRestampAll, vista-previa, deshacer): en vez de sembrar
@@ -10357,10 +10381,15 @@ function mcSunUniforms(L, S){
     }
   }
   if(L.uSunShade===undefined || L.uSunShade===null) return;
+  // REQ-SHADOW3 · el mando de la sombra de noche se resuelve AQUÍ, en la CPU, y no en el shader: es un número por
+  // frame, no por fragmento. La sombra proyectada es un FACTOR que multiplica el color, y de noche el color ya viene
+  // multiplicado por la exposición (game.luz) ⇒ un 0,55 sobre algo casi negro no se distingue de nada. Con esto se
+  // puede pedir que de noche apriete MÁS que de día, que es lo que el dueño pedía ver.
   if(!S){ gl.uniform1f(L.uSunShade, 1); return; }
-  gl.uniform1f(L.uSunShade, mc.sunShade);
+  gl.uniform1f(L.uSunShade, mcSunShadeEf());
   mcSunFrustum(L);
   gl.uniform1f(L.uSunProbe, mc.sunProbe);
+  if(L.uSunSuave) gl.uniform1f(L.uSunSuave, mc.shadowSuave!=null?mc.shadowSuave:1);
   gl.uniform1i(L.uSunMap, 1);
 }
 
@@ -19901,6 +19930,31 @@ Object.defineProperty(game,'luzOcluye',{ enumerable:true, get:()=>mc.luzOcluye,
   set:v=>{ v=!!v; mc.luzOcluye=v; try{localStorage.setItem('vf_mcLuzOcluye', v?'1':'0');}catch(e){}
     if(!v && mc._dynVis) mc._dynVis.clear();
     toast(v?'La luz dinámica respeta los sólidos':'La luz dinámica atraviesa los sólidos (como antes)'); return v; } });
+// REQ-SHADOW3 · los dos mandos de la SOMBRA PROYECTADA que faltaban. Ninguno re-malla ni re-siembra nada: los dos son
+// uniformes que el frame siguiente ya usa. Ojo a la confusión de siempre (docs/luz-y-sombra.md): esto es la sombra
+// del sol en el mapa de sombra de la GPU, NO la skylight horneada en el vértice (ésa es game.interiorDark).
+//
+// game.shadowSuave = radio del filtrado (PCF) en téxeles. **0 = borde duro**, 1 = como siempre, 3 = muy difuminada.
+// El filtro ya estaba y sus 9 pesos suman 1, así que con radio 0 las nueve muestras caen en el mismo téxel y sale la
+// sombra dura sin una sola rama nueva por fragmento. Es la respuesta a «*podrían estar más definidas*».
+// game.sunShadeNoche = cuánto apaga la sombra con la exposición (game.luz) a 0. Se interpola con ella, así que
+// sunShade sigue mandando de día. **null = sin mando puesto**, la misma fuerza a todas horas (comportamiento viejo).
+// Es la respuesta a «*de noche la sombra sale muy difuminada y casi no se ve*»: no se veía porque la sombra es un
+// FACTOR y de noche multiplica algo que la exposición ya ha dejado casi negro; con esto se le pide que apriete más.
+// ⚠️ El «apagado» del mapa de sombra pasa a mirar el valor EFECTIVO (mcSunShadeEf), o poner sunShade=1 con
+// sunShadeNoche puesto dejaría el mapa sin reservar y la sombra de noche no existiría.
+try{ const s=parseFloat(localStorage.getItem('vf_mcShadowSuave')); if(isFinite(s)) mc.shadowSuave=Math.max(0,Math.min(MC_SHADOW_SUAVE_MAX,s)); }catch(e){}
+try{ const s=localStorage.getItem('vf_mcSunShadeNoche'); if(s!==null && s!=='') mc.sunShadeNoche=Math.max(0,Math.min(1,parseFloat(s))); }catch(e){}
+Object.defineProperty(game,'shadowSuave',{ enumerable:true, get:()=>mc.shadowSuave,
+  set:v=>{ v=Math.max(0, Math.min(MC_SHADOW_SUAVE_MAX, isFinite(+v)?+v:1)); mc.shadowSuave=v;
+    try{localStorage.setItem('vf_mcShadowSuave',v);}catch(e){}
+    toast(v===0?'Sombra del sol: borde duro':'Sombra del sol: difuminado ×'+v); return v; } });
+Object.defineProperty(game,'sunShadeNoche',{ enumerable:true, get:()=>mc.sunShadeNoche,
+  set:v=>{ if(v==null || v===''){ mc.sunShadeNoche=null; try{localStorage.removeItem('vf_mcSunShadeNoche');}catch(e){}
+             toast('Sombra de noche: la misma que de día (game.sunShade='+mc.sunShade+')'); return null; }
+    v=Math.max(0, Math.min(1, isFinite(+v)?+v:mc.sunShade)); mc.sunShadeNoche=v;
+    try{localStorage.setItem('vf_mcSunShadeNoche',v);}catch(e){}
+    toast('Sombra de noche: '+v+' (de día '+mc.sunShade+')'); return v; } });
 // game.worldSize (t8) = límites del mundo. Lectura: '96×40×96'. Redimensionar en vivo: game.resizeWorld(x,y,z)
 // (x/z 16..512, y 8..256). Conserva los bloques anclados en el origen, recoloca al jugador dentro y re-malla; las
 // estructuras estampadas mantienen sus coords de mundo. Persiste en el servidor (dim viaja en el guardado).
