@@ -568,3 +568,21 @@ En el navegador: `/map/test` (`F` vuela, `Alt+F` saca foto y aparece en `/fotos`
 `/map/fps?intro=1` (la cámara pasea, JUGAR aterriza sin recargar, CONSTRUIR abre el editor **sin
 recargar** y «VOXELFORGE» trae de vuelta a la intro, también sin recargar), cualquier **otro** mapa con
 `?intro=1` para ver el respaldo genérico, y `/map/fps` a secas para confirmar que **no cambió nada**.
+
+---
+
+## Las 4 reglas caras (movidas verbatim desde CLAUDE.md el 2026-08-21)
+
+Estaban en el índice porque cuestan caro romperlas; bajan aquí para hacer sitio a la Ley de Oro del
+[desarrollo desacoplado](desarrollo-desacoplado.md). No se ha cambiado ni una palabra.
+
+- Acción de botón: **CERO parámetros**, se llama sin argumentos ⇒ el volcado imprime una **receta**
+  copiable entera a F12. El dueño lo devolvió **3 veces** (REQ-OSD5).
+- Pantalla-mapa = **`<iframe>` con `?osd=1`** (escaparate: no guarda, sin hotbar, sin captura de puntero)
+  y **el iframe se destruye al cerrar** (`mc` es singleton ⇒ eso es otro contexto WebGL vivo).
+- **Tamaño del panel se pide en `cfg`, ⛔ no se toca el CSS** (REQ-OSD13) y se aplica en **los 2** sitios
+  de montaje (`mcOsdAbrir`, `mcOsdHtml`) o repintar un botón le cambia la talla.
+- **`?intro=1` = única forma de disparar la intro**; vive en el snippet `arranque-<mapa>` o el genérico
+  `arranque-intro`, ⛔ **nunca en `app.js`**; su bucle (`mc._intro`) se **desmonta antes de montar otro**.
+  **Ni JUGAR ni CONSTRUIR recargan**: editor y Mundo son **la misma página** (`closeWorld()` /
+  `mcVolverAIntro()`, ⛔ jamás `location.href`).

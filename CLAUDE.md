@@ -42,6 +42,13 @@ como línea, pero el fichero es `web/app.js`.
 
 ## 🚦 ARRANQUE
 
+0. 🥇 **LEY DE ORO** → [`docs/desarrollo-desacoplado.md`](docs/desarrollo-desacoplado.md).
+   ⛔ **`app.js` NO se modifica hasta que el cambio esté validado antes por parcheo en caliente.** Nace
+   **aislado** en un snippet `data/snippets/<id>.json` (JS **dentro** de `code`, ⛔ jamás un `.js` suelto)
+   que envuelve funciones del motor en memoria guardando el original (`fn._orig`; `app.js` es script
+   clásico sin IIFE ⇒ `window.mcX` es reasignable e intercepta sus llamadas internas), y se manda con
+   **`game.<modulo>.on()/off()`** — `off()` devuelve el motor **byte a byte**: ése es el A/B y el circuit
+   breaker. Solo tras demostrar estabilidad se gradúa, y **lo mínimo**. Plantilla: `luz-quietas.json`.
 1. ⛔ **NUNCA borrar de `data/habitantes/` ni `data/agentes/`** — autoría del dueño, no runtime. Ni
    `DELETE` ni `rm`; sobrante → `data/habitantes_trash/<ms>__<nombre>`. Igual notas del Mundo (se añade
    `[PROCESADA]` debajo, no se reescriben) y `data/tickets/`. Duda → preguntar.
@@ -154,16 +161,8 @@ capacidad. `game.bloques.info()` = descubridor de la clave EXACTA de lo que piso
 Botón = **bloque con una nota**, identificado **por su texto** ⇒ una pantalla pasa de `{html:…}` a
 `{mapa:'menu1'}` sin tocar ni una acción. **`game.osd.dump()` = el descubridor.**
 
-- Acción de botón: **CERO parámetros**, se llama sin argumentos ⇒ el volcado imprime una **receta**
-  copiable entera a F12. El dueño lo devolvió **3 veces** (REQ-OSD5).
-- Pantalla-mapa = **`<iframe>` con `?osd=1`** (escaparate: no guarda, sin hotbar, sin captura de puntero)
-  y **el iframe se destruye al cerrar** (`mc` es singleton ⇒ eso es otro contexto WebGL vivo).
-- **Tamaño del panel se pide en `cfg`, ⛔ no se toca el CSS** (REQ-OSD13) y se aplica en **los 2** sitios
-  de montaje (`mcOsdAbrir`, `mcOsdHtml`) o repintar un botón le cambia la talla.
-- **`?intro=1` = única forma de disparar la intro**; vive en el snippet `arranque-<mapa>` o el genérico
-  `arranque-intro`, ⛔ **nunca en `app.js`**; su bucle (`mc._intro`) se **desmonta antes de montar otro**.
-  **Ni JUGAR ni CONSTRUIR recargan**: editor y Mundo son **la misma página** (`closeWorld()` /
-  `mcVolverAIntro()`, ⛔ jamás `location.href`).
+- Las **4 reglas caras** (acción sin parámetros · iframe `?osd=1` · tamaño en `cfg` · `?intro=1` nunca
+  en `app.js`) → su `docs/` (movidas verbatim el 2026-08-21).
 
 ## 🔒 Luz y sombra — CANDADO → [`wiki/paginas/ley-de-la-luz.md`](wiki/paginas/ley-de-la-luz.md)
 

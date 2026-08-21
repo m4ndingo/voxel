@@ -7440,15 +7440,6 @@ const mc={
   dynTex:null,                    // …y su textura 3D (unidad 4), gemela de blkTex
   glowGain:1,                     // INTENSIDAD de la luz artificial (game.glowGain): 1 = tope normal (pleno día); >1 sobreexpone (una antorcha/gafas brillan MÁS que el día). Es el techo del mix de exposición, no re-siembra ni re-malla (solo uniforme) ⇒ live y barato
   hasGlow:false,                  // ¿hay ≥1 voxel emisivo vivo (estructura o celda de rejilla)? cache para saltar BFS/mallado sin brillo
-  luzQuietas:true,                // REQ-LUZ2 · ¿las luces de game.voxelesUI que llevan rato quietas alumbran desde el campo del MUNDO en vez de desde la caja (game.luzQuietas)? false = todas por la caja, como antes del ticket
-  _lqVistas:new Map(),            // REQ-LUZ2 · censo: clave de la luz → pasadas seguidas viéndola igual. Dos mapas que se turnan para no asignar uno por frame
-  _lqVistasB:new Map(),
-  _lqQuietas:[],                  // [x,y,z,nivel]×N · las que alumbran desde mc.blockLight
-  _lqMoviles:[],                  // …y las que siguen yendo por la caja (mismo formato que devuelve mcVoxUILuces)
-  _lqSig:null,                    // firma del conjunto quieto: si cambia hay que rehornear el campo del mundo
-  _lqLv:0,                        // alcance más largo entre las quietas (manda en mcLuzSubAjusta junto al de la caja)
-  _lqCache:null,                  // campo de las quietas SOLAS, compacto: {sig,gen,grid,n,idx,bl,bd,or,di,mx}
-  _lqSucia:0,                     // instante de la última edición que dejó vieja esa caché (0 = al día)
   _glowIds:null,                  // id de bloque → geometría fina con ≥1 celda emisiva (o null); lo hornea mcGlowCeldas
   _glowFirma:null,                // firma de esos ids: si cambia (paleta nueva, geometría recién horneada) hay que re-barrer
   _glowCeldas:null,               // Set de índices de mc.grid con una pieza emisiva puesta: el índice DISPERSO de emisores
@@ -11097,9 +11088,6 @@ function mcComputeBlockLight(){
   // aquí es innecesario (BL a cero ya se ve igual, ver mcMeshChunk) y se pisaría con el mallado a medio poblar.
   const GE=mcGlowCeldas();
   if(GE.size) mc.hasGlow=true;
-  // REQ-LUZ2 · una luz quieta de game.voxelesUI tampoco es estructura emisiva ni celda de rejilla, pero alumbra
-  // desde este campo, y el render solo lo sube a la GPU con `if(mc.hasGlow && mc._blkTexDirty)`.
-  if(mc._lqQuietas.length) mc.hasGlow=true;
   if(!mc.hasGlow || lv0<=0){          // sin emisivos: BL en 0, mcMeshChunk lo trata como sin luz de bloque
     // …pero sin re-poner a cero lo que YA está a cero. Es un fill de N bytes en cada bloque puesto o roto: 3 ms en
     // 512×40×512 para no cambiar ni un byte. La bandera vive aquí porque este es el único sitio que escribe BL.
@@ -11113,7 +11101,6 @@ function mcComputeBlockLight(){
   // mcSetBlock), la firma queda igual y esta función es un no-op. En un mundo grande con emisores
   // esto ahorra decenas de ms por pulso — el motivo real por el que un solo observador tiraba fps.
   let emiSig = 0;
-  if(mc._lqSig!=null) emiSig = (emiSig*31 + mc._lqSig) | 0;   // REQ-LUZ2 · las quietas también son emisores de aquí
   for(const idx of GE) emiSig = (emiSig*31 + idx) | 0;
   for(const s of mc.structures){ const ec=s.emitFinos;
     if(ec && ec.length){ emiSig = (emiSig*31 + s.ox*73 + s.oy*37 + s.oz*41 + ec.length) | 0; } }
@@ -11171,7 +11158,6 @@ function mcComputeBlockLight(){
         cx+(ec[k]+0.5)/MC_TILE, cy+(ec[k+1]+0.5)/MC_TILE, cz+(ec[k+2]+0.5)/MC_TILE); } }
   if(sembrada) mcLuzDifunde(C, PASA, buckets, lv0, focus);
   }
-  mcLuzQuietasAlCampo(BL, BD, OR, DI, MX);   // REQ-LUZ2 · y encima, las luces quietas de game.voxelesUI
 }
 // ── BUG-GLOW8 · UN SOLO MODELO DE LUZ ARTIFICIAL ─────────────────────────────────────────────────────────────
 // Hasta 2026-08-20 había DOS y se veía la costura: el BFS de aquí (antorcha plantada, rombos escalonados, para
@@ -11464,133 +11450,9 @@ function mcLuzDifunde(C, PASA, buckets, lv0, focus){
     }
   }
 }
-// ── REQ-LUZ2 · LAS LUCES DE game.voxelesUI QUE NO SE MUEVEN ALUMBRAN DESDE EL CAMPO DEL MUNDO ────────────────
-// Ley VII: si nada que afecte al BFS ha cambiado, la pasada es un no-op. Una estrella clavada en el cielo no ha
-// cambiado nunca, pero vivía en la CAJA (mcDynSync → mcDynBake), que se re-siembra entera cada vez que el jugador
-// anda. Y un horneado cuesta CELDAS × SEMILLAS, así que 154 estrellas repartidas por el cielo hacían las dos cosas
-// a la vez: estirar la caja al mundo entero y multiplicar por 154 las relajaciones de cada celda.
-// Medido en fornite-tilted-towers, 150 frames conducidos, mismo paseo: 20,10 ms/frame (49,8 fps) con mcDynBake
-// comiéndose el 89,1 % del frame, contra 6,40 ms (156,3 fps) y mcDynBake en 0,00 al sacarlas de ahí.
-//
-// La luz es LA MISMA (Mandamiento 4): mismo BFS, misma tabla de opacos, mismo color, mismo alcance. Lo único que
-// cambia es a qué campo se escribe, y el shader ya mezcla los dos con max(): no hay costura que inventar.
-//
-// Quieta = vista en el MISMO sitio y con el MISMO nivel MC_LUZ_QUIETAS_TRAS pasadas seguidas. La sangre, las
-// chispas y el humo no llegan a contar y siguen yendo por la caja, exactamente como antes del ticket.
-const MC_LUZ_QUIETAS_TRAS=8;        // pasadas idénticas para dar una luz por «quieta» (~133 ms a 60 fps)
-// ⛔ FIJA, y NO puede depender de MC_LUZ_SUB: el paso del campo lo decide el alcance de las quietas
-// (mcLuzSubAjusta), así que atarle la clave del censo cierra un bucle que rehornea el mundo en cada vuelta.
-const MC_LUZ_QUIETAS_Q=128;         // cuantización de la posición en la clave del censo: 1/128 de bloque
-const MC_LUZ_QUIETAS_REFRESCO=900;  // ms de calma tras la última edición antes de rehacer la caché exacta
-
-// Reparte las luces de game.voxelesUI y devuelve LAS QUE SE MUEVEN, que son las únicas que van a la caja.
-function mcLuzQuietasReparto(todas){
-  const mov=mc._lqMoviles;
-  if(mc.luzQuietas===false){
-    if(mc._lqQuietas.length){ mc._lqQuietas=[]; mc._lqSig=null; mc._lqLv=0; mc._lqCache=null; }
-    mc._lqVistas.clear(); return todas;
-  }
-  const antes=mc._lqVistas, ahora=mc._lqVistasB; ahora.clear();
-  mov.length=0;
-  const quietas=[]; let lv=0;
-  for(let i=0;i<todas.length;i+=4){
-    const x=todas[i], y=todas[i+1], z=todas[i+2], nv=todas[i+3];
-    // Clave NUMÉRICA: 15 bits por eje (±128 bloques a 1/128 de bloque) + 6 del nivel = 51 bits, entero exacto en
-    // un double. Con cadenas serían ~47.000 asignaciones por segundo con 240 estrellas a 200 fps, y este bucle
-    // corre en TODOS los frames, ande o no ande el jugador.
-    const qx=Math.round(x*MC_LUZ_QUIETAS_Q)&32767, qy=Math.round(y*MC_LUZ_QUIETAS_Q)&32767,
-          qz=Math.round(z*MC_LUZ_QUIETAS_Q)&32767;
-    const k=((qx*32768+qy)*32768+qz)*64+(nv&63);
-    const veces=(antes.get(k)||0)+1;
-    ahora.set(k, veces);
-    if(veces>=MC_LUZ_QUIETAS_TRAS){ quietas.push(x,y,z,nv); if(nv>lv) lv=nv|0; }
-    else mov.push(x,y,z,nv);
-  }
-  // Lo que ya no aparece se cae del censo: una luz que se APAGA deja de estar quieta, y si no saliera de aquí
-  // seguiría alumbrando en el campo del mundo sin que nadie la mantenga (Ley VII al revés).
-  mc._lqVistas=ahora; mc._lqVistasB=antes;
-  let sig=quietas.length;
-  for(let i=0;i<quietas.length;i++) sig=(sig*31+Math.round(quietas[i]*MC_LUZ_QUIETAS_Q))|0;
-  if(sig!==mc._lqSig){ mc._lqSig=sig; mc._lqQuietas=quietas; mc._lqLv=lv; }
-  return mov;
-}
-
-// La siembra de las quietas: ni una regla propia. mcCampoLuz + mcLuzBuckets + mcLuzSiembra + mcLuzDifunde son las
-// mismas que acaba de usar mcComputeBlockLight para las antorchas; lo único distinto son los baldes, dimensionados
-// al alcance de las estrellas (que NO topa en MC_MAXLIGHT) en vez de al de la luz de bloque.
-// Sin haz y sin color propio (−1 = blanco cálido), que es exactamente como entraban en la caja.
-function mcLuzQuietasSiembra(BL, BD, OR, DI, MX){
-  const dim=mc.dim, q=mc._lqQuietas, lv0=Math.max(1, mc._lqLv|0);
-  const focus=Math.max(0, Math.min(1, mc.glowFocus));
-  const C=mcCampoLuz(BL, BD, 0,0,0, dim.x,dim.y,dim.z, OR, DI, MX);
-  const PASA=mcTablaLuz(), buckets=mcLuzBuckets(lv0);
-  for(let i=0;i<q.length;i+=4){
-    const fx=q[i], fy=q[i+1], fz=q[i+2];
-    mcLuzSiembra(C, PASA, buckets, q[i+3]|0, focus, Math.floor(fx), Math.floor(fy), Math.floor(fz),
-      null, 0, null, fx, fy, fz);
-  }
-  mcLuzDifunde(C, PASA, buckets, lv0, focus);
-}
-
-// La CACHÉ del campo de las quietas SOLAS (sin el mundo). Sin ella, cada bloque puesto o roto volvería a sembrar
-// las 154 estrellas sobre el mundo entero: 342 ms medidos, un congelón por clic. Con ella el mundo se rehornea
-// cuando quiera —es barato, 3,7 ms— y las estrellas se le funden encima en 14 ms.
-// Se guarda COMPACTA (solo las celdas que la luz alcanza, ~31 % con cielo estrellado): densa serían 48 MB y 3,1 M
-// de celdas que recorrer en cada fusión; la lista son 18 MB y 950 k seguidas en memoria.
-function mcLuzQuietasHornea(){
-  const dim=mc.dim, N=dim.x*dim.y*dim.z;
-  // Andamio de usar y tirar: el BFS escribe sobre campos DENSOS, así que se le da uno y se compacta al salir.
-  const BL=new Uint8Array(N*4), BD=new Int8Array(N*3);
-  const OR=new Int16Array(N*3), DI=new Uint16Array(N), MX=new Uint8Array(N);
-  mcLuzQuietasSiembra(BL, BD, OR, DI, MX);
-  let M=0; for(let i=0;i<N;i++) if(BL[i*4+3]) M++;
-  const idx=new Uint32Array(M), bl=new Uint8Array(M*4), bd=new Int8Array(M*3);
-  const or=new Int16Array(M*3), di=new Uint16Array(M), mx=new Uint8Array(M);
-  let m=0;
-  for(let i=0;i<N;i++){
-    const j=i*4; if(!BL[j+3]) continue;
-    const pp=m*4, t=i*3, u=m*3;
-    idx[m]=i;
-    bl[pp]=BL[j]; bl[pp+1]=BL[j+1]; bl[pp+2]=BL[j+2]; bl[pp+3]=BL[j+3];
-    bd[u]=BD[t]; bd[u+1]=BD[t+1]; bd[u+2]=BD[t+2];
-    or[u]=OR[t]; or[u+1]=OR[t+1]; or[u+2]=OR[t+2];
-    di[m]=DI[i]; mx[m]=MX[i];
-    m++;
-  }
-  mc._lqCache={ sig:mc._lqSig, gen:mc.gridGen|0, grid:mc.grid, n:N, idx, bl, bd, or, di, mx };
-}
-
-// Las quietas, encima del campo del mundo ya horneado.
-// ⚠️ Ley VI, una celda UN emisor: quien gana el nivel se lleva TAMBIÉN su haz, su origen, su camino y su pleno.
-// Copiarle el nivel y dejarle al otro el OR/DI/MX es exactamente el bug que arregló BUG-GLOW8h. El tinte va por
-// max en cada canal, igual que cuando dos emisores se solapan dentro de un mismo campo.
-function mcLuzQuietasAlCampo(BL, BD, OR, DI, MX){
-  if(!mc._lqQuietas.length) return;
-  const N=BL.length>>2, K=mc._lqCache;
-  if(!K || K.sig!==mc._lqSig || K.n!==N || K.grid!==mc.grid) mcLuzQuietasHornea();
-  // La caché se horneó contra la topología de ENTONCES: al editar el mundo queda vieja, pero solo a ≤alcance de
-  // lo tocado. Se sigue usando (barata) y se rehace exacta cuando el jugador para: rehacerla en cada bloque de
-  // una pared de veinte serían veinte congelones de 342 ms. mcDynSync dispara ese refresco.
-  else if(K.gen!==(mc.gridGen|0) && !mc._lqSucia) mc._lqSucia=performance.now();
-  const C=mc._lqCache, idx=C.idx, bl=C.bl, bd=C.bd, or=C.or, di=C.di, mx=C.mx;
-  const M=idx.length, conOR=!!(OR&&DI&&MX);
-  for(let m=0;m<M;m++){
-    const i=idx[m], pp=m*4, j=i*4, v=bl[pp+3];
-    if(bl[pp]  >BL[j])   BL[j]  =bl[pp];
-    if(bl[pp+1]>BL[j+1]) BL[j+1]=bl[pp+1];
-    if(bl[pp+2]>BL[j+2]) BL[j+2]=bl[pp+2];
-    if(v<=BL[j+3]) continue;                  // el mundo gana la celda: se queda con su dueño ENTERO
-    BL[j+3]=v;
-    const t=i*3, u=m*3;
-    BD[t]=bd[u]; BD[t+1]=bd[u+1]; BD[t+2]=bd[u+2];
-    if(conOR){ OR[t]=or[u]; OR[t+1]=or[u+1]; OR[t+2]=or[u+2]; DI[i]=di[m]; MX[i]=mx[m]; }
-  }
-}
-
 // Recalcula mc.hasGlow: ¿alguna estructura viva tiene ≥1 celda emisiva? (cache para saltar BFS/mallado de luz de bloque).
 function mcRecomputeHasGlow(){ mc.hasGlow=false; for(const s of mc.structures){ if(s.emitFinos&&s.emitFinos.length){ mc.hasGlow=true; return; } }
-  if(mcGlowCeldas().size) mc.hasGlow=true;           // …o alguna pieza emisiva puesta en la rejilla (mcGlowCeldas)
-  else if(mc._lqQuietas.length) mc.hasGlow=true; }   // REQ-LUZ2 · …o una luz quieta de game.voxelesUI
+  if(mcGlowCeldas().size) mc.hasGlow=true; }   // …o alguna pieza emisiva puesta en la rejilla (mcGlowCeldas)
 function mcMeshAll(){
   mcComputeLight();
   mcComputeBlockLight();
@@ -11730,8 +11592,7 @@ function mcDynSync(){
   // REQ-GLOW5 · la capa game.voxelesUI compite en igualdad: son cuerpos del mundo que emiten, y aquí ya no importa
   // si vienen de una estructura o de una partícula. Sin haz (isótropas: una llama alumbra a todos lados) y con su
   // propio alcance por grupo, que NO topa en 15 (una estrella a 34 bloques tiene que llegar al suelo).
-  // REQ-LUZ2 · a la caja solo van las que SE MUEVEN; las quietas alumbran desde el campo del mundo.
-  const vl=mcLuzQuietasReparto(mcVoxUILuces());
+  const vl=mcVoxUILuces();
   for(let k=0;k<vl.length;k+=4){
     if(!mcLuzPuedeSembrar(vl[k], vl[k+1], vl[k+2])) continue;
     const dx=vl[k]-eye[0], dy=vl[k+1]-eye[1], dz=vl[k+2]-eye[2];
@@ -11755,13 +11616,6 @@ function mcDynSync(){
                org: orig[idx[i]], d2: cand[c] });     // depuración (mcLuzDiag), no lo usa la siembra
   }
   mcDynBake(sem);
-  // REQ-LUZ2 · el conjunto quieto cambió (una estrella se encendió, se apagó o se movió) ⇒ el campo del mundo hay
-  // que rehacerlo. Aquí no hay que re-mallar nada: estas luces no dejan huella estampada en la rejilla.
-  if(mc._lqSig!==mc._blLqSig){ mc._blLqSig=mc._lqSig; mcComputeBlockLight(); }
-  // …y el refresco exacto de la caché, una sola vez, cuando el jugador deja de editar (ver mcLuzQuietasAlCampo).
-  else if(mc._lqSucia && performance.now()-mc._lqSucia>MC_LUZ_QUIETAS_REFRESCO){
-    mc._lqSucia=0; mc._lqCache=null; mc._blEmiSig=null; mcComputeBlockLight();
-  }
   if(cambio){   // solo al arrancar/parar de seguir: re-siembra la luz del mundo (sin las montadas) y re-malla su halo estampado
     mc._blEmiSig=null; mcComputeBlockLight();
     const R=MC_MAXLIGHT+1, dim=mc.dim, ncx=Math.ceil(dim.x/MC_CHUNK), ncz=Math.ceil(dim.z/MC_CHUNK);
@@ -11780,10 +11634,7 @@ function mcDynBake(sem){
   // que manda es el que hay en escena, no el de las que sobrevivan al recorte de la caja. Si se mirase solo a las
   // usadas, el paso cambiaría al recortar la caja y volvería a cambiar al soltarla ⇒ rehorneo del mundo entero cada
   // vez que el dueño gira. Con todas, es conservador (nunca da la vuelta al byte) y sobre todo QUIETO.
-  let lvMax=mc._lqLv|0;   // REQ-LUZ2 · las quietas ya no están en `sem` pero SIGUEN en escena, en el otro campo:
-  // los dos comparten `uLuzEsc`, así que si su alcance no entrara aquí el byte daría la vuelta y una estrella de
-  // 37 saldría negra en su propio centro (ver mcLuzSubAjusta).
-  for(let i=0;i<sem.length;i++){ const n=sem[i].nivel|0; if(n>lvMax) lvMax=n; }
+  let lvMax=0; for(let i=0;i<sem.length;i++){ const n=sem[i].nivel|0; if(n>lvMax) lvMax=n; }
   mcLuzSubAjusta(lvMax);
   if(!sem.length || mc.luzDinamica===false || !mc.grid){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
   const dim=mc.dim, tope=Math.max(1000, mc.luzDinCeldas!=null?mc.luzDinCeldas|0:MC_DYN_CELDAS);
@@ -21034,20 +20885,6 @@ Object.defineProperty(game,'luzDinamica',{ enumerable:true, get:()=>mc.luzDinami
   set:v=>{ v=!!v; mc.luzDinamica=v; try{localStorage.setItem('vf_mcLuzDinamica', v?'1':'0');}catch(e){}
     mcDynApaga(); if(mc.grid) mcDynSync();
     toast(v?'Lo que se mueve vuelve a alumbrar':'Lo que se mueve deja de alumbrar (para medir fps)'); return v; } });
-// REQ-LUZ2 · game.luzQuietas = ¿las luces de game.voxelesUI que llevan rato quietas alumbran desde el campo del
-// MUNDO en vez de desde la caja de lo que se mueve? true (por defecto) = sí, y andar deja de costar fps por culpa
-// de las estrellas. false = todas por la caja, byte a byte como antes del ticket, para medir con y sin.
-// Persiste en vf_mcLuzQuietas.
-try{ const lq=localStorage.getItem('vf_mcLuzQuietas'); if(lq!==null) mc.luzQuietas = lq==='1'; }catch(e){}
-Object.defineProperty(game,'luzQuietas',{ enumerable:true, get:()=>mc.luzQuietas!==false,
-  set:v=>{ v=!!v; mc.luzQuietas=v; try{localStorage.setItem('vf_mcLuzQuietas', v?'1':'0');}catch(e){}
-    // Al apagarlo hay que BORRAR del campo del mundo lo que las quietas dejaron sembrado, o alumbrarían para
-    // siempre sin dueño; al encenderlo, el censo tarda MC_LUZ_QUIETAS_TRAS pasadas en repartir.
-    mc._lqCache=null; mc._lqSucia=0; mc._lqVistas.clear(); mc._lqVistasB.clear();
-    if(!v){ mc._lqQuietas=[]; mc._lqSig=null; mc._lqLv=0; }
-    mc._blLqSig=mc._lqSig; mc._blEmiSig=null;
-    if(mc.grid){ mcComputeBlockLight(); mcRecomputeHasGlow(); mcDynApaga(); mcDynSync(); }
-    toast(v?'Las luces quietas alumbran desde el campo del mundo':'Todas las luces vuelven a la caja (para medir fps)'); return v; } });
 // BUG-GLOW8b · game.luzSuave = ¿el campo de lo que se mueve se muestrea en la posición FINA del emisor (true) o
 // en el centro de su celda (false)? El campo es el mismo en los dos casos —una sola ley, celda a celda—; lo que
 // cambia es dónde se lee. Con true la luz se DESLIZA con la mano; con false salta de bloque en bloque, que es lo

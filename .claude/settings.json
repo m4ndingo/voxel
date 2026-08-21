@@ -1,7 +1,7 @@
 {
   "permissions": {
     "deny": [
-      "Read(./data/worlds/**)",
+      "Read(./data/worlds/*.vox)",
       "Read(./data/mundo.vox)",
       "Read(./data/fotos/*.png)",
       "Read(./releases/**)",

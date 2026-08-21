@@ -521,7 +521,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     # que `/server.py`, `/PLAN.md`, `/tests/…` y el resto del código dejan de estar servidos por HTTP.
     # Se cambia `self.directory` en vez de rehacer la ruta a mano para no perder el confinamiento
     # que ya hace SimpleHTTPRequestHandler (el que impide salir con `..`).
-    RAIZ_URL = ('assets', 'data', 'wiki', 'images')
+    #
+    # `performance` es la excepción que confirma la regla (2026-08-21): sus `.js` NO son código del
+    # motor, son sondas que sólo existen para correr EN la consola del navegador. Copiarlas a mano al
+    # portapapeles son 35 KB de pegado; servidas, la tirada es `await import('/performance/<sonda>.js')`.
+    RAIZ_URL = ('assets', 'data', 'wiki', 'images', 'performance')
 
     def translate_path(self, path):
         tramo = urllib.parse.urlparse(path).path.lstrip('/').split('/')[0]

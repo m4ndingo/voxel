@@ -76,7 +76,10 @@ const estado = async (u) => (await fetch(HOST + u, { redirect: 'manual' })).stat
   }
 
   console.log('\n§4 y lo que sí sale del repo (los datos) sigue saliendo');
-  for (const u of ['/assets/index.json', '/data/ui/ranuras.json', '/wiki/wiki.js', '/images/']) {
+  // `/performance/*.js` entró en `RAIZ_URL` el 2026-08-21: son sondas de consola, y se cargan con
+  // `await import('/performance/<sonda>.js')` en vez de pegar 35 KB a mano.
+  for (const u of ['/assets/index.json', '/data/ui/ranuras.json', '/wiki/wiki.js', '/images/',
+                   '/performance/consola_donde_va_el_frame.js']) {
     const s = await estado(u);
     check(s === 200, `${u} → ${s}`);
   }
