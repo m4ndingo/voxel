@@ -75,3 +75,7 @@ __pycache__/
 
 # Backups del propio repo (zip/tgz). Todo lo que llevaban está en el historial de git.
 releases/
+
+# Borradores de depuración de un rato (probe_*.js en la raíz). Lo que merece sobrevivir se escribe
+# como sonda en performance/ o como test en tests/, nunca como un probe_ suelto en la raíz.
+/probe_*.js
