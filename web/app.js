@@ -7315,7 +7315,7 @@ const mc={
   // REQ-OSD3 · modo ESCAPARATE (URL ?osd=1): este mundo es la PANTALLA de un menú, no una partida.
   // No guarda, no captura el puntero, no enseña hotbar y el clic PULSA bloques en vez de romperlos.
   escaparate:false,
-  tool:'build',                   // acción del clic (game.playerTool: 'build' pone al lado | 'paint' repinta | 'select' marca caja | 'pick' cuentagotas)
+  tool:'select',                   // acción del clic (game.playerTool: 'build' pone al lado | 'paint' repinta | 'select' marca caja | 'pick' cuentagotas)
   structTextures:true,            // game.structTextures: true = estructuras texturadas de verdad (detalle del editor, coste nivel 1) · false = color plano por cara (media, más barato)
   structGreedy:true,              // game.structGreedy: true = greedy meshing (fusiona caras coplanares de la misma textura/color → muchas menos caras) · false = una cara por voxel (como antes)
   useOldStructBuild:false,        // game.useOldStructBuildCall: true = el clic derecho vuelve a estampar SIEMPRE una pieza suelta (mcStampStruct, 1 draw call cada una). false (defecto) = lo que cabe en una celda se pone con setVoxel, dentro de la malla del chunk
@@ -15660,7 +15660,39 @@ function mcBoxCalcCurrentY1(){
   }
   return Math.max(0, Math.min((mc.dim.y || 40) - 1, targetY));
 }
+
 function mcBoxClick(){
+  const near = mcRaycast(mcReach(), true);
+  // Paso 0: primer clic fija esquina A
+  if(!mc.boxStep || mc.boxStep === 0){
+    if(!near) return;
+    const n = near.normal;
+    const px = near.cell[0] + n[0], py = near.cell[1] + n[1], pz = near.cell[2] + n[2];
+    mc.boxA = [px, py, pz];
+    mc.boxStep = 1;
+    toast('Esquina A fijada. Clic izq en la esquina opuesta para fijar la base');
+    return;
+  }
+  // Paso 1: segundo clic fija esquina B (base) - ANTES era mouseup/drag
+  if(mc.boxStep === 1){
+    const a = mc.boxA;
+    if(!a){ mc.boxStep = 0; return; }
+    let bx = a[0], bz = a[2];
+    if(near){ bx = near.cell[0] + near.normal[0]; bz = near.cell[2] + near.normal[2]; }
+    mc.boxB = [bx, a[1], bz];
+    mc.boxPitch0 = mc.pitch;
+    mc.boxStep = 2;
+    const w = Math.abs(bx - a[0]) + 1, d = Math.abs(bz - a[2]) + 1;
+    toast('Base fijada (' + w + 'x' + d + '). Mueve la mirada arriba/abajo y clic izq para altura');
+    return;
+  }
+  // Pasos 2 y 3: sin cambios, delegamos al original
+  // (pero como el original tambien maneja pasos 0 y 1, llamamos directamente
+  //  la logica de pasos 2+ que esta en el original)
+  return origBoxClick.call(this);
+}
+
+function origBoxClick(){
   const near = mcRaycast(mcReach(), true);
   if(!mc.boxStep || mc.boxStep === 0){
     if(!near) return;
@@ -15727,17 +15759,8 @@ function mcBoxClick(){
   }
 }
 function mcBoxMouseUp(){
-  if(mc.boxStep === 1 && mc.boxA){
-    const near = mcRaycast(mcReach(), true);
-    const a = mc.boxA;
-    let bx = a[0], bz = a[2];
-    if(near){ bx = near.cell[0] + near.normal[0]; bz = near.cell[2] + near.normal[2]; }
-    mc.boxB = [bx, a[1], bz];
-    mc.boxPitch0 = mc.pitch;
-    mc.boxStep = 2;
-    const w = Math.abs(bx - a[0]) + 1, d = Math.abs(bz - a[2]) + 1;
-    toast('Base fijada (' + w + '×' + d + ') · Mueve la mirada arriba/abajo y clic izquierdo para altura');
-  }
+  // No-op: ya no necesitamos el mouseup para fijar la base
+  // (se hace con el segundo clic)
 }
 function mcBoxStampVolume(px, py, pz, w, h, d){
   const mat = mc.hotbar[mc.sel];
@@ -15853,7 +15876,7 @@ function mcSelectPickFill(shift){
   // Se pilla la clave BASE por lo mismo que el cuentagotas: la postura la pone la mano (R / Shift+R) y
   // arrastrar el giro del bloque apuntado pelearía con ella; del fluido se pilla «agua», no «agua 3/7».
   const k=mcFluidBase(mcClaveBase(clave));
-  if(mc.structs[k]) return mcSelectFillPieza(k, '«'+mcNombreMat(k)+'»');   // pieza: pasa por el camino que sabe de posturas
+  //if(mc.structs[k]) return mcSelectFillPieza(k, '«'+mcNombreMat(k)+'»');   // pieza: pasa por el camino que sabe de posturas
   const id=mc.blockKey.indexOf(k);
   if(id>0) return mcSelectFillId(id);
   return mcSelectFillPieza(k, '«'+mcNombreMat(k)+'»');          // clave sin id todavía: que la dé de alta escribiéndola
@@ -15905,24 +15928,46 @@ function mcSelectFillPieza(sk, quien){
     toast(quien+' aún se está cargando — vuelve a pulsar'); return false; }
   return mcSelectFillId(id, {x:p[0],y:p[1],z:p[2],before:p[3],after:id});
 }
+function mcSelForEachConAire(fn){
+  const cajas = mc.selCajas; if(!cajas || !cajas.length) return;
+  const vistas = cajas.length > 1 ? new Set() : null;
+  for(let ci = 0; ci < cajas.length; ci++){
+    const s = cajas[ci];
+    const x0 = Math.min(s.a[0], s.b[0]), x1 = Math.max(s.a[0], s.b[0]);
+    const y0 = Math.min(s.a[1], s.b[1]), y1 = Math.max(s.a[1], s.b[1]);
+    const z0 = Math.min(s.a[2], s.b[2]), z1 = Math.max(s.a[2], s.b[2]);
+    for(let x = x0; x <= x1; x++) for(let y = y0; y <= y1; y++) for(let z = z0; z <= z1; z++){
+      if(!mcInside(x, y, z)) continue;
+      const i = mcIdx(x, y, z);
+      if(vistas){ if(vistas.has(i)) continue; vistas.add(i); }
+      const id = mc.grid[i];
+      fn(x, y, z, id, ci);
+    }
+  }
+}
 // Reparte un id ya resuelto por los bloques SÓLIDOS de la caja. `yaHecha` es la celda que
 // mcSelectFillPieza tuvo que escribir para resolver la clave: se suma al mismo gesto de historial.
 function mcSelectFillId(id, yaHecha){
-  if(mc.tool!=='select' || !mc.selBox || !id) return false;
-  const celdas=[]; mcSelForEach((x,y,z,before)=>celdas.push([x,y,z,before]));
-  if(!celdas.length){ toast('Nada que reemplazar'); return true; }
-  const edits=[];
-  let desde=0;
-  if(yaHecha){ edits.push(yaHecha); desde=1; }
-  for(let n=desde;n<celdas.length;n++){
-    const [x,y,z,before]=celdas[n];
-    if(before===id) continue;                                // ya es ese material: ni edición ni historial
-    mc.grid[mcIdx(x,y,z)]=id; mcDirty(x,y,z); mcGlowTocada(x,y,z);
-    edits.push({x,y,z,before,after:id});
+  if(mc.tool !== 'select' || !mc.selBox || !id) return false;
+  const celdas = [];
+  mcSelForEachConAire((x, y, z, before) => celdas.push([x, y, z, before]));
+  if(!celdas.length){ toast('Nada que rellenar'); return true; }
+  const edits = [];
+  let desde = 0;
+  if(yaHecha){ edits.push(yaHecha); desde = 1; }
+  for(let n = desde; n < celdas.length; n++){
+    const [x, y, z, before] = celdas[n];
+    if(before === id) continue;
+    mc.grid[mcIdx(x, y, z)] = id;
+    mcDirty(x, y, z);
+    mcGlowTocada(x, y, z);
+    edits.push({x, y, z, before, after: id});
   }
-  if(!edits.length){ toast('Nada que reemplazar'); return true; }
-  mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
-  toast(edits.length+' bloque(s) → '+mcNombreMat(mc.blockKey[id]||''));
+  if(!edits.length){ toast('Nada que rellenar'); return true; }
+  mcRemeshEdiciones(edits);
+  mcPushHist({t: 'bb', edits});
+  mcScheduleSave();
+  toast(edits.length + ' bloque(s) rellenados con ' + mcNombreMat(mc.blockKey[id] || ''));
   return true;
 }
 // Recorre los bloques SÓLIDOS del mundo dentro de la selección, llamando fn(x,y,z,id,ci) — `ci` es DE QUÉ
@@ -15981,7 +16026,8 @@ function mcSelExtruir(dir){
       const y=c.y+1;
       if(!mcInside(c.x,y,c.z)) continue;                  // techo del mundo
       const before=mc.grid[mcIdx(c.x,y,c.z)];
-      if(before) continue;                                // ya hay algo ahí: extruir no pisa lo que hay
+      //const isFluid = mc.blockKey[before].toLowerCase().includes("agua") || mc.blockKey[before].toLowerCase().includes("lava")
+      //if(before && isFluid==false) continue;                                // ya hay algo ahí: extruir no pisa lo que hay
       mcSetBlock(c.x,y,c.z,c.id);                         // mcSetBlock y no mc.grid[..]=: es un cambio de
       edits.push({x:c.x,y,z:c.z,before,after:c.id});      // TOPOLOGÍA y tiene que re-iluminar (mc.gridGen)
     } else {
@@ -16006,6 +16052,9 @@ function mcSelExtruir(dir){
   }
   mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
   toast((arriba?'Extruido':'Cavado')+' — '+edits.length+' bloque(s)');
+
+  if(arriba) mcForceUnstick();
+
   return true;
 }
 // Ctrl+C: vuelca la caja seleccionada a `clipboard` (portapapeles global del editor). Cada bloque de mundo se
@@ -19725,65 +19774,90 @@ game.saveWorld=async function(){
   return ok;
 };
 function mcTick(now){
-  if(!mc.active) return;
-  // REQ-FPS1 · TOPE DE FOTOGRAMAS (game.fpsMax). Se salta el frame ENTERO —update y render— cuando llega
-  // antes de tiempo, en vez de dormir: dormir dentro del rAF bloquea el hilo y falsea cualquier medida.
-  // El `dt` no se pierde, porque quien lo calcula lo saca de `mc.last`, que sólo se toca en los frames que
-  // sí corren ⇒ el frame siguiente recibe el intervalo acumulado y la física avanza igual de lejos.
-  // El plazo se ACUMULA (`due += per`) en vez de reiniciarse en `now`. Con el vsync puesto sólo existen
-  // múltiplos del refresco, así que un tope que no sea divisor exacto es INALCANZABLE frame a frame: pedir
-  // 60 en un panel de 144 Hz sólo ofrece 13,9 ms o 20,8 ms. Reiniciando en `now` se rechazaba el de 13,9 y
-  // se cogía siempre el de 20,8 ⇒ 48 fps (144/3) con el tope en 60 — el fallo que cazó el dueño. Acumulando,
-  // el limitador alterna 2 y 3 refrescos y el ritmo MEDIO sí es el pedido; el marcador puede leer una pizca
-  // por debajo (57-58 con tope 60 a 144 Hz) porque no hay ningún reparto que dé 60 exactos.
-  // El −0,5 ms de holgura es para no perder un frame entero por redondeo del reloj cuando el tope coincide
-  // con el refresco de la pantalla (pedir 60 en un panel de 60 dejaría 30 sin él).
-  if(mc.fpsMax>0){
-    const per=1000/mc.fpsMax, due=mc._fpsMaxDue||0;
-    if(now < due-0.5){ mc.raf=requestAnimationFrame(mcTick); return; }
-    // Si el motor no llega al tope (o la pestaña volvió de estar oculta) el plazo se ha quedado atrás:
-    // se re-ancla en `now` en vez de arrastrar una deuda que saldría luego como ráfaga de frames.
-    mc._fpsMaxDue = (now > due+per) ? now+per : due+per;
-    mc._fpsMaxLast=now;
+  if (!mc.active) return;
+
+  if (mc.fpsMax > 0) {
+    const per = 1000 / mc.fpsMax;
+    
+    // Inicialización en el primer frame
+    if (!mc._fpsMaxLast) {
+      mc._fpsMaxLast = now;
+      mc._fpsAccum = 0;
+    }
+
+    const elapsed = now - mc._fpsMaxLast;
+    mc._fpsMaxLast = now;
+
+    // Evitar ráfagas tras pausar la pestaña (máximo 2 frames de deuda acumulada)
+    mc._fpsAccum = Math.min(mc._fpsAccum + elapsed, per * 2);
+
+    // Margen de tolerancia (3 ms) para absorber el jitter de rAF sin perder el frame
+    if (mc._fpsAccum < per - 3.0) {
+      mc.raf = requestAnimationFrame(mcTick);
+      return;
+    }
+
+    // Consumir el intervalo del frame
+    mc._fpsAccum -= per;
+  } else {
+    mc._fpsAccum = 0;
+    mc._fpsMaxLast = now;
   }
-  // REQ-PERF1: cerrar el frame anterior y comprobar. `now - mc.last` es la duración TOTAL del frame
-  // anterior desde su inicio de rAF hasta el inicio del actual — incluye mcTick, callbacks de OTROS
-  // rAF (p. ej. procesarRemallar del snippet de redstone), composite del navegador y espera de GPU.
-  // Todo lo instrumentado durante ese intervalo está acumulado en _perfState.frame; se vuelca aquí
-  // si el frame fue lento, y se limpia para el frame actual.
-  const _perfOn = _perfAssert>0;
-  if(_perfOn && mc.last){
+
+  // Instrumentación de rendimiento
+  const _perfOn = typeof _perfAssert !== 'undefined' && _perfAssert > 0;
+  if (_perfOn && mc.last) {
     const dtFrame = now - mc.last;
-    if(dtFrame > 0) _perfComprobarFrame(1000 / dtFrame);
+    if (dtFrame > 0 && typeof _perfComprobarFrame === 'function') {
+      _perfComprobarFrame(1000 / dtFrame);
+    }
   }
-  if(_perfOn) _perfState.frame = {};
-  const dt=mc.last ? (now-mc.last)/1000 : 0;
-  // FPS reales de pantalla ~cada 0.5s (calca playTick)
-  mc.fpsN++;
-  if(!mc.fpsT) mc.fpsT=now;
-  if(now-mc.fpsT>=500){ mc.fps=mc.fpsN*1000/(now-mc.fpsT); game.fps=mc.fps; mc.fpsN=0; mc.fpsT=now; }
-  if(mc.grid) mcUpdate(dt);
-  if(typeof game !== 'undefined' && game.fluidos) game.fluidos.tick();
-  if(mc.agents.size){ mcAgentsTick(now); mcAgentsSmoothUpdate(dt); }   // agentes/NPC: ticks lógicos + interpolación continua de renderizado
-  if(mc.grid) mcDynSync();   // BUG-GLOW3 · luz dinámica de agente por-fragmento (tras escribirse s.model en mcUpdate)
-  // Construir/romper CONTINUO: mientras se mantiene el botón (y el puntero está bloqueado), repite la acción
-  // a intervalos (no cada frame). El estampado de estructuras NO se repite (una pieza por pulsación).
-  if(mc.heldBtn>=0 && mcMandoActivo() && now-mc.actAt>=MC_ACT_MS){   // REQ-MOV1 · el botón táctil también pica en cadena mientras se mantiene
-    if(!mcToolPasiva() && !(mc.heldBtn===2 && mc.slotStruct[mc.sel])) mcDoAction(mc.heldBtn);   // Seleccionar y Cuentagotas NO se repiten: cada clic es un gesto suelto
-    mc.actAt=now;
+  if (_perfOn && typeof _perfState !== 'undefined') _perfState.frame = {};
+
+  const dt = mc.last ? (now - mc.last) / 1000 : 0;
+
+  // Contador de FPS reales promediados cada 500 ms
+  mc.fpsN = (mc.fpsN || 0) + 1;
+  if (!mc.fpsT) mc.fpsT = now;
+  if (now - mc.fpsT >= 500) {
+    mc.fps = (mc.fpsN * 1000) / (now - mc.fpsT);
+    if (typeof game !== 'undefined') game.fps = mc.fps;
+    mc.fpsN = 0;
+    mc.fpsT = now;
   }
-  mcUpdatePreview();              // refresca la malla de la vista-previa si cambió el objetivo/giro (asíncrono, no bloquea)
-  mcUpdateHotbar(dt);             // hunde/emerge la hotbar según la carrera (ver mcUpdateHotbar)
-  mcSyncHeldToolStruct();         // sincroniza y posiciona la herramienta en mano si game.showTool está activo
-  mcRender();
-  mcUpdateNoteView();            // t1 · muestra/oculta el texto de la nota apuntada
-  // Carteles de las notas: el repaso barato va aquí y no en cada escritura de mc.notes porque quien
-  // escribe notas no es solo el panel — también los snippets y los agentes, que no saben de carteles.
-  if(now-mcNoteSignAt>500){ mcNoteSignAt=now; if(mcNoteSignsDesfasados()) mcSyncNoteSigns(); }
-  mcUpdateXrayLabels();          // rayos-X · etiquetas de coordenadas sobre los bloques rojos
-  updateWorldMeters();
-  mc.last=now;
-  mc.raf=requestAnimationFrame(mcTick);
+
+  // Lógica y renderizado
+  if (mc.grid && typeof mcUpdate === 'function') mcUpdate(dt);
+  if (typeof game !== 'undefined' && game.fluidos) game.fluidos.tick();
+  if (mc.agents && mc.agents.size) {
+    if (typeof mcAgentsTick === 'function') mcAgentsTick(now);
+    if (typeof mcAgentsSmoothUpdate === 'function') mcAgentsSmoothUpdate(dt);
+  }
+  if (mc.grid && typeof mcDynSync === 'function') mcDynSync();
+
+  if (mc.heldBtn >= 0 && typeof mcMandoActivo === 'function' && mcMandoActivo() && now - mc.actAt >= MC_ACT_MS) {
+    if (!mcToolPasiva() && !(mc.heldBtn === 2 && mc.slotStruct[mc.sel])) mcDoAction(mc.heldBtn);
+    mc.actAt = now;
+  }
+
+  if (typeof mcUpdatePreview === 'function') mcUpdatePreview();
+  if (typeof mcUpdateHotbar === 'function') mcUpdateHotbar(dt);
+  if (typeof mcSyncHeldToolStruct === 'function') mcSyncHeldToolStruct();
+  if (typeof mcRender === 'function') mcRender();
+  if (typeof mcUpdateNoteView === 'function') mcUpdateNoteView();
+
+  if (typeof mcNoteSignAt !== 'undefined' && now - mcNoteSignAt > 500) {
+    mcNoteSignAt = now;
+    if (typeof mcNoteSignsDesfasados === 'function' && mcNoteSignsDesfasados()) {
+      mcSyncNoteSigns();
+    }
+  }
+
+  if (typeof mcUpdateXrayLabels === 'function') mcUpdateXrayLabels();
+  if (typeof updateWorldMeters === 'function') updateWorldMeters();
+
+  mc.last = now;
+  mc.raf = requestAnimationFrame(mcTick);
 }
 // Overlay de carga del Mundo (t12): evita ver «solo cielo» mientras se hornea el mundo/atlas/meshes.
 function mcYield(){ return new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))); }   // cede 2 frames para que el navegador pinte
@@ -20516,7 +20590,7 @@ function mcSetPlayerTool(v, announce){    // centraliza mc.tool (setter de conso
 function mcHerramientasDisponibles(secundarias){
   // Seleccionar va con las PRINCIPALES (2026-08-17, orden del dueño): construir, marcar un volumen y
   // marcar una caja son el mismo trabajo y se alternan a cada rato; pintar y cuentagotas no.
-  const pool = secundarias ? ['paint', 'pick'] : ['build', 'box', 'select'];
+  const pool = secundarias ? ['paint', 'pick'] : ['select', 'build', 'box'];
   if(!mc.catalog) return pool;
   const disp = pool.filter(t => mcHerramientaKey(t));
   return disp.length ? disp : (secundarias ? ['paint'] : ['build']);
