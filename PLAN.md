@@ -54,6 +54,9 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [BUG-RANURA2](#-bug-ranura2) | con un recorte de `K` cargado, pulsar **1-9 repinta el recorte** en vez de elegir bloque para construir | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`, estrena [REQ-RANURA1](PLAN_ARCHIVO.md#-req-ranura1) (commit `dcfabf7`, de anteanoche). **Localizado**: `mcPasteMaterial` (`app.js:16003`) dispara con solo `mc.pasteActive`, sin mirar qué herramienta hay en la mano. El repintado se escribió a propósito para el Ctrl+V; lo que falta es acotarlo | 
 | [BUG-GLOW9](#-bug-glow9) | las **estrellas del cielo no parecen autoiluminadas** (puntitos oscuros y cúbicos) y la **niebla no las tapa** | 🔴 abierto 2026-08-20 | **dos** notas de `/map/bugfinder2` sobre lo mismo. Lo de la niebla está escrito a propósito en `mcDrawVoxUI` (`app.js:14026`: `uFogNear = far*8`, `aEmit=1`) ⇒ es una **decisión que él quiere revisar**, no un descuido. Lo de «se nota que son voxels» es otra cosa y falta medirlo. Vecino de [REQ-GLOW5](#-req-glow5) | 
 | [REQ-GLOW10](#-req-glow10) | el brillo de los **emisivos debe adaptarse a la luz ambiente**: de noche brillan, de día no hace falta tanto | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Pide **dos tunables**: la adaptación y el brillo máximo. Redactado, sin investigar. **Desbloqueado**: [BUG-GLOW8](PLAN_ARCHIVO.md#-bug-glow8) cerró el 2026-08-20 y ya hay UNA sola ley de luz. 🔒 **bajo el candado** de la [Ley de la Luz](wiki/paginas/ley-de-la-luz.md) | 
+| [BUG-GLOW11](#-bug-glow11) | **las estrellas del cielo tiran los fps al andar**: `mcDynSync` se come el 95 % del frame | 🔴 abierto 2026-08-20 | **medido, con causa aislada** (no es que emitir luz sea caro). Las ~240 estrellas de `efectos-demo` inflan la caja del BFS dinámico a 200 000 celdas **y** ocupan 148-160 de las 160 plazas de `MC_DYN_SEMILLAS`, que se reparten por distancia al ojo ⇒ andar reordena la lista y **rompe el candado `mc._dynSig` el 94-96 % de los frames** (0 % sin estrellas). Sonda: `performance/sonda_dynsync.js`. **2026-08-20, medido en la máquina del dueño: el 89 % de las re-siembras son FALSAS** (mismo campo byte a byte, sólo cambia el ORDEN del recorrido) ⇒ arreglo en [REQ-LUZ1](#-req-luz1). 🔒 cae bajo el candado de la [Ley de la Luz](wiki/paginas/ley-de-la-luz.md) |
+| [REQ-LUZ1](#-req-luz1) | **sembrar la luz dinámica en orden canónico**, no en orden de cercanía al ojo | 🟢 abierto 2026-08-20 | arreglo de la vía (0) de [BUG-GLOW11](#-bug-glow11): la distancia al ojo sigue decidiendo **quién coge plaza**, deja de decidir **en qué orden se siembra** ⇒ se van el 89 % de las re-siembras sin cambiar qué alumbra. Condiciones del dueño: **conmutable** (`game.luzOrden`) y **con redundancia ante fallos «como los motores de los aviones»** (cruce periódico entre los dos órdenes + reversión automática + una suma de comprobación por un canal independiente para cazar el fallo silencioso). ⛔ No toca el cupo de 160. 🔒 [Ley de la Luz](wiki/paginas/ley-de-la-luz.md). **HECHO 2026-08-20** (`game.luzOrden`, guardián `tests/test_luz_orden.js`, 24 ok) — pero medido el 2026-08-21: **no era la causa de los fps**, las roturas por orden son 0-1 con y sin él. Se queda por correcto (Ley VIII: 0,437 → 0,257), no por rápido |
+| [REQ-LUZ2](#-req-luz2) | **una caja por lo que se mueve**: los emisores quietos (estrellas) al campo estático | 🔴 abierto 2026-08-21 | **la causa de verdad de [BUG-GLOW11](#-bug-glow11)**, medida cuatro veces: la caja del BFS es la unión de TODAS las semillas ⇒ 4 estrellas repartidas la estiran al mundo entero y el bamboleo de la herramienta paga 368 640 celdas 86 veces por segundo (**78 % del reloj en `empty2`**; 27 % en el mundo grande, allí por el recorte centrado en el ojo). Vías (b)+(c), que eran la misma. Ley VII + Mandamiento 2. ⚠️ **No saldrá byte a byte idéntico** (Ley VI): lo arbitra `luz-campo` (Ley VIII). Conmutable `game.luzQuietas` + degradación automática. Aliviadero sin código para el mundo grande: `game.luzDinCeldas=640000` |
 | [BUG-SEL5](#-bug-sel5) | en selección, **Ctrl+Z revierte los bloques pero deja los corchetes** donde estaban | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. La caja de selección no entra en el gesto del historial. Redactado, sin investigar | 
 | [BUG-SEL3](#-bug-sel3) | al **rotar una selección**, las piezas finas u orientadas no giran con ella (la puerta se sale de su marco) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`, con su ejemplo: marco de bloques bien, puerta no. Es el giro **local** de cada pieza, no el de la caja. Ojo: las 24 posturas van **en la clave** (`mcOriNorm`/`mcOriParts`), ⛔ nada de `(rot\|0)&15` | 
 | [REQ-SEL4](#-req-sel4) | con selección, **`r` debe girar en horizontal y `R` en profundidad** (4×4 posturas) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «así se puede con `r` abrir una ventana de bloques, o con `R` levantar una cornisa». Hermano de [BUG-SEL3](#-bug-sel3): el mismo giro, visto desde el mando | 
@@ -63,6 +66,11 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-CART7](#-req-cart7) | poder **elegir el tipo de cartel** de una nota desde su editor, con los carteles definidos en un sitio | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Él mismo propone la puerta: categoría **«Cartel de Notas»** en la galería. Encaja con que los carteles ya **se derivan** de `mc.notes` y no viven en `mundo.json` ([BUG-CART1](#-bug-cart1)) | 
 | [REQ-FX1](#-req-fx1) | **temblor de cámara al caer** desde 15 bloques o más, con altura/amplitud/duración ajustables | 🟢 abierto 2026-08-20 | nota de `/map/bugfinder2`. El sitio natural es el aterrizaje que ya detecta `mcCaidaPaso`. Redactado, sin investigar | 
 | [REQ-CIUDAD1](#-req-ciudad1) | **renderizar un `.md` como ciudad de voxels** (`/map/plan`) y **regenerar el `.md` desde el mapa** | 🟢 entregado 2026-08-20, esperando su visto bueno | pedido del dueño el 2026-08-20. Hecho y en verde: la vuelta es **byte a byte** con `--fidelidad=exacta` (`tests/test_ciudad_md.js`). Detalle en [`docs/ciudad-md.md`](docs/ciudad-md.md). Falta que lo mire y decida si el aspecto de la ciudad merece más presupuesto (todo lo estético es DERIVADO y no toca la ida y vuelta) | 
+| [BUG-SHADOW4](#-bug-shadow4) | en un **mapa grande**, andar tira los fps: cada chunk que se malla rehornea el mapa de sombra **entero** | 🔴 abierto 2026-08-20 | **medido con `game.showRendered`** sobre un volcado del dueño de un mapa grande **sin estrellas ni agua** ⇒ **no es [BUG-GLOW11](#-bug-glow11)**: `mcTick` sólo 0,4-2,3 ms de los 16,7. `mcRenderShadow` = **401 draws / 159 M vértices (81 % del frame)** contra 69 draws de lo que se ve, porque **no recorta nada** (`app.js:10457-10463`) y el mapa del sol encuadra el mundo entero a propósito (`MC_SUN_MARGIN`). Disparador: `mcShadowDirty()` al final de cada mallado (`app.js:11241`) + `game.shadowGeoMs = 0`. 🔒 candado de la [Ley de la Luz](wiki/paginas/ley-de-la-luz.md) |
+| [REQ-REN1](#-req-ren1) | **`game.showRendered`**: medidor en tiempo real de **lo que se dibuja de verdad** (draws, triángulos y chunks), y los 4 medidores en consola y quemados en la foto de `Alt+F` | 🟢 entregado 2026-08-20, esperando su visto bueno | pedido del dueño el 2026-08-20 («no es normal que me quede mirando una pared y al mover un poco el ratón caigan los fps»). Envuelve `gl.drawArrays` sólo encendido (coste 0 apagado) y **reparte por pasada**. De paso contestó lo de `/map/plan`: no es el tamaño, es el **agua** — el reflejo planar se lleva 80 de 118 draws. Detalle en [`docs/rendimiento.md`](docs/rendimiento.md) |
+| [BUG-FINO1](#-bug-fino1) | la **geometría fina** es el **99,2 %** de los triángulos del frame: 16,8 M dibujados **mirando una pared que los tapa** | 🔴 abierto 2026-08-20 | **A/B cerrado con `game.showRendered`**: poniendo `finoCount=0` el frame pasa de 16 985 994 a 136 738 triángulos (**1/124**) y los fps suben de golpe. Dos causas que se suman: no hay occlusion culling (la pasada fina reusa la lista del frustum por chunk, `app.js:12979-12988`) y **cada baldosa cuesta 1 759 triángulos** porque el greedy funde por `m.id`, que lleva el color dentro. Misma enfermedad que el diagnóstico PERF-MC de 2026-07-22, ahora medida en la **rejilla** en vez de en las estructuras |
+| [REQ-CULL1](#-req-cull1) | **afinar el recorte por frustum que YA existe**: el AABB de un chunk es una columna de la altura entera del mundo y una estructura se recorta por su **esfera** | 🟢 abierto 2026-08-20 | ⚠️ **el frustum culling no hay que implementarlo, ya está** (`mcChunkVisible`, `app.js:12836`, aplicado a terreno, estructuras y fino). Lo que falta es **granularidad**: ~~caja real del contenido~~ y ~~la capa horneada de `game.voxelesUI`~~ **hechas 2026-08-20** (`game.cajaAjustada`, guardián `tests/test_caja_ajustada.js`); queda la **AABB girada en vez de esfera** para estructuras, que choca con `test_giro_navegador.js` y espera al dueño. El corte por distancia **ya existía** (`game.renderDist`). Barato y sin riesgo visual, pero **al dueño no le movió los fps**. ⛔ **No arregla la caída de las estrellas** ([BUG-GLOW11](#-bug-glow11)): ésas son la capa viva y su coste es JS, no dibujado |
+| [REQ-CULL2](#-req-cull2) | **occlusion culling**: no dibujar lo que una pared tapa por completo | 🟡 abierto 2026-08-20 | el ahorro está **medido** en [BUG-FINO1](#-bug-fino1): 16,8 M de triángulos tapados por una pared a un metro. Propuesta: **visibilidad por conexión de aire entre chunks** (se precalcula al mallar, BFS desde el chunk del ojo), no occlusion queries — que además no existen en WebGL1 y el contexto tiene fallback (`app.js:8756`). El más caro de los dos y el que más puede romper: un falso negativo **borra geometría de la pantalla** |
 
 ---
 
@@ -844,6 +852,399 @@ muestra, está mal por definición.
 
 ---
 
+<a id="-bug-glow11"></a>
+
+### BUG-GLOW11 · las estrellas del cielo tiran los fps al andar — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (2026-08-20, depurando con `perfDump`): «si apago las estrellas del cielo no
+caen los fps». Y el dato que lo acota: «con estrellas puestas, si giro hacia los lados sin andar con
+una herramienta en la mano que tenga emisión de luz caen los fps, pero si la oculto no. Al andar caen
+los fps tenga oculta o no la herramienta».
+
+**Volcado suyo**: `mcDynSync` = **59-62 ms de un `mcTick` de 62-65 ms** (el 95 % del frame), con
+`mcIdx` a 255 888 llamadas y `mcInside` a 33 828 **por frame**.
+
+> **Confirmado por el dueño el 2026-08-20, y es la frase que ordena las prioridades de rendimiento:**
+> «si sube los fps, esconder la herramienta de la mano derecha y quitar las estrellas, **el resto de
+> cosas apenas influyen**». Dicho después de probar, en su mapa y en vivo, `game.cajaAjustada=true`
+> ([REQ-CULL1](#-req-cull1)), `game.renderDist=2` y `game.renderScale=0.5`: **ninguna de las tres le
+> movió los fps de forma apreciable**. Las dos que sí los mueven —herramienta emisora en mano y
+> estrellas— son **la misma causa**: las dos rompen `mc._dynSig` y rehacen el BFS entero.
+>
+> ⇒ **Este ticket es el que vale.** [BUG-FINO1](#-bug-fino1) es real y está medido, pero mide un
+> **nivel** (por qué ese mapa dibuja 16,8 M de triángulos), no la **caída** que él nota; y REQ-CULL1
+> quedó hecho y en verde ahorrando donde a él no le duele. Lo único que lo bloquea es que toca
+> iluminación y el dueño dijo «no es momento de meternos con la ley de la luz ahora» — **esperando
+> que levante ese freno**.
+
+⚠️ **«Caen los fps al andar» tiene DOS culpables distintos; no confundirlos.** Éste es de CPU y sólo
+aparece **con estrellas** (o con otra nube de emisores de `game.voxelesUI`). Si el volcado enseña un
+`mcTick` **corto** (unos pocos ms) y aun así los fps son bajos, no es esto: es
+[BUG-SHADOW4](#-bug-shadow4), que es de GPU, va por el mapa de sombra y se dispara con el **tamaño del
+mundo** aunque no haya ni una estrella. La prueba que los separa en un vistazo es `mcTick`: aquí se
+come el 95 % del frame, allí el 3-14 %.
+
+#### No es que emitir luz sea caro. Son dos daños a la vez
+
+`mcDynBake` está gobernado por una **firma** (`mc._dynSig`, BUG-GLOW8) que promete que «mientras
+ninguna luz cambie de celda, esto no hace absolutamente nada». Las ~240 estrellas de `efectos-demo`
+(`game.voxelesUI`, `luz:37`) la rompen por los dos lados:
+
+1. **Inflan la caja del BFS** de ~0-30 000 celdas a **15 000-200 000**. Ése es el `mcIdx` de 255 888.
+2. **Ocupan 148-160 de las 160 plazas** de `MC_DYN_SEMILLAS` (`app.js:11790`), que se reparten **por
+   distancia al ojo** ⇒ andar reordena la lista, entran y salen estrellas, y la firma cambia.
+
+Medido con **`performance/sonda_dynsync.js`** (⚠️ **andando**; quieto no se reproduce), alternando
+rondas y en **ms, nunca en fps** (bajo SwiftShader el frame está capado por GPU y esto es invisible):
+
+| | firma rota | caja | ms/llamada |
+|---|---|---|---|
+| con estrellas | **94-96 % de los frames** | 15 000-200 000 celdas | 0,67-5,57 |
+| sin estrellas | **0 %** | 0 celdas | 0,02 |
+
+#### Las tres observaciones del dueño, una por una
+
+- **Andar, con o sin herramienta** → cambia el orden por distancia de las 160 estrellas. Roturas
+  medidas: `caja 22 · semillas 60`. La herramienta no interviene.
+- **Girar quieto CON herramienta emisora** → girar no mueve las estrellas, pero la herramienta va
+  delante de la cámara y su posición fina y su haz entran en la firma. La rompe ella, pero **el precio
+  lo ponen las estrellas**: rehacer la caja cuesta 200 000 celdas en vez de las ~30 000 que costaría
+  la herramienta sola (el propio `app.js:11930` cifra esa caja de 31³ en 1,09 ms).
+- **Girar quieto con la herramienta oculta** → no se mueve ninguna semilla, firma intacta, coste cero.
+  Medido: 0 % de roturas, 0,19 ms.
+
+#### El remate, ya escrito en el código
+
+`app.js:11802` (BUG-GLOW8g): «hay 237 luces de `game.voxelesUI` (estrellas) y **232 están POR ENCIMA
+del mundo** […] así que 154 de las 160 plazas se las llevaban emisores que no alumbran nada». Pagan la
+caja y las plazas **sin aportar un solo nivel de luz**.
+
+#### Medido en la máquina del dueño el 2026-08-20: el 89 % de las re-siembras son FALSAS
+
+Dato nuevo suyo que acota el ticket entero: **girando sobre el sitio y sin herramienta, con las
+estrellas puestas, no cae un solo fps; sólo cae al ANDAR.** Dos sondas de consola de 8 s andando en
+línea recta, en su mapa (`mc._dynSig` troceada por `|`: `[2]` es la caja, `[3..]` las semillas):
+
+| | |
+|---|---|
+| firmas muestreadas | 445 · 550 |
+| **caja recortada al ojo** | **0 %** — el recorte de `app.js:12036-12048` NO se dispara jamás |
+| cupo de `MC_DYN_SEMILLAS` saturado | **100 %** — **189 candidatas fijas para 160 plazas** |
+| firmas rotas | **81 %** de los frames (446 de 550) |
+| ↳ **sólo porque cambió el ORDEN** | **395 (89 % de las roturas)** |
+| ↳ cambió el conjunto de emisores | 13 |
+| ↳ cambió la caja | 38 |
+
+Es decir: **de 446 re-siembras, 395 producen un campo de luz idéntico byte a byte.** La causa es que
+`sem` viene ordenada por d² al ojo (`app.js:11989`) y **la firma se concatena en ese mismo orden**
+(`app.js:12064`): andar reordena las mismas 160 estrellas y la cadena cambia sin que cambie ni un
+nivel. Las que cambian de verdad son 51 en 8 s (≈ 6/s), y ésas cambian porque el corte de las 160
+mete una estrella y saca otra — el problema de fondo, no el de rendimiento.
+
+**El artículo: Ley VII, último punto** — «si nada que afecte al BFS cambió, la pasada entera es un
+no-op (**firma de emisores + generación de topología**)». Un orden de recorrido no es ni emisores ni
+topología. La firma de hoy lleva dentro **dónde está parado el jugador**, y por eso el motor recalcula
+la luz porque te has movido tú, no porque haya cambiado el mundo.
+
+⚠️ **Y la trampa, que casi se cuela como arreglo de una línea:** *no basta con ordenar la cadena de la
+firma antes de compararla.* El BFS rompe los empates por orden de siembra (`app.js:11811`, `>=`: gana
+el primero que llega, y **el que gana escribe el color**), así que dos órdenes distintos pueden dar
+campos que difieren en las celdas empatadas. Firmar el conjunto ordenado mientras se siembra por
+cercanía sería **cachear a través de una diferencia real** = el apaño que la Ley prohíbe. Lo correcto
+es **sembrar en orden canónico** (por celda, no por distancia al ojo) y firmar en ese mismo orden: la
+distancia al ojo sigue decidiendo *quién coge plaza* —eso es el cupo— pero deja de decidir *en qué
+orden se siembra*. Con eso el campo deja de depender del jugador de verdad, no sólo en la firma. Ojo:
+cambia el color de las celdas empatadas respecto a hoy, y eso **es una corrección** (hoy ese color
+depende de dónde estás), pero hay que decirlo y medirlo con los informes de foto (Ley VIII).
+
+#### Medido el 2026-08-21: el DISPARO y el PRECIO son cosas distintas (y yo las tenía mezcladas)
+
+Cuatro tiradas del dueño en su máquina, sonda de consola, 8 s cada una, con `game.luzOrden='canonico'`:
+
+| mundo | qué lleva | fps | re-siembras / 8 s | ms cada una | caja | **quién rompe la firma** |
+|---|---|---|---|---|---|---|
+| grande, **quieto** | herramienta escondida | **144** | 0 | — | — | nadie: **0 roturas** |
+| grande, andando | herramienta escondida | 111 | 38 = **27 % del reloj** | 56,9 | 259 200-328 050 | **CAJA 38**, semillas 0 |
+| `empty2`, andando | 4 estrellas + herramienta | 93 | 688 = **78 % del reloj** | 9,1 | 368 640 fija | **semillas 685** (el haz de la mano) |
+| `empty`, girando en el sitio | herramienta escondida | sin caída | — | — | — | nadie |
+
+Y la frase del dueño que lo ordena todo: «**es la herramienta, y son las estrellas, pero sobre todo las
+estrellas**; girando en el sitio no caen, andando sí, y sin estrellas —o con las estrellas sin emisión— no».
+
+**Las estrellas no disparan la re-siembra: le ponen el PRECIO.** Dispara andar (la caja recortada
+persiguiendo al ojo, o el bamboleo de la herramienta, que cruza un cuanto de haz casi cada frame). Lo que
+convierte ese disparo en 57 ms es que **cuatro estrellas repartidas por el cielo estiran la caja hasta el
+mundo entero**, porque la caja es la unión de TODAS las semillas. Girar en el sitio no mueve ni la caja ni
+la mano ⇒ cuesta cero, exactamente como debe ser.
+
+#### ⛔ La segunda cosa que este ticket daba por exonerada y era FALSA
+
+Aquí estaba escrito, el 2026-08-20, que «el recorte de caja hacia el ojo **no se dispara nunca: 0 %.
+Exonerado**». Salía de `game.luzDiag().caja.recortada`, que estaba calculado como
+`D.vol >= MC_DYN_CELDAS` — y **recortar deja el volumen por debajo del tope, así que ese indicador es
+`false` por construcción: no podía dar `true` jamás**. El recorte era justamente el culpable en el mundo
+grande (96×64×96 = 589 824 celdas de unión cruda contra un tope de 450 000 ⇒ recorta siempre, y el
+recorte va **centrado en el ojo**, `app.js:12203` ⇒ la caja resbala un bloque por paso, y la caja está en
+la firma). Reproducido en headless: **0 roturas de 200 pasos** con presupuesto holgado y **24 de 200,
+todas de CAJA, a 71,4 ms**, bajando el tope a 300 000.
+
+Arreglado el instrumento (2026-08-21, `mcDynBake` + `mcLuzDiag`): se apunta la unión **cruda** antes de
+recortar y `recortada` mide lo que dice. La lección, sin adorno: **un indicador que sólo sabe decir «no»
+no es una medida**, y con él exoneré al culpable y mandé el trabajo por dos vías secundarias.
+
+#### Vías, sin decidir
+
+Ninguna investigada a fondo, y no son excluyentes: **(0)** *(la nueva, y la que más quita por menos
+riesgo)* **siembra en orden canónico** ⇒ se van el 89 % de las re-siembras sin tocar qué alumbra; **(a)** que un emisor que no puede sembrar no gaste
+plaza **ni caja** — BUG-GLOW8g ya le quita la plaza, pero la caja se calcula antes; **(b)** sacar del
+BFS dinámico los emisores lejanos y quietos, que es para lo que **se mueve**; **(c)** que la caja no
+sea la unión de todos los emisores.
+
+🔒 **Cae de lleno bajo el candado**: toca la iluminación del motor ⇒ se lee antes la
+[Ley de la Luz](wiki/paginas/ley-de-la-luz.md) **entera** y se cita el artículo que se aplica. El dueño
+lo aplazó explícitamente el 2026-08-20 («no es momento de meternos con la ley de la luz ahora»).
+⛔ Y el corolario suyo: **nada de apagar las estrellas para que suban los fps** — eso sería el apaño
+que la Ley prohíbe. REQ-GLOW5 (emisivos en `game.voxelesUI`) es una función **pedida por él**.
+
+**Criterio de cierre:** con las estrellas puestas y andando, `sonda_dynsync.js` da **firma rota por
+debajo del 10 %** y `mcDynSync` deja de ser el primero del `perfDump` del dueño en su máquina — sin
+que las estrellas dejen de alumbrar.
+
+El arreglo propuesto para la vía (0) tiene ticket propio: [REQ-LUZ1](#-req-luz1) *(hecho el 2026-08-20;
+quitó la dependencia del ojo en el orden, pero **no era esto**: medido el 2026-08-21, las roturas por orden
+son 0-1)*. Las vías **(b)** y **(c)** resultaron ser la misma y son las que quedan: [REQ-LUZ2](#-req-luz2).
+
+---
+
+<a id="-req-luz1"></a>
+
+### REQ-LUZ1 · siembra en orden canónico, conmutable y con redundancia · 🟢 abierto 2026-08-20
+
+> 🔒 **Bajo el candado de la [Ley de la Luz](wiki/paginas/ley-de-la-luz.md).** No se escribe una línea
+> sin que el dueño levante el freno. Artículos que se aplican: **Ley VII** (último punto: la firma es
+> *emisores + topología*), **Mandamiento 2** (la ley será una sola), **Mandamiento 10** y **Ley VIII**
+> (se demuestra midiendo).
+
+Arreglo de la vía (0) de [BUG-GLOW11](#-bug-glow11), donde está la medida que lo justifica: **el 89 %
+de las re-siembras al andar producen un campo idéntico byte a byte**, sólo porque `sem` se recorre en
+orden de cercanía al ojo. Condiciones puestas por el dueño el 2026-08-20: **conmutable** y **con
+redundancia ante fallos, «como los motores de los aviones»**.
+
+#### Qué cambia, exactamente
+
+`mcDynSync` (`app.js:11986-12001`) hace **dos cosas con el mismo orden** y hay que separarlas:
+
+1. **Quién coge plaza** — las 160 más cercanas al ojo de las 189 candidatas. **Esto NO se toca**: es el
+   cupo, y es otra discusión (la de las 51 rotaciones reales por 8 s).
+2. **En qué orden se siembran las que cogieron plaza** — hoy también por distancia al ojo, y de ahí
+   sale todo el desperdicio. **Esto pasa a orden canónico.**
+
+**El orden canónico es el propio fragmento de firma de cada semilla**, ordenado como cadena. Se calcula
+una vez por semilla y sirve para las dos cosas ⇒ **siembra y firma no pueden desincronizarse nunca**,
+que es la clase de bug que este ticket no se puede permitir.
+
+#### ⛔ Lo que este ticket afirmaba y era FALSO (lo cazó su propio guardián, 2026-08-20)
+
+Estaba escrito aquí que «el **nivel** no cambia en ninguna celda» y que el orden no podía cambiar el
+campo porque dos semillas con el mismo fragmento son indistinguibles. **Las dos cosas son mentira**, y
+el guardián lo tumbó a la primera. El BFS guarda **UN emisor por celda** (Ley VI) y **el orden de
+llegada decide cuál**; el salto siguiente se calcula desde el dueño de la celda, así que reordenar mueve
+el nivel de unas cuantas celdas **aguas abajo**, entre semillas *distintas*. Medido en `/map/test` con
+209 candidatas para 160 plazas:
+
+| | |
+|---|---|
+| celdas encendidas | 102 650 |
+| cambian de **nivel** al pasar de un orden a otro | **79 (0,077 %)**, y ninguna salta más de 1 nivel |
+| cambian sólo de color | 3 |
+| sembrar dos veces lo mismo | idéntico byte a byte (control) |
+
+**Y el dato que da la vuelta al argumento:** eso mismo pasa HOY cada vez que el dueño da un paso. Una
+permutación pequeña del orden —la que produce andar— **también mueve celdas**. O sea que la luz de hoy
+ya depende de dónde está parado el jugador; el orden canónico no introduce ese defecto, **lo quita**.
+
+**El árbitro es la Ley VIII, no la opinión.** Corriendo el informe `luz-campo` (cuánto se aparta el
+motor de su propia ley) con los dos órdenes, en el mismo sitio:
+
+| orden | desvío máximo contra la ley |
+|---|---|
+| por cercanía al ojo | **0,437** |
+| canónico | **0,257** |
+
+`resolucionMinima` es 0,25 ⇒ el orden canónico deja el desvío **en el suelo de lo representable**, donde
+el propio informe dice que «no hay nada que arreglar», mientras que el de siempre se queda por encima,
+que es la definición de artefacto. Y `sumaBFS` se acerca a `sumaLey` (3 168,75 → 3 181,5). **El orden
+canónico no es sólo más barato: se aparta menos de la ley.**
+
+#### El mando
+
+`game.luzOrden` = `'canonico'` | `'ojo'`, persistido en `localStorage` (`vf_luzOrden`), como
+`game.renderDist` y `game.cajaAjustada`. Arranca en `'ojo'` (lo de hoy) y pasa a `'canonico'` por
+defecto **cuando el cruce de abajo haya volado limpio**. `game.luzDiag()` dice siempre cuál va puesto.
+
+#### La redundancia (tres capas, y una que es la que de verdad importa)
+
+**Capa 0 · Un solo motor de luz, dos órdenes.** ⛔ No hay dos implementaciones del BFS: eso sería un
+«modelo aparte para este caso» y lo veta el **Mandamiento 2**. Lo redundante es el **orden**, no la
+física. Los dos caminos entran por el mismo `mcDynBake`.
+
+**Capa 1 · Verificación cruzada (el BITE del motor).** `game.luzCruce = N` segundos (def. 30; `0` la
+apaga), y **sólo corre con el orden canónico puesto**: volando el de siempre no hay nada nuevo que
+verificar, y hacer siembras extra a todo el mundo sería cambiar el motor para medirlo. Hace dos
+preguntas distintas:
+- **repetibilidad** — sembrar dos veces lo mismo tiene que dar lo mismo byte a byte. Si no, hay algo
+  podrido (búfer sucio, estado que se cuela entre pasadas) y **eso sí es avería**.
+- **los dos órdenes, uno contra otro** — se **mide** la diferencia. ⚠️ Que difieran unas pocas celdas
+  **NO es avería**: es el desempate, ya medido y acotado arriba. Son avería la **caja distinta** (es una
+  unión: no puede depender del orden), que se **desborde la tolerancia** (`MC_LUZ_CRUCE_TOL`, 1 % de las
+  encendidas) o que una celda **salte más de 1 nivel** (`MC_LUZ_CRUCE_SALTO`). Las cifras están a la
+  vista en el código a propósito: un umbral escondido es un apaño con otro nombre.
+
+**Capa 2 · Reversión automática, y no se vuelve a arrancar sola.** Ante (a) una excepción en el camino
+canónico o (b) una discrepancia de `nivel`: se vuelve a `'ojo'` **para el resto de la sesión**, se
+guarda `mc._luzOrdenFallo = {motivo, cuándo, celda}`, y sale en consola, en `game.luzDiag()` y en la
+ficha de la foto (`mcFichaFoto` ya lleva `luz:`). ⛔ **Nada de reintentar en silencio**: un avión no
+rearranca solo el motor que ha fallado; aterriza y se mira.
+
+**Capa 3 · El fallo que de verdad da miedo, y su canal independiente.** El peligro de este ticket **no
+es que reviente** — es lo contrario: que la firma **deje de invalidarse cuando debería** y la luz se
+quede congelada *pareciendo* correcta. Nada falla, nada grita, y el mundo alumbra mal. Contra eso, un
+**segundo canal calculado de otra manera**: una **suma de comprobación conmutativa** del conjunto de
+semillas (un entero por semilla, sumados — libre de orden *por construcción*, no por haberlo ordenado,
+y por un código distinto del que arma la cadena). Invariante: **si la suma cambia y la firma no,
+la firma está rota** ⇒ annunciación + reversión. Cuesta una suma por semilla y es lo único de todo el
+diseño que detecta el fallo silencioso.
+
+#### Estado (2026-08-20): HECHO, con `tests/test_luz_orden.js` en verde (24 comprobaciones)
+
+Lo que afirma el guardián, y por qué esas y no otras:
+
+1. **El reparto está saturado** (209 candidatas para 160 plazas). Sin eso el test no probaría el caso
+   que duele, y pasaría por casualidad.
+2. La diferencia entre órdenes está **acotada** (≤ 1 % de las encendidas, ningún salto > 1 nivel), en vez
+   de la afirmación falsa de «idéntico» que traía este ticket.
+3. **La promesa de verdad**: se mueve el ojo a un sitio donde el conjunto elegido es **el mismo** (se
+   comprueba, no se supone), y con el orden canónico **el campo sale idéntico** — la luz deja de depender
+   de dónde estás. Con control de que el orden de siempre **sí** reordena en ese mismo paso.
+4. **Andando 120 pasos**: 120 roturas del candado con el orden de siempre → **24** con el canónico. Las
+   24 que quedan son cambios **reales** del conjunto (el cupo de 160), que es [BUG-GLOW11](#-bug-glow11)
+   y este ticket no lo toca a propósito.
+5. **Ley VIII**: `luz-campo` con los dos órdenes ⇒ el canónico **no puede apartarse más de la ley**
+   (0,437 → 0,257).
+6. Las tres capas de redundancia: el cruce sale limpio y **no revierte el motor bueno**; una excepción
+   provocada en el camino canónico **no tumba el frame ni apaga la luz**, revierte sola, lo deja anotado
+   con su motivo, y el mundo sigue alumbrando; y una **firma rancia** provocada a mano la caza el canal
+   independiente y ante la duda **re-siembra** en vez de dar por buena la luz vieja.
+
+**Sin regresiones, comprobado y no supuesto:** los **12** guardianes de luz del repo dan **exactamente
+los mismos números** que en HEAD, corriendo HEAD en un `git worktree` aparte con los datos reales
+enlazados. ⚠️ Y hay que decirlo: **26 de esas comprobaciones ya estaban rojas antes de este ticket**
+(`test_agente_luz_sigue` 9, `test_glow8_luz_una_sola` 5, `test_luz_en_rejilla` 6, `test_luz_traspasa` 3,
+y 1 en cada uno de `test_luz_artificial`, `test_luz_global`, `test_luz_al_estampar`). No son de aquí.
+
+**Falta para cerrar, y es del dueño:** `game.luzOrden` arranca en `'ojo'` a propósito. La prueba que
+decide es la suya — encenderlo, andar, y mirar los fps y la pantalla. Fotos antes/después con
+`herramientas/comparar_fotos.py` (`luz-continuidad`: `cruzarCelda` no puede moverse) en su GPU, que
+SwiftShader no decide.
+
+**Criterio de cierre:** andando con las estrellas puestas, firma rota **por debajo del 10 %** (hoy 81 %)
+y sin una sola avería del cruce en una sesión larga del dueño.
+
+**Cerrado a medias (2026-08-21):** implementado, guardián verde, cero regresiones… y **no era la causa**.
+Con él puesto, las roturas por orden son **0** — pero también eran **1** sin él. El 89 % de ayer se midió
+con el cupo saturado (189 candidatas para 160 plazas); el 2026-08-21, con 108-128 candidatas, ese reparto
+no se da y lo que rompe la firma es la caja o el haz de la mano. Se queda puesto porque es correcto por
+Ley VIII (desviación 0,437 → 0,257) y quita una dependencia del jugador que no debía estar, **pero no
+sube los fps**. El ticket de los fps es [REQ-LUZ2](#-req-luz2).
+
+---
+
+<a id="-req-luz2"></a>
+
+### REQ-LUZ2 · una caja por lo que se mueve, y los emisores quietos al campo estático · 🟢 abierto 2026-08-21
+
+> 🔒 **Bajo el candado de la [Ley de la Luz](wiki/paginas/ley-de-la-luz.md).** No se escribe una línea sin
+> haberla leído entera y citado el artículo.
+
+**El hecho, medido cuatro veces** (tabla en [BUG-GLOW11](#-bug-glow11)): la caja del BFS dinámico es la
+**unión de TODAS las semillas**, así que cuatro estrellas repartidas por el cielo la estiran hasta el mundo
+entero — y entonces **el bamboleo de 1/256 de radián de la herramienta que llevas en la mano paga 368 640
+celdas, 86 veces por segundo**. En `empty2`, un mapa vacío con 4 estrellas y 1 herramienta: **78 % del
+reloj**. En el mundo grande, la misma raíz con otra cara: la unión no cabe en el presupuesto ⇒ se recorta
+**centrada en el ojo** ⇒ la caja resbala tras el jugador ⇒ 27 % del reloj.
+
+**El artículo:** **Ley VII**, último punto — «si nada que afecte al BFS cambió, la pasada entera es un
+no-op (firma de emisores + generación de topología)». Una estrella que no se ha movido **no ha cambiado**;
+que su luz se rehaga porque el jugador ha dado un paso es exactamente lo que ese punto prohíbe. Y
+**Mandamiento 2** (una sola ley de luz): la solución no puede ser un segundo BFS con reglas propias.
+
+**La propuesta.** Las estrellas no se mueven ⇒ su luz es **estática** y su sitio es `mcComputeBlockLight`,
+que ya se gobierna por «emisores + topología». La caja dinámica se queda con lo que de verdad se mueve —la
+herramienta, los agentes—, y son ~31³ ≈ 30 000 celdas en vez de 368 640. **No hay que inventar ninguna
+mezcla**: el shader ya combina los dos campos con `max(s, d)` (`app.js:9950`); el emisor sólo cambia de
+lado de un `max` que ya existe.
+
+**Lo que se ha construido (2026-08-21), y en qué se aparta de lo escrito arriba.** La propuesta decía «quién
+es quieto **lo declara el snippet**» (`material('estrellas',{quieto:true})`). Se ha hecho **al revés**, por
+orden del dueño: *«quiero algo genérico que sirva para cualquier partícula que emita luz, me da igual si
+están en la misma caja o van sueltas»*. Una bandera que hay que acordarse de poner no es genérica: sirve a
+las estrellas y a nada más, y la partícula que un snippet olvide declarar sigue pagando la caja del mundo
+entero. **El motor no pregunta si la partícula se mueve: lo mira.**
+
+- **`mcVoxUIReparto()`** (`app.js`, al lado de `mcVoxUILuces`) compara cada luz de la capa con la de la
+  pasada anterior por su **clave** — posición cuantizada al **mismo cuanto con el que entra en la firma de
+  `mcDynBake`** (`mcLuzFirmaSemilla`, `qPos = MC_LUZ_SUB*8`) más su alcance. Quieta significa exactamente
+  *«no rompería la firma»*, no una definición aparte ni un umbral inventado.
+- La que lleva **`MC_LUZ_QUIETA_TRAS` = 30 pasadas** seguidas idéntica pasa al campo del mundo
+  (`mcComputeBlockLight`); la que cambia se queda en la caja. Histéresis en un solo sitio, sin degradación
+  ni re-armado: una partícula que titila **nunca** llega a las 30 y se queda donde estaba — lo que la
+  «degradación automática» de la propuesta perseguía sale gratis de contar.
+- **`app.js` sigue sin saber qué es una estrella**: no hay clave nueva en `game.voxelesUI.material` y el
+  snippet del decorado no se toca. Vale igual para una farola de partículas o una chispa que se para.
+- El conjunto quieto entra en el **`emiSig`** de `mcComputeBlockLight` con un hash de conjunto (suma+xor,
+  independiente del orden en que la capa las enumere): plantar, apagar o mover una estrella invalida ese
+  campo igual que colocar una antorcha. Sin eso, el atajo de la firma dejaría el campo **congelado
+  pareciendo correcto**, que es el fallo silencioso que teme la Ley VII.
+- El cambio de bando sale por **el camino que ya existía** para la transición montado↔quieto de las
+  estructuras (`cambio` + caja XZ en `mcDynSync`), que ya sabe re-sembrar el mundo y re-mallar su halo.
+- **Conmutable**: `game.luzQuietas` (de serie **encendido**: es el arreglo, no un experimento) y
+  `game.luzQuietasTras`, los dos persistidos. `game.luzDiag().quietas` dice el reparto en vivo — si
+  `movidas` no baja nunca es que un snippet las está moviendo, y ahí hay que mirar, no en el BFS.
+
+**Medido** (`probe_luz_quietas.js`, `/map/test` 96×40×96, 128 estrellas de luz 37; mismo mundo, misma
+máquina y el mismo paseo de 200 pasos, con `game.luzQuietas` false y true):
+
+| | firma rota | `mcDynSync` por frame | caja | reparto de la capa |
+|---|---|---|---|---|
+| **false** (lo de antes) | **199** / 200 | **76,69 ms** | 368 640 celdas (el mundo entero) | 0 quietas / 368 movidas |
+| **true** (REQ-LUZ2) | **3** / 200 | **0,38 ms** | 29 791 celdas (sólo la herramienta) | 368 quietas / 0 movidas |
+
+**×199 andando.** Y la luz sigue puesta: el campo del mundo pasa de 35 198 a 207 274 celdas encendidas, y a
+ras de suelo bajo las estrellas el nivel es **16,5 antes → 17 después** (no idéntico, Ley VI, como estaba
+avisado).
+
+⛔ **El coste no ha desaparecido: se ha mudado, y hay que decirlo.** Rehornear el campo del mundo —lo que se
+paga al **colocar o romper un bloque**, no por frame— pasa de **19,8 ms a 78,8 ms** con las 128 estrellas
+dentro (medido en SwiftShader, CPU pura y lenta). Es un tirón discreto en una acción discreta, a cambio de
+no pagar nada al andar. Bajarlo es otro ticket: `mcComputeBlockLight` rehornea el mundo ENTERO por un
+bloque, cuando lo que cambia es un radio de `MC_MAXLIGHT` alrededor de él.
+
+⚠️ **Esto NO va a salir byte a byte idéntico, y hay que decirlo antes de empezar** (en REQ-LUZ1 me
+equivoqué justo en este punto): donde la luz de una estrella y la de la herramienta se solapan, un solo BFS
+y dos BFS combinados con `max` **no dan lo mismo** — Ley VI, cada celda guarda un solo emisor. Así que el
+criterio no puede ser «es idéntico».
+
+**Criterio de cierre**, en este orden:
+1. **Ley VIII**: `luz-campo` sale **igual o más cerca** de la ley que hoy. Si se aleja, el ticket se cae.
+2. Andando con las estrellas puestas, `mcDynBake` **por debajo del 5 % del reloj** (hoy 27-78 %).
+3. Las estrellas siguen alumbrando el suelo. ⛔ Nada de apagarlas: eso es el apaño que la Ley prohíbe.
+
+**Aliviadero de hoy, sin tocar código**, para el mundo grande: `game.luzDinCeldas = 640000` (por encima de
+la unión cruda de 589 824) ⇒ el recorte deja de saltar y la caja deja de perseguir al ojo. Cuesta ~9 MB y
+una siembra de ~70 ms. No arregla `empty2` (allí la caja ya cabía): eso sólo lo arregla el ticket.
+
+---
+
 <a id="-bug-sel5"></a>
 
 ### BUG-SEL5 · Ctrl+Z en selección deja los corchetes sin revertir — 🔴 abierto 2026-08-20
@@ -1025,6 +1426,110 @@ Queda pendiente de su visto bueno, y sin medir: **`PLAN_ARCHIVO.md` (900 KB) son
 por orden suya no hay tope ni aviso. La ciudad tira hoy a cementerio de cajas ordenadas; el remedio
 es todo derivado y no toca la ida y vuelta.
 
+<a id="-req-ren1"></a>
+
+### 🟢 REQ-REN1 · `game.showRendered` · qué se está dibujando de verdad — 🟢 entregado 2026-08-20, esperando su visto bueno
+
+Pedido del dueño (2026-08-20), dos cosas seguidas: **«otro medidor en pantalla que se llame
+`game.showRendered`. Quiero saber cuántos elementos se están renderizando en tiempo real, no es normal
+que me quede mirando una pared y al mover un poco el ratón caigan los fps drásticamente»**, y luego
+**«sacar las métricas de fps, voxels, colores y rendered tanto en la consola como en la captura con
+Alt+F»**. Venía del hilo anterior: «tengo mapas mucho más grandes que `/map/plan` y no caen tanto los
+fps, necesitamos depurar el motivo».
+
+Cómo se lee y qué mide → [`docs/rendimiento.md`](docs/rendimiento.md).
+
+```js
+game.showRendered = true    // medidor en pantalla: draws · triángulos · chunks vistos/totales
+game.renderDump()           // desglose por pasada del último frame
+game.metricas()             // fps, vox, col y rendered de golpe, por consola
+```
+
+- Envuelve `gl.drawArrays` **sólo con el medidor encendido** (coste 0 apagado, como `game.perfAssert`)
+  y convive con el profiler REQ-PERF1, que envuelve lo mismo: cada uno restaura el original que él
+  capturó, en cualquier orden.
+- Reparte por pasada (`sombra`, `terreno`, `reflejo`, `estructuras`, `fino`, `translúcido`, `notas`…),
+  que es lo que convierte «van mal los fps» en «se va en esta pasada».
+- Sólo en el Mundo: el visor 3D y Play rasterizan en canvas 2D, no hay draws que contar.
+- `Alt+F` lleva los cuatro medidores en una **3ª línea quemada** en la ficha, los mismos por consola y
+  en crudo en `data/fotos/<id>.json`. **No depende de que el HUD esté encendido.**
+
+**Y contestó a la pregunta que lo motivó**: en `/map/plan` el **reflejo planar del entorno** se lleva
+80 de los 118 draws y el 88 % de los triángulos — 282,7 → 161,0 ms/frame apagándolo, y vuelve al
+reencenderlo. Lo que hace especial a ese mapa **no es el tamaño, es el agua**: Ciudad-MD usa `agua`
+como separador de barrios ⇒ canales por todas partes ⇒ la pasada de reflejo está siempre encendida.
+Un mapa el doble de grande sin agua a la vista no la paga. Tabla, A/B/A y la falsa pista de la sombra,
+en el doc.
+
+⚠️ **Sin línea de índice en `CLAUDE.md`**: quedan 32 B para el tope de 15 KB, y la regla dice que para
+meter una línea hay que **mover detalle verbatim** a `docs/` primero. Pendiente de decidir qué se
+mueve; hasta entonces `docs/rendimiento.md` se alcanza desde este ticket.
+
+---
+
+<a id="-bug-shadow4"></a>
+
+### BUG-SHADOW4 · en un mapa grande, andar tira los fps: cada chunk mallado rehornea la sombra entera · 🔴 abierto 2026-08-20
+
+🔒 **Toca la sombra proyectada del sol ⇒ ILUMINACIÓN.** Antes de escribir una línea se lee entera la
+[Ley de la Luz](wiki/paginas/ley-de-la-luz.md) y se cita el artículo. El dueño ha dicho **«no es momento
+de meternos con la ley de la luz ahora»** (2026-08-20) ⇒ esto está **diagnosticado, no autorizado a arreglar**.
+
+**Lo primero: no es [BUG-GLOW11](#-bug-glow11).** El dueño trajo un volcado de verbosidad 3 de un mapa
+grande **sin estrellas y sin agua**, y ahí `mcDynSync` vale 0,0-1,1 ms. El JS entero (`mcTick`) va de
+**0,4 a 2,3 ms** contra los 16,7 ms que caben en un frame de 60 fps — el 3-14 %. Con 36-48 fps reales,
+**el cuello no está en JS**. Son dos bugs distintos con la misma cara.
+
+**El reparto de dibujado señala solo:**
+
+| | draws | vértices |
+|---|---|---|
+| frame normal | 69 | 30,8 M |
+| frame que rehace la sombra | 486 | 196,1 M |
+| └ de ellos `mcRenderShadow` | **401** | **159,01 M — el 81 %** |
+| └ de ellos `mcRender` | 85 | 37,06 M |
+
+**Causa, en tres piezas que hay que ver juntas:**
+
+1. **`mcRenderShadow` no recorta NADA.** Sus bucles (`app.js:10457-10463`) recorren `mc.chunks`,
+   `mc.agents` y `mc.structures` enteros, sin una sola pregunta de visibilidad, y por cada chunk
+   dibujan dos veces (`ch.vbo` + `ch.finoVbo`). El único filtro que existe es `st.sinProyectar`.
+   `mcRender`, en cambio, sí recorta: `mcChunkVisible(ch,pv)` en `app.js:12841` y el AABB de las
+   estructuras en `12873`. De ahí 69 contra 401.
+2. **Y no se arregla metiéndole el mismo frustum.** El mapa del sol encuadra el **mundo entero con
+   margen** a propósito: `mcSunFrustum` (`app.js:10379-10383`) va de `-16` a `dim+16` en los tres ejes,
+   con `MC_SUN_MARGIN` justificado en `app.js:10362` (sin él, la panza de una nube que asoma se veía a
+   pleno sol). Todo el mundo está *legítimamente* dentro del volumen ⇒ no hay nada que recortar contra él.
+   **Corolario: el coste de rehornear escala con el TAMAÑO DEL MUNDO, no con lo que miras.**
+3. **El disparador es andar.** `mcShadowDirty()` está al final del constructor de chunks
+   (`app.js:11241`, *«el terreno cambió de forma → el mapa del sol ya no vale»*), así que **cada chunk
+   que se malla ensucia el mapa entero**; y `game.shadowGeoMs = 0` (`app.js:6256`, puesto a 0 adrede
+   porque el throttle *«produce sombra saltando y queda feo»*) lo rehornea **en el acto**. En un mapa
+   grande, caminar malla chunks sin parar ⇒ una reconstrucción de 159 M vértices detrás de otra.
+
+**⚠️ El remedio que sugiere el propio comentario de `app.js:6254` NO ataca esto**: bajar `game.shadowSize`
+(2048 → 1024) son téxeles, o sea coste de *relleno*. Los 401 draws y los 159 M vértices no se mueven ni
+un pelo, y encima degrada el borde de la sombra. Anotado para que nadie lo intente y crea que ha medido mal.
+
+**No contradice la «falsa pista» de [`docs/rendimiento.md`](docs/rendimiento.md) §110** — la confirma y la
+acota. Allí se anotó que la pasada `sombra` **no aparece con la escena en reposo**, porque su caché por
+firmas funciona. Exacto: el problema es justo el caso contrario, la escena **en movimiento sobre un mapa
+grande**, cuando el mallado no para de ensuciarla. Las dos cosas son verdad.
+
+**Camino prometedor (sin tocar el resultado visual ni un píxel): rehornear POR PARTES**, sólo la región
+del mapa de sombra que cubre el chunk que cambió, en vez del mundo entero. Es lo único que rompe la
+proporción «coste ∝ tamaño del mundo» sin recortar geometría que sí debe proyectar. Descartado de
+antemano: recortar por frustum de cámara (rompe el punto 2, sombras que desaparecen al girar) y subir
+`shadowGeoMs` (ya se probó y se revirtió: sombra a saltos).
+
+**Para reproducir y medir:** volcado de verbosidad 3 en un mapa grande **andando**, mirando el reparto
+por pasada (`game.showRendered`, [`docs/rendimiento.md`](docs/rendimiento.md)) — nunca fps bajo
+SwiftShader, que está topado por GPU (memoria `ab-de-fps-en-sondas-headless`).
+
+**Suelto, sin explicar:** un frame atípico del mismo volcado marca `mcTick 16,70 ms` con
+`(resto de mcTick) 11,30 — 68 % de mcTick sin dueño`. Eso es JS sin instrumentar y no lo cubre nada de
+lo anterior. Si se repite, hace falta otra pasada de sondas.
+
 ---
 
 ## Backlog Mundo (REQ-MC) · Olas B y C — pendiente
@@ -1134,6 +1639,228 @@ re-malla en vivo y persiste (`vf_mcStructGreedy`) -> escape si algo se viera rar
 layout/shader (solo cambia si fusiona) => el switch no puede descuadrar el VBO. **Pendiente**: verificacion visual
 en navegador (Taberna/Herreria con textura completa por voxel, sin costuras; `game.voxels` cae mucho pegado a
 una pared; `game.structGreedy=false` recupera el render actual).
+
+---
+
+<a id="-bug-fino1"></a>
+
+### BUG-FINO1 · la geometría fina es el 99,2 % de los triángulos del frame · 🔴 abierto 2026-08-20
+
+**No toca iluminación** ⇒ no hay candado de la [Ley de la Luz](wiki/paginas/ley-de-la-luz.md)… **con una
+condición**: el `ch.finoVbo` se dibuja **también** en la pasada de sombra (`app.js:10507`, «las celdas finas
+dan su sombra de verdad, no la del cubo»). Cualquier arreglo que cambie la malla que ve *esa* pasada sí toca
+la sombra proyectada. Si el LOD se aplica **sólo a la pasada visible**, no cambia ni un texel de sombra y se
+queda fuera del candado.
+
+#### Lo medido (A/B, no hipótesis)
+
+Mapa del dueño, **pegado a una pared oscura y quieto**, con `game.showRendered`:
+
+| pasada | draws | triángulos | % de los tris |
+|---|---:|---:|---:|
+| `terreno` | 75 | 159 778 | 0,9 % |
+| **`fino`** | **46** | **16 825 884** | **99,06 %** |
+| `estructuras` | 1 | 320 | ~0 |
+| `cielo` | 1 | 12 | ~0 |
+| **total** | **123** | **16 985 994** | |
+
+Y el mismo sitio con `ch.finoCount = 0` en los 144 chunks:
+
+| | draws | triángulos | fps |
+|---|---:|---:|---|
+| normal | 123 | **16 985 994** | ~100 |
+| sin `fino` | 73 | **136 738** | **suben de golpe** |
+
+**1/124 de los triángulos.** Es el A/B completo, con el número en las dos ramas.
+
+Censo de lo que hay plantado en la rejilla (`mc._geoFina` sobre `mc.grid`):
+
+| material | celdas | |
+|---|---:|---|
+| `asset:assets/baldosas-urbanas.vox.json` | **24 694** | 84 % de las celdas finas |
+| `asset:assets/metal-corrugado.vox.json` | 4 266 | |
+| `asset:assets/rejilla-pluvial.vox.json` | 384 | |
+| `asset:assets/diana.vox.json` | 16 | |
+| **total** | **29 360** | **51 649 304 tris en 144 chunks ⇒ 1 759 tris/celda** |
+
+#### Causa, en dos piezas que se multiplican
+
+1. **Nada las oculta.** El único filtro es el frustum **por chunk** (`mcChunkVisible`, `app.js:12781`), y la
+   pasada fina (`app.js:12982`, `for(const ch of vis)`) **reusa esa misma lista**. Una pared a un metro tapa
+   el 99 % de lo que hay detrás, pero sólo lo descarta el **test de profundidad**, que es lo último: los ~50 M
+   de vértices ya han pasado por el vertex shader antes de que se rechace un píxel. Es palabra por palabra el
+   punto 1 del diagnóstico **PERF-MC de 2026-07-22**, que se escribió para las estructuras estampadas; nadie
+   había medido que la **rejilla** lo sufriera igual o peor.
+2. **Una losa plana cuesta 1 759 triángulos.** El mallador de piezas finas **sí** hace greedy
+   (`app.js:9475-9487`), pero funde sólo caras con el **mismo `m.id`**, y `m.id` lleva el color dentro. Una
+   baldosa decorativa tiene color distinto sub-voxel a sub-voxel ⇒ **no funde casi nada**: salen ~880 quads
+   donde la cara de arriba de una losa lisa sería 1. El greedy está encendido y no puede trabajar.
+
+24 694 baldosas × 1 759 ≈ **43,4 M de triángulos sólo de acera**.
+
+#### Arreglos posibles, de mejor a peor
+
+- **A · LOD por distancia con malla simplificada (recomendado).** Segunda malla por asset, greedy agresivo
+  sobre el **color promedio** en vez del color exacto: 1 759 → decenas de triángulos. A 40 bloques el patrón
+  de una baldosa es sub-píxel y se está pagando entero. Se calcula **una vez por asset**, no por celda.
+  Conmutable (`game.finoLOD`, `game.finoDist`) como el resto de lo caro.
+- **B · Corte duro por distancia.** Cuatro líneas en el bucle de `app.js:12982`. Pero la baldosa **es** la
+  celda: si no se dibuja queda un **agujero en el suelo** y un pop visible al acercarse. Vale como válvula de
+  emergencia, no como arreglo.
+- **C · Pasar los materiales planos y repetitivos a la ruta texturada `tex:`** (`mc.stexProg`), donde el
+  greedy *sí* fusiona sin perder el tile por voxel (es justo para lo que se hizo, PERF-MC1). Es decisión de
+  **asset**, no de motor, y sería lo más barato de todo si el aspecto aguanta.
+- **D · Occlusion culling.** Caro de implementar y no toca el fondo del asunto (los 1 759 tris siguen ahí en
+  cuanto la baldosa es visible). Descartado como primera respuesta.
+
+#### Cómo reproducirlo en 8 segundos
+
+```js
+(()=>{ const g=[];
+  for(const ch of mc.chunks.values()) if(ch.finoCount){ g.push([ch, ch.finoCount]); ch.finoCount=0; }
+  game.showRendered(true);
+  setTimeout(()=>console.log('DURANTE:', game.renderDump()), 2500);
+  setTimeout(()=>{ for(const [ch,n] of g) ch.finoCount=n; }, 8000);
+  return 'apagados '+g.length+' chunks'; })()
+```
+
+#### ⚠️ Contrapeso del dueño (2026-08-20): esto NO es prioritario
+
+Después de todo lo de arriba, el dueño midió otra cosa: **un mapa grande y «lleno de estructuras
+finas» se le mantiene a 140 fps** con tal de esconder la herramienta de la mano y apagar las estrellas.
+O sea que en su máquina **la geometría fina tiene margen de sobra** y no es lo que le duele.
+
+Y su argumento contra confundir las dos cosas es el que cierra el asunto: **240 voxeles de estrella son
+184 320 triángulos, el 1 % de los 16,8 M de aquí**. Si el coste de las estrellas fuese geométrico no se
+vería en el perfil. No lo es: cada estrella es un **emisor** y lo que cuesta un emisor se mide en el
+volumen de la caja del BFS y en cuántas veces se rehace, no en triángulos ([BUG-GLOW11](#-bug-glow11)).
+
+⇒ Este ticket sigue siendo cierto y está medido, pero es **optimización de un caso concreto** (una
+ciudad con 24 694 baldosas), no el cuello de botella del motor. Que nadie lo adelante a BUG-GLOW11.
+
+#### Lo que este ticket NO afirma
+
+La caída que trajo el dueño era **140 → 100 fps**, o sea un **cambio**. Esto mide un **nivel**: por qué este
+mapa es caro en absoluto. Para saber si además explica la caída haría falta saber si esas 24 694 baldosas son
+nuevas en el mapa o llevaban ahí desde antes de los 140 fps. **Sin comprobar.** Van tres hipótesis previas
+caídas sobre esa caída (sombra → [BUG-SHADOW4](#-bug-shadow4), estrellas → [BUG-GLOW11](#-bug-glow11),
+medidores persistidos → descartado por el dueño); ésta es la primera con A/B, pero de otra pregunta.
+
+---
+
+<a id="-req-cull1"></a>
+
+### REQ-CULL1 · afinar el recorte por frustum que YA existe · 🟢 abierto 2026-08-20
+
+> ⚠️ **Lo primero, para no perder el tiempo: el frustum culling NO hay que implementarlo, ya está hecho
+> y funciona.** `mcChunkVisible` (`app.js:12836`) proyecta las 8 esquinas del AABB y descarta si las 8
+> caen fuera del mismo plano de recorte; `mcStructVisible` (`app.js:12824`) hace lo propio con las
+> estructuras. Se aplica al terreno (`12896`), a las estructuras en las tres pasadas (`12970`, `13006`,
+> `13065`) y, por herencia de la lista `vis`, a la geometría fina. El ticket es **afinarlo**.
+
+Lo que se pierde hoy, en orden de cuánto recorta:
+
+1. **El AABB de un chunk es una columna de la altura ENTERA del mundo.** `app.js:11267` lo fija en
+   `[x0, 0, z0, x1, dim.y, z1]` y `MC_CHUNK=16` (`app.js:7430`, «la columna vertical y entera va en un
+   chunk»). En un mapa de 256×48×256 eso son cajas de **16×48×16**: mirando de frente al nivel del
+   suelo, un chunk entra entero por dos voxeles de cornisa a 40 de altura. El arreglo es gratis en
+   tiempo: al mallar ya se recorre el chunk voxel a voxel, así que se puede anotar de paso el **`y`
+   mínimo y máximo con contenido** y guardar la caja real. Sin cambiar ni una regla de dibujo.
+2. **Las estructuras se recortan por su ESFERA envolvente, no por su caja.** `mcStructVisible`
+   (`app.js:12828-12833`) calcula `r` como la **semidiagonal** del AABB y prueba un cubo de lado `2r`
+   alrededor del centro girado. Para una pieza alargada (un cable, una viga) eso es varias veces su
+   volumen real. Con las 24 posturas ya derivadas del giro, girar el AABB de verdad es aritmética
+   conocida.
+3. ~~**No hay corte por distancia.**~~ ⛔ **FALSO, escrito sin comprobarlo** (corregido el 2026-08-20 al
+   implementar el ticket): el corte por distancia **ya existe**. `mc.renderDist` (def. 8,
+   `app.js:7576`) es una distancia de Chebyshev en chunks que se prueba **antes** que el frustum, con
+   mando `game.renderDist` (`app.js:20480`, acotado 2..24 y persistido en `vf_mcRD`). Este punto no
+   hay nada que hacerlo. Se deja escrito en vez de borrarlo para que nadie lo vuelva a abrir.
+4. **La capa HORNEADA de `game.voxelesUI` no se recorta en absoluto.** `app.js:14491-14497` es
+   `for(const ch of mc.voxFino.values())` con un solo filtro, `if(!ch.count || !ch.vbo) continue`:
+   **ni una prueba de visibilidad**, al contrario que el terreno. Se manda entera mires donde mires.
+   Encontrado el 2026-08-20 al descartar que REQ-CULL1 sirviera para las estrellas — **y no sirve**:
+   las estrellas son la capa **VIVA** (`app.js:14455`, un solo `mcDrawArr` sin chunks) y su coste es
+   JS, no dibujado ([BUG-GLOW11](#-bug-glow11)). Esto es el otro camino, el de la nieve y las manchas
+   que ya se quedaron en el suelo, y ahí sí hay chunks que recortar.
+   - Los chunks de `mc.voxFino` **no tienen `aabb`**: se crean como `{m, sucio, vbo, count}`
+     (`app.js:7991`) y su clave es `floor(fx/N)+','+floor(fz/N)` (`app.js:7989`), o sea la **misma
+     huella XZ de 16 bloques** que `MC_CHUNK`. La caja sale de la clave con una multiplicación.
+   - ⚠️ **Misma trampa que el punto 1**: si se deriva de la clave sin más, vuelve a salir una columna
+     de la altura entera del mundo. El rango de `y` con contenido se anota al mallar, en
+     `mcVoxFinoGeom` (`app.js:8026`), que ya recorre los voxeles.
+   - Es el punto **más barato de los cuatro** y el que menos puede romper: un fallo hace parpadear
+     adorno, no materia.
+
+**No entra aquí:** que la **pasada de sombra no recorte nada** — eso está medido y escrito aparte en
+[BUG-SHADOW4](#-bug-shadow4), y toca iluminación ⇒ tiene candado de la Ley de la Luz. Este ticket es
+sólo la pasada visible.
+
+**Riesgo: bajo.** Todo son cajas más ajustadas alrededor de la misma geometría; un fallo se ve al
+instante (aparecen y desaparecen trozos al girar) y no corrompe nada guardado. Verificable con
+`game.showRendered`: `chunks` visibles y `draws` tienen que **bajar** sin que cambie lo que se ve.
+
+#### Estado (2026-08-20)
+
+**Hechos los puntos 1 y 4**, con mando `game.cajaAjustada` (def. `true`, persistido en `vf_mcCajaAj`)
+y guardián nuevo `tests/test_caja_ajustada.js` en verde (27 comprobaciones). El test no cuenta draws:
+compara la **imagen píxel a píxel** en 5 vistas con la caja ajustada y con la columna entera, porque
+el fallo caro de este ticket es que algo DESAPAREZCA de la pantalla, y eso un contador de draws no lo
+ve. Lleva un tercer render de control que demostró su utilidad al primer intento: falló por el agua,
+que se mueve sola porque `uTime` sale de `performance.now()` (`app.js:13087`) — se congela el reloj
+mientras se mide.
+
+**El punto 2 (AABB girada en vez de esfera) queda pendiente y NO se hizo a escondidas**: choca de
+frente con `tests/test_giro_navegador.js:99-131`, que afirma justo lo contrario — que la caja inflada
+declara visible lo que la caja cruda descarta. Una AABB ajustada de un cubo girado 90° sobre su propio
+centro es la misma caja, así que el discriminante de ese test desaparece. Tocarlo necesita el visto
+bueno del dueño.
+
+⚠️ **Y lo que mide de verdad, dicho por el dueño el 2026-08-20 después de probarlo en su máquina:
+`game.cajaAjustada`, `game.renderDist=2` y `game.renderScale=0.5` NO le movieron los fps.** Este
+ticket ahorra en mapas planos y mirando al cielo, pero **no es su cuello de botella**; el suyo es
+[BUG-GLOW11](#-bug-glow11).
+
+---
+
+<a id="-req-cull2"></a>
+
+### REQ-CULL2 · occlusion culling: no dibujar lo que una pared tapa entero · 🟡 abierto 2026-08-20
+
+El ahorro no es una estimación, está **medido** en [BUG-FINO1](#-bug-fino1): pegado a una pared oscura,
+el motor dibuja **16 985 994 triángulos** de los que la pared tapa prácticamente todos; quitando sólo la
+geometría fina el frame se queda en **136 738** y los fps suben de golpe. El frustum no puede arreglar
+esto: esos chunks **sí** están dentro del cono de visión. Lo único que los descarta hoy es el test de
+profundidad, que es lo último — los ~50 M de vértices ya pasaron por el shader.
+
+Está escrito como causa nº 1 desde el diagnóstico **PERF-MC de 2026-07-22** (para las estructuras
+estampadas). Lo nuevo es que ahora hay número y método de medida.
+
+#### Cómo, y por qué no de la forma obvia
+
+- **⛔ Occlusion queries de GPU** (`gl.createQuery` + `ANY_SAMPLES_PASSED`). Dos problemas: **no existen
+  en WebGL1**, y el contexto tiene fallback declarado (`app.js:8756` prueba `webgl2` y luego `webgl`);
+  y el resultado llega **un frame o dos tarde**, lo que produce parpadeo al girar rápido.
+- **✅ Visibilidad por conexión de aire entre chunks** (lo que hacen los motores de voxels). Al mallar
+  un chunk se calcula, con un flood-fill por el aire, **qué pares de sus 6 caras están conectados**
+  — 15 bits por chunk, y se calcula **una vez por mallado**, no por frame. En el frame se hace un BFS
+  desde el chunk del ojo hacia fuera, entrando en un vecino sólo si (a) está en el frustum y (b) la
+  cara por la que se entra conecta con la cara por la que se salió. Pegado a una pared, el BFS muere en
+  el primer chunk. Encaja con lo que ya hay: `mc.chunks`, el mallado por chunk y la lista `vis`.
+- **⛔ Portales/celdas**: no encaja en un mundo de voxels abierto.
+
+#### Lo que hay que vigilar
+
+- **Un falso negativo borra geometría de la pantalla**, y ése es el fallo caro de este ticket (al revés
+  que REQ-CULL1, donde lo peor es no ahorrar). Hace falta **conmutador** (`game.oclusion`, def. según
+  cómo salga) para poder apagarlo en el acto y comparar.
+- El BFS tiene que arrancar del chunk del **ojo**, no del jugador: en vuelo o con la cámara en tercera
+  persona no son el mismo.
+- **La pasada de sombra NO puede usar esta lista.** Lo que el ojo no ve sí proyecta sombra sobre lo que
+  ve; usar aquí la visibilidad del ojo sería exactamente el tipo de apaño que prohíbe la
+  [Ley de la Luz](wiki/paginas/ley-de-la-luz.md).
+- **Orden recomendado: REQ-CULL1 primero.** Es barato, sin riesgo, y deja las cajas ajustadas sobre las
+  que este BFS decide.
 
 ## Bitácora
 

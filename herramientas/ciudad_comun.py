@@ -51,9 +51,30 @@ DIMS = (96, 128, 192, 256, 384, 512, 768, 1024)   # escalones de lado; se elige 
 
 # ---------------------------------------------------------------- materiales
 
+_CATALOGO = None
+
+
+def _catalogo():
+    """id → fichero, leído de assets/index.json (la única lista buena, ver CLAUDE.md)."""
+    global _CATALOGO
+    if _CATALOGO is None:
+        with open(os.path.join(BASE, 'assets', 'index.json'), encoding='utf-8') as f:
+            _CATALOGO = {e['id']: e['file'] for e in json.load(f) if e.get('id') and e.get('file')}
+    return _CATALOGO
+
+
 def mat(nombre):
-    """Clave de material del catálogo. NUNCA un id de cliente: la paleta del .vox lleva claves."""
-    return 'asset:assets/%s.vox.json' % nombre
+    """Clave de material del catálogo. NUNCA un id de cliente: la paleta del .vox lleva claves.
+
+    ⛔ El fichero se LEE del índice, no se deduce del id. `assets/<id>.vox.json` es la convención
+    pero no la regla: `yellow` vive en `assets/yellow_concrete.vox.json`, y deducirlo daba un mundo
+    con un 404 en la paleta (`GET /assets/yellow.vox.json`, reportado por el dueño el 2026-08-20).
+    Un material que no carga no rompe nada a gritos: sale fucsia macizo y ya.
+    """
+    fichero = _catalogo().get(nombre)
+    if not fichero:
+        raise KeyError('material %r no está en assets/index.json' % nombre)
+    return 'asset:' + fichero
 
 
 # Reservados: la vuelta segmenta POR ESTOS y por nada más, así que ningún otro rasgo puede usarlos.

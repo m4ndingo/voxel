@@ -5696,8 +5696,67 @@ for(const k in ROOM_PROPS){ const p=ROOM_PROPS[k];
 window.room = room;
 
 // `game`: inspector global de consola. Teclear `game` a secas vuelca el diccionario con valores:
-// {fps, voxels, colors, mode, room:{doorTrim,…}, showFPS, showVoxels, showColors}. Los medidores se muestran/ocultan con
-// `game.showFPS(false)`, `game.showVoxels(false)`, `game.showColors(false)` o por asignación (persistidos).
+// {fps, voxels, colors, mode, room:{doorTrim,…}, showFPS, showVoxels, showColors, showRendered}. Los medidores se
+// muestran/ocultan con `game.showFPS(false)`, `game.showVoxels(false)`, `game.showColors(false)`,
+// `game.showRendered(true)` o por asignación (persistidos).
+// REQ-REN1 · game.showRendered · cuántos elementos manda la GPU DE VERDAD en el frame que se está
+// viendo. No es `game.voxels` (quads de geometría, que los cuenta mcRender sumando counts): esto son
+// las LLAMADAS DE DIBUJO reales y sus triángulos, medidos envolviendo `gl.drawArrays`, más el reparto
+// por pasada. Sirve para lo que game.fps no dice: mirando a una pared quieto y girando un poco el
+// ratón, ¿qué crece — el terreno visible, la sombra del sol, el reflejo, los carteles?
+//
+// ⛔ Con el medidor APAGADO no se envuelve nada (mismo trato que `game.perfAssert=0`: coste 0). Al
+// encenderlo se envuelve una vez y al apagarlo se desenvuelve, pero SÓLO si nadie ha envuelto encima
+// (el profiler REQ-PERF1 también envuelve `gl.drawArrays` con verbosidad≥2): si hay otra capa, el
+// envoltorio se queda puesto y se corta solo con `if(!_showRen) return`.
+const _ren = { draws:0, tris:0, fase:'', porFase:Object.create(null), chunks:0, chunksTot:0,
+               ultimo:null, pico:0, gl:null, wda:null };
+function _renFase(n){ if(_showRen) _ren.fase=n; }        // lo llaman mcRender y las pasadas sueltas
+function _renInicioFrame(){
+  if(!_showRen) return;
+  _ren.draws=0; _ren.tris=0; _ren.fase='(suelta)'; _ren.porFase=Object.create(null);
+  _renEnvuelve();
+}
+function _renFinFrame(){
+  if(!_showRen) return;
+  _ren.chunks = (mc._visChunks||[]).length; _ren.chunksTot = mc.chunks ? mc.chunks.size : 0;
+  if(_ren.draws>_ren.pico) _ren.pico=_ren.draws;
+  _ren.ultimo = { draws:_ren.draws, tris:_ren.tris, chunks:_ren.chunks, chunksTot:_ren.chunksTot,
+                  porFase:_ren.porFase };
+}
+function _renEnvuelve(){
+  const gl = mc && mc.gl;
+  if(!gl || _ren.gl===gl) return;
+  // ⛔ Sin `.bind(gl)`: `bind` devuelve una función NUEVA y se dejaría por el camino la marca (`_perf`,
+  // `_ren`) de quien hubiera envuelto debajo, de modo que al desenvolver nadie reconocería ya su
+  // propio envoltorio y la capa se quedaría enterrada para siempre. Se guarda la identidad y se
+  // invoca con `.call(gl, …)`.
+  const orig = gl.drawArrays;
+  const wda = function(mode, first, count){
+    if(_showRen){
+      _ren.draws++; _ren.tris += (count|0)/3;
+      const e = _ren.porFase[_ren.fase] || (_ren.porFase[_ren.fase] = { draws:0, tris:0 });
+      e.draws++; e.tris += (count|0)/3;
+    }
+    return orig.call(gl, mode, first, count);
+  };
+  wda._ren = true; wda._orig = orig;
+  gl.drawArrays = wda;
+  _ren.gl = gl; _ren.wda = wda;
+}
+function _renDesenvuelve(){
+  const gl = _ren.gl;
+  if(!gl) return;
+  if(gl.drawArrays === _ren.wda){ gl.drawArrays = _ren.wda._orig; _ren.gl=null; _ren.wda=null; }
+  // si no es el nuestro, hay otra capa encima (profiler): se deja y el `if(!_showRen)` lo apaga.
+}
+let _showRen=false; try{ _showRen = localStorage.getItem('vf_showRen')==='1'; }catch(e){}
+function applyShowRen(v){ _showRen=!!v;
+  try{ localStorage.setItem('vf_showRen', _showRen?'1':'0'); }catch(e){}
+  if(_showRen) _renEnvuelve(); else { _renDesenvuelve(); _ren.ultimo=null; _ren.pico=0; }
+  updateWorldMeters();
+  return _showRen; }
+
 let _showFPS=true; try{ _showFPS = localStorage.getItem('vf_showFPS')!=='0'; }catch(e){}
 function applyShowFPS(v){ _showFPS=!!v;
   try{ localStorage.setItem('vf_showFPS', _showFPS?'1':'0'); }catch(e){}
@@ -5764,6 +5823,23 @@ Object.defineProperty(game, 'showColors', { enumerable:true,   // muestra/oculta
   set(v){ applyShowColors(v); } });
 Object.defineProperty(game, 'showColor', { enumerable:false,
   get(){ return game.showColors; }, set(v){ game.showColors=v; } });
+Object.defineProperty(game, 'showRendered', { enumerable:true,   // REQ-REN1 · draws y triángulos REALES del frame
+  get(){ const f=v=>applyShowRen(v===undefined?!_showRen:v); f.valueOf=()=>_showRen; f.toString=()=>String(_showRen); return f; },
+  set(v){ applyShowRen(v); } });
+Object.defineProperty(game, 'showRen', { enumerable:false,
+  get(){ return game.showRendered; }, set(v){ game.showRendered=v; } });
+// El desglose por pasada del último frame medido. Sin el medidor encendido no hay nada que contar.
+game.renderDump = function(){
+  if(!_showRen){ console.log('game.showRendered está apagado (game.showRendered=true)'); return null; }
+  const u=_ren.ultimo; if(!u){ console.log('aún no ha pasado ningún frame medido'); return null; }
+  const filas=Object.keys(u.porFase).map(k=>({ pasada:k, draws:u.porFase[k].draws,
+    triángulos:Math.round(u.porFase[k].tris), '%draws':Math.round(100*u.porFase[k].draws/(u.draws||1)) }))
+    .sort((a,b)=>b.draws-a.draws);
+  console.log('%c'+u.draws+' draws · '+Math.round(u.tris).toLocaleString('es-ES')+' triángulos · '
+    +u.chunks+'/'+u.chunksTot+' chunks · pico '+_ren.pico+' draws', 'font-weight:bold');
+  console.table(filas);
+  return u;
+};
 // REQ-OSD1 · aquí vivían `game.showOSDbuttons` y los dos botones de la esquina del Mundo (🧩 Código y
 // ✕ Cerrar). QUITADOS 2026-08-13 por decisión del dueño («ya llegamos de otras formas»): al Mundo se
 // entra y se sale con teclado —`Esc` cierra, `Alt+C` abre los snippets— y los botones salían en cada
@@ -5789,8 +5865,17 @@ Object.defineProperty(game, 'showColor', { enumerable:false,
 //     esperar a otra caída.
 //   - Con `perfAssert = 0` (defecto) el sistema está APAGADO: las envolturas se retiran y el motor
 //     corre exactamente igual que sin el profiler. Coste medible = 0.
+// ⚠️ El observador SÍ pesa mientras está puesto, y el reparto no es uniforme: verbosity 1-2 envuelven
+// funciones de decenas/cientos de llamadas por frame (ruido), pero las HOJAS de verbosity 3 van a
+// millones. Por eso esas se cuentan sin cronómetro (`_PERF_HOJAS`). Regla para quien añada nombres:
+// si la función puede pasar de ~10 000 llamadas por frame, va a `_PERF_HOJAS`, no a `N1/N2/N3`.
 let _perfAssert = 0, _perfVerbosity = 1;
-const _perfState = { armed: true, frame: {}, lastDump: null, wrapping: false, origs: {} };
+const _perfState = { armed: true, frame: {}, lastDump: null, wrapping: false, origs: {}, hojas: {} };
+// Pila de funciones envueltas que están corriendo AHORA MISMO. Sirve para una sola cosa, pero es la
+// que faltaba: adjudicar cada `gl.drawArrays` al pase que lo pide. Un total de «150 draws, 63 M
+// vértices» no acusa a nadie; «el pase de sombra pide 400 de esos draws» sí. Se alimenta sola desde
+// las envolturas, así que cubre también lo que envuelva un snippet, sin tocar los sitios de dibujo.
+const _perfPila = [];
 function _perfNombres(v){
   // Niveles como capas: cada uno amplía la instrumentación. Ver PLAN.md §REQ-PERF1.
   // ⚠️ El frame en Chrome incluye: mcTick + otros callbacks rAF (procesarRemallar del snippet de
@@ -5798,11 +5883,25 @@ function _perfNombres(v){
   // instrumentado en ese intervalo suma, aunque se ejecute fuera de mcTick.
   // Los métodos con `.` son propiedades anidadas — se resuelven navegando desde window.
   const N1 = ['mcTick','mcRender','mcUpdate','mcRemeshAround','mcMeshChunk','mcComputeBlockLight','mcRelightBox','mcRebakeStructsNear','mcBuildPalette','mcMeshAll','mcUpdatePreview','mcUpdateXrayLabels','mcRenderShadow'];
-  const N2 = N1.concat(['mcSetBlock','mcCollides','mcRaycast','mcAgentsTick','mcAgentsSmoothUpdate','mcRestampAll','mcBuildStructMesh','mcMeshChunkFino','mcRelightSkylight','mcComputeLight','mcRebakeStructs','mcUpdateHotbar','updateWorldMeters',
-    'mcStampStruct','mcAgentMesh','mcFreeStruct','mcCarryEfimera','mcUploadAtlas','mcAddBlock','mcResolveMat',
+  // ⚠️ Todo nombre de estas listas se resuelve desde `window`; los que no existen sólo generan ruido
+  // en consola. Se quitaron `mcMeshChunkFino`, `mcRelightSkylight` y `mcRebakeStructs`: nunca han
+  // existido. Lo fino se malla dentro de `mcMeshChunk`, el skylight es `mcRelightBox`/`mcComputeLight`
+  // y el rehorneado de estructuras es `mcRebakeStructsNear`, ya en N1.
+  const N2 = N1.concat(['mcSetBlock','mcCollides','mcRaycast','mcAgentsTick','mcAgentsSmoothUpdate','mcRestampAll','mcBuildStructMesh','mcComputeLight','mcUpdateHotbar','updateWorldMeters',
+    'mcStampStruct','mcAgentMesh','mcFreeStruct','mcCarryEfimera','mcUploadAtlas','mcAddBlock',
+    // Los HIJOS DIRECTOS de mcTick que faltaban (2026-08-20). Sin ellos un frame con `mcTick` de 16 ms
+    // salía con 1,5 ms repartidos y ~14 ms SIN DUEÑO, que es justo lo que no deja diagnosticar nada.
+    // Ojo a `game.fluidos.tick`: lo instala un SNIPPET y corre en TODOS los mapas (mundo-autoarranque).
+    'mcDynSync','mcSyncHeldToolStruct','mcUpdateNoteView','mcNoteSignsDesfasados','mcSyncNoteSigns','mcDoAction',
+    'game.fluidos.tick',
+    // LO QUE DIBUJAN LOS SNIPPETS. La librería `particulas-voxel` no pinta ella: mete voxeles en
+    // `game.voxelesUI` y es app.js quien rehace la malla ENTERA de la capa y la sube cada frame
+    // (mcVoxUIGeom → mcDrawArr). Sin estos tres nombres, el coste de una nevada o de un puñado de
+    // estrellas no aparecía por ningún sitio del volcado; ahora sale con su desglose por grupo.
+    'mcDrawVoxUI','mcVoxUIGeom','mcVoxUILuces','mcDrawArr','mcDrawOverlays',
     // Motor de redstone: métodos públicos. Capturan el tiempo del click y del drenado internos.
     'game.redstone.encender','game.redstone.conmutar','game.redstone.tick','game.redstone.revisar','game.redstone.revisarCaja']);
-  const N3 = N2.concat(['mcResolveMat','mcPushHist','mcScheduleSave','mcDirty','mcGlowTocada','mcShadowDirty','mcSyncNoteSigns','mcNoteSignsDesfasados','mcGetFluidHeight','mcTapaCara','mcSolid','mcInside','mcIdx']);
+  const N3 = N2.concat(['mcPushHist','mcScheduleSave','mcShadowDirty','mcSyncNoteSigns','mcNoteSignsDesfasados']);
   return v>=3 ? N3 : v>=2 ? N2 : v>=1 ? N1 : [];
 }
 // Navega hasta el "propietario" y el nombre final desde un identificador tipo "game.redstone.tick".
@@ -5814,6 +5913,33 @@ function _perfResolver(nombre){
   const key = parts[parts.length-1];
   return (obj && typeof obj[key] === 'function') ? { obj, key, label: nombre } : null;
 }
+// ⚠️ HOJAS ULTRA-CALIENTES. Éstas NO se cronometran: se CUENTAN. `mcInside` sale a ~30 M llamadas por
+// volcado y `mcIdx` a ~15 M; a dos `performance.now()` + `push`/`pop` por llamada eso son DECENAS DE
+// SEGUNDOS de puro observador — el 2026-08-20 dejó el juego a 0,1 fps y el volcado mentía (los 10 987
+// ms de `mcComputeBlockLight` eran, casi enteros, el coste de medir a sus hijas). El dato útil de una
+// hoja así es su CUENTA, no sus ms: «30 M `mcInside` por frame» ya señala al culpable, y quien lo
+// necesite cronometra al LLAMADOR, que sí está envuelto. Envolturas por aridad y sin `arguments`,
+// para que sigan siendo monomórficas e inlineables.
+const _PERF_HOJAS = ['mcSolid','mcInside','mcIdx','mcTapaCara','mcGetFluidHeight','mcResolveMat','mcDirty','mcGlowTocada'];
+const _perfHojasArr = [];   // los mismos contadores en array: el reset por frame no debe iterar claves
+function _perfWrapCuenta(nombre){
+  const r = _perfResolver(nombre); if(!r) return null;
+  const f = r.obj[r.key];
+  if(f._perf) return null;
+  const c = _perfState.hojas[nombre] || (_perfState.hojas[nombre] = { n:0 });
+  if(_perfHojasArr.indexOf(c) < 0) _perfHojasArr.push(c);
+  let w;
+  switch(f.length){
+    case 1:  w = function(a){ c.n++; return f.call(this,a); }; break;
+    case 2:  w = function(a,b){ c.n++; return f.call(this,a,b); }; break;
+    case 3:  w = function(a,b,d){ c.n++; return f.call(this,a,b,d); }; break;
+    case 4:  w = function(a,b,d,e){ c.n++; return f.call(this,a,b,d,e); }; break;
+    default: w = function(){ c.n++; return f.apply(this, arguments); };
+  }
+  w._perf = true; w._orig = f; w._soloCuenta = true;
+  return w;
+}
+
 function _perfWrap(nombre){
   const r = _perfResolver(nombre); if(!r) return null;
   const orig = r.obj[r.key];
@@ -5821,7 +5947,10 @@ function _perfWrap(nombre){
   const label = r.label;
   const w = function(){
     const t = performance.now();
-    const res = orig.apply(this, arguments);
+    _perfPila.push(label);                      // ⬅️ para poder ADJUDICAR los draws de dentro
+    let res;
+    try{ res = orig.apply(this, arguments); }
+    finally{ _perfPila.pop(); }
     const dt = performance.now() - t;
     const e = _perfState.frame[label] || (_perfState.frame[label] = { calls:0, ms:0, maxMs:0 });
     e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt;
@@ -5842,7 +5971,11 @@ function _perfInstalar(){
   }
   _perfState.origs = {};
   _perfState.wrapping = false;
-  if(_perfAssert <= 0) return;
+  // ⚠️ Apagar es apagar TAMBIÉN en WebGL. Este `return` se comía la retirada de las envolturas de
+  // `gl.bufferData`/`gl.drawArrays` de más abajo: con `game.perfAssert = 0` las funciones del motor
+  // se desenvolvían pero las de GPU se quedaban puestas el resto de la sesión, cronometrando ~300
+  // draws por frame. Rompía la promesa de "coste medible = 0" de esta misma cabecera.
+  if(_perfAssert <= 0){ _perfDesenvolverGL(); _perfDesenvolverRAF(); return; }
   const nombres = _perfNombres(_perfVerbosity);
   const noEncontradas = [];
   for(const n of nombres){
@@ -5850,6 +5983,15 @@ function _perfInstalar(){
     if(!r){ noEncontradas.push(n); continue; }
     if(r.obj[r.key]._perf) continue;   // no re-envolver
     const w = _perfWrap(n); if(!w) continue;
+    _perfState.origs[n] = { obj: r.obj, key: r.key, orig: r.obj[r.key] };
+    r.obj[r.key] = w;
+  }
+  // Las hojas ultra-calientes, sólo en verbosity 3 y sólo contadas (ver `_PERF_HOJAS`).
+  if(_perfVerbosity >= 3) for(const n of _PERF_HOJAS){
+    const r = _perfResolver(n);
+    if(!r){ noEncontradas.push(n); continue; }
+    if(r.obj[r.key]._perf) continue;
+    const w = _perfWrapCuenta(n); if(!w) continue;
     _perfState.origs[n] = { obj: r.obj, key: r.key, orig: r.obj[r.key] };
     r.obj[r.key] = w;
   }
@@ -5862,11 +6004,12 @@ function _perfInstalar(){
   // fps viene de saturar la GPU con muchos buffers/draws, cosa invisible en el resto del profiler.
   if(_perfVerbosity>=2 && mc.gl && !mc.gl.bufferData._perf){
     const gl = mc.gl;
-    const _bd = gl.bufferData.bind(gl);
-    const _da = gl.drawArrays.bind(gl);
+    const _bd = gl.bufferData;   // ⛔ sin `.bind`: ver la nota de `_renEnvuelve` (REQ-REN1)
+    const _da = gl.drawArrays;
     const wbd = function(target, data, usage){
+      if(!(_perfAssert > 0 && _perfVerbosity >= 2)) return _bd.call(gl, target, data, usage);
       const t = performance.now();
-      const r = _bd(target, data, usage);
+      const r = _bd.call(gl, target, data, usage);
       const dt = performance.now() - t;
       const bytes = (data && data.byteLength)|0;
       const e = _perfState.frame['gl.bufferData'] || (_perfState.frame['gl.bufferData'] = { calls:0, ms:0, maxMs:0, bytes:0 });
@@ -5874,29 +6017,97 @@ function _perfInstalar(){
       return r;
     };
     const wda = function(mode, first, count){
+      // Se corta sola: si no se puede desenvolver (REQ-REN1 encima), al menos no cronometra.
+      if(!(_perfAssert > 0 && _perfVerbosity >= 2)) return _da.call(gl, mode, first, count);
       const t = performance.now();
-      const r = _da(mode, first, count);
+      const r = _da.call(gl, mode, first, count);
       const dt = performance.now() - t;
       const e = _perfState.frame['gl.drawArrays'] || (_perfState.frame['gl.drawArrays'] = { calls:0, ms:0, maxMs:0, vertices:0 });
       e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt; e.vertices = (e.vertices|0) + (count|0);
+      // …y el mismo draw, otra vez, adjudicado al pase que lo pide (lo más hondo de la pila).
+      const pase = _perfPila.length ? _perfPila[_perfPila.length-1] : '(fuera de mcTick)';
+      const q = (e.pases || (e.pases = {}));
+      const s = q[pase] || (q[pase] = { calls:0, vertices:0 });
+      s.calls++; s.vertices += (count|0);
       return r;
     };
     wbd._perf = true; wda._perf = true; wbd._orig = _bd; wda._orig = _da;
     gl.bufferData = wbd;
     gl.drawArrays = wda;
     _perfState._glWrapped = { gl, bufferData: _bd, drawArrays: _da };
-  } else if(_perfVerbosity<2 && _perfState._glWrapped){
-    // Desinstrumentar WebGL si bajó verbosidad.
-    _perfState._glWrapped.gl.bufferData = _perfState._glWrapped.bufferData;
-    _perfState._glWrapped.gl.drawArrays = _perfState._glWrapped.drawArrays;
-    _perfState._glWrapped = null;
+  } else if(_perfVerbosity<2){
+    _perfDesenvolverGL();   // bajó la verbosidad
   }
+  if(_perfVerbosity>=2) _perfEnvolverRAF(); else _perfDesenvolverRAF();
+}
+// Los OTROS bucles de rAF: los que instala un snippet (procesarRemallar de redstone, agentes,
+// efectos…). La cabecera de este archivo ya avisaba de que su tiempo cae dentro del frame medido,
+// pero no tenían nombre en ninguna lista, así que sólo se veían como «el frame tarda más que la
+// suma». Ahora salen como `rAF:<nombre de la función>`. mcTick se deja fuera: ya se mide él solo.
+// `rAF:tick` no acusa a nadie: media docena de snippets llaman `tick` a su bucle. La pila del sitio
+// donde se PIDE el frame sí lo dice, porque los snippets se compilan con `//# sourceURL=vf-snippet/<id>`
+// (app.js:4363). Se calcula una sola vez por función y se recuerda: la pila cuesta, la etiqueta no.
+const _perfEtiqRAF = new WeakMap();
+function _perfEtiquetaRAF(cb){
+  let e = _perfEtiqRAF.get(cb);
+  if(e) return e;
+  let quien = '';
+  try{
+    const m = (new Error().stack || '').match(/vf-snippet\/[\w.-]+/);
+    if(m) quien = ' · ' + m[0].replace('vf-snippet/', '');
+  }catch(_){}
+  e = 'rAF:' + (cb.name || '(anónima)') + quien;
+  _perfEtiqRAF.set(cb, e);
+  return e;
+}
+function _perfEnvolverRAF(){
+  if(window.requestAnimationFrame._perf) return;
+  const _raf = window.requestAnimationFrame.bind(window);
+  const wraf = function(cb){
+    if(!(_perfAssert > 0 && _perfVerbosity >= 2) || cb === mcTick) return _raf(cb);
+    const etiqueta = _perfEtiquetaRAF(cb);
+    return _raf(function(t){
+      const t0 = performance.now();
+      try { return cb(t); }
+      finally {
+        const dt = performance.now() - t0;
+        const e = _perfState.frame[etiqueta] || (_perfState.frame[etiqueta] = { calls:0, ms:0, maxMs:0 });
+        e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt;
+      }
+    });
+  };
+  wraf._perf = true; wraf._orig = window.requestAnimationFrame;
+  _perfState._rafOrig = window.requestAnimationFrame;
+  window.requestAnimationFrame = wraf;
+}
+function _perfDesenvolverRAF(){
+  if(!_perfState._rafOrig) return;
+  if(window.requestAnimationFrame._perf) window.requestAnimationFrame = _perfState._rafOrig;
+  _perfState._rafOrig = null;
+}
+// Retira las envolturas de WebGL. Cada una restaura EL ORIGINAL QUE ELLA CAPTURÓ y sólo si sigue
+// siendo la de arriba: `game.showRendered` (REQ-REN1) también envuelve `gl.drawArrays`, y restaurar a
+// ciegas se lo llevaría por delante. Si alguien envolvió encima se quedan puestas, sin coste: el
+// primer `if` de cada envoltorio las corta.
+function _perfDesenvolverGL(){
+  const w = _perfState._glWrapped; if(!w) return;
+  let quedan = 0;
+  if(w.gl.bufferData._perf) w.gl.bufferData = w.bufferData; else quedan++;
+  if(w.gl.drawArrays._perf) w.gl.drawArrays = w.drawArrays; else quedan++;
+  if(!quedan) _perfState._glWrapped = null;
+}
+// Copia de los contadores de hoja del frame que se vuelca. Sólo se llama al volcar, nunca por frame.
+function _perfHojasSnap(){
+  const o = {};
+  for(const k in _perfState.hojas) if(_perfState.hojas[k].n) o[k] = _perfState.hojas[k].n;
+  return o;
 }
 function _perfComprobarFrame(fpsFrame){
   if(_perfAssert<=0 || !_perfState.armed) return;
   if(fpsFrame >= _perfAssert) return;
   _perfState.lastDump = { fpsFrame, umbral:_perfAssert, verbosity:_perfVerbosity,
-    cuando:new Date().toISOString(), acc:JSON.parse(JSON.stringify(_perfState.frame)) };
+    cuando:new Date().toISOString(), acc:JSON.parse(JSON.stringify(_perfState.frame)),
+    hojas:_perfHojasSnap() };
   // REQ-PERF1: modo continuo. Si perfContinuo=true, NO se desarma tras un dump → sigue disparando en
   // cada frame lento. Útil para ver el patrón de un circuito activo. Con perfContinuo=false (defecto)
   // dispara UNA vez y se rearma con game.perfDump().
@@ -5905,8 +6116,91 @@ function _perfComprobarFrame(fpsFrame){
   }
   _perfImprimir(_perfState.lastDump);
 }
+// Hijos DIRECTOS de mcTick, en el orden en que los llama (web/app.js §mcTick). No es decoración: es
+// la lista con la que se resta, y si se añade una llamada a mcTick hay que añadirla aquí también o el
+// resto la acusará a ella sin nombrarla.
+const _PERF_HIJOS_TICK = ['mcUpdate','game.fluidos.tick','mcAgentsTick','mcAgentsSmoothUpdate','mcDynSync',
+  'mcDoAction','mcUpdatePreview','mcUpdateHotbar','mcSyncHeldToolStruct','mcRender','mcUpdateNoteView',
+  'mcNoteSignsDesfasados','mcSyncNoteSigns','mcUpdateXrayLabels','updateWorldMeters'];
+// LO QUE DIBUJAN LOS SNIPPETS, con nombre y apellidos. `game.voxelesUI` es una capa VIVA: mientras
+// tenga un solo voxel, app.js le rehace la malla entera y se la sube a la GPU en cada frame. El coste
+// no lo manda el número de voxeles que plantó el snippet sino ese número × grosor³ (el grosor agranda
+// el cubo, y 16 son 4096 voxeles por partícula, ver mcVoxUIGrosor). Por eso la tabla es POR GRUPO: un
+// grupo es un sistema de partículas de una librería, así que la fila de arriba nombra al culpable.
+// Las hojas de `_PERF_HOJAS`: cuenta y nada más. Sin ms A PROPÓSITO — cronometrarlas cuesta más que
+// ejecutarlas y falsea al padre. Se leen así: una cuenta de millones dice que el trabajo está en el
+// LLAMADOR (que sí tiene ms arriba), no en la hoja.
+function _perfHojasTabla(hojas){
+  const filas = Object.entries(hojas || {}).sort((a,b)=>b[1]-a[1]);
+  if(!filas.length) return;
+  console.log('[perf]  — hojas calientes (SÓLO CUENTA; medir sus ms cuesta más que ejecutarlas) —');
+  for(const [n,c] of filas) console.log('[perf]  ' + n.padEnd(28) + '  ' + String(c).padStart(8) + ' llamadas');
+}
+function _perfVoxUI(){
+  if(!mc.voxUI || !mc.voxUI.size) return;
+  const filas = [];
+  let cubos = 0;
+  for(const [nombre, m] of mc.voxUI){
+    const g = mcVoxUIGrosor(nombre), n = m ? m.size : 0;
+    const c = n * g * g * g;
+    cubos += c;
+    filas.push({ nombre, n, g, c, mat: mcVoxUIMat(nombre) ? 'sí' : '' });
+  }
+  filas.sort((a,b)=>b.c-a.c);
+  console.log('[perf]  ── game.voxelesUI · capa VIVA: se re-malla y se SUBE ENTERA cada frame ──');
+  console.log('[perf]  ' + 'grupo'.padEnd(28) + '  ' + 'voxeles'.padStart(8) + '  ' + 'grosor'.padStart(6) + '  ' +
+    'cubos'.padStart(9) + '  ' + 'triángulos'.padStart(11) + '  material');
+  for(const f of filas){
+    console.log('[perf]  ' + f.nombre.padEnd(28) + '  ' + String(f.n).padStart(8) + '  ' + String(f.g).padStart(6) + '  ' +
+      String(f.c).padStart(9) + '  ' + String(f.c*12).padStart(11) + '  ' + f.mat +
+      (f.g > 1 ? '   ⚠️ grosor ' + f.g + ' ⇒ ×' + (f.g*f.g*f.g) + ' geometría' : ''));
+  }
+  console.log('[perf]  ' + 'TOTAL'.padEnd(28) + '  ' + ''.padStart(8) + '  ' + ''.padStart(6) + '  ' +
+    String(cubos).padStart(9) + '  ' + String(cubos*12).padStart(11) +
+    '  alfa ' + mc.voxUIAlfa + (mc.voxUIEncima ? ' · encima' : '') + (mc.voxUILuces === false ? ' · luces off' : ''));
+  console.log('[perf]  apágala para un A/B: game.voxelesUI.limpia() · o el grupo: game.voxelesUI.limpia("<grupo>")');
+}
+// La fila que faltaba. Un volcado donde `mcTick` marca 16 ms y sus hijos suman 1,5 no dice qué pasa;
+// dice que el profiler no está mirando donde hay que mirar. Esta resta lo pone negro sobre blanco:
+// si `(resto de mcTick)` se lleva el frame, el tiempo está en código que NO tiene nombre en ninguna
+// lista — típicamente una costura de snippet (`mcUpdate._orig` y compañía, ver CLAUDE.md §snippets).
+function _perfResto(acc){
+  const t = acc['mcTick']; if(!t) return;
+  let hijos = 0;
+  for(const n of _PERF_HIJOS_TICK) if(acc[n]) hijos += acc[n].ms;
+  const resto = t.ms - hijos;
+  if(resto < 0.05) return;
+  const pct = Math.round(100 * resto / (t.ms || 1));
+  console.log('[perf]  ' + '(resto de mcTick)'.padEnd(28) + '  ' + '—'.padStart(8) + '  ' +
+    resto.toFixed(2).padStart(9) + '  ' + '—'.padStart(11) + '  ' + pct + ' % de mcTick sin dueño' +
+    (pct >= 40 ? '  ⚠️ mira los snippets: game.snippets.lista()' : ''));
+}
+// ¿QUIÉN pide los draws? Con la escena quieta el JS puede marcar 1 ms y el frame durar 35: entonces
+// el cuello no es código, es geometría, y la única pregunta útil es qué pase la manda. Esta tabla lo
+// contesta; ordena por vértices, que es lo que paga la GPU, no por número de llamadas.
+function _perfPases(acc){
+  const e = acc && acc['gl.drawArrays'];
+  if(!e || !e.pases) return;
+  const filas = Object.entries(e.pases).sort((a,b)=>b[1].vertices - a[1].vertices);
+  if(filas.length < 2) return;                 // un solo pase no es un desglose, es la misma fila
+  console.log('[perf] ── gl.drawArrays por pase (' + e.calls + ' draws · ' +
+    (e.vertices/1e6).toFixed(1) + ' M vértices en el frame) ──');
+  for(const [n,s] of filas){
+    console.log('[perf]  ' + n.padEnd(28) + '  ' + String(s.calls).padStart(8) + '  ' +
+      (s.vertices/1e6).toFixed(2).padStart(9) + ' M vért  ' +
+      String(Math.round(100*s.vertices/(e.vertices||1))).padStart(3) + ' %');
+  }
+}
 function _perfImprimir(d){
-  if(!d){ console.log('[perf] sin datos — dispara al caer los fps por debajo de game.perfAssert, o llama game.perfDump.forzar()'); return; }
+  if(!d){
+    // `game.perfDump()` RE-IMPRIME el último volcado; no mide. Recién armado no hay ninguno, y quien
+    // pega las cuatro líneas de un tirón llega aquí siempre (ni un frame ha pasado todavía).
+    const fps = (typeof mc !== 'undefined' && mc.fps) ? mc.fps.toFixed(0) : '?';
+    console.log(_perfAssert > 0
+      ? '[perf] sin datos todavía: armado a ' + _perfAssert + ' fps y ahora mismo vas a ' + fps + ' fps. Sólo salta cuando un frame BAJE del umbral: juega un rato y vuelve, o mira el frame actual ya con game.perfDump.forzar()'
+      : '[perf] el profiler está APAGADO (game.perfAssert = 0). Ármalo con un umbral, p. ej. game.perfAssert = 45');
+    return;
+  }
   console.log('[perf] === CAÍDA DE FPS: ' + d.fpsFrame.toFixed(1) + ' fps  (umbral ' + d.umbral + ', verbosidad ' + d.verbosity + ')  ' + d.cuando + ' ===');
   const entries = Object.entries(d.acc).sort((a,b)=>b[1].ms - a[1].ms);
   if(!entries.length){ console.log('[perf]  (frame sin funciones instrumentadas — sube perfVerbosity)'); }
@@ -5918,7 +6212,11 @@ function _perfImprimir(d){
       else if(e.vertices!==undefined) extra = e.vertices + ' vertices';
       console.log('[perf]  ' + n.padEnd(28) + '  ' + String(e.calls).padStart(8) + '  ' + e.ms.toFixed(2).padStart(9) + '  ' + e.maxMs.toFixed(2).padStart(11) + (extra ? '  ' + extra : ''));
     }
+    _perfResto(d.acc);
+    _perfPases(d.acc);
+    _perfVoxUI();
   }
+  _perfHojasTabla(d.hojas);
   console.log('[perf] === game.perfDump() re-arma; game.perfDump.reset() limpia; game.perfAssert=0 apaga ===');
 }
 Object.defineProperty(game, 'perfAssert', { enumerable:true,
@@ -5933,7 +6231,8 @@ game.perfDump = function(){ _perfImprimir(_perfState.lastDump); _perfState.armed
 game.perfDump.reset = function(){ _perfState.frame = {}; _perfState.lastDump = null; _perfState.armed = true; };
 game.perfDump.forzar = function(){
   const snap = { fpsFrame: mc.fps || 0, umbral: _perfAssert, verbosity: _perfVerbosity,
-    cuando: new Date().toISOString(), acc: JSON.parse(JSON.stringify(_perfState.frame)) };
+    cuando: new Date().toISOString(), acc: JSON.parse(JSON.stringify(_perfState.frame)),
+    hojas: _perfHojasSnap() };
   _perfImprimir(snap);
   _perfState.frame = {};
   _perfState.armed = true;
@@ -7139,6 +7438,10 @@ const MC_MAXLIGHT=15;               // NIVELES de luz (gradación) y alcance del
 // el alcance largo de una partícula (REQ-GLOW5, 40) da 160. Lo dividen: el shader (255/(MC_MAXLIGHT*SUB)) y
 // mcDynNivel, que sigue hablando en NIVELES de cara afuera.
 const MC_LUZ_SUB=4;
+// REQ-LUZ2 · cuántas pasadas seguidas tiene que estar IDÉNTICA una luz de game.voxelesUI para que el motor deje
+// de tratarla como «lo que se mueve» y la mande al campo del mundo. Vive aquí arriba porque `mc` la usa como
+// valor por defecto de game.luzQuietasTras; el porqué entero está en mcVoxUIReparto.
+const MC_LUZ_QUIETA_TRAS=30;
 // REQ-GLOW7 · tope de game.interiorDark. El mando es un FACTOR de sombra, `interiorDark^((MAX-lv)/MAX)`:
 // 0 = penumbra a negro · 1 = neutro (desactivado) · >1 = SOBREEXPONER la penumbra (lo que no tiene luz
 // sale MÁS claro que lo que la tiene). Lo pidió el dueño para poder ver qué está alumbrando la espada
@@ -7275,6 +7578,7 @@ const mc={
   vel:[0,0,0], onGround:false, keys:{}, // física (F4)
   hotbar:[], sel:0,               // hotbar (F5): 9 ranuras (id de bloque, 0=vacía) y ranura activa
   fov:1.15, renderDist:8,         // tunables (game.fov / game.renderDist)
+  cajaAjustada:true,              // REQ-CULL1 · recortar por el alto REAL del chunk (game.cajaAjustada; false = columna entera, como antes)
   crosshair:'+',                  // punto de mira (game.crosshair / game.mira; admite '+', '🎯', '·', '🔴', etc.)
   renderScale:1,                  // escala de la resolución de render (game.renderScale; <1 = menos píxeles = más fps)
   sens:0.000625,                  // sensibilidad del ratón, rad/px (base 0.0025 × mouseSpeed 0.25 por defecto; game.mouseSpeed = múltiplo)
@@ -7321,6 +7625,12 @@ const mc={
   voxUIMat:null,                  // {grupo: {emite, luz, …}} — EFECTOS DE MATERIAL del grupo (game.voxelesUI.material)
   voxUILuces:true,                // interruptor de TODA la luz de esta capa (game.voxelesUI.luces = false ⇒ ni se recorre)
   _voxUILuz:null,                 // cache [x,y,z,nivel, …] de las luces vivas de la capa (REQ-GLOW5), en coordenadas de mundo
+  luzQuietas:true,                // REQ-LUZ2 · una luz de esa capa que lleva N pasadas sin moverse pasa al campo del MUNDO (game.luzQuietas)
+  luzQuietasTras:MC_LUZ_QUIETA_TRAS,   // …cuántas pasadas (game.luzQuietasTras). Ver mcVoxUIReparto
+  _voxUIVistas:null,              // Map clave→pasadas seguidas idéntica, el reloj del reparto
+  _voxUIRep:null,                 // último reparto {quietas, movidas, sig, caja, maduro}
+  _voxUIQuietas:null,             // …sus quietas, que es lo que siembra mcComputeBlockLight
+  _voxUIQuietasSig:0,             // …y su firma de conjunto, que va en el emiSig de la luz de bloque
   preview:null,                   // instancia-malla de la vista-previa mientras se mantiene el clic derecho (habitación renderizada siguiendo la mira)
   previewKey:null,                // memo "sk|ox|oy|oz|rot" de la vista-previa actual (para no re-mallar cada frame)
   previewStructKey:null,          // clave de sala cuyas texturas deben estar en el atlas para la vista-previa
@@ -7413,6 +7723,8 @@ const mc={
   luzDinamica:true,               // BUG-GLOW8 · ¿se siembra la caja de luz de lo que SE MUEVE (game.luzDinamica)? false = lo que llevas en la mano o lleva un agente no alumbra; lo QUIETO sigue igual. Está para medir fps con y sin
   luzSuave:true,                  // BUG-GLOW8b · ¿esa caja se muestrea en la posición FINA del emisor (se desliza) o en el centro de su celda (salta de bloque en bloque)? Mismo campo, distinto punto de lectura (game.luzSuave)
   luzDinCeldas:null,              // BUG-GLOW8 · presupuesto en CELDAS de esa caja (game.luzDinCeldas); null = MC_DYN_CELDAS
+  luzOrden:'ojo',                 // REQ-LUZ1 · en qué ORDEN se siembran las semillas que ya cogieron plaza (game.luzOrden). 'ojo' = por cercanía al ojo, como siempre; 'canonico' = orden que no sabe dónde está el jugador. NO decide quién coge plaza: eso sigue siendo el cupo por distancia
+  luzCruce:30,                    // REQ-LUZ1 · cada cuántos SEGUNDOS se siembra con los dos órdenes y se comparan byte a byte (game.luzCruce). 0 = sin cruce. Es el autochequeo, no un modo de dibujo
   dynLight:null,                  // BUG-GLOW8 · campo de luz de lo que se mueve {BL,x0,y0,z0,W,H,P}: lo siembra mcDynBake con la MISMA ley que mcComputeBlockLight, lo lee dynLuzTex por fragmento
   dynTex:null,                    // …y su textura 3D (unidad 4), gemela de blkTex
   glowGain:1,                     // INTENSIDAD de la luz artificial (game.glowGain): 1 = tope normal (pleno día); >1 sobreexpone (una antorcha/gafas brillan MÁS que el día). Es el techo del mix de exposición, no re-siembra ni re-malla (solo uniforme) ⇒ live y barato
@@ -7424,6 +7736,10 @@ const mc={
   agentsLightTrack:true,          // BUG-GLOW2 · ¿la luz de un emisor MONTADO en un agente (pieza de esqueleto con matriz
                                   // de modelo viva) le sigue al moverse? true = se re-siembra y re-malla al cambiar de celda;
                                   // false = se queda en la celda ESTAMPADA (comportamiento viejo). Conmutable en game.agentsLightTracking()
+  shadowParcial:true,             // BUG-SHADOW4 · rehornear SÓLO el recorte del mapa de sombra que ha cambiado, en vez del
+                                  // mundo entero (game.shadowParcial). El resultado es idéntico téxel a téxel — lo garantiza
+                                  // el SCISSOR, ver mcSombraRecorte —, así que esto es puro ahorro, no una rebaja de calidad.
+                                  // false = comportamiento viejo. Es el mando para medir cuánto valía el arreglo.
   quads:0,                        // caras dibujadas este frame (→ game.voxels)
   agents:new Map(),               // agentes/NPC vivos (id → handle); ver «AGENTES» al final (game.defineAgent)
 };
@@ -7718,11 +8034,16 @@ function mcVoxFinoHay(fx, fy, fz){
 const MC_VOXF_DIR=[[0,-1,0],[0,1,0],[0,0,-1],[0,0,1],[1,0,0],[-1,0,0]];   // orden de MC_VOXCARA_*
 function mcVoxFinoGeom(ch){
   const gl=mc.gl; ch.sucio=false;
-  if(!ch.m.size){ ch.count=0; return; }
+  if(!ch.m.size){ ch.count=0; ch.aabb=null; return; }
   const cap = ch.m.size*36*7;
   let buf = mc._voxFinoBuf;
   if(!buf || buf.length < cap) buf = mc._voxFinoBuf = new Float32Array(Math.max(cap, 4096));
   let n=0;
+  // REQ-CULL1 · la caja de lo que este chunk fino dibuja de verdad. Hasta ahora la capa HORNEADA de
+  // game.voxelesUI se mandaba entera mirases donde mirases: el bucle de dibujo no tenía ni una prueba de
+  // visibilidad, al contrario que el terreno. Aquí sale exacta y en las tres direcciones, porque lo que se
+  // emite son justo estas cajas — no hace falta derivarla de la clave del chunk ni suponerle el alto.
+  let bx0=Infinity, by0=Infinity, bz0=Infinity, bx1=-Infinity, by1=-Infinity, bz1=-Infinity;
   for(const [k,c] of ch.m){
     const q=k.split(','), x=+q[0], y=+q[1], z=+q[2], w=c[3], h=c[4], d3=c[5];
     // Las caras pegadas a otro voxel fino no se emiten. Con la nieve tumbada en el suelo esto es media
@@ -7734,9 +8055,16 @@ function mcVoxFinoGeom(ch){
       for(let f=0; f<6; f++){ const d=MC_VOXF_DIR[f];
         if(!mcVoxFinoHay(x+d[0], y+d[1], z+d[2])) mask|=(1<<f); }
     } else mask = 63;
-    if(mask) n = mcPushVoxCajaBuf(buf, n, x*MC_VOX, y*MC_VOX, z*MC_VOX,
-                                  w*MC_VOX, h*MC_VOX, d3*MC_VOX, c[0], c[1], c[2], mask);
+    if(mask){
+      n = mcPushVoxCajaBuf(buf, n, x*MC_VOX, y*MC_VOX, z*MC_VOX,
+                           w*MC_VOX, h*MC_VOX, d3*MC_VOX, c[0], c[1], c[2], mask);
+      if(x<bx0)bx0=x; if(y<by0)by0=y; if(z<bz0)bz0=z;
+      if(x+w>bx1)bx1=x+w; if(y+h>by1)by1=y+h; if(z+d3>bz1)bz1=z+d3;
+    }
   }
+  // Un voxel fino de margen: lo que se pierde es inapreciable y cubre el redondeo de float en el borde.
+  ch.aabb = bx0<=bx1 ? [(bx0-1)*MC_VOX, (by0-1)*MC_VOX, (bz0-1)*MC_VOX,
+                        (bx1+1)*MC_VOX, (by1+1)*MC_VOX, (bz1+1)*MC_VOX] : null;
   if(!ch.vbo) ch.vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
   gl.bufferData(gl.ARRAY_BUFFER, buf.subarray(0,n), gl.STATIC_DRAW);   // STATIC: no se vuelve a subir
@@ -8522,7 +8850,69 @@ function updateWorldMeters(){
     ec.hidden=!(_showColors && mc.active);
     ec.textContent=(game.colors||0).toLocaleString('es-ES')+' col';
   }
+  const er=$('#mc-ren'); if(er){                      // REQ-REN1 · game.showRendered
+    er.hidden=!(_showRen && mc.active);
+    const u=_ren.ultimo;
+    er.textContent = u ? (u.draws+' dib · '+Math.round(u.tris).toLocaleString('es-ES')+' tri · '
+                          +u.chunks+'/'+u.chunksTot+' ch') : '— dib';
+  }
 }
+// REQ-REN1 · los cuatro medidores en un solo sitio: consola (`game.metricas()`) y ficha de la foto.
+// Lee de las MISMAS variables que pintan los medidores flotantes — si aquí sale otro número, uno de
+// los dos miente. `colores` se puede pasar ya contado: la foto lo saca EXACTO del lienzo compuesto,
+// mientras que el medidor de pantalla va por PBO asíncrono y llega un frame tarde.
+function mcMedidores(colores){
+  const u=_ren.ultimo;
+  return {
+    fps: Math.round(mc.active ? (mc.fps||0) : (game.fps||0)),
+    voxels: game.voxels||0,
+    colores: colores!=null ? colores : (game.colors||0),
+    draws: u ? u.draws : null,
+    triangulos: u ? Math.round(u.tris) : null,
+    chunks: u ? u.chunks : null,
+    chunksTot: u ? u.chunksTot : null,
+  };
+}
+function mcMedidoresTexto(m){
+  const n=v=>(v||0).toLocaleString('es-ES');
+  const ren = m.draws==null ? 'dib: — (game.showRendered=false)'
+    : n(m.draws)+' dib · '+n(m.triangulos)+' tri · '+m.chunks+'/'+m.chunksTot+' ch';
+  return n(m.fps)+' fps · '+n(m.voxels)+' vox · '+n(m.colores)+' col · '+ren;
+}
+// Cuenta de colores SÍNCRONA y de este mismo instante. `game.colors` sólo se refresca mientras el
+// medidor de colores está encendido (`updateWorldMeters`), así que sin ella `game.metricas()` decía
+// `colores: 0` — que es justo lo que reportó el dueño. Aquí no se puede reutilizar la vía del medidor:
+// va por PBO asíncrono (llega un frame tarde) y quien llama desde la consola no tiene frame siguiente.
+function mcCuentaColoresAhora(){
+  const gl=mc.gl, cv=mc.canvas;
+  if(!mc.active || !gl || !cv || cv.width<=0 || cv.height<=0) return null;
+  const w=cv.width, h=cv.height;
+  try{
+    // El PBO del medidor puede haber dejado atado PIXEL_PACK_BUFFER: con uno atado, readPixels a un
+    // array de CPU es INVALID_OPERATION. Se desata (el medidor lo reata en su siguiente pasada).
+    if(mc.gl2) gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const buf=new Uint8Array(w*h*4);
+    gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,buf);
+    return countColorsFromRgba(buf);
+  }catch(e){ return null; }
+}
+// Los cuatro medidores por consola, estén o no encendidos en pantalla. Renderiza un fotograma propio
+// para poder medirlo: el buffer de dibujo no sobrevive a la llamada desde la consola.
+game.metricas = function(){
+  let cols=null;
+  if(mc.active && mc.gl){
+    const antes=_showRen; _showRen=true; _renEnvuelve();
+    mcRender();                    // ⚠️ sin ningún await entre esto y el readPixels de abajo
+    _showRen=antes;
+    cols=mcCuentaColoresAhora();
+  }
+  const m = mcMedidores(cols);
+  console.log('📊 ' + mcMedidoresTexto(m));
+  return m;
+};
+game.metrics = game.metricas;
+
 const MC_EYE=1.62;   // altura del ojo sobre los pies del jugador
 
 // --- F2 · terreno plano + rejilla densa + paleta + atlas de textura GL ---
@@ -9993,7 +10383,17 @@ function mcFreeShadow(){
 // Marca el mapa para rehacer. Lo llama todo lo que cambia la GEOMETRÍA (mallar un chunk, mover un agente, estampar
 // o liberar una estructura). Mientras nada se mueva el mapa se reutiliza tal cual y la sombra sale gratis: el coste
 // solo aparece en los frames en los que de verdad ha cambiado algo.
-function mcShadowDirty(){ if(mc.shadow) mc.shadow.dirty=true; }
+// BUG-SHADOW4 · Con argumentos, quien ensucia DICE QUÉ FRANJA DEL MUNDO ha cambiado (caja en XZ, coordenadas de
+// mundo) y sólo se rehornea ese recorte del mapa de sombra. Sin argumentos = «no sé dónde» ⇒ mundo entero, que es
+// el comportamiento de siempre: los 8 llamadores viejos siguen valiendo tal cual sin tocarlos.
+// Que esto sea EXACTO (no una aproximación) lo garantiza la proyección del sol, ver mcSombraRecorte.
+function mcShadowDirty(x0,z0,x1,z1){
+  const S=mc.shadow; if(!S) return;
+  S.dirty=true;
+  if(x0===undefined){ S.full=true; return; }                       // llamador que no sabe localizar el cambio
+  if(S.rx0===undefined){ S.rx0=x0; S.rz0=z0; S.rx1=x1; S.rz1=z1; } // 1ª franja de esta tanda
+  else { if(x0<S.rx0)S.rx0=x0; if(z0<S.rz0)S.rz0=z0; if(x1>S.rx1)S.rx1=x1; if(z1>S.rz1)S.rz1=z1; }  // unión
+}
 // Variante «puede esperar»: algo se ha MOVIDO, pero rehacer el mapa entero cuesta ~20 ms (48 estructuras) y a 144 Hz
 // eso hunde los fps. Solo marca; mcRenderShadow decide cuándo, según mc.shadowMoveMs. Una edición del mundo NO va
 // por aquí: esa es mcShadowDirty y se rehornea en el acto.
@@ -10020,11 +10420,34 @@ function mcSunFrustum(L){
   gl.uniform3f(L.uSunOrg, -M, -1, -M);                                 // esquina baja del volumen
   gl.uniform3f(L.uSunDim, mc.dim.x+2*M, mc.dim.y+2+M, mc.dim.z+2*M);   // y su tamaño: origen + esto = la otra esquina
 }
+// BUG-SHADOW4 · ¿qué recorte del mapa de sombra hay que rehornear? Devuelve null = «el mundo entero».
+//
+// POR QUÉ ESTO ES EXACTO Y NO UNA APROXIMACIÓN (es toda la justificación del invento, léela antes de tocarlo):
+// la proyección del sol es ORTOGRÁFICA CENITAL Y ALINEADA CON LOS EJES — en MC_SUN_VS, `ndc.x` sale sólo de
+// `w.x` y `ndc.y` sólo de `w.z`, sin ninguna inclinación por la dirección de la luz. Un téxel (u,v) sólo lo
+// puede escribir geometría cuya XZ caiga sobre ese téxel. Luego rehornear el rectángulo R con el SCISSOR
+// puesto deja los téxeles de dentro de R bit a bit iguales que un rehorneo completo, y los de fuera intactos.
+// ⚠️ El scissor es lo que da la exactitud, NO el descarte de geometría: lo que se dibuja de más es sólo trabajo
+// perdido, nunca un píxel distinto. Lo que sí es obligatorio es que el rectángulo CUBRA todo lo que cambió; por
+// eso lo que no se sabe localizar (agentes que andan, estructuras que aparecen) marca S.full y va entero.
+function mcSombraRecorte(S){
+  if(!mc.shadowParcial || S.full || S.rx0===undefined) return null;
+  const M=MC_SUN_MARGIN, size=S.size, W=mc.dim.x+2*M, P=mc.dim.z+2*M;
+  // +1 téxel de guarda por cada lado: el redondeo del rasterizado puede tocar el téxel de al lado.
+  const t=(v,ext)=>Math.max(0, Math.min(size, Math.floor((v+M)/ext*size)));
+  const px0=t(S.rx0,W)-1, px1=t(S.rx1,W)+1, pz0=t(S.rz0,P)-1, pz1=t(S.rz1,P)+1;
+  const x0=Math.max(0,px0), x1=Math.min(size,px1), z0=Math.max(0,pz0), z1=Math.min(size,pz1);
+  if(x1<=x0 || z1<=z0) return null;
+  // Si el recorte ya cubre casi todo, el scissor sólo añade trabajo: mejor entero y sin florituras.
+  if((x1-x0)*(z1-z0) >= size*size*0.75) return null;
+  return {px0:x0, pz0:z0, pw:x1-x0, ph:z1-z0, wx0:S.rx0, wz0:S.rz0, wx1:S.rx1, wz1:S.rz1};
+}
 // Pasada 1 · el mundo visto desde el sol. Le entran las MISMAS VBO que se dibujan en pantalla, así que terreno,
 // estructuras y agentes proyectan sombra sin que ninguno tenga código propio. Se queda fuera el pase translúcido
 // (un cristal no proyecta un agujero negro) y el fantasma de colocación.
 function mcRenderShadow(){
   const gl=mc.gl;
+  _renFase('sombra');
   // REQ-SHADOW3 · el «apagado» se mira sobre el valor EFECTIVO: con game.sunShadeNoche puesto, sunShade puede valer
   // 1 (sin sombra de día) y aun así haber sombra de noche. Preguntar por mc.sunShade a secas dejaría el mapa sin
   // reservar y la sombra nocturna no llegaría a existir.
@@ -10063,15 +10486,23 @@ function mcRenderShadow(){
   // cambia la geometría. Puesto a 0 = rehorneo inmediato como antes.
   const geoThrottleMs = (typeof game !== 'undefined' && game.shadowGeoMs !== undefined) ? (game.shadowGeoMs|0) : (mc.shadowMoveMs|0);
   if(S.geoChanged && (geoThrottleMs<=0 || ahora-(S.lastBake||0)>=geoThrottleMs)){
-    S.dirty=true; S.geoChanged=false;
+    S.dirty=true; S.geoChanged=false; S.full=true;   // una estructura/agente que aparece o cambia de malla: la firma no dice DÓNDE ⇒ entero (BUG-SHADOW4)
   }
   if(!S.dirty && S.moved && ahora-(S.lastBake||0)>=mc.shadowMoveMs) S.dirty=true;
   if(!S.dirty) return S;                                            // nada que rehacer todavía
+  // Un agente que anda ensucia el mapa SIN decir dónde: hay que borrar también el rastro que deja atrás, y su
+  // posición anterior no se guarda. Hasta que se guarde, movimiento de agente = rehorneo entero (BUG-SHADOW4).
+  if(S.moved) S.full=true;
   S.moved=false; S.lastBake=ahora;
+  const rec=mcSombraRecorte(S);
+  S.full=false; S.rx0=undefined;                                    // la tanda de suciedad se cierra aquí
+  S.ultimoParcial=!!rec; S.bakes=(S.bakes|0)+1; if(rec) S.bakesParciales=(S.bakesParciales|0)+1;
   const SL=mc.sunLoc;
   gl.bindFramebuffer(gl.FRAMEBUFFER, S.fbo);
-  gl.viewport(0,0,S.size,S.size);
-  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);   // altura 0 = -1 en mundo: por debajo de todo ⇒ al sol
+  gl.viewport(0,0,S.size,S.size);       // ⚠️ SIEMPRE entero: el viewport es quien define la proyección. Recortar
+                                        // AQUÍ metería el mundo entero dentro del rectángulo. Se recorta con SCISSOR.
+  if(rec){ gl.enable(gl.SCISSOR_TEST); gl.scissor(rec.px0, rec.pz0, rec.pw, rec.ph); }
+  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);   // altura 0 = -1 en mundo: por debajo de todo ⇒ al sol (el scissor también recorta el borrado, que es justo lo que se quiere)
   // Esta pasada va la PRIMERA del frame, así que hereda el estado con el que acabó el frame anterior (el pase
   // translúcido deja BLEND puesto y la máscara de profundidad quitada). Sin esto la altura se mezclaría en vez
   // de escribirse y el z-test no se quedaría con el fragmento más alto.
@@ -10092,7 +10523,12 @@ function mcRenderShadow(){
       else { gl.enableVertexAttribArray(SL.aShade); gl.vertexAttribPointer(SL.aShade,1,gl.FLOAT,false,stride,shOff); }
     }
     gl.drawArrays(gl.TRIANGLES,0,count); };
-  for(const ch of mc.chunks.values()){ if(ch.count && ch.vbo) draw(ch.vbo, ch.count, 6*4, null, 5*4);
+  // BUG-SHADOW4 · en un rehorneo parcial, un chunk que no pisa el recorte no puede escribir ni un téxel de él
+  // (proyección cenital alineada, ver mcSombraRecorte) ⇒ saltárselo es gratis. Aquí es donde se cae el 81 % del
+  // frame que medía el volcado del dueño: 401 draws pasan a los pocos chunks que de verdad han cambiado.
+  const pisa = rec ? (a)=>a && a[3]>rec.wx0 && a[0]<rec.wx1 && a[5]>rec.wz0 && a[2]<rec.wz1 : null;
+  for(const ch of mc.chunks.values()){ if(pisa && !pisa(ch.aabb)) continue;
+    if(ch.count && ch.vbo) draw(ch.vbo, ch.count, 6*4, null, 5*4);
     if(ch.finoCount && ch.finoVbo) draw(ch.finoVbo, ch.finoCount, 9*4, null, 6*4); }   // las celdas finas dan su sombra de verdad, no la del cubo
   for(const a of mc.agents.values()) if(a.count && a.vbo) draw(a.vbo, a.count, 6*4);   // un agente no es un material: siempre proyecta
   for(const st of mc.structures){
@@ -10103,6 +10539,9 @@ function mcRenderShadow(){
   // Lo que dibuja otro (p.ej. los cuerpos de ESTRUCTURA de los agentes, que van con matriz de modelo propia y no
   // están en ninguna de las listas de arriba). app.js no sabe qué es: solo le presta el dibujante de la pasada.
   if(mc.sunExtra) try{ mc.sunExtra(draw); }catch(e){ console.error('[mundo] sunExtra:', e); }
+  // ⚠️ El scissor se quita ANTES de soltar el framebuffer: si sigue puesto, mcClearFondo sólo borraría ese
+  // rectángulo de la pantalla y el resto se quedaría con la basura del frame anterior.
+  if(rec) gl.disable(gl.SCISSOR_TEST);
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
   mcClearFondo(gl);
   S.dirty=false;
@@ -10200,6 +10639,7 @@ function mcRenderRefl(waterY, vis, TP, L, SM, pj, view){
   if(!gl || !mcReflEntorno || mcFluidoOjo()) return null;
   const R = mcInitRefl();
   if(!R) return null;
+  _renFase('reflejo');
 
   // REQ-ENV5: desvincular R.tex de TEXTURE3 para evitar feedback loop (GL_INVALID_OPERATION 1282) al dibujar en R.fbo
   mcReflTexDummy();
@@ -10535,6 +10975,7 @@ function mcInitSky(gl) {
 
 function mcRenderSky(gl, projMat, viewMat) {
   if (mcFluidoOjo()) return;
+  _renFase('cielo');
   if (!mc.skyProg) mcInitSky(gl);
   const p = mc.skyProg, L = mc.skyLoc;
   if (!p) return;
@@ -10650,13 +11091,13 @@ function mcMeshChunk(cx,cz){
             sig: chEarly._meshSig, vbo: chEarly.vbo, count: chEarly.count,
             finoVbo: chEarly.finoVbo, finoCount: chEarly.finoCount,
             finoAVbo: chEarly.finoAVbo, finoACount: chEarly.finoACount,
-            aabb: chEarly.aabb,
+            aabb: chEarly.aabb, yLo: chEarly.yLo, yHi: chEarly.yHi,   // REQ-CULL1 · el alto real viaja con la malla
           };
           chEarly._meshSig = slot.sig;
           chEarly.vbo = slot.vbo; chEarly.count = slot.count;
           chEarly.finoVbo = slot.finoVbo; chEarly.finoCount = slot.finoCount;
           chEarly.finoAVbo = slot.finoAVbo; chEarly.finoACount = slot.finoACount;
-          chEarly.aabb = slot.aabb;
+          chEarly.aabb = slot.aabb; chEarly.yLo = slot.yLo; chEarly.yHi = slot.yHi;
           // El saliente pasa al slot; movemos el slot al final del array (LRU: reciente al final).
           chEarly._cache.splice(idx, 1);
           chEarly._cache.push(saliente);
@@ -10675,7 +11116,7 @@ function mcMeshChunk(cx,cz){
         sig: chEarly._meshSig, vbo: chEarly.vbo, count: chEarly.count,
         finoVbo: chEarly.finoVbo, finoCount: chEarly.finoCount,
         finoAVbo: chEarly.finoAVbo, finoACount: chEarly.finoACount,
-        aabb: chEarly.aabb,
+        aabb: chEarly.aabb, yLo: chEarly.yLo, yHi: chEarly.yHi,       // REQ-CULL1
       });
       while(chEarly._cache.length > _CACHE_SLOTS){
         // Evict el más viejo (LRU). Liberar sus VBOs.
@@ -10709,6 +11150,11 @@ function mcMeshChunk(cx,cz){
   const SS=mc.sinSombra;     // REQ-SHADOW2 · id → banderas de sombra (1 no recibe, 2 no proyecta). null = coste cero
   const GEO=mcTablaFina();   // id → geometría real (o null): las celdas que no son cubos, ver más abajo
   const finas=[];            // …y dónde están: [x,y,z,id, x,y,z,id, …] (plano, sin objetos por celda)
+  // REQ-CULL1 · el alto REAL del chunk. `ch.aabb` es una columna de la altura entera del mundo
+  // (MC_CHUNK=16 de lado y `dim.y` de alto), así que mirando de frente al nivel del suelo entraba un
+  // chunk completo por dos voxeles de cornisa a 40 de altura. Se anota aquí, POR CELDA QUE EMITE, que
+  // es donde ya se está recorriendo: dos comparaciones por cara, cero pasadas extra sobre los buffers.
+  let yLo=Infinity, yHi=-Infinity;
   for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
     const id=mc.grid[mcIdx(x,y,z)]; if(!id) continue;
     if(GEO && GEO[id]){ finas.push(x,y,z,id); continue; }   // no es un cubo: se emite abajo con sus voxels
@@ -10741,6 +11187,7 @@ function mcMeshChunk(cx,cz){
       // en la bandera. El sombreado propio de la cara (F.s) se respeta: eso es el relieve del cubo, no una sombra.
       if(lightLut && !(ss&1)){ let lv=MC_MAXLIGHT; if(mcInside(ax,ay,az)){ const li=mcIdx(ax,ay,az); lv=L?L[li]:MC_MAXLIGHT; } s*=lightLut[lv]; }   // fuera de la rejilla = cielo abierto
       s+=2*ss;                   // las dos banderas viajan sumadas al sombreado (MC_SHADE_LIB)
+      if(y<yLo) yLo=y; if(y+1>yHi) yHi=y+1;                                  // REQ-CULL1 · alto real
       const uv=[[r.u0,r.v0],[r.u1,r.v0],[r.u1,r.v1],[r.u0,r.v1]];
       for(const k of [0,1,2,0,2,3]){
         const c=C[k];
@@ -10838,6 +11285,7 @@ function mcMeshChunk(cx,cz){
       const ss = SS?(SS[id]|0):0;
       const tap = tapadasFluido(x,y,z,id,fH);
       const agua = FT ? (FT[id]||'')==='WATER' : false;   // REQ-FLUID5: solo el agua refleja (la lava, no: es otro caso)
+      if(y<yLo) yLo=y; if(y+1>yHi) yHi=y+1;               // REQ-CULL1 · una pieza fina cabe en su celda (≤16³)
       copia(g.colLocal,   g.colCount,   g.colSC,   g.colFD,   fcol,   x,y,z, fH, ss, tap, agua);
       copia(g.alphaLocal, g.alphaCount, g.alphaSC, g.alphaFD, falpha, x,y,z, fH, ss, tap, agua);
     }
@@ -10847,6 +11295,13 @@ function mcMeshChunk(cx,cz){
   gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
   ch.count=verts.length/6; ch.aabb=[x0,0,z0, x1,dim.y,z1];
+  // REQ-CULL1 · el alto real va APARTE y no toca `ch.aabb`: esa caja la leen también el recorte en XZ del
+  // horneo parcial de sombra y los huecos de la caché LRU, y afinarle la Y por detrás sería cambiarles el
+  // contrato sin avisar. Aquí solo se guarda el rango, y `mcChunkVisible` decide si lo usa (game.cajaAjustada).
+  // El margen de 1 bloque es seguro barato: el fallo caro de este ticket es que algo DESAPAREZCA de la
+  // pantalla, y un bloque de holgura sobre 48 cuesta el 2 % del ahorro a cambio de cubrir lo que no he previsto.
+  if(yLo<=yHi){ ch.yLo=Math.max(0, yLo-1); ch.yHi=Math.min(dim.y, yHi+1); }
+  else { ch.yLo=ch.yHi=undefined; }                       // chunk sin nada que dibujar: que decida `count`
   // Los dos flujos finos del chunk: opaco (pasada de color por vértice) y translúcido (pasada con blend).
   // Sin celdas finas no se crea ni un buffer, y si dejan de haberlas se libera: un mundo sin flores no paga nada.
   const sube=(vboProp,cntProp,flujo)=>{
@@ -10874,7 +11329,10 @@ function mcMeshChunk(cx,cz){
     }
     ch._meshSig = sig;
   }
-  mcShadowDirty();   // el terreno cambió de forma → el mapa del sol ya no vale
+  // El terreno cambió de forma → el mapa del sol ya no vale. Pero cambió SÓLO EN ESTE CHUNK, y decirlo es lo que
+  // permite el rehorneo parcial (BUG-SHADOW4): andar por un mapa grande malla chunks sin parar, y antes cada uno
+  // se llevaba por delante una reconstrucción del mundo entero (401 draws / 159 M vértices en el volcado del dueño).
+  mcShadowDirty(x0, z0, x1, z1);
 }
 // t7 · SKYLIGHT: propaga la luz del cielo por el aire → mc.light[idx] en 0..MC_MAXLIGHT. Reciben luz plena (cielo)
 // el aire abierto por ARRIBA (cada columna, de arriba abajo hasta topar con sólido) y el de las 4 CARAS LATERALES
@@ -11053,10 +11511,23 @@ function mcComputeBlockLight(){
   // aquí es innecesario (BL a cero ya se ve igual, ver mcMeshChunk) y se pisaría con el mallado a medio poblar.
   const GE=mcGlowCeldas();
   if(GE.size) mc.hasGlow=true;
-  if(!mc.hasGlow || lv0<=0){          // sin emisivos: BL en 0, mcMeshChunk lo trata como sin luz de bloque
+  // REQ-LUZ2 · …y las partículas de game.voxelesUI que llevan rato QUIETAS, que son emisores del mundo como
+  // cualquier otro (mcVoxUIReparto). Su alcance NO lo pone game.glowLevel —cada una trae el suyo, y las estrellas
+  // piden 37—, así que ni pasan por el tope de lv0 ni dependen de él: el mundo emite con lv0 y ellas con el suyo.
+  // De ahí `lvMax`, que es lo que dimensiona los cubos del BFS y hasta dónde baja el barrido.
+  const QU=mcVoxUIQuietas();
+  const mundoEmite = mc.hasGlow && lv0>0;
+  // `mc.hasGlow` es «el campo del mundo alumbra algo», y con partículas quietas dentro lo alumbra: es la bandera
+  // que abre el uniforme uBlkOn (app.js:10862) y la subida de la textura 3D (app.js:13112). Sin encenderla, las
+  // estrellas se sembrarían en un campo que el shader ni mira. Igual que con GE: aquí SOLO se enciende.
+  if(QU.length) mc.hasGlow=true;
+  let lvMax = mundoEmite ? lv0 : 0;
+  for(let k=3;k<QU.length;k+=4) if(QU[k]>lvMax) lvMax=QU[k];
+  if(!mundoEmite && !QU.length){      // sin emisivos: BL en 0, mcMeshChunk lo trata como sin luz de bloque
     // …pero sin re-poner a cero lo que YA está a cero. Es un fill de N bytes en cada bloque puesto o roto: 3 ms en
     // 512×40×512 para no cambiar ni un byte. La bandera vive aquí porque este es el único sitio que escribe BL.
     if(!mc._blCero){ BL.fill(0); mc._blCero=true; }
+    mc._blEmiSig=null;                // …y que la próxima con emisores no se crea el atajo de la firma
     return;
   }
   // PERF-RS1: si NADA que afecte al BFS ha cambiado desde la última pasada, saltar. La firma
@@ -11069,6 +11540,11 @@ function mcComputeBlockLight(){
   for(const idx of GE) emiSig = (emiSig*31 + idx) | 0;
   for(const s of mc.structures){ const ec=s.emitFinos;
     if(ec && ec.length){ emiSig = (emiSig*31 + s.ox*73 + s.oy*37 + s.oz*41 + ec.length) | 0; } }
+  // REQ-LUZ2 · el conjunto QUIETO entra en la firma con su hash de conjunto (mcVoxUIReparto): una estrella que se
+  // apaga, se enciende o cambia de sitio invalida este campo igual que lo invalida colocar una antorcha. Si no
+  // entrara, el atajo de abajo dejaría el campo congelado PARECIENDO correcto, que es el fallo silencioso que la
+  // Ley VII teme.
+  emiSig = (emiSig*31 + (QU.length ? mc._voxUIQuietasSig|0 : 0)) | 0;
   const gridGen = mc.gridGen|0;
   if(!nueva && mc._blEmiSig===emiSig && mc._blGridGen===gridGen){
     return;   // el BL actual sigue siendo válido: exactos mismos emisores y misma topología
@@ -11096,8 +11572,17 @@ function mcComputeBlockLight(){
   // quien gana una celda le impone su decaimiento a todo lo que cuelgue de ella, y un cono (×k, hasta 6 por
   // bloque) estrangulaba la luz de una antorcha (1 por bloque) en cuanto le ganaba una sola celda por el camino.
   for(let pasada=0; pasada<2; pasada++){
-  const buckets=mcLuzBuckets(lv0); let sembrada=false;
+  const buckets=mcLuzBuckets(lvMax); let sembrada=false;
   const conHaz=(ed,k)=> !!(ed && (ed[k]||ed[k+1]||ed[k+2]));
+  // REQ-LUZ2 · las partículas quietas van en la pasada 0: no tienen haz (la capa game.voxelesUI no lo declara),
+  // igual que las sembraba mcDynBake. Cada una con SU alcance, y con su posición fina, así que el campo que sale
+  // es el mismo que salía en la caja — sólo que aquí no se rehace mientras el mundo no cambie.
+  if(pasada===0) for(let k=0;k<QU.length;k+=4){
+    sembrada=true;
+    mcLuzSiembra(C, PASA, buckets, QU[k+3], focus, Math.floor(QU[k]), Math.floor(QU[k+1]), Math.floor(QU[k+2]),
+      null, 0, null, QU[k], QU[k+1], QU[k+2]);
+  }
+  if(mundoEmite) {
   for(const s of mc.structures){ const ec=s.emitFinos; if(!ec||!ec.length) continue; const ed=s.emitDir, col=s.emitCol;
     // BUG-GLOW3 · un emisor MONTADO en un agente movido NO se hornea aquí: lo siembra mcDynBake en su propia caja,
     // con ESTA MISMA ley (BUG-GLOW8). El campo del mundo se queda solo para emisores QUIETOS, que es donde es barato.
@@ -11121,7 +11606,8 @@ function mcComputeBlockLight(){
       sembrada=true;
       mcLuzSiembra(C, PASA, buckets, lv0, focus, cx, cy, cz, ed, k, col,
         cx+(ec[k]+0.5)/MC_TILE, cy+(ec[k+1]+0.5)/MC_TILE, cz+(ec[k+2]+0.5)/MC_TILE); } }
-  if(sembrada) mcLuzDifunde(C, PASA, buckets, lv0, focus);
+  }
+  if(sembrada) mcLuzDifunde(C, PASA, buckets, lvMax, focus);
   }
 }
 // ── BUG-GLOW8 · UN SOLO MODELO DE LUZ ARTIFICIAL ─────────────────────────────────────────────────────────────
@@ -11392,7 +11878,8 @@ function mcLuzDifunde(C, PASA, buckets, lv0, focus){
 }
 // Recalcula mc.hasGlow: ¿alguna estructura viva tiene ≥1 celda emisiva? (cache para saltar BFS/mallado de luz de bloque).
 function mcRecomputeHasGlow(){ mc.hasGlow=false; for(const s of mc.structures){ if(s.emitFinos&&s.emitFinos.length){ mc.hasGlow=true; return; } }
-  if(mcGlowCeldas().size) mc.hasGlow=true; }   // …o alguna pieza emisiva puesta en la rejilla (mcGlowCeldas)
+  if(mcGlowCeldas().size) mc.hasGlow=true;     // …o alguna pieza emisiva puesta en la rejilla (mcGlowCeldas)
+  else if(mcVoxUIQuietas().length) mc.hasGlow=true; }   // REQ-LUZ2 · …o una partícula ya dada por quieta: también es del mundo
 function mcMeshAll(){
   mcComputeLight();
   mcComputeBlockLight();
@@ -11431,7 +11918,7 @@ const MC_DYN_SEMILLAS=160;
 // 450 k deja pasar entera la caja de un mundo de 96×48×96 sin recortar: el mundo por defecto (~300 k) caía JUSTO
 // en el filo del tope viejo, y ahí cualquier temblor de un bloque se notaba.
 const MC_DYN_CELDAS=450000;
-function mcDynApaga(){ mc.dynLight=null; mc._dynSig=null; mc._dynTexDirty=true; }
+function mcDynApaga(){ mc.dynLight=null; mc._dynSig=null; mc._dynSuma=null; mc._dynTexDirty=true; }
 // BUG-GLOW8g · ¿ESTE EMISOR PUEDE SEMBRAR ALGO? Es EXACTAMENTE la primera línea de mcLuzSiembra (`mcInside` de su
 // celda): un emisor cuya celda cae fuera del mundo se descarta allí y no aporta ni un nivel. Está aquí para que el
 // REPARTO pregunte lo mismo que la siembra, porque el tope de MC_DYN_SEMILLAS se decide por distancia al ojo y no
@@ -11463,8 +11950,22 @@ function mcLuzDiag(){
     semillas:{ candidatas:(mc._dynCand?mc._dynCand.length/11:0), usadas, tope:MC_DYN_SEMILLAS,
                saturado:(mc._dynCand?mc._dynCand.length/11:0)>=MC_DYN_SEMILLAS,
                reparto:{ mano, estructuras:estruct, voxelesUI:voxui } },
-    caja: D?{ org:[D.x0,D.y0,D.z0], tam:[D.W,D.H,D.P], celdas:D.vol, tope:MC_DYN_CELDAS,
-              recortada:D.vol>=MC_DYN_CELDAS }:null,
+    // REQ-LUZ2 · el reparto de la capa game.voxelesUI: cuántas de sus luces son ya del MUNDO (y por tanto gratis
+    // por frame) y cuántas siguen pagando caja. Con el cielo lleno de estrellas y la herramienta en la mano, lo
+    // sano es quietas≈todas y movidas = las de la herramienta. Si `movidas` no baja nunca, algo las está moviendo
+    // (un snippet que las repinta con jitter) y ahí es donde hay que mirar, no en el BFS.
+    quietas:{ puesto:mc.luzQuietas!==false, tras:mc.luzQuietasTras|0,
+              quietas:(mc._voxUIQuietas?mc._voxUIQuietas.length/4:0),
+              movidas:(mc._voxUIRep?mc._voxUIRep.movidas.length/4:0),
+              maduro:!!(mc._voxUIRep&&mc._voxUIRep.maduro), sig:(mc._voxUIQuietasSig|0) },
+    caja: D?{ org:[D.x0,D.y0,D.z0], tam:[D.W,D.H,D.P], celdas:D.vol,
+              tope:(mc._dynRecorte?mc._dynRecorte.tope:MC_DYN_CELDAS),
+              crudo:(mc._dynRecorte?mc._dynRecorte.crudo:D.vol),   // la unión ANTES de recortar: lo que decide
+              recortada:(mc._dynRecorte?mc._dynRecorte.hubo:false) }:null,
+    // REQ-LUZ1 · qué motor va puesto y cómo se está portando. `fallo` distinto de null = se revirtió solo y
+    // NO se ha rearmado: eso es lo primero que hay que mirar cuando la luz «se ve rara».
+    orden:{ puesto:mc.luzOrden, cruce:mc.luzCruce, fallo:mc._luzOrdenFallo||null,
+            cruces:mc._luzCruces|0, discrepancias:mc._luzCruceDisc|0, ultimo:mc._luzCruceInfo||null },
     sub: MC_LUZ_SUB,                     // subniveles por nivel: el escalón más fino que el campo sabe representar
     centro: (D&&D.pos)?D.pos.map(v=>+v.toFixed(3)):null,
     // las 6 semillas más cercanas al ojo, con su distancia: si el ORDEN o el reparto cambia al girar, se ve aquí
@@ -11530,13 +12031,22 @@ function mcDynSync(){
   // REQ-GLOW5 · la capa game.voxelesUI compite en igualdad: son cuerpos del mundo que emiten, y aquí ya no importa
   // si vienen de una estructura o de una partícula. Sin haz (isótropas: una llama alumbra a todos lados) y con su
   // propio alcance por grupo, que NO topa en 15 (una estrella a 34 bloques tiene que llegar al suelo).
-  const vl=mcVoxUILuces();
+  // REQ-LUZ2 · …pero SÓLO las que de verdad se mueven. La misma pregunta que ya se le hace a una estructura dos
+  // bucles más arriba (`if(mcEmisorSeguido(s)) continue;`), que a esta capa nunca se le hizo: entraban todas
+  // incondicionalmente, y con ellas la caja del mundo entero. Las quietas están ya en mc.blockLight; el shader
+  // mezcla los dos campos con max(), así que la estrella alumbra exactamente igual, sin pagar peaje por frame.
+  const rep=mcVoxUIReparto(), vl=rep.movidas;
   for(let k=0;k<vl.length;k+=4){
     if(!mcLuzPuedeSembrar(vl[k], vl[k+1], vl[k+2])) continue;
     const dx=vl[k]-eye[0], dy=vl[k+1]-eye[1], dz=vl[k+2]-eye[2];
     cand.push(dx*dx+dy*dy+dz*dz, vl[k], vl[k+1], vl[k+2], 0, 0, 0, vl[k+3], -1, -1, -1);
     orig.push(null);         // depuración: null = capa game.voxelesUI (estrellas, partículas…)
   }
+  // Alguien ha cambiado de bando (una estrella se ha plantado, o una que estaba quieta se ha movido/apagado) ⇒
+  // el campo del mundo ya no vale y su halo hay que re-mallarlo, exactamente igual que la transición montado↔quieto
+  // de las estructuras. Sale por el mismo camino de abajo, que ya sabe hacerlo.
+  if(rep.caja){ const q=rep.caja;
+    if(q[0]<bx0)bx0=q[0]; if(q[1]<bz0)bz0=q[1]; if(q[2]>bx1)bx1=q[2]; if(q[3]>bz1)bz1=q[3]; cambio=true; }
   // Las MC_DYN_SEMILLAS celdas más cercanas al ojo (índices ordenados por d², sin reordenar el array plano).
   const nC=cand.length/11, idx=mc._dynIdx||(mc._dynIdx=[]);
   idx.length=nC; for(let i=0;i<nC;i++) idx[i]=i;
@@ -11553,7 +12063,19 @@ function mcDynSync(){
                col: cand[c+8]>=0 ? [cand[c+8], cand[c+9], cand[c+10]] : null,
                org: orig[idx[i]], d2: cand[c] });     // depuración (mcLuzDiag), no lo usa la siembra
   }
-  mcDynBake(sem);
+  // REQ-LUZ1 · hasta aquí el ojo ha decidido QUIÉN COGE PLAZA (el cupo de arriba, por d²). A partir de aquí
+  // ya no manda: el orden de siembra lo pone mcLuzOrdena. Si devuelve false el ciclo se descarta y el campo
+  // anterior se queda puesto — el mundo NO se va a negro por un fallo del orden.
+  if(mcLuzOrdena(sem)){
+    mcDynBake(sem);
+    // El BITE sólo corre con el motor nuevo puesto: volando el orden de siempre no hay nada nuevo que
+    // verificar, y hacer tres siembras extra cada 30 s a todo el mundo sería cambiar el motor para medirlo.
+    const cr=(mc.luzOrden==='canonico') ? mc.luzCruce : 0;
+    if(cr>0 && sem.length){
+      const ahora=Date.now();
+      if(!mc._luzCruceT || ahora-mc._luzCruceT >= cr*1000){ mc._luzCruceT=ahora; mcLuzCruzar(sem); }
+    }
+  }
   if(cambio){   // solo al arrancar/parar de seguir: re-siembra la luz del mundo (sin las montadas) y re-malla su halo estampado
     mc._blEmiSig=null; mcComputeBlockLight();
     const R=MC_MAXLIGHT+1, dim=mc.dim, ncx=Math.ceil(dim.x/MC_CHUNK), ncz=Math.ceil(dim.z/MC_CHUNK);
@@ -11561,6 +12083,153 @@ function mcDynSync(){
     const cz0=Math.max(0,Math.floor((bz0-R)/MC_CHUNK)), cz1=Math.min(ncz-1,Math.floor((bz1+R)/MC_CHUNK));
     for(let cz=cz0;cz<=cz1;cz++) for(let cx=cx0;cx<=cx1;cx++) mcMeshChunk(cx,cz);
   }
+}
+// ── REQ-LUZ1 · EL ORDEN DE SIEMBRA ────────────────────────────────────────────────────────────────────
+// Medido en la máquina del dueño el 2026-08-20: ANDANDO, el 89 % de las re-siembras producían un campo
+// IDÉNTICO byte a byte. La causa no era la luz. `sem` venía ordenada por distancia al ojo y la firma se
+// concatena en ese mismo orden, así que andar reordenaba las MISMAS 160 estrellas y rompía el candado sin
+// que cambiara un solo nivel. La Ley VII dice que la firma es «emisores + topología»; dónde está parado el
+// jugador no es ni lo uno ni lo otro.
+//
+// Se separan las dos cosas que hacía el mismo orden:
+//   · QUIÉN COGE PLAZA → sigue siendo por cercanía al ojo (el cupo de MC_DYN_SEMILLAS). ⛔ No se toca aquí.
+//   · EN QUÉ ORDEN SE SIEMBRAN los que ya la cogieron → orden canónico, que no sabe dónde está el jugador.
+//
+// El orden canónico ES el propio fragmento de firma ⇒ siembra y firma NO PUEDEN desincronizarse, porque no
+// hay dos criterios que mantener a la vez. Y de ahí sale la prueba de que es correcto: dos semillas con el
+// mismo fragmento son indistinguibles (misma posición cuantizada, mismo nivel, mismo haz, mismo color),
+// luego el orden entre ellas no puede cambiar el campo.
+//
+// ⚠️ Lo que SÍ cambia respecto a antes son las celdas EMPATADAS. El BFS rompe empates por orden de siembra
+// (`BL[jdx+3]>=nl` ⇒ gana el primero que llega, y el que gana escribe el color Y se lleva su OR/DI aguas
+// abajo). Aquí estaba escrito que «el nivel no cambia en ninguna» y ERA FALSO: lo tumbó el guardián a la
+// primera. Medido en /map/test, 102 650 celdas encendidas: **79 (0,077 %) cambian de nivel**, ninguna más
+// de 1, porque cada celda guarda UN SOLO emisor (Ley VI) y la propagación hereda el del que ganó el empate.
+// Lo que autoriza el cambio no es que no se note, es la Ley VIII: el informe `luz-campo` mide la desviación
+// contra la ley y baja de 0,437 (orden por ojo) a 0,257 (canónico), por debajo de `resolucionMinima` 0,25.
+// El orden canónico está MÁS CERCA de la ley. Si algún día deja de estarlo, este ticket se revierte.
+function mcLuzFirmaSemilla(s){
+  const qPos=MC_LUZ_SUB*8, qHaz=256;   // las dos cifras y su porqué, en la firma de mcDynBake (BUG-GLOW8f)
+  return (s.fx!=null ? Math.round(s.fx*qPos)+','+Math.round(s.fy*qPos)+','+Math.round(s.fz*qPos)
+                     : s.x+','+s.y+','+s.z)+','+s.nivel
+       +(s.haz?','+Math.round(s.haz[0]*qHaz)+','+Math.round(s.haz[1]*qHaz)+','+Math.round(s.haz[2]*qHaz):',*')
+       +(s.col?','+s.col[0]+','+s.col[1]+','+s.col[2]:'');
+}
+// REQ-LUZ1 · capa 3 de la redundancia: EL CANAL INDEPENDIENTE. El peligro de este ticket no es reventar —
+// es lo contrario: que la firma deje de invalidarse cuando debería y la luz se quede congelada PARECIENDO
+// correcta. Nada grita y el mundo alumbra mal. Esta suma es libre de orden POR CONSTRUCCIÓN (se suma y se
+// xorea, las dos operaciones conmutativas) y no por haberla ordenado, y sale de aritmética entera, no de
+// concatenar cadenas: es un camino DISTINTO del que arma la firma, que es lo que la hace valer como testigo.
+// Invariante: si esta suma cambia y la firma no, la firma está rota.
+function mcLuzSumaSemillas(sem){
+  const qPos=MC_LUZ_SUB*8;
+  let suma=0, xor=0;
+  for(let i=0;i<sem.length;i++){
+    const s=sem[i], fino=s.fx!=null;
+    let h=2166136261;
+    h=Math.imul(h ^ (fino?Math.round(s.fx*qPos):(s.x*qPos|0)), 16777619);
+    h=Math.imul(h ^ (fino?Math.round(s.fy*qPos):(s.y*qPos|0)), 16777619);
+    h=Math.imul(h ^ (fino?Math.round(s.fz*qPos):(s.z*qPos|0)), 16777619);
+    h=Math.imul(h ^ (s.nivel|0), 16777619);
+    if(s.haz) for(let k=0;k<3;k++) h=Math.imul(h ^ Math.round(s.haz[k]*256), 16777619);
+    if(s.col) for(let k=0;k<3;k++) h=Math.imul(h ^ (s.col[k]|0), 16777619);
+    suma=(suma+h)>>>0; xor=(xor^h)>>>0;
+  }
+  return suma+':'+xor+':'+sem.length;
+}
+// REQ-LUZ1 · capa 2 · SE APAGA EL MOTOR Y NO SE REARRANCA SOLO. Un avión no rearranca en el aire el motor
+// que ha fallado: aterriza y se mira. Se anota el PRIMER fallo (los de después son consecuencia), se vuelve
+// al orden de siempre para el resto de la sesión y se anuncia por los tres sitios donde el dueño mira:
+// consola, game.luzDiag() y la ficha de la foto. Rearmar es cosa suya: game.luzOrden='canonico'.
+function mcLuzFallo(motivo, detalle){
+  if(mc._luzOrdenFallo) return;
+  mc._luzOrdenFallo={ motivo, detalle:detalle||'', cuando:new Date().toISOString(), orden:mc.luzOrden };
+  mc.luzOrden='ojo';
+  mc._dynSig=null; mc._dynSuma=null;
+  console.error('LUZ · REQ-LUZ1 · vuelta al orden por cercanía al ojo — '+motivo+(detalle?' · '+detalle:''));
+  try{ toast('Luz: orden canónico revertido ('+motivo+')'); }catch(e){}
+}
+// REQ-LUZ1 · pone el fragmento a cada semilla y, si toca, las ordena. Devuelve false si NO se puede sembrar
+// este ciclo: entonces el campo anterior se queda puesto (el mundo no se va a negro) y el frame siguiente
+// vuela ya con el orden de siempre, porque mcLuzFallo ha invalidado la firma.
+function mcLuzOrdena(sem){
+  const canonico = !mc._luzOrdenFallo && mc.luzOrden==='canonico';
+  try{
+    for(let i=0;i<sem.length;i++) sem[i].sig=mcLuzFirmaSemilla(sem[i]);
+    if(canonico) sem.sort((a,b)=> a.sig<b.sig ? -1 : (a.sig>b.sig ? 1 : 0));
+    return true;
+  }catch(e){
+    mcLuzFallo('excepción al ordenar las semillas', String(e && e.message || e));
+    return false;
+  }
+}
+// REQ-LUZ1 · capa 1 · EL CRUCE (el BITE del motor). No son dos implementaciones del BFS —eso sería «un
+// modelo aparte para este caso» y lo veta el Mandamiento 2—: es el MISMO mcDynBake con las semillas en otro
+// orden. Cada game.luzCruce segundos hace dos preguntas distintas:
+//
+//   1. REPETIBILIDAD (el autochequeo de verdad): sembrar DOS VECES lo mismo tiene que dar lo mismo, byte a
+//      byte. Si no, hay algo podrido —búfer sucio, estado que se cuela entre pasadas— y eso sí es avería.
+//   2. LOS DOS ÓRDENES, uno contra otro: se MIDE la diferencia y se enseña.
+//
+// ⚠️ Aquí me equivoqué al escribir el ticket y el guardián me pilló (2026-08-20): yo afirmaba que el campo
+// era función sólo del CONJUNTO de semillas y que el nivel no podía cambiar. Es falso. El BFS guarda UN
+// emisor por celda (Ley VI) y el orden de llegada decide cuál; el siguiente salto se calcula desde el dueño
+// de la celda, así que reordenar puede mover el nivel de unas pocas celdas aguas abajo. Medido en
+// /map/test con 207 candidatas: una permutación MÍNIMA no mueve ni una celda, y una barajada entera mueve
+// ~61 de 104 952 encendidas (0,06 %). Por eso una diferencia PEQUEÑA no es avería: es el desempate. Lo que
+// sí es avería es que se dispare — y para eso está la tolerancia, que es una cifra puesta a la vista.
+const MC_LUZ_CRUCE_TOL   = 0.01;   // hasta un 1 % de las celdas encendidas puede diferir por desempate
+const MC_LUZ_CRUCE_SALTO = 1;      // ...y ninguna puede saltar más de 1 nivel: eso ya no lo explica un empate
+function mcLuzCruzar(sem){
+  const D=mc.dynLight;
+  if(!D || !sem.length) return null;
+  const vol=D.W*D.H*D.P, A=D.BL.slice(0, vol*4);
+  const caja=[D.x0,D.y0,D.z0,D.W,D.H,D.P];
+  const mismaCaja = (E)=> !!E && E.x0===caja[0] && E.y0===caja[1] && E.z0===caja[2]
+                        && E.W===caja[3] && E.H===caja[4] && E.P===caja[5];
+  // 1 · repetible: el MISMO orden, otra vez
+  mc._dynSig=null; mcDynBake(sem);
+  let repetible=mismaCaja(mc.dynLight);
+  if(repetible){ const R=mc.dynLight.BL; for(let i=0;i<vol*4;i++) if(A[i]!==R[i]){ repetible=false; break; } }
+  // 2 · el otro orden, sobre las MISMAS semillas
+  const otro = (mc.luzOrden==='canonico') ? 'ojo' : 'canonico';
+  const copia = sem.slice();
+  if(otro==='canonico') copia.sort((a,b)=> a.sig<b.sig ? -1 : (a.sig>b.sig ? 1 : 0));
+  else                  copia.sort((a,b)=> a.d2-b.d2);
+  let nivel=0, color=0, salto=0, encendidas=0, primera=null;
+  mc._dynSig=null; mcDynBake(copia);
+  const E=mc.dynLight, cajaDistinta=!mismaCaja(E);
+  if(!cajaDistinta){
+    const B=E.BL;
+    for(let i=0;i<vol;i++){
+      const j=i*4;
+      if(A[j+3]) encendidas++;
+      if(A[j+3]!==B[j+3]){
+        const dl=Math.abs(A[j+3]-B[j+3])/MC_LUZ_SUB;
+        if(dl>salto) salto=dl;
+        if(!primera) primera={celda:i, a:A[j+3], b:B[j+3]};
+        nivel++;
+      }
+      else if(A[j]!==B[j] || A[j+1]!==B[j+1] || A[j+2]!==B[j+2]) color++;
+    }
+  }
+  mc._dynSig=null; mcDynBake(sem);   // dejar volando el orden bueno, no el del chequeo
+  const desborda = encendidas>0 && nivel > encendidas*MC_LUZ_CRUCE_TOL;
+  const info={ cuando:new Date().toISOString(), orden:mc.luzOrden, contra:otro, celdas:vol, encendidas,
+               repetible, nivel, color, salto, cajaDistinta, desborda, primera };
+  mc._luzCruces=(mc._luzCruces|0)+1;
+  mc._luzCruceInfo=info;
+  // Sólo estas tres cosas son avería. Que difieran unas pocas celdas NO lo es, y decirlo aquí evita que el
+  // motor bueno se apague solo por un efecto que ya está medido y acotado.
+  if(!repetible || cajaDistinta || desborda || salto>MC_LUZ_CRUCE_SALTO){
+    mc._luzCruceDisc=(mc._luzCruceDisc|0)+1;
+    mcLuzFallo(!repetible ? 'la misma siembra dio DOS resultados distintos'
+             : cajaDistinta ? 'el cruce dio OTRA CAJA'
+             : desborda ? 'demasiadas celdas cambian de nivel con el orden'
+             : 'una celda salta más de '+MC_LUZ_CRUCE_SALTO+' nivel(es) con el orden',
+      nivel+' de '+encendidas+' encendidas, salto máx '+salto+(primera?', la 1ª '+primera.a+' vs '+primera.b:''));
+  }
+  return info;
 }
 // BUG-GLOW8 · Siembra las luces que se mueven en su propia CAJA, con la ley de mcComputeBlockLight y ni una regla
 // aparte. Es la mitad cara del ticket y por eso está gobernada por una FIRMA: mientras ninguna luz cambie de celda
@@ -11587,7 +12256,13 @@ function mcDynBake(sem){
     usadas++; if(s.nivel>lv0) lv0=s.nivel;
   }
   if(!usadas){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
-  if((x1-x0+1)*(y1-y0+1)*(z1-z0+1) > tope){
+  // BUG-GLOW11 · el recorte se apunta AQUÍ, con la caja CRUDA delante. `mcLuzDiag` lo publicaba como
+  // `D.vol>=MC_DYN_CELDAS`, que después de recortar es FALSE POR CONSTRUCCIÓN (recortar deja el volumen por
+  // debajo del tope): el indicador no podía dar `true` jamás. Con él exoneré al recorte «medido al 0 %» el
+  // 2026-08-20 — y el recorte era exactamente el culpable. Un instrumento que sólo sabe decir «no» no mide.
+  const volCrudo=(x1-x0+1)*(y1-y0+1)*(z1-z0+1);
+  mc._dynRecorte={ crudo:volCrudo, tope, hubo:volCrudo>tope };
+  if(volCrudo > tope){
     // Recorte centrado en el OJO (su posición, no su rumbo ⇒ girar en el sitio no mueve la caja) y proporcional en
     // los tres ejes, para no deformar el alcance. El bucle de guardia baja el eje más largo de uno en uno.
     const ex=Math.round(mc.pos[0]), ey=Math.round(mc.pos[1]+MC_EYE*mc.scale), ez=Math.round(mc.pos[2]);
@@ -11614,13 +12289,9 @@ function mcDynBake(sem){
   //   congelación y 1/8 de coseno hasta 5: el campo se quedaba clavado y luego pegaba el brinco. Con paso p, el
   //   error del nivel es ~p·(1+5·focus) en posición y ~p·alcance·5·focus en el haz; pedir que ambos queden por
   //   debajo de 1/SUB da estas dos cifras. Cuando nada se mueve, la firma no cambia y esto sigue sin costar nada.
-  const qPos=MC_LUZ_SUB*8, qHaz=256;
-  for(let i=0;i<usadas;i++){ const s=sem[i];
-    sig+='|'+(s.fx!=null ? Math.round(s.fx*qPos)+','+Math.round(s.fy*qPos)+','+Math.round(s.fz*qPos)
-                         : s.x+','+s.y+','+s.z)+','+s.nivel
-       +(s.haz?','+Math.round(s.haz[0]*qHaz)+','+Math.round(s.haz[1]*qHaz)+','+Math.round(s.haz[2]*qHaz):',*')   // haz null = omnidireccional
-       +(s.col?','+s.col[0]+','+s.col[1]+','+s.col[2]:'');
-  }
+  //   REQ-LUZ1 · el fragmento de cada semilla se calcula UNA vez, en mcLuzFirmaSemilla, porque es a la vez la
+  //   firma y el criterio de orden. Una sola definición ⇒ siembra y candado no pueden discrepar.
+  for(let i=0;i<usadas;i++) sig+='|'+(sem[i].sig!=null ? sem[i].sig : mcLuzFirmaSemilla(sem[i]));
   // BUG-GLOW8c · aquí vivía un DESPLAZAMIENTO GLOBAL del muestreo (BUG-GLOW8b): el resto sub-celda medio de los
   // emisores, aplicado a la caja entera para disimular el salto al cruzar de celda. Era falso en cuanto había más
   // de una pieza. Lo cazaron las fotos 68/69 del dueño (mismo sitio, 4° de giro): 27 semillas sembradas, 26 eran
@@ -11637,8 +12308,16 @@ function mcDynBake(sem){
     if(n) cen=[sfx/n, sfy/n, sfz/n];      // solo diagnóstico (mcLuzDiag): dónde están DE VERDAD los emisores sembrados
   }
   mc._dynSem=sem;                  // depuración (mcLuzDiag): las semillas tal cual entraron, en orden
-  if(sig===mc._dynSig && mc.dynLight){ mc.dynLight.pos=cen; return; }
-  mc._dynSig=sig;
+  // REQ-LUZ1 · capa 3 · el candado se contrasta con el CANAL INDEPENDIENTE antes de creérselo. La suma no
+  // sabe de orden por construcción, así que si ella ve un cambio y la firma no, la firma miente: se anuncia y
+  // se sigue por el lado seguro (re-sembrar), nunca dando por buena una luz vieja.
+  const suma=mcLuzSumaSemillas(sem);
+  if(sig===mc._dynSig && mc.dynLight){
+    if(suma===mc._dynSuma){ mc.dynLight.pos=cen; return; }
+    mcLuzFallo('firma rancia: cambió el conjunto de semillas y el candado no se enteró',
+               mc._dynSuma+' → '+suma);
+  }
+  mc._dynSig=sig; mc._dynSuma=suma;
   const W=x1-x0+1, H=y1-y0+1, P=z1-z0+1, vol=W*H*P;
   const BL=(mc._dynBL&&mc._dynBL.length>=vol*4)?mc._dynBL:(mc._dynBL=new Uint8Array(vol*4));
   const BD=(mc._dynBD&&mc._dynBD.length>=vol*3)?mc._dynBD:(mc._dynBD=new Int8Array(vol*3));
@@ -12416,8 +13095,14 @@ function mcStructVisible(s, pv){
 
 function mcChunkVisible(ch, pv){
   const a=ch.aabb, out=[0,0,0,0,0,0];
+  // REQ-CULL1 · si el chunk trae su alto REAL (`yLo`/`yHi`, anotado al mallar) se prueba ése en vez de la
+  // columna de la altura entera del mundo. Es un `if` y no un cambio de `ch.aabb` a propósito: así el
+  // conmutador `game.cajaAjustada` actúa EN EL ACTO, sin re-mallar nada, y se puede comparar en vivo.
+  // Sin `yLo` (chunk vacío, malla vieja de la caché, o `MC_AABB_GIRO`) se cae al comportamiento de siempre.
+  const ajus = mc.cajaAjustada && ch.yLo!==undefined;
+  const ay0 = ajus ? ch.yLo : a[1], ay1 = ajus ? ch.yHi : a[4];
   for(let i=0;i<8;i++){
-    const x=(i&1)?a[3]:a[0], y=(i&2)?a[4]:a[1], z=(i&4)?a[5]:a[2];
+    const x=(i&1)?a[3]:a[0], y=(i&2)?ay1:ay0, z=(i&4)?a[5]:a[2];
     const cx=pv[0]*x+pv[4]*y+pv[8]*z+pv[12], cy=pv[1]*x+pv[5]*y+pv[9]*z+pv[13];
     const cz=pv[2]*x+pv[6]*y+pv[10]*z+pv[14], cw=pv[3]*x+pv[7]*y+pv[11]*z+pv[15];
     if(cx<-cw) out[0]++; if(cx>cw) out[1]++;
@@ -12429,6 +13114,7 @@ function mcChunkVisible(ch, pv){
 }
 function mcRender(){
   const gl=mc.gl; if(!gl) return;
+  _renInicioFrame();              // REQ-REN1 · game.showRendered (apagado: no hace nada)
   mcResize();
   // REQ-FLUID4 · lo primero del frame: si el ojo está sumergido, el fondo y la niebla son otros. Va
   // ANTES del clear porque el color de fondo es la mitad del efecto (lo que se ve más allá de la
@@ -12479,6 +13165,7 @@ function mcRender(){
   }
   vis.sort((a,b)=>a._d-b._d);   // cercano→lejano: con el early-z, el terreno próximo tapa (por depth) a los fragmentos de detrás antes de sombrearlos → menos overdraw
   let quads=0;
+  _renFase('terreno');
   for(const ch of vis){
     if(!ch.count) continue;                   // chunk solo con celdas finas: se dibuja en la pasada de estructuras
     gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
@@ -12490,7 +13177,9 @@ function mcRender(){
   }
   // Alfombras volátiles (mc.capa): mismo formato de vértice, mismo atlas y mismos uniformes que el
   // terreno ⇒ se cuelan aquí sin cambiar de programa, y con eso heredan la niebla y la sombra del sol.
+  _renFase('capas');
   quads+=mcDrawCapas(L, stride, cxp, czp);
+  _renFase('agentes');
   // Agentes (NPC): su cuerpo es un cubo suelto con el MISMO formato de vértice que el terreno (x,y,z,u,v,shade)
   // y el mismo atlas, así que se dibuja aquí sin cambiar de programa. No vive en mc.grid (ver mcAgentSetBlock).
   for(const a of mc.agents.values()){
@@ -12509,8 +13198,14 @@ function mcRender(){
   // GL que una estructura —sesgo y culling de traseras incluidos—, pero uno por chunk en vez de uno por celda.
   let finoOp=0, finoAl=0; for(const ch of vis){ finoOp+=ch.finoCount|0; finoAl+=ch.finoACount|0; }
   // REQ-ENV5 · Pasada de reflejo planar del entorno sobre la lámina de agua (solo si hay agua visible y no está sumergido)
-  const waterY = mcDetectWaterY();
-  const RM = (finoAl && mcAguaReflejo > 0 && mcReflEntorno > 0 && !mcFluidoOjo()) ? mcRenderRefl(waterY, vis, TP, L, SM, pj, view) : null;
+  // ⚠️ `mcDetectWaterY()` va DENTRO de la condición, no antes. Barre 25×33×33 = 27 225 celdas
+  // (`mcInside` + `mcIdx` por celda) y en un mapa SIN agua no encuentra nada, no cachea el fallo
+  // —`mc._lastWaterY` sólo se escribe si `nearestY > 0`, app.js:10499— y repite el barrido entero
+  // el frame siguiente. Estaba calculándose siempre para tirarlo aquí mismo cuando `finoAl` es 0:
+  // medido por el dueño, 30 600 `mcInside` + 29 950 `mcIdx` por frame y `mcRender` en 12-16 ms.
+  // El resultado no cambia: `waterY` no se usa en ningún otro sitio (sólo lo consume mcRenderRefl).
+  const hayRefl = (finoAl && mcAguaReflejo > 0 && mcReflEntorno > 0 && !mcFluidoOjo());
+  const RM = hayRefl ? mcRenderRefl(mcDetectWaterY(), vis, TP, L, SM, pj, view) : null;
   if(RM){
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, mc.canvas.width, mc.canvas.height);
@@ -12521,7 +13216,7 @@ function mcRender(){
   // La capa game.voxelesUI (partículas, sangre, estrellas) es OPACA y del MUNDO: va aquí, entre lo opaco y
   // el translúcido, NO al final con el overlay. Fuera del `if` de abajo a propósito: ese bloque (y con él
   // el cielo) se salta entero cuando no hay estructuras, y las partículas tienen que salir igual.
-  mcDrawVoxUI(pj, view);
+  mcDrawVoxUI(pj, view, pv);
 
   if(mc.structures.length || finoOp || finoAl){
     mcStructGL(true);
@@ -12536,6 +13231,7 @@ function mcRender(){
       gl.uniform1f(SL.uReflejo, 0);   // REQ-FLUID5: la pasada opaca no refleja (el agua es translúcida, va en la 3)
       mcSunUniforms(SL, SM);
       mcAttribs([SL.aPos,SL.aColor,SL.aShade,SL.aEmit,SL.aAlpha]);
+      _renFase('estructuras');
       for(const s of mc.structures){
         if(!s.colCount || !mcStructVisible(s,pv)) continue;
         gl.uniformMatrix4fv(SL.uModel,false,mcModelOf(s));
@@ -12547,6 +13243,7 @@ function mcRender(){
       // …y los lotes del chunk, que ya vienen en coordenadas de MUNDO (sin matriz de modelo) y ya pasaron el
       // frustum con el aabb del chunk: solo hay que cambiar el buffer.
       if(finoOp){
+        _renFase('fino');
         gl.uniformMatrix4fv(SL.uModel,false,MC_IDENT);
         for(const ch of vis){
           if(!ch.finoCount) continue;
@@ -12570,6 +13267,7 @@ function mcRender(){
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, mc.structAtlasTex); gl.uniform1i(SL.uTex,0);
       mcSunUniforms(SL, SM);
       mcAttribs([SL.aPos,SL.aTile,SL.aRect,SL.aShade]);
+      _renFase('estruct-tex');
       for(const s of mc.structures){
         if(!s.texCount || !mcStructVisible(s,pv)) continue;
         gl.uniformMatrix4fv(SL.uModel,false,mcModelOf(s));
@@ -12583,6 +13281,7 @@ function mcRender(){
       }
     }
     mcRenderSky(gl, pj.m, view);
+  _renFase('translúcido');
     // BUG-FLUID6 · mcRenderSky apaga el CULL_FACE y NO lo repone (sí repone depthMask y depthFunc), así que
     // la pasada 3 se dibujaba con las traseras puestas mientras las 1 y 2 iban culladas. En un opaco no se
     // nota —la de delante tapa a la de detrás—, pero en el agua las DOS pieles de la masa se mezclaban: la
@@ -12676,12 +13375,16 @@ function mcRender(){
     }
     mcStructGL(false);   // fuera antes de la pasada del sol del frame siguiente, que hereda el estado
   }
+  _renFase('notas');
   mcDrawNoteTexts(pj, view);      // el texto de cada nota, pegado en la tabla de su cartel (se desvanece de lejos)
+  _renFase('previa');
   mcDrawPreview(pj, view);        // vista-previa translúcida de la habitación/cartel mientras se apunta (mc.preview)
   mcDrawVolumeBlocks(pj, view);   // bloques reales texturados de la herramienta volumen
   mcDrawPasteBlocks(pj, view);    // bloques reales de la herramienta pegar (Ctrl+V)
+  _renFase('overlay');
   mcDrawOverlays(pj, view);
   mc.quads=quads; game.voxels=Math.round(quads);
+  _renFinFrame();                 // REQ-REN1 · cierra el reparto por pasada de este frame
   if(mcMediaRecorder && mcMediaRecorder.state === 'recording') mcCompositaVideoFrame();
 }
 
@@ -14000,6 +14703,80 @@ function mcVoxUILuces(){
   mc._voxUILuz=out;
   return out;
 }
+// ── REQ-LUZ2 · QUIÉN SE MUEVE DE VERDAD ────────────────────────────────────────────────────────────────────
+// Ley VII, último punto: «si nada que afecte al BFS cambió, la pasada es un no-op». Una estrella clavada en el
+// cielo NO ha cambiado — y sin embargo hasta hoy pagaba como la espada que llevas en la mano, porque mcDynSync
+// metía TODAS las luces de game.voxelesUI en el mismo saco de «lo que se mueve». No las disparaba: les ponía el
+// PRECIO. La caja del BFS es la unión de todas las semillas, así que cuatro estrellas repartidas por el cielo la
+// estiran al mundo entero, y cualquier temblor de la herramienta paga esa caja entera (medido en BUG-GLOW11:
+// 368 640 celdas, 688 re-siembras en 8 s, el 78 % del reloj ANDANDO).
+//
+// El arreglo no es una excepción para las estrellas: es que el motor DEJE DE DAR POR SUPUESTO que una partícula
+// se mueve, y LO MIRE. Cada pasada se compara cada luz con la de la pasada anterior por su CLAVE —el mismo cuanto
+// con el que entra en la firma de mcDynBake (mcLuzFirmaSemilla)—; la que lleva MC_LUZ_QUIETA_TRAS pasadas seguidas
+// idéntica deja de ser «lo que se mueve» y pasa al campo del MUNDO, donde cuesta lo que cuesta una antorcha
+// plantada: nada mientras nadie toque el mundo. Genérico por construcción: sirve para una estrella, una farola de
+// partículas o una chispa que se para; el snippet no declara nada y app.js no sabe qué es una estrella.
+// ⚠️ NO sale byte a byte idéntico (Ley VI: una celda guarda UN emisor, y ahora unos ganan en otro campo). Lo que
+// autoriza el cambio es la Ley VIII: lo arbitra el informe `luz-campo`, no el parecido.
+// Clave de una luz de la capa: posición cuantizada + alcance. Mismo qPos que la firma de la caja (BUG-GLOW8f), o
+// «quieta» querría decir una cosa aquí y otra allí: quieta = «no rompería la firma».
+function mcVoxUIClave(x, y, z, nivel){ const q=MC_LUZ_SUB*8;
+  return Math.round(x*q)+','+Math.round(y*q)+','+Math.round(z*q)+','+nivel; }
+// Reparte las luces de la capa en QUIETAS (van al campo del mundo, mcComputeBlockLight) y MOVIDAS (van a la caja,
+// mcDynSync). Devuelve además la caja XZ de lo que ha CAMBIADO DE BANDO en esta pasada, que es lo único que obliga
+// a re-sembrar el mundo. Con la capa entera quieta y sin cambios el coste de estar aquí es cero.
+function mcVoxUIReparto(){
+  const vl=mcVoxUILuces();
+  const R=mc._voxUIRep||(mc._voxUIRep={ quietas:[], movidas:[], sig:0, caja:null, maduro:false, de:null });
+  R.caja=null;
+  // Apagado (game.luzQuietas=false) → todo a la caja, exactamente como antes de este ticket.
+  if(mc.luzQuietas===false){
+    if(R.quietas.length){ R.quietas=[]; R.sig=0; R.caja=[0,0,mc.dim.x-1,mc.dim.z-1]; }
+    mc._voxUIVistas=null; R.maduro=false; R.de=null;
+    mc._voxUIQuietas=R.quietas; mc._voxUIQuietasSig=R.sig;
+    R.movidas=vl; return R;
+  }
+  // Atajo: mcVoxUILuces cachea, así que el MISMO array quiere decir que la capa no se ha tocado. Si además ya
+  // no queda ninguna luz madurando, seguir contando pasadas no puede cambiar nada ⇒ ni se recorre.
+  if(vl===R.de && R.maduro) return R;
+  const tras=Math.max(1, mc.luzQuietasTras|0 || MC_LUZ_QUIETA_TRAS);
+  const antes=mc._voxUIVistas, ahora=new Map();
+  const quietas=[], movidas=[];
+  let sig=0, xor=0, n=0;
+  for(let k=0;k<vl.length;k+=4){
+    const clave=mcVoxUIClave(vl[k], vl[k+1], vl[k+2], vl[k+3]);
+    const c=Math.min(tras, (antes ? (antes.get(clave)|0) : 0) + 1);
+    ahora.set(clave, c);
+    if(c>=tras){
+      quietas.push(vl[k], vl[k+1], vl[k+2], vl[k+3]);
+      // Firma del CONJUNTO, independiente del orden en que la capa los enumere (que no es cosa nuestra):
+      // suma + xor de un hash por clave, como mcLuzSumaSemillas. Es lo que mira mcComputeBlockLight para
+      // saber si su campo sigue valiendo.
+      let h=2166136261; for(let i=0;i<clave.length;i++) h=Math.imul(h^clave.charCodeAt(i), 16777619);
+      sig=(sig+h)|0; xor^=h; n++;
+    } else movidas.push(vl[k], vl[k+1], vl[k+2], vl[k+3]);
+  }
+  mc._voxUIVistas=ahora;
+  sig=((Math.imul(sig,31)^xor)+n)|0;
+  if(sig!==R.sig){
+    // Ha cambiado el conjunto QUIETO ⇒ el campo del mundo ya no vale. La caja XZ es la unión de lo viejo y lo
+    // nuevo: el que entra hay que sembrarlo y el que sale hay que borrarlo, y los dos halos hay que re-mallarlos.
+    let x0=1e9, z0=1e9, x1=-1e9, z1=-1e9;
+    const mete=(A)=>{ for(let k=0;k<A.length;k+=4){ const r=A[k+3];
+      if(A[k]-r<x0) x0=A[k]-r; if(A[k]+r>x1) x1=A[k]+r;
+      if(A[k+2]-r<z0) z0=A[k+2]-r; if(A[k+2]+r>z1) z1=A[k+2]+r; } };
+    mete(R.quietas); mete(quietas);
+    if(x1>=x0) R.caja=[Math.floor(x0), Math.floor(z0), Math.ceil(x1), Math.ceil(z1)];
+    R.sig=sig;
+  }
+  R.quietas=quietas; R.movidas=movidas; R.de=vl; R.maduro=(movidas.length===0);
+  mc._voxUIQuietas=quietas; mc._voxUIQuietasSig=sig;
+  return R;
+}
+// Lo que mcComputeBlockLight tiene que sembrar de esta capa. Función aparte porque a él lo llaman DIEZ sitios
+// (estampar, colocar, cargar mundo…) y ninguno pasa por el reparto: lee la última clasificación y punto.
+function mcVoxUIQuietas(){ return (mc.luzQuietas===false || !mc._voxUIQuietas) ? [] : mc._voxUIQuietas; }
 // Los cubos de game.voxelesUI son CUERPOS SÓLIDOS DEL MUNDO (partículas, sangre, estrellas), no adorno de
 // interfaz ⇒ se dibujan CON EL MUNDO: después de todo lo opaco y ANTES de la pasada translúcida y del cielo.
 // Iban al final, en mcDrawOverlays, y ahí el agua y el cristal ya se habían pintado SIN escribir profundidad
@@ -14008,7 +14785,9 @@ function mcVoxUILuces(){
 // cazó al bajarlas a la altura de la escena. Aquí el agua se mezcla ENCIMA, que es lo correcto.
 // Mismos uniformes que el overlay (sin niebla y `aEmit=1` ⇒ SIN LUZ: una estrella blanca sigue siendo blanca
 // a medianoche) y mismo enrollado que los corchetes de selección (mcPushBoxTris va hacia DENTRO ⇒ frontFace CW).
-function mcDrawVoxUI(pj, view){
+// `pv` (proyección·vista) es opcional: sin él la capa horneada se dibuja entera, como antes de REQ-CULL1.
+function mcDrawVoxUI(pj, view, pv){
+  _renFase('voxUI');
   const gl=mc.gl, SL=mc.structLoc;
   if(!mc.structProg) return;
   // Dos capas, mismo material y mismo sitio del frame: la VIVA (game.voxelesUI, una malla que se sube
@@ -14016,8 +14795,12 @@ function mcDrawVoxUI(pj, view){
   // función porque comparten los uniformes y el manoseo del estado de GL, que es lo delicado.
   const arr = (mc.voxUI && mc.voxUIAlfa>0 && !mc.voxUIEncima) ? mcVoxUIGeom() : null;
   const viva = !!(arr && arr.length);
+  // REQ-CULL1 · el chunk fino se recorta como el terreno. Sin `pv`, sin conmutador o sin caja (malla vieja)
+  // se dice que sí y queda el comportamiento de antes. La misma prueba decide si hay ALGO que dibujar: si
+  // todo queda fuera del visor nos ahorramos también el `useProgram` y los ocho uniformes de abajo.
+  const veVox = ch => !!ch.count && (!pv || !mc.cajaAjustada || !ch.aabb || mcChunkVisible(ch, pv));
   let horneada = false;
-  if(mc.voxFino) for(const ch of mc.voxFino.values()) if(ch.count){ horneada=true; break; }
+  if(mc.voxFino) for(const ch of mc.voxFino.values()) if(veVox(ch)){ horneada=true; break; }
   if(!viva && !horneada) return;
   gl.useProgram(mc.structProg);
   gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
@@ -14051,7 +14834,7 @@ function mcDrawVoxUI(pj, view){
     gl.uniform1f(SL.uFogMin, mcFogMin()); gl.uniform1f(SL.uFogNear, mcFogNear(pj.far)); gl.uniform1f(SL.uFogFar, mcFogFar(pj.far));
     if(SL.aEmit >= 0) gl.vertexAttrib1f(SL.aEmit, 0.0);
     for(const ch of mc.voxFino.values()){
-      if(!ch.count || !ch.vbo) continue;
+      if(!ch.vbo || !veVox(ch)) continue;
       gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbo);
       gl.vertexAttribPointer(SL.aPos,3,gl.FLOAT,false,7*4,0);
       gl.vertexAttribPointer(SL.aColor,3,gl.FLOAT,false,7*4,12);
@@ -17563,7 +18346,7 @@ function mcPintaFicha(ctx, f, w, y, h){
   ctx.fillStyle='#e7ecf4';
   const tInfo = f.tool ? ('  ·  🗡️ ' + f.tool.key + ' (' + f.tool.vbo + 'v, p:' + (f.tool.pos||[]).join(',') + ' s:' + f.tool.scale + ')') : '';
   ctx.fillText(f.mapa+'  ·  '+f.pos.join(', ')+'  ·  mirando '+f.rumbo+' ('+f.yaw+'° / '+f.pitch+'°)' + tInfo,
-               izq, y+h*0.32);
+               izq, y+h*0.25);
   ctx.font=px*0.82+'px ui-monospace,SFMono-Regular,Menlo,monospace';
   ctx.fillStyle='#8a93a6';
   const ap=f.apunta ? (f.apunta.clave||'?')+' en '+f.apunta.celda.join(',') : 'nada (cielo)';
@@ -17572,7 +18355,13 @@ function mcPintaFicha(ctx, f, w, y, h){
   // franja pegada debajo. Sin la palabra, los dos números se contradicen y parece un fallo.
   ctx.fillText('apunta: '+ap+'   escala ×'+f.escala+'   vista '+f.ancho+'×'+f.alto+'   '+
                d.toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),
-               izq, y+h*0.71);
+               izq, y+h*0.55);
+  // REQ-REN1 · 3ª línea: los medidores del fotograma. En ámbar, como el medidor de la pantalla, para
+  // que se lean como lo que son (coste) y no se confundan con las coordenadas.
+  if(f.medidores){
+    ctx.fillStyle='#e2a44a';
+    ctx.fillText('📊 '+mcMedidoresTexto(f.medidores), izq, y+h*0.83);
+  }
 }
 
 // Copia reducida de la foto ya montada (con mira y ficha quemadas), a lo ancho MC_FOTO_MINI_ANCHO.
@@ -17600,12 +18389,24 @@ function mcFoto(opts){
   // no se mueve, así que miden exactamente el instante que se está fotografiando.
   const est=mcCorreInformes(opts);
   ficha.informes=est.idx;
+  // REQ-REN1 · la foto SIEMPRE trae los medidores, esté el HUD encendido o no: se fuerza la cuenta
+  // sobre este fotograma y se devuelve el interruptor a como estaba (sin tocar localStorage). El
+  // envoltorio de gl.drawArrays se queda puesto tras la 1ª foto, pero apagado es un `if` y ya.
+  const _renAntes=_showRen; _showRen=true; _renEnvuelve();
   mcRender();                                            // fotograma fresco: lo de abajo lee ESTE buffer
-  const cv=mc.canvas, w=cv.width, px=Math.max(11,Math.min(24,Math.round(w/64))), franja=Math.round(px*3.2);
+  _showRen=_renAntes;
+  const cv=mc.canvas, w=cv.width, px=Math.max(11,Math.min(24,Math.round(w/64))), franja=Math.round(px*4.3);
   const out=document.createElement('canvas');
   out.width=w; out.height=cv.height+franja;
   const ctx=out.getContext('2d');
   ctx.drawImage(cv,0,0);                                 // ← síncrono y pegado al mcRender de arriba
+  // REQ-REN1 · los colores, EXACTOS y de este mismo fotograma: se cuentan sobre el lienzo ya
+  // compuesto (antes de pintarle la mira y la ficha, que meterían colores que no son del mundo). El
+  // medidor de pantalla no vale aquí: va por PBO asíncrono y llega un frame tarde, o está apagado.
+  let cols=null;
+  try{ cols=countColorsFromRgba(ctx.getImageData(0,0,w,cv.height).data); }catch(e){}
+  ficha.medidores=mcMedidores(cols);
+  console.log('📊 ' + mcMedidoresTexto(ficha.medidores));   // los mismos números que van quemados
   // La mira es un <div> del HTML, no está en el canvas: sin repintarla, la foto no enseña adónde
   // apuntaba quien la sacó, que es de lo que se va a hablar al comentarla.
   const cx=w/2, cy=cv.height/2, r=Math.round(px*0.55);
@@ -19509,7 +20310,7 @@ function mcTick(now){
     const dtFrame = now - mc.last;
     if(dtFrame > 0) _perfComprobarFrame(1000 / dtFrame);
   }
-  if(_perfOn) _perfState.frame = {};
+  if(_perfOn){ _perfState.frame = {}; for(let i=0;i<_perfHojasArr.length;i++) _perfHojasArr[i].n = 0; }
   const dt=mc.last ? (now-mc.last)/1000 : 0;
   // FPS reales de pantalla ~cada 0.5s (calca playTick)
   mc.fpsN++;
@@ -19985,6 +20786,14 @@ Object.defineProperty(game,'fov',{ get:()=>Math.round(mc.fov*180/Math.PI),
   set:v=>{ v=Math.max(30,Math.min(110,+v||66)); mc.fov=v*Math.PI/180; try{localStorage.setItem('vf_mcFov',v);}catch(e){} return v; } });
 Object.defineProperty(game,'renderDist',{ get:()=>mc.renderDist,
   set:v=>{ v=Math.max(2,Math.min(24,Math.round(+v)||8)); mc.renderDist=v; try{localStorage.setItem('vf_mcRD',v);}catch(e){} return v; } });
+// REQ-CULL1 · game.cajaAjustada: recortar por el alto REAL de cada chunk en vez de por una columna de la
+// altura entera del mundo, y de paso recortar la capa horneada de game.voxelesUI, que no se recortaba nada.
+// Def. true. Ponerlo a false devuelve el recorte de siempre EN EL ACTO, sin re-mallar: es el escape si algo
+// se viera parpadear, y el lado B del A/B (`game.showRendered(true)` + `game.renderDump()`: los `chunks`
+// visibles y los `draws` tienen que BAJAR sin que cambie lo que se ve).
+try{ if(localStorage.getItem('vf_mcCajaAj')==='0') mc.cajaAjustada=false; }catch(e){}
+Object.defineProperty(game,'cajaAjustada',{ enumerable:true, get:()=>mc.cajaAjustada,
+  set:v=>{ mc.cajaAjustada=!!v; try{localStorage.setItem('vf_mcCajaAj', v?'1':'0');}catch(e){} return v; } });
 // game.renderScale = escala de la resolución de RENDER (0.25..1; 1 = nativa). El cuello de botella del Mundo es
 // fill-rate (píxeles × fragment shader), no geometría: renderDist/fov recortan triángulos pero no píxeles. Bajar
 // esto pinta menos píxeles (p.ej. 0.7 ≈ mitad) y reescala el framebuffer a pantalla con filtrado suave → sube fps
@@ -20720,6 +21529,24 @@ try{ const n=parseInt(localStorage.getItem('vf_mcShadowSize'),10); if(isFinite(n
 Object.defineProperty(game,'shadowSize',{ enumerable:true, get:()=>mc.shadowSize,
   set:v=>{ v=Math.max(256,Math.min(4096, parseInt(v,10)||2048)); mc.shadowSize=v; try{localStorage.setItem('vf_mcShadowSize',v);}catch(e){}
     mcFreeShadow(); return v; } });   // mcInitShadow lo reserva de nuevo al siguiente frame
+// BUG-SHADOW4 · game.shadowParcial = rehornear sólo el RECORTE del mapa de sombra que ha cambiado (true, por defecto)
+// o el mundo entero como antes (false). ⚠️ NO es un ajuste de calidad: el resultado es idéntico téxel a téxel, lo
+// garantiza el scissor (ver mcSombraRecorte). Está para poder medir el A/B y para poder apagarlo si diera guerra.
+// El mando que SÍ cambia lo que se ve es game.shadowSize (téxeles); éste sólo cambia cuánto trabajo se tira.
+// `game.showRendered.sombra` enseña el reparto real; game.shadowInfo() dice cuántos horneos han sido parciales.
+try{ const sp=localStorage.getItem('vf_mcShadowParcial'); if(sp!=null) mc.shadowParcial=(sp==='1'); }catch(e){}
+Object.defineProperty(game,'shadowParcial',{ enumerable:true, get:()=>mc.shadowParcial,
+  set:v=>{ mc.shadowParcial=!!v; try{localStorage.setItem('vf_mcShadowParcial', v?'1':'0');}catch(e){}
+    mcShadowDirty(); return mc.shadowParcial; } });   // sin argumentos = el próximo horneo va entero: base limpia para el A/B
+// game.shadowInfo() = el descubridor de BUG-SHADOW4: cuántos horneos se han hecho y cuántos han salido parciales.
+// Un `parciales` que no sube mientras andas significa que algo está marcando S.full cada frame (agentes, casi seguro).
+game.shadowInfo = function(){
+  const S=mc.shadow; if(!S) return { activo:false };
+  return { activo:true, parcial:!!mc.shadowParcial, size:S.size,
+           horneos:S.bakes|0, parciales:S.bakesParciales|0,
+           ultimoParcial:!!S.ultimoParcial,
+           pctParciales: S.bakes ? Math.round(100*(S.bakesParciales|0)/S.bakes) : 0 };
+};
 // game.glowLevel = alcance de la LUZ DE BLOQUE emisiva (voxeles *#hex): nivel de siembra 0..MC_MAXLIGHT (−1/paso por el
 // aire). 0 = sin luz de bloque; 15 (=MC_MAXLIGHT, alcance máx) por defecto. La luz es escalar/neutra (no tiñe) en v1. Persiste en vf_mcGlow; al
 // cambiarlo recalcula la luz de bloque, re-malla el terreno y re-hornea las estructuras (paredes cercanas encendidas).
@@ -20778,6 +21605,47 @@ Object.defineProperty(game,'luzDinamica',{ enumerable:true, get:()=>mc.luzDinami
 // que el dueño vio («va a saltos, estaría genial que fuese más continua»). Gratis: son dos uniformes, no re-siembra
 // nada. Persiste en vf_mcLuzSuave.
 try{ const ls=localStorage.getItem('vf_mcLuzSuave'); if(ls!==null) mc.luzSuave = ls==='1'; }catch(e){}
+// REQ-LUZ1 · game.luzOrden = en qué ORDEN se siembran las semillas que YA cogieron plaza. 'ojo' (lo de siempre) o
+// 'canonico'. ⛔ No decide quién coge plaza: el cupo sigue repartiéndose por cercanía al ojo. Arranca en 'ojo' a
+// propósito: lo enciende el dueño. Rearmar tras un fallo es también cosa suya y queda dicho en consola.
+// Persiste en vf_luzOrden; game.luzCruce (segundos) es el autochequeo, en vf_luzCruce.
+try{ const lo=localStorage.getItem('vf_luzOrden'); if(lo==='canonico'||lo==='ojo') mc.luzOrden=lo; }catch(e){}
+try{ const lc=localStorage.getItem('vf_luzCruce'); if(lc!==null && isFinite(+lc)) mc.luzCruce=Math.max(0,+lc); }catch(e){}
+Object.defineProperty(game,'luzOrden',{ enumerable:true, get:()=>mc.luzOrden,
+  set:v=>{ v=(String(v)==='canonico')?'canonico':'ojo';
+    if(mc._luzOrdenFallo){
+      console.warn('LUZ · REQ-LUZ1 · rearmado A MANO tras el fallo «'+mc._luzOrdenFallo.motivo+'» ('+mc._luzOrdenFallo.cuando+')');
+      mc._luzOrdenFallo=null;
+    }
+    mc.luzOrden=v; try{localStorage.setItem('vf_luzOrden', v);}catch(e){}
+    mc._dynSig=null; mc._dynSuma=null; if(mc.grid) mcDynSync();
+    toast(v==='canonico'?'Luz: siembra en orden canónico':'Luz: siembra por cercanía al ojo'); return v; } });
+Object.defineProperty(game,'luzCruce',{ enumerable:true, get:()=>mc.luzCruce,
+  set:v=>{ v=Math.max(0, isFinite(+v)?+v:30); mc.luzCruce=v; try{localStorage.setItem('vf_luzCruce', String(v));}catch(e){}
+    mc._luzCruceT=0;
+    toast(v?('Luz: cruce de órdenes cada '+v+' s'):'Luz: cruce de órdenes apagado'); return v; } });
+// REQ-LUZ2 · game.luzQuietas = ¿una partícula de game.voxelesUI que lleva rato sin moverse pasa al campo del
+// MUNDO? true (de serie) = sí, y entonces andar con el cielo lleno de estrellas no cuesta nada. false = todas a la
+// caja, como antes del ticket; está para el A/B de fps y para volver atrás sin tocar código. game.luzQuietasTras
+// son las pasadas de espera (30): subirlo aguanta más antes de dar por quieta una partícula que titila.
+// ⚠️ Los dos rehacen los dos campos a mano: cambiar el reparto cambia quién siembra dónde, y el candado de
+// mcComputeBlockLight no se entera solo del cambio de MODO (sí del de conjunto, que va en su firma).
+try{ const lq=localStorage.getItem('vf_luzQuietas'); if(lq!==null) mc.luzQuietas = lq==='1'; }catch(e){}
+try{ const lt=localStorage.getItem('vf_luzQuietasTras'); if(lt!==null && isFinite(+lt)) mc.luzQuietasTras=Math.max(1,+lt|0); }catch(e){}
+const mcLuzQuietasRearma=()=>{ mc._voxUIVistas=null; mc._voxUIRep=null; mc._voxUIQuietas=null; mc._voxUIQuietasSig=0;
+  mc._blEmiSig=null; mc._dynSig=null; mc._dynSuma=null;
+  if(mc.grid){ mcDynSync(); mcRecomputeHasGlow(); mcComputeBlockLight(); mcMeshAll(); } };
+Object.defineProperty(game,'luzQuietas',{ enumerable:true, get:()=>mc.luzQuietas!==false,
+  set:v=>{ v=!!v; mc.luzQuietas=v; try{localStorage.setItem('vf_luzQuietas', v?'1':'0');}catch(e){}
+    mcLuzQuietasRearma();
+    toast(v?'Las partículas quietas alumbran desde el campo del mundo':'Todas las partículas vuelven a la caja (para medir fps)'); return v; } });
+Object.defineProperty(game,'luzQuietasTras',{ enumerable:true, get:()=>mc.luzQuietasTras|0,
+  set:v=>{ v=Math.max(1, isFinite(+v)?(+v|0):MC_LUZ_QUIETA_TRAS); mc.luzQuietasTras=v;
+    try{localStorage.setItem('vf_luzQuietasTras', String(v));}catch(e){}
+    mcLuzQuietasRearma();
+    toast('Luz: una partícula es quieta tras '+v+' pasadas iguales'); return v; } });
+// REQ-LUZ1 · cruzar AHORA, sin esperar al temporizador: devuelve el parte (celdas comparadas, nivel, color).
+game.luzCruzar = ()=>{ if(mc.grid) mcDynSync(); return mc._dynSem ? mcLuzCruzar(mc._dynSem) : null; };
 // BUG-GLOW8b · game.luzDiag() = la misma radiografía que se guarda en la ficha de cada foto, a mano y en el momento.
 // Útil para ver en vivo qué cambia al GIRAR sin soltar el ratón: game.luzDiag().semillas.reparto y .off.
 game.luzDiag = ()=>mcLuzDiag();
