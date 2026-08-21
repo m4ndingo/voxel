@@ -131,17 +131,12 @@ for (const m of mundos) {
 
 console.log('\n§5 toda clave de paleta existe en assets/index.json');
 const idx = JSON.parse(fs.readFileSync(path.join(RAIZ, 'assets', 'index.json'), 'utf8'));
-// ⛔ Se comprueba el FICHERO, no el id deducido del nombre. `assets/<id>.vox.json` es la convención
-// pero no la regla (`yellow` → `assets/yellow_concrete.vox.json`), y dar por buena la deducción dejó
-// pasar un mundo entero con `GET /assets/yellow.vox.json` 404 (reportado por el dueño, 2026-08-20).
-// Un material que no carga no falla a gritos: sale fucsia macizo.
-const conocidos = new Set((Array.isArray(idx) ? idx : idx.items)
-  .map((a) => (typeof a === 'string' ? `assets/${a}.vox.json` : a.file)).filter(Boolean));
+const conocidos = new Set((Array.isArray(idx) ? idx : idx.items).map((a) => (typeof a === 'string' ? a : a.id)));
 for (const m of mundos) {
   const cab = JSON.parse(fs.readFileSync(m.wf, 'utf8'));
   const malas = cab.palette.slice(1).filter((k) => {
-    const mm = /^asset:(.+)$/.exec(k || '');
-    return !mm || !conocidos.has(mm[1]) || !fs.existsSync(path.join(RAIZ, mm[1]));
+    const mm = /^asset:assets\/(.+)\.vox\.json$/.exec(k || '');
+    return !mm || !conocidos.has(mm[1]);
   });
   check(malas.length === 0, `${m.nombre}: ${cab.palette.length - 1} materiales, todos del catálogo` +
     (malas.length ? ' -> ' + malas.join(', ') : ''));

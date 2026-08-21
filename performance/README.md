@@ -7,11 +7,9 @@ está esperando decisión del dueño.
 | fichero | qué es |
 |---|---|
 | `README.md` | esto: **el inventario de ayudantes de consola** |
-| `PROTOCOLO_TEST_DUENO.md` | el guion para medir **en el navegador del dueño** (GPU real): el tirón **al colocar un bloque** (BUG-PERF3) |
-| `PROTOCOLO_FPS_GENERAL.md` | el guion para lo otro: va lento **en reposo y en todos los mapas** |
+| `PROTOCOLO_TEST_DUENO.md` | el guion para medir **en el navegador del dueño** (GPU real) |
 | `PROPUESTA_PERF-RS1_pasada9.md` | diagnóstico de la pasada 9 + arreglo propuesto (🟡 sin aprobar) |
 | `sonda_req_perf1.js` | ejercita la API del profiler (`perfAssert`, `perfDump`, …) |
-| `sonda_perfdump_capas.js` | el profiler **apagado desenvuelve de verdad**, y convive con `game.showRendered` en cualquier orden |
 | `sonda_perf_rs1.js` | mide el coste de un circuito de redstone oscilando |
 | `sonda_cache_lru.js` | mide el caché LRU de `mcMeshChunk` con un observador |
 | `sonda_render_mode.js` | comprueba el ida y vuelta de `game.renderMode` |
@@ -36,16 +34,11 @@ Y `game.voxels` **subiendo** al acercarse a una pared es geometría sin cullar, 
 
 ---
 
-## El profiler condicional (REQ-PERF1) — `app.js:5857-6030` (`_perfNombres` … `game.perfDump`)
+## El profiler condicional (REQ-PERF1) — `app.js:4985-5143`
 
 Envuelve funciones caras del motor **solo mientras `game.perfAssert > 0`**. Con el assert a 0 las
 envolturas **se retiran**, así que el coste medible cuando está apagado es **cero** — no es una
 promesa, es que las funciones vuelven a ser las originales.
-
-> Hasta el 2026-08-20 eso era verdad a medias: `_perfInstalar` salía por un `return` temprano cuando
-> el assert bajaba a 0 y **las envolturas de `gl.bufferData`/`gl.drawArrays` se quedaban puestas el
-> resto de la sesión**, cronometrando ~300 draws por frame. Arreglado; lo vigila
-> [`sonda_perfdump_capas.js`](sonda_perfdump_capas.js).
 
 Mide el **frame de verdad** (rAF a rAF: `fpsFrame = 1000 / duración del frame`), **no** el
 `game.fps` de la esquina, que es un promedio de 500 ms y se traga precisamente el pico que
@@ -60,12 +53,6 @@ game.perfDump.forzar();    // vuelca AHORA, sin esperar a otra caída
 game.perfDump.reset();     // tira la acumulación y re-arma
 game.perfAssert = 0;       // apaga y desinstrumenta
 ```
-
-> ⚠️ **`game.perfDump()` no mide: RE-IMPRIME el último volcado.** Pegar las cuatro primeras líneas de
-> un tirón no saca nada — se ejecutan en el mismo turno de consola, antes de que haya pasado un solo
-> frame, así que no hay volcado que re-imprimir. Y con el assert a 60 no salta nunca si vas a 142 fps:
-> el disparo es «frame **por debajo** del umbral». Para ver algo **ya**: `game.perfDump.forzar()`.
-> (Lo reportó el dueño el 2026-08-20; ahora el propio mensaje de consola dice cuál de los dos casos es.)
 
 ### Los niveles de `perfVerbosity`
 

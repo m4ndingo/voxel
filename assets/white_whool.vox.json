@@ -4111,5 +4111,6 @@
     "15,15,14": "#ecf0f2",
     "15,15,15": "#f7f9fb"
   },
+  "atravesable": true,
   "id": "white_whool"
 }

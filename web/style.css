@@ -282,15 +282,6 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
   pointer-events:none; backdrop-filter:blur(3px);
 }
 .col-float[hidden]{display:none}
-/* medidor de lo que se dibuja de verdad: draws + triángulos (bajo el de colores) */
-.ren-float{
-  position:absolute; top:108px; left:12px; z-index:5;
-  padding:4px 8px; border-radius:8px;
-  background:rgba(14,17,25,.82); border:1px solid var(--line);
-  color:var(--accent); font-size:12px; font-family:ui-monospace,monospace;
-  pointer-events:none; backdrop-filter:blur(3px); white-space:pre;
-}
-.ren-float[hidden]{display:none}
 .tool-float{
   position:absolute; top:12px; right:12px; z-index:5;
   display:flex; flex-direction:column; gap:4px;
@@ -1028,7 +1019,7 @@ body.mc-escaparate .mc-modal{background:transparent}
 .mc-note-head{font-family:var(--font-game); font-size:var(--note-fs,18px)}
 .mc-note textarea{font-family:var(--font-game); font-size:var(--note-fs,18px); line-height:1.8}
 .toast.mc-mode{font-family:var(--font-game); font-size:9px; line-height:1.7}
-.fps-float.mc-float,.vox-float.mc-float2,.col-float.mc-float3,.ren-float.mc-float4{font-family:var(--font-game); font-size:9px}
+.fps-float.mc-float,.vox-float.mc-float2,.col-float.mc-float3{font-family:var(--font-game); font-size:9px}
 .mc-stuck{font-family:var(--font-game); font-size:9px; line-height:1.7}
 .mc-slot .mc-slot-key{font-family:var(--font-game); font-size:9px}
 /* rayos-X (tecla X): capa de etiquetas de coordenadas; no intercepta clics, cada .mc-xlbl se posiciona por transform */
