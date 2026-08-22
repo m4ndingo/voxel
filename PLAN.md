@@ -45,12 +45,9 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [BUG-CART1](#-bug-cart1) | **carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce | 🟡 arreglado 2026-08-20, **falta una pasada del dueño** | encontrado tirando de un guardián en rojo, no pedido. La causa (la marca `efimera` se ponía DESPUÉS del `await` de estampar) está arreglada y el motor se cura solo en caliente. Queda lo que ya está escrito en los ficheros: `python3 herramientas/carteles_fantasma.py` (en seco) y luego `--escribe`. **No lo puedo lanzar yo**: la caja de arena me deniega escribir en `data/worlds/` |
 | [REQ-MULTI1](#-req-multi1) | **multijugador colaborativo**: varios jugadores en el mismo mapa, viéndose entre sí (con el arma en la mano y su etiqueta de nombre) y con los cambios del mundo sincronizados | 🟢 abierto 2026-08-19 | pedido por el dueño el 2026-08-19 al hilo de «pisar el mundo»: si el mapa es de todos, **nadie pisa a nadie**. Es el ticket más grande del plan. **Acotado ya por él (2026-08-19)**: tope **10** jugadores de momento (idealmente sin tope), **internet y red local**, y se **juega Y se construye** a la vez. A favor: medio camino hecho sin querer — `POST /api/mundo/edits` ya manda **el delta**, no el mundo. En contra: hoy no hay proceso servidor con estado (stdlib, un `Handler` por petición), ni identidad, ni cuerpo de jugador dibujable. Construir a la vez obliga a que **el servidor sea el árbitro**, no el navegador |
 | [REQ-SPAWN1](#-req-spawn1) | **pensar el tema de los puntos de aparición** (spawn) | 🟢 **propuesta escrita 2026-08-20**, esperando su visto bueno | nota del dueño en `/map/bugfinder`, tal cual: es un **encargo de pensar**, no un arreglo. Hoy hay un único `spawn` en la cabecera del mundo |
-| [BUG-SEL5](#-bug-sel5) | en selección, **Z revierte los bloques pero deja los corchetes** donde estaban | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. La caja de selección no entra en el gesto del historial. Redactado, sin investigar | 
-| [REQ-SEL6](#-req-sel6) | **ver el pivote de la selección** sin tener que pulsar Ctrl (al pulsarlo ya cambia al apuntado) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «hay que conocerlo antes». Redactado, sin investigar | 
 | [REQ-SEL2](#-req-sel2) | copiar/pegar debería llevarse el **redstone pegado a la cara** de los bloques copiados | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «son difíciles de seleccionar». Toca la frontera `mc.grid` ↔ `mc.structures`, la misma que [BUG-RS10](#-bug-rs10) | 
 | [REQ-TOOL9](#-req-tool9) | poder **elegir qué herramientas entran con `e` y cuáles con `E`** desde el editor (primarias / secundarias) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «cambiar el orden de las herramientas empieza a ser algo habitual». Redactado, sin investigar | 
 | [REQ-CART7](#-req-cart7) | poder **elegir el tipo de cartel** de una nota desde su editor, con los carteles definidos en un sitio | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Él mismo propone la puerta: categoría **«Cartel de Notas»** en la galería. Encaja con que los carteles ya **se derivan** de `mc.notes` y no viven en `mundo.json` ([BUG-CART1](#-bug-cart1)) | 
-| [REQ-FX1](#-req-fx1) | **temblor de cámara al caer** desde 15 bloques o más, con altura/amplitud/duración ajustables | 🟢 abierto 2026-08-20 | nota de `/map/bugfinder2`. El sitio natural es el aterrizaje que ya detecta `mcCaidaPaso`. Redactado, sin investigar | 
 
 ---
 
@@ -186,21 +183,6 @@ python3 herramientas/carteles_fantasma.py --escribe          # borra (idempotent
 decoración suya y corre `--escribe` con lo demás.
 
 ---
-
-<a id="-bug-sel5"></a>
-
-### BUG-SEL5 · Z en selección deja los corchetes sin revertir — 🔴 abierto 2026-08-20
-
-**Palabras del dueño** (nota de `/map/bugfinder2` en `70,14,30`): «en seleccion control+z va bien pero
-deja los corchetes sin revertir, esos tambien deberian de volver a la posicion previa del historial
-como sí hacen los bloques».
-
-**Redactado, sin investigar.** Los bloques vuelven bien, luego el historial por gesto funciona; lo que
-no entra en el gesto es **la caja de selección** (los corchetes). Dicho de otro modo: la posición de la
-selección debería ser parte de lo que se guarda y se restaura, no solo el contenido.
-
-**Criterio de cierre:** mover la selección, editar, Ctrl+Z → los corchetes vuelven a donde estaban a la
-vez que los bloques, sin un repintado de más.
 
 ---
 
@@ -463,23 +445,6 @@ sin que ninguna edición se haya perdido por el camino.
 
 ---
 
-<a id="-req-sel6"></a>
-
-### REQ-SEL6 · ver el pivote de la selección sin pulsar Ctrl — 🔴 abierto 2026-08-20
-
-**Palabras del dueño** (nota de `/map/bugfinder2` en `72,14,38`): «cuando se seleccionan los bloques,
-deberia de verse de alguna forma cual es el pivote sin necesidad de pulsar control y apuntar, ya que en
-el momento en el que se pulsa cambia al apuntado; hay que conocerlo antes».
-
-El problema es que el único modo de **ver** el pivote es el mismo gesto que lo **cambia** — mirarlo ya
-lo mueve. Hace falta que se vea en reposo.
-
-**Redactado, sin investigar.** Si acaba siendo un adorno que se dibuja cada frame, mirar
-`game.voxelesUI` antes que el overlay ([BUG-VOXUI1](PLAN_ARCHIVO.md#-bug-voxui1): el translúcido del
-overlay no escribe z).
-
----
-
 <a id="-req-sel2"></a>
 
 ### REQ-SEL2 · copiar/pegar debe llevarse el redstone pegado a las caras — 🔴 abierto 2026-08-20
@@ -537,23 +502,6 @@ distintas — sin que aparezca ni un voxel de cartel en `mundo.json`
 (`herramientas/carteles_fantasma.py` en cero).
 
 ---
-
-<a id="-req-fx1"></a>
-
-### REQ-FX1 · temblor de cámara al caer desde alto — 🟢 abierto 2026-08-20
-
-**Palabras del dueño** (nota de `/map/bugfinder2` en `45,14,50`): «Al caer desde una gran atura,
-pongamos que 15 bloques o más, deberia de haber algun efecto de temblor en la escena; que sea un
-tunable ajustable la altura, aplitud del temblor y duracion».
-
-Tres tunables, dichos por él: **altura** a partir de la cual tiembla, **amplitud** y **duración**.
-
-**Redactado, sin investigar.** El sitio natural es el aterrizaje que ya conoce `mcCaidaPaso` — que es
-**la** pieza por la que pasan el jugador y los dos integradores del snippet, así que la altura de caída
-ya está a mano ahí. ⛔ Y por lo mismo, ojo: si se la envuelve hay que pasarle **todos** los argumentos
-(comerse el 6º apaga el nadar, el 7º la mirada, sin fallar nada).
-
-Verde y no rojo porque es adorno: no rompe nada mientras no exista.
 
 ---
 

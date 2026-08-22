@@ -18,6 +18,45 @@ resuelve a una sección que existe.
 
 ---
 
+---
+
+<a id="-bug-sel5"></a>
+
+### BUG-SEL5 · Z en selección deja los corchetes sin revertir — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `70,14,30`): «en seleccion control+z va bien pero
+deja los corchetes sin revertir, esos tambien deberian de volver a la posicion previa del historial
+como sí hacen los bloques».
+
+**Hecho 2026-08-22**: `mcPushHist` captura `selBefore` y `selAfter` (posiciones de `mc.selCajas`), y `mcApplyHist` restaura la posición y tamaño exactos de los corchetes al deshacer (`z`) o rehacer (`Z`).
+
+---
+
+<a id="-req-sel6"></a>
+
+### REQ-SEL6 · ver el pivote de la selección sin pulsar Ctrl — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `72,14,38`): «cuando se seleccionan los bloques,
+deberia de verse de alguna forma cual es el pivote sin necesidad de pulsar control y apuntar, ya que en
+el momento en el que se pulsa cambia al apuntado; hay que conocerlo antes».
+
+**Hecho 2026-08-22**: `mcDrawOverlays` dibuja automáticamente la celda pivote en reposo (por defecto la esquina mínima `[x0, y0, z0]` o el agarre manual fijado) con sus corchetes en magenta sin requerir mantener Ctrl.
+
+---
+
+<a id="-req-fx1"></a>
+
+### REQ-FX1 · temblor de cámara al caer desde alto — 🟢 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `45,14,50`): «Al caer desde una gran atura,
+pongamos que 15 bloques o más, deberia de haber algun efecto de temblor en la escena; que sea un
+tunable ajustable la altura, aplitud del temblor y duracion».
+
+**Hecho 2026-08-22**: `mcUpdate` detecta la caída vertical al tocar tierra y `mcViewMatrix` aplica un screen shake senoidal amortiguado durante `duracion` segundos. Tunables expuestos en `game.temblorCaida` (`alturaMin:15`, `amplitud:0.03`, `duracion:0.5s`, `frecuencia:9Hz`).
+
+---
+
+
 <a id="-bug-glow4"></a>
 
 ### 🔴 BUG-GLOW4 · Un objeto emisivo ilumina plantado, pero no en la mano — 🔴 abierto 2026-08-19
@@ -469,6 +508,9 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[BUG-SEL5](#-bug-sel5)~~ | ~~en selección, **Z revierte los bloques pero deja los corchetes** donde estaban~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`. `mcPushHist` y `mcApplyHist` capturan y restauran `selBefore`/`selAfter` para revertir `mc.selCajas` acompasado con los bloques |
+| ~~[REQ-SEL6](#-req-sel6)~~ | ~~**ver el pivote de la selección** sin tener que pulsar Ctrl (al pulsarlo ya cambia al apuntado)~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`. Muestra en reposo la celda pivote (esquina mínima por defecto o pivote fijado) con sus corchetes/brackets en magenta |
+| ~~[REQ-FX1](#-req-fx1)~~ | ~~**temblor de cámara al caer** desde 15 bloques o más, con altura/amplitud/duración ajustables~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`. Screen shake senoidal amortiguado en `mcViewMatrix` tras impacto de caída >=15 bloques, configurable via `game.temblorCaida` |
 | ~~[BUG-GLOW4](#-bug-glow4)~~ | ~~un objeto emisivo **ilumina plantado pero no en la mano** (ni montado en nada que no sea un agente)~~ | ✅ resuelto 2026-08-22 | pedido del dueño: la luz es del **dibujo**, no del sitio. Investigado a fondo: **3 fallos encadenados**, uno en `mundo-autoarranque` y dos en `app.js`. Con los tres puestos, la Espada de Luz alumbra (luminancia del suelo 10,4 → 120) |
 | ~~[BUG-VID1](#-bug-vid1)~~ | ~~un clip de vídeo **muy corto se guarda con 0 bytes** y el servidor lo acepta tan tranquilo~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`. **Reproducido en disco**: `data/videos/0001…mp4` y `0002…mp4` pesan 0 B, con `"duracion": 0.05` en su ficha. Dos fallos, uno cada lado: `start(100)` no llega a soltar un solo trozo en 50 ms, y el `POST /api/videos` mira que el base64 no esté vacío **antes** de quitarle el prefijo `data:` ⇒ una carga vacía se cuela |
 | ~~[BUG-RANURA2](#-bug-ranura2)~~ | ~~con un recorte de `K` cargado, pulsar **1-9 repinta el recorte** en vez de elegir bloque para construir~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`, estrena [REQ-RANURA1](PLAN_ARCHIVO.md#-req-ranura1) (commit `dcfabf7`, de anteanoche). **Localizado**: `mcPasteMaterial` (`app.js:16003`) dispara con solo `mc.pasteActive`, sin mirar qué herramienta hay en la mano. El repintado se escribió a propósito para el Ctrl+V; lo que falta es acotarlo |
