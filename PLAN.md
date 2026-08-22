@@ -1,7 +1,7 @@
-# PLAN · VoxelForge → Juego RPG
-
-Plan de construcción del modo juego sobre el editor actual. Se avanza de lo más sencillo a lo
-más complejo; cada fase es demostrable por sí sola. Estados: `⬜ todo` · `🟨 wip` · `✅ done` · `⛔ blocked`.
+# PLAN · VoxelForge → Juego RPG\r
+\r
+Plan de construcción del modo juego sobre el editor actual. Se avanza de lo más sencillo a lo\r
+más complejo; cada fase es demostrable por sí sola. Estados: `⬜ todo` · `🟨 wip` · `✅ done` · `⛔ blocked`.\r
 
 ## Base disponible (hecho antes de este plan)
 - Editor voxel completo (capas + 3D libre, extrude, undo/redo, aislar, recorte de cercanía).
@@ -42,27 +42,15 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [BUG-SNP4](#-bug-snp4) | los cambios hechos en el **editor de código del Mundo se revierten** al volver al mapa y reabrirlo | 🔴 abierto 2026-08-11 | **Redactado, sin investigar.** Sospecha (sin comprobar): el snippet tiene **dos copias vivas** y al reabrir el editor se relee la que se cargó al abrir el Mundo, no la editada. Ojo: el dueño dice **Ctrl+C**, `CLAUDE.md` documenta **Alt+C** |
 | [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
 | [REQ-DOC2](#-req-doc2) | falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas) | 🟡 abierto 2026-08-07 | la crítica mejor puesta de la auditoría; no es partir el fichero, es documentar qué vive en `state`, `mc` y `game`. **Sin investigar a fondo** |
-| [REQ-MAP1](#-req-map1) | Alt+M = pantalla de mapas conmutable sin perder el mundo abierto | medio | — |
-| [BUG-GLOW4](#-bug-glow4) | un objeto emisivo **ilumina plantado pero no en la mano** (ni montado en nada que no sea un agente) | 🔴 abierto 2026-08-19 | pedido del dueño: la luz es del **dibujo**, no del sitio. Investigado a fondo: **3 fallos encadenados**, uno en `mundo-autoarranque` y dos en `app.js`. Con los tres puestos, la Espada de Luz alumbra (luminancia del suelo 10,4 → 120) | 
-| [REQ-GLOW5](#-req-glow5) | poder decir desde un snippet que un **voxel de `game.voxelesUI` emite luz** (fuego, partículas) | 🔴 abierto 2026-08-19 | mismo principio que BUG-GLOW4: se declara con el prefijo `*` del color, igual que en un dibujo. Se apoya en la luz dinámica ya existente | 
-| [REQ-MOV1](#-req-mov1) | en el **móvil** el Mundo es inmanejable: sobran 📷/🎬, faltan los **3 botones del ratón**, pantalla completa, y el ✕ debe ser un **menú** | 🔴 abierto 2026-08-19 | captura y palabras del dueño en [`data/tickets/REQ-MOV1/`](data/tickets/REQ-MOV1/contexto.md). Revierte el «a propósito NO hay botones de romper/poner» que estaba escrito en `app.js`. El central **no es duda**: es el de redstone. Ojo al `pointerLockElement`: pantalla completa lo suelta |
-| [REQ-ED3](#-req-ed3) | **guías de rejilla** en el editor 2D (líneas azul claro que parten la capa en 2×2, 4×4…), conmutables | 🟢 abierto 2026-08-18 | pedido por el dueño como «tool que rote entre sin grid / ÷2 / ÷4». **Investigado**: el sitio es `drawEdit` (`app.js:565`), que ya pinta una rejilla por celda. Ojo con lo de «tool»: las del panel son de DIBUJO y elegirla te dejaría sin pincel — el precedente correcto es el interruptor de Caras (`vf_caras_marcar`), estado de VISTA que no viaja en el documento |
 | [BUG-CART1](#-bug-cart1) | **carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce | 🟡 arreglado 2026-08-20, **falta una pasada del dueño** | encontrado tirando de un guardián en rojo, no pedido. La causa (la marca `efimera` se ponía DESPUÉS del `await` de estampar) está arreglada y el motor se cura solo en caliente. Queda lo que ya está escrito en los ficheros: `python3 herramientas/carteles_fantasma.py` (en seco) y luego `--escribe`. **No lo puedo lanzar yo**: la caja de arena me deniega escribir en `data/worlds/` |
 | [REQ-MULTI1](#-req-multi1) | **multijugador colaborativo**: varios jugadores en el mismo mapa, viéndose entre sí (con el arma en la mano y su etiqueta de nombre) y con los cambios del mundo sincronizados | 🟢 abierto 2026-08-19 | pedido por el dueño el 2026-08-19 al hilo de «pisar el mundo»: si el mapa es de todos, **nadie pisa a nadie**. Es el ticket más grande del plan. **Acotado ya por él (2026-08-19)**: tope **10** jugadores de momento (idealmente sin tope), **internet y red local**, y se **juega Y se construye** a la vez. A favor: medio camino hecho sin querer — `POST /api/mundo/edits` ya manda **el delta**, no el mundo. En contra: hoy no hay proceso servidor con estado (stdlib, un `Handler` por petición), ni identidad, ni cuerpo de jugador dibujable. Construir a la vez obliga a que **el servidor sea el árbitro**, no el navegador |
 | [REQ-SPAWN1](#-req-spawn1) | **pensar el tema de los puntos de aparición** (spawn) | 🟢 **propuesta escrita 2026-08-20**, esperando su visto bueno | nota del dueño en `/map/bugfinder`, tal cual: es un **encargo de pensar**, no un arreglo. Hoy hay un único `spawn` en la cabecera del mundo |
-| [BUG-VID1](#-bug-vid1) | un clip de vídeo **muy corto se guarda con 0 bytes** y el servidor lo acepta tan tranquilo | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. **Reproducido en disco**: `data/videos/0001…mp4` y `0002…mp4` pesan 0 B, con `"duracion": 0.05` en su ficha. Dos fallos, uno cada lado: `start(100)` no llega a soltar un solo trozo en 50 ms, y el `POST /api/videos` mira que el base64 no esté vacío **antes** de quitarle el prefijo `data:` ⇒ una carga vacía se cuela | 
-| [BUG-RANURA2](#-bug-ranura2) | con un recorte de `K` cargado, pulsar **1-9 repinta el recorte** en vez de elegir bloque para construir | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`, estrena [REQ-RANURA1](PLAN_ARCHIVO.md#-req-ranura1) (commit `dcfabf7`, de anteanoche). **Localizado**: `mcPasteMaterial` (`app.js:16003`) dispara con solo `mc.pasteActive`, sin mirar qué herramienta hay en la mano. El repintado se escribió a propósito para el Ctrl+V; lo que falta es acotarlo | 
-| [BUG-GLOW9](#-bug-glow9) | las **estrellas del cielo no parecen autoiluminadas** (puntitos oscuros y cúbicos) y la **niebla no las tapa** | 🔴 abierto 2026-08-20 | **dos** notas de `/map/bugfinder2` sobre lo mismo. Lo de la niebla está escrito a propósito en `mcDrawVoxUI` (`app.js:14026`: `uFogNear = far*8`, `aEmit=1`) ⇒ es una **decisión que él quiere revisar**, no un descuido. Lo de «se nota que son voxels» es otra cosa y falta medirlo. Vecino de [REQ-GLOW5](#-req-glow5) | 
-| [REQ-GLOW10](#-req-glow10) | el brillo de los **emisivos debe adaptarse a la luz ambiente**: de noche brillan, de día no hace falta tanto | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Pide **dos tunables**: la adaptación y el brillo máximo. Redactado, sin investigar. **Desbloqueado**: [BUG-GLOW8](PLAN_ARCHIVO.md#-bug-glow8) cerró el 2026-08-20 y ya hay UNA sola ley de luz. 🔒 **bajo el candado** de la [Ley de la Luz](wiki/paginas/ley-de-la-luz.md) | 
-| [BUG-SEL5](#-bug-sel5) | en selección, **Ctrl+Z revierte los bloques pero deja los corchetes** donde estaban | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. La caja de selección no entra en el gesto del historial. Redactado, sin investigar | 
-| [BUG-SEL3](#-bug-sel3) | al **rotar una selección**, las piezas finas u orientadas no giran con ella (la puerta se sale de su marco) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`, con su ejemplo: marco de bloques bien, puerta no. Es el giro **local** de cada pieza, no el de la caja. Ojo: las 24 posturas van **en la clave** (`mcOriNorm`/`mcOriParts`), ⛔ nada de `(rot\|0)&15` | 
-| [REQ-SEL4](#-req-sel4) | con selección, **`r` debe girar en horizontal y `R` en profundidad** (4×4 posturas) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «así se puede con `r` abrir una ventana de bloques, o con `R` levantar una cornisa». Hermano de [BUG-SEL3](#-bug-sel3): el mismo giro, visto desde el mando | 
+| [BUG-SEL5](#-bug-sel5) | en selección, **Z revierte los bloques pero deja los corchetes** donde estaban | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. La caja de selección no entra en el gesto del historial. Redactado, sin investigar | 
 | [REQ-SEL6](#-req-sel6) | **ver el pivote de la selección** sin tener que pulsar Ctrl (al pulsarlo ya cambia al apuntado) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «hay que conocerlo antes». Redactado, sin investigar | 
 | [REQ-SEL2](#-req-sel2) | copiar/pegar debería llevarse el **redstone pegado a la cara** de los bloques copiados | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «son difíciles de seleccionar». Toca la frontera `mc.grid` ↔ `mc.structures`, la misma que [BUG-RS10](#-bug-rs10) | 
 | [REQ-TOOL9](#-req-tool9) | poder **elegir qué herramientas entran con `e` y cuáles con `E`** desde el editor (primarias / secundarias) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «cambiar el orden de las herramientas empieza a ser algo habitual». Redactado, sin investigar | 
 | [REQ-CART7](#-req-cart7) | poder **elegir el tipo de cartel** de una nota desde su editor, con los carteles definidos en un sitio | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Él mismo propone la puerta: categoría **«Cartel de Notas»** en la galería. Encaja con que los carteles ya **se derivan** de `mc.notes` y no viven en `mundo.json` ([BUG-CART1](#-bug-cart1)) | 
 | [REQ-FX1](#-req-fx1) | **temblor de cámara al caer** desde 15 bloques o más, con altura/amplitud/duración ajustables | 🟢 abierto 2026-08-20 | nota de `/map/bugfinder2`. El sitio natural es el aterrizaje que ya detecta `mcCaidaPaso`. Redactado, sin investigar | 
-| [REQ-CIUDAD1](#-req-ciudad1) | **renderizar un `.md` como ciudad de voxels** (`/map/plan`) y **regenerar el `.md` desde el mapa** | 🟢 entregado 2026-08-20, esperando su visto bueno | pedido del dueño el 2026-08-20. Hecho y en verde: la vuelta es **byte a byte** con `--fidelidad=exacta` (`tests/test_ciudad_md.js`). Detalle en [`docs/ciudad-md.md`](docs/ciudad-md.md). Falta que lo mire y decida si el aspecto de la ciudad merece más presupuesto (todo lo estético es DERIVADO y no toca la ida y vuelta) | 
 
 ---
 
@@ -76,339 +64,9 @@ Al cerrar un ticket: su fila **y** su sección se van al archivo de una vez.
 
 ---
 
-## 🎫 Tickets ABIERTOS — detalle
+## 🐛 Tickets ABIERTOS — Bugs
 
-Una sección por ticket vivo. Al cerrar uno, su sección se va **entera** a
-[`PLAN_ARCHIVO.md`](PLAN_ARCHIVO.md), junto con su fila: aquí solo queda lo que sigue pendiente.
-
-<a id="-bug-glow4"></a>
-
-### 🔴 BUG-GLOW4 · Un objeto emisivo ilumina plantado, pero no en la mano — 🔴 abierto 2026-08-19
-
-Orden del dueño (2026-08-19): **«si un objeto brilla porque tiene voxels que emiten, cuando se planta en el
-terreno ilumina; lo mismo tiene que pasar cuando se lleva como herramienta en la mano»**. O sea: la luz la
-declara el **DIBUJO** (color `*#rrggbb`), y viaja con el objeto — el motor no pregunta dónde está.
-
-Hoy no pasa. `data/habitantes/espada-de-luz.json` tiene **45 voxeles emisivos** y en la mano no alumbra nada.
-No es una cosa: son **tres fallos encadenados**, cada uno tapando al siguiente. Medido en `/map/test?noauto=1`
-de noche (`game.luz(0.12)`), luminancia media del suelo:
-
-| | luminancia | luz dinámica |
-|---|---|---|
-| hoy | 10,41 | `dynN=0` — no hay |
-| solo (1) | 9,76 | `dynN=1`, pero en `(17, 45, 83)` ← a **55 bloques** del jugador |
-| (1)+(2) | 11,01 | ya en `(49,4 · 15,5 · 47,9)`, correcta — pero el haz apunta a otro lado |
-| (1)+(2)+(3) | **120,07** | ✅ |
-
-1. **`mundo-autoarranque` borra la matriz de la herramienta cada frame.** `mirarObjetivos` recorre TODAS las
-   estructuras y a las que no están en su tabla les hace `s.model = null` («dejo de mirar: a su pose horneada»).
-   La herramienta en mano **es una estructura real** (`_isHeldTool`), así que cae ahí. Como `mcSyncHeldToolStruct`
-   la repone 9 líneas después —y antes de `mcRender`— el **dibujo y la sombra salen bien** (de ahí que el dueño
-   viera la espada proyectando sombra correctamente de día); el que se come el `null` es `mcDynSync`, que corre
-   ANTES (`app.js:17786` vs `17795`). Ese fichero ya tiene dos guardas para lo mismo (`s._rig` para las piezas
-   de esqueleto, `desplazada(s)` para `seguir`): falta la tercera.
-2. **`mcDynSync` le suma `s.ox`.** La malla de la herramienta se hornea en `ox:0,0,0` (`app.js:12107`) pero
-   `mcSyncHeldToolStruct` **pisa `s.ox` con `mc.pos`** (12134-12136) para el culling. `mcDynSync` hace
-   `model · (s.ox + celda)` como para una estructura normal ⇒ el ancla se rota y se suma dos veces. Hace falta
-   que la struct diga con qué origen se horneó su malla, en vez de suponer que es `ox`.
-3. **El haz apaga en vez de atenuar, y ahí las dos luces no se parecen.** Plantada, el emisor va por
-   `mcComputeBlockLight`: BFS por el aire con **coste variable (≥1) según el haz** ⇒ en contra llega más débil,
-   pero **llega** (medido alrededor de la espada plantada: `15` en su celda y `11, 9, 7` alejándose). En la mano
-   va por el shader, que hace `pow(cos, 1+foco*8)` y **anula** todo lo que quede fuera del cono. Mismo dibujo,
-   dos leyes distintas: eso es justo lo que el ticket viene a quitar.
-
-**Criterio de cierre**: el mismo dibujo alumbra igual plantado que en la mano, **sin mandos nuevos** y sin que
-el snippet tenga que declarar nada. `game.glowFocus` sigue existiendo para quien quiera enfocar.
-
-**Hecho 2026-08-19** (a falta del visto bueno del dueño). Los tres, en su sitio:
-1. `herramientas/parche_snp_glow4.py` → guarda `if (s._isHeldTool) continue;` en `mirarObjetivos`; snippet a `v1.36`.
-2. `mcDynSync` usa `s.mox/moy/moz` (el ancla con la que se horneó la malla) cuando la struct lo declara; quien no
-   lo ponga se comporta exactamente igual que antes. `mcSyncHeldToolStruct` lo pone a 0.
-3. `MC_DYNLIGHT_LIB`: el haz **encarece el camino** (`coste = 1 + foco*5*(1−max(cos,0))`) en vez de anularlo — la
-   misma ley que el BFS estático, escrita como coste por bloque.
-
-Verificado en `/map/test?noauto=1` de noche con `mundo-autoarranque` cargado: Espada de Luz **luminancia 108,4**
-(`dynN=1`, luz en `49,42 · 15,55 · 47,86` con el jugador en `48,5 · 15 · 48,5`) contra un control de espada de
-diamante sin emisivos, **9,79** y `dynN=0`. Regresión: `test_agente_luz_sigue.js` da **exactamente la misma
-salida con y sin los parches** (3 fallos, todos de siembra estática `suma=0`, **preexistentes en HEAD** —
-comprobado con `git stash`); sus asertos de luz dinámica (posición viva, 0 recálculos, delante/detrás del haz)
-siguen en verde.
-
----
-
-<a id="-req-glow5"></a>
-
-### 🔴 REQ-GLOW5 · Un voxel de `game.voxelesUI` puede emitir luz — 🔴 abierto 2026-08-19
-
-Dueño (2026-08-19): **«si desde un snippet digo que quiero poner un voxelui de esos, quiero poder indicar que
-emite luz»**, con el caso de uso encima de la mesa: **fuego realista que ilumine el jardín** y partículas.
-
-Hoy `game.voxelesUI` se dibuja con `aEmit=1` (`mcDrawVoxUI`): se ve a pleno color de noche —autoiluminado— pero
-no está ni en `mc.grid` ni en `mc.structures`, así que **no ilumina nada**. Autoiluminado ≠ ilumina; el propio
-`efectos-demo` lo dice en su cabecera.
-
-Forma acordada, la misma que en un dibujo y que en el editor: **el prefijo `*` del color**.
-`game.voxelesUI.pon(x, y, z, '*#ffaa00', grupo)` = ese voxel emite. Nada de una API aparte de luces.
-
-Se apoya en la luz dinámica por fragmento que ya existe (`mcDynSync` + `MC_DYNLIGHT_LIB`), que es la única que
-no exige re-mallar ni re-sembrar y por tanto aguanta partículas que se mueven cada frame. Dos límites que hay
-que respetar y medir:
-- **`MC_DYN_MAX = 8`** luces simultáneas (array fijo de uniforms). Las llamas de una hoguera son muchas: hay que
-  quedarse con las más cercanas al ojo (`mcDynSync` ya ordena por distancia) y ver si 8 se queda corto.
-- La luz dinámica **no tiene color propio**: hoy es siempre cálida fija (`vec3(1.15, 0.98, 0.75)`). Un fuego
-  saldrá cálido, pero no rojo, hasta que se le meta el color por luz (`emitCol` ya está horneado para la luz
-  de bloque, así que el dato existe).
-
-Depende de [BUG-GLOW4](#-bug-glow4): arregla el camino que esto necesita.
-
-**Hecho 2026-08-19** (a falta del visto bueno del dueño). Todo en `app.js`, 0 líneas en ningún snippet:
-- **Por CLAVES, no por prefijo de color** (corrección del dueño el mismo día: «igual sería mejor indicar claves
-  para los efectos de material, porque luego quiero poner efectos de alpha, metal, etc»).
-  `game.voxelesUI.material(grupo, {emite:true, luz:6})` es la puerta —lo barato y lo normal, un sistema de
-  partículas entero—; por voxel, `pon(x,y,z,{col:…, emite:true})`. El `*` de siempre (`'*#hex'`, `isGlow`) se
-  sigue entendiendo. Añadir `alfa`/`metal` mañana = una clave más, **sin tocar ninguna llamada existente**.
-- `mcVoxUIColor` guarda un hueco «emite» detrás del rgb, y **avisa por consola** si el color no se entiende:
-  `'*' + [r,g,b]` concatena el array (`'*0.6,0.7,0.9'`), no es hex, y antes se comía el tinte y pintaba blanco
-  en silencio — le pasó al dueño en las estrellas de `efectos-demo`.
-- `mcVoxUILuces()` saca las luces de la capa en coordenadas de mundo, **agrupadas por celda de bloque**: 200
-  voxeles de fuego pegados son 1 luz en su centroide, no 200 candidatas que se comerían las 8 plazas de
-  `MC_DYN_MAX` sin alumbrar más. Cacheado con el mismo `mc.voxUISucio` que la geometría.
-- `mcDynSync` las mete en la **misma cola** que las estructuras emisivas (vía dinámica, por fragmento): una
-  partícula se mueve cada frame y la siembra estática es un BFS + re-mallado, igual que en BUG-GLOW3. Sin haz
-  (isótropas). El array plano de candidatas pasa de 7 a 8 huecos para llevar **nivel por luz**.
-- **`luz` es ALCANCE EN BLOQUES y NO topa en `MC_MAXLIGHT`** (corregido el mismo día: el dueño puso `luz: 600` a
-  unas estrellas a 34 bloques y no pasaba nada, porque yo lo capaba a 15 «por analogía» con `glowLevel`). El 15
-  es el tope de la siembra **estática** —BFS, textura de luz, mallas cacheadas—; la vía **dinámica** es aritmética
-  por fragmento y admite el alcance que se pida.
-- **La caída pasa a ser RELATIVA al alcance**: `rad = clamp(1 − d*coste/nivel, 0, 1)` en vez de una rampa fija de
-  15 bloques. Con alcance 15 es **la misma cuenta** (`(15−d)/15 == 1−d/15`) ⇒ la ley del BFS que exige BUG-GLOW4
-  se conserva exacta y nada de lo existente se mueve (comprobado: `delante=0.800` / `detras=0.000` idénticos, y la
-  Espada de Luz sigue en **106,8** contra **10,3** del control). Segunda queja del dueño, y con razón: «en 40 veo
-  mucha luz, en 30 nada, en 35 un poco, el ajuste es complejo» — con la rampa fija, una estrella a 34 bloques
-  pasaba de nada (`luz:34`) a saturada (`luz:49`), todo el margen útil en una ventana de 15 y lejos del origen.
-  Curva nueva sobre el suelo (apagadas 7,4): `15`→7,5 · `35`→6,9 · `40`→**18,7** · `50`→39,5 · `60`→56,0 ·
-  `80`→76,1 · `120`→94,7 · `200`→108,7. Las estrellas están a **33,7 / 62,1 / 78,6** bloques del ojo (mínima,
-  mediana, máxima), así que por debajo de ~34 no llega ninguna y hace falta ~78 para que lleguen todas.
-- ⚠️ **Techo que queda en pie: `MC_DYN_MAX = 8`**, y se eligen las 8 más cercanas al ojo ⇒ con 240 focos
-  candidatos la luz es un charco que **se recoloca al andar** (medido: tras 25 bloques, otras 8). Para un cielo
-  coherente, emisoras solo unas pocas; subir `MC_DYN_MAX` cuesta bucle por fragmento y hay que medirlo en la
-  máquina del dueño (el navegador de pruebas va a 1,4 fps y sus fps no miden nada).
-- Mandos: `game.voxelesUI.material(grupo, {emite, luz})` (mezcla, no reemplaza; `null` borra; clave desconocida
-  **avisa**), `game.voxelesUI.luz(grupo, n)` como atajo de `{luz:n}`, y `game.voxelesUI.luces = false` para apagar
-  toda la luz de la capa sin borrar nada (medir fps). `game.voxelesUI.info()` añade `luces`, `materiales` y
-  `focosVivos`.
-
-Verificado en `/map/test?noauto=1` de noche, control con **los mismos cubos** con y sin la clave (el dibujo es
-idéntico, así que toda diferencia es luz sobre el suelo): sin nada **8,73** · cubos sin `emite` **8,47**
-(`dynN=0`, 0 focos) · `material('fuego',{emite:true})` **80,37** (`dynN=1`, 1 foco en el centroide) ·
-`{luz:4}` **8,44** (no llega al ojo; el material queda `{emite:true, luz:4}`, o sea que mezcló) ·
-`{emite:false}` **9,17** y `dynN=0` · por voxel (`{col, emite:true}`, sin material de grupo) **80,29**.
-El tinte se conserva en todas las formas: `[r,g,b]` → `[1, 0.66, 0]`, `{col,emite}` → `[1, 0.66, 0, 1]`,
-`'*#ffaa00'` → `[1, 0.667, 0, 1]`; y `'*'+[r,g,b]` sale blanco **avisando por consola**.
-
-Y las estrellas de `efectos-demo`, que el dueño había marcado `"*"+col` y salían todas blancas
-(`herramientas/parche_snp_estrellas_tinte.py`, publicado): 240 plantadas, **0 blancas puras** (34 azuladas,
-20 cálidas), **0 emisoras** y `dynN=0` —no gastan plaza de las 8 luces dinámicas—, y a `game.luz(0.05)`
-siguen viéndose: luminancia máxima **152,1**, 245 píxeles brillantes. Autoiluminadas, que era lo que quería.
-
----
-
-<a id="-req-map1"></a>
-
-### ⬜ REQ-MAP1 · Alt+M = pantalla de mapas conmutable, sin perder el mundo abierto — ⬜ todo
-**Reportado** 2026-08-06 por el dueño: «quiero que Alt+M me muestre la pantalla de elección de mapas,
-si es posible que sea conmutable, sin perder el que tengo actualmente; una segunda vez a Alt+M cierra
-la pantalla para seguir donde estaba; esto desde cualquier parte de la app».
-
-**Estado actual**
-La pantalla de elección de mapas es **`/map/`** (sin nombre), una **página aparte** servida por el
-servidor (`server.py:421-424`, `mundos.listar()` con estadísticas y miniatura cenital). Llegar a ella
-es una **navegación completa**: se pierde el mundo abierto y volver cuesta la recarga entera de la SPA
-—con los ~2 s que documenta PERF-MC3—. No hay ningún atajo de teclado para ella.
-
-**Lo bueno: el servidor ya está hecho.** `GET /api/mundos` (`server.py:433`) devuelve el listado con
-las miniaturas cacheadas en `data/_thumbs/`. Esto es **solo cliente**: un overlay que pinte ese JSON.
-
-**Precedente exacto a copiar: Alt+C y Alt+A** (`app.js:3196-3217`), que ya resuelven «conmutable desde
-cualquier parte, incluido el Mundo». De ahí salen las cautelas, que están comentadas en el propio
-código y **no** hay que redescubrir:
-- mirar `e.code` (tecla física) porque con Alt pulsado `e.key` llega compuesto en varios teclados, y
-  excluir Ctrl/⌘ para no pisar AltGr;
-- ir **antes** del corte de Mundo y del de `input/textarea`, para que cierre igual con el foco dentro;
-- `exitPointerLock()` al abrir, que en el Mundo el ratón está capturado.
-- `m` **no está asignada a nada** hoy (a diferencia de la `a` de Alt+A, que es andar a la izquierda), así
-  que aquí no hace falta `stopImmediatePropagation`. Comprobarlo igualmente al implementar.
-- Añadir el overlay a la **guardia de teclas del Mundo** (`app.js:9922`, la lista de modales abiertos):
-  si no, el jugador **sigue andando por detrás** mientras elige mapa.
-- Cerrar también con **Esc**, como los demás modales (`app.js:3192`, `3224`, `3227`).
-
-**«Sin perder el que tengo actualmente»** — dos mitades que conviene no confundir:
-1. **Abrir/cerrar el overlay** no toca `mc.*`: el mundo sigue vivo detrás y al cerrar se continúa donde
-   se estaba. Esto es lo que pide el dueño y es barato.
-2. **Elegir otro mapa** sí es un cambio de mundo. Opciones: (a) navegar a `/map/<otro>` —simple y
-   honesto, pero paga la recarga—; (b) cambiar el mundo **en caliente** sin recargar la página. (b) es
-   bastante más trabajo (soltar VBOs, paleta, estructuras, agentes, snippets) y es donde se esconden las
-   fugas. **Recomiendo (a)**, y que **guarde antes de irse**; (b) solo si al dueño le sigue molestando.
-
-**Móvil**: no hay tecla Alt. El dueño juega en móvil (≈390 px), así que hace falta una entrada
-equivalente —un botón—; encaja con REQ-OSD1, que está decidiendo justo qué botones se ven en el Mundo.
-
-**Verificación esperada**
-- Alt+M abre el overlay desde el editor, desde el Mapa, desde Play y desde el Mundo; segundo Alt+M lo
-  cierra y se sigue exactamente donde se estaba (misma posición y vista en el Mundo).
-- Con el overlay abierto, **el jugador no se mueve** aunque se tecleen WASD, y Esc cierra.
-- El listado sale de `/api/mundos` (mismas miniaturas y estadísticas que `/map/`), sin recargar la SPA.
-- Abrir y cerrar el overlay 20 veces no cambia `game.fps` ni deja peticiones colgando.
-- Elegir otro mapa guarda el actual antes de irse.
-
----
-
-<a id="-req-mov1"></a>
-
-### ⬜ REQ-MOV1 · Mandos táctiles: los 3 botones del ratón, pantalla completa y menú — ⬜ todo
-**Reportado** 2026-08-19 por el dueño, con captura: «en el móvil el juego es prácticamente
-inmanejable, sobran los botones de video y tomar foto, faltarían controles/botones como tiene el
-ratón o un mando de videoconsola para saltar, botón izquierdo, derecho y central. también poder
-ponerlo a pantalla completa. el botón de cerrar debería de ser un menú para poder parte de cerrar
-poder poner pantalla completa».
-
-Captura y transcripción → [`data/tickets/REQ-MOV1/contexto.md`](data/tickets/REQ-MOV1/contexto.md).
-
-**Qué se cambia**
-1. 📷 y 🎬 **fuera del pad** — no se pierden: se van al menú.
-2. Botones de acción **⛏ / ▣ / ⚡** = clic izquierdo / derecho / central del ratón. El ⤒ de saltar
-   ya existía; se queda con ellos, en pila de mando.
-3. El ✕ pasa a ser **☰**, y despliega: pantalla completa · foto · vídeo · salir.
-
-**Decisiones que no hay que volver a tomar**
-- **Revierte una decisión escrita**: `app.js` decía «a propósito NO hay botones de romper/poner: un
-  toque de más sería una edición de verdad, con su autoguardado en `mundo.json`». El dueño los pide.
-  El comentario se sustituye, no se borra sin más: el riesgo (tocar de más = editar el mundo de
-  verdad) sigue siendo cierto, y por eso los de acción van **arriba**, lejos del pulgar que anda.
-- **El central es el de redstone**, no una pregunta abierta: lo dice `redstone/redstone-piezas.js`,
-  que ya escucha `mousedown` con `button:1` en `window`. El botón táctil manda ese mismo evento en
-  vez de duplicar la lógica.
-- **`mcMandoActivo()`**: hasta ahora «¿manda el jugador?» se escribía `pointerLockElement===mc.canvas`
-  repetido por media docena de sitios. En táctil no hay ratón que capturar, y **entrar en pantalla
-  completa suelta el pointer-lock** ⇒ sin esto, cumplir la mitad del ticket (pantalla completa)
-  apagaría la otra mitad (los botones). Un solo predicado, y el táctil entra por la puerta.
-
-<a id="-req-ed3"></a>
-
-### ⬜ REQ-ED3 · Guías de rejilla conmutables en el editor 2D — ⬜ todo
-**Reportado** 2026-08-18 por el dueño: «en modo de edición 2d debería de haber una separación visual
-(línea de color azul clarito ligeramente visible por ejemplo) que sea como un grid, inicialmente 2
-divisiones en el plano horizontal y 2 en el vertical de la capa, así por defecto un bloque de 16x16
-tendría 4 cajas visibles de 8x8 (vista superior de la capa), pero podría ser interesante poder elegir
-el tamaño de grid, además de mostrarlo/ocultarlo. Podría ser una nueva tool para el editor 2d que rote
-entre: sin grid, división por 2 horizontal y vertical, y por 4».
-
-**Estado actual**
-`drawEdit` (`app.js:537`) ya pinta **una rejilla por celda** al terminar los voxels: un solo
-`beginPath` con `SX+1` verticales y `SY+1` horizontales en `rgba(255,255,255,0.06)`
-(`app.js:565-570`). Las guías nuevas son **otra pasada igual pero cada N celdas**, más marcada y azul,
-encima de esa. El ancla de coordenadas ya existe y no hay que recalcular nada: `px(i)`/`py(j)` y
-`viewGeom()`, que respetan zoom y paneo.
-
-**Decisión de diseño: ⛔ que NO sea una `data-tool`.** El panel HERRAMIENTAS (`index.html:142`,
-`index.html:220`) es de herramientas de **dibujo**, y `setTool` (`app.js:3231`) es excluyente: elegir
-«Rejilla» te dejaría sin Pincel y habría que volver a pulsarlo después de cada cambio de guía. Esto no
-edita nada, es **estado de VISTA**.
-
-El precedente exacto es el **interruptor de Caras** (`app.js:345-351`): un botón en la `stage-bar`
-(`index.html:194-203`), preferencia en `localStorage` (`vf_caras_marcar`), y el comentario de
-`app.js:340-343` deja escrita la regla — *«es estado de VISTA: no toca el documento, no viaja en él y
-no cambia nada del Mundo»*. Aquí igual: `vf_grid_div`, y **⛔ nunca dentro de `state`**, o la guía se
-guardaría en el `.vox.json` y viajaría a quien abra la pieza.
-
-Un botón que **rota** los tres valores (sin guías → ÷2 → ÷4 → sin guías) es exactamente lo que pide el
-dueño y cabe en un solo botón de la barra, sin selector.
-
-**A decidir con el dueño al implementar**
-- **Tamaños no divisibles.** El editor no es siempre 16³ (el panel Objeto deja poner 16×16×16 a mano).
-  Con `SX=10` y ÷4 las guías caerían en 2,5 celdas. Propuesta: dibujar solo en los múltiplos enteros y,
-  si no hay ninguno, no dibujar esa guía — mejor que una línea a mitad de celda, que engaña.
-- **¿Solo Capas, o también la vista 3D del editor?** El dueño dice «modo de edición 2d», así que se
-  hace solo en `drawEdit`. `drawEdit3d` queda fuera salvo que lo pida.
-
-**Cómo se comprueba**
-- Con ÷2 en una capa de 16×16 se ven **4 cajas de 8×8**; con ÷4, **16 de 4×4**; el borde exterior no
-  se dobla con la rejilla que ya había.
-- Las guías **se pegan a las celdas** al hacer zoom y paneo (no se despegan de la rejilla fina).
-- El ajuste **sobrevive a recargar** la página, y **no aparece** en el JSON que se guarda de la pieza.
-- No se ven guías en el Mundo ni en la ficha de la pieza: es solo el lienzo del editor.
-
----
-
-<a id="-req-rs11"></a>
-
-### 🟡 REQ-RS11 · Las piezas de redstone, en carpeta propia — 🟡 abierto 2026-08-07
-
-**Abierto 2026-08-07.** El dueño hizo un `pull` desde otra máquina y las piezas de redstone no
-estaban:
-
-> «no entiendo qué sentido tiene la carpeta habitantes, muévelas a redstone y súbelas»
-
-**Ya está hecha la mitad urgente** (que viajen): las 22 piezas están exceptuadas en `.gitignore` y
-versionadas, 336 KB. Un clon nuevo ya abre el mundo con su redstone. Esto es **la otra mitad**:
-separarlas de verdad.
-
-⚠️ **Lo que impide moverlas sin más, y es el motivo de que esto sea un ticket y no un `mv`:**
-`hab:` **no es una ruta, es un espacio de nombres**, y está **grabado dentro de los mundos
-guardados**. `server.py:11` lo ata a una sola carpeta (`STORE = data/habitantes`) y `app.js:3450`
-resuelve la clave con `fetch('/api/habitantes/' + key.slice(4))`. Referencias vivas hoy:
-
-| dónde | refs a `hab:<pieza de redstone>` |
-|---|---|
-| `data/mundo.json` | 88 |
-| `data/worlds/` (test 65, redstone 44, cubes 34, favicon 25, agents 10, fps 10, lab 8, empty 1) | 197 |
-| código versionado (`redstone-ejemplos.js` 92, `test_redstone_dsl.js` 54, `redstone-piezas.js` 40, …) | ~450 |
-
-O sea: **cambiar la clave no es una opción** — dejaría 285 bloques de mundos reales sin material. La
-carpeta se puede mover, la clave no.
-
-**El camino, entonces:** `data/redstone/` versionada, y el namespace `hab:` **servido desde las dos
-carpetas**. Hay que tocar listar / cargar / guardar / renombrar / borrar en `server.py` y las
-miniaturas de `mundos.py`.
-
-**Sin decidir, y hay que preguntar al dueño:** qué pasa si **editas** una pieza de redstone desde el
-editor — ¿se escribe en la carpeta versionada (y entonces el editor ensucia el repo) o se copia a
-`data/habitantes/` y esa gana (y entonces hay dos verdades)? Y si al listar la galería siguen
-saliendo mezcladas o en un grupo aparte.
-
-**Nota aparte, sin resolver:** el código versionado también referencia otras 9 claves `hab:` que
-**tampoco viajan** (`agua`, `agua-profunda`, `cristal`, `cubo-trans`, `escalera`, `likelava`,
-`like-water`, `rejilla`, `tejado`, ~630 KB). Las usan tests como `test_cubo_translucido.js` o
-`test_escalera_inercia.js`. No se han versionado porque el encargo era el redstone; decidir si
-entran.
-
----
-
-<a id="-req-doc2"></a>
-
-### 🟡 REQ-DOC2 · Un mapa del estado interno de `app.js` — 🟡 abierto 2026-08-07
-
-**Redactado sin investigar.** Tercera fila de la auditoría externa: «Frontend (`app.js`) — Legible
-pero Denso — Monolito de 778 KB; vendría bien un esquema/mapa de estado interno». La cifra real es
-**749 KB / 11 437 líneas**; la crítica es la mejor puesta de la tabla.
-
-**Esto NO es un ticket para partir `app.js`**, ni para refactorizarlo. Es para escribir el mapa que
-hoy hay que reconstruir a `grep` cada vez: qué vive en `state` (editor), qué en `mc` (mundo) y qué en
-`game` (scripting), quién invalida qué, y dónde está la frontera entre los tres.
-
-Candidatos a entrar, por ser los que ya han costado tickets o me han mordido en sesión:
-
-- `state.voxels` / `state.caras` y el contador `voxRev` que invalida las cachés de render.
-- `mc.grid` (assets 16³ macizos) **vs** `mc.structures` (todo lo que tiene forma, 1/16 de grosor) —
-  ya documentado como concepto, pero sin mapa de qué campo lo decide.
-- `bits` (colisión) vs `bitsAim` (apuntado), y las tres capas de envoltorios de solidez.
-- `mc.blockKey` / la paleta que se re-hornea en cada arranque (los ids **no son estables**).
-- Los ganchos que `app.js` expone sin saber qué son: `mc.sunExtra`, `mcXrayExtra`, `mc.atraviesa`.
-
-Sitio natural: sección nueva en `CLAUDE.md`, lo que lo hace hermano de [REQ-DOC1](PLAN_ARCHIVO.md#-req-doc1) — si el
-fichero no se vuelve navegable antes, este mapa se entierra igual que lo demás.
-
----
+Errores y fallos pendientes de corrección.
 
 <a id="-bug-rs10"></a>
 
@@ -448,26 +106,6 @@ sin verificar, y **el caso de la captura ya no ocurre**:
 propios: moverla es escribir en `mc.structures` y remallar, no copiar un id de celda a celda), ni qué
 pasa con una que ocupe varias celdas y solo una esté delante del pistón. **Antes de programar nada hay
 que preguntarle al dueño si esto le sigue molestando**, porque el ejemplo que dio ya está resuelto.
-
----
-
-<a id="-req-gal3"></a>
-
-### 🔴 REQ-GAL3 · Cambiar el espacio de nombres de una pieza desde la galería — 🔴 abierto 2026-08-10
-
-**Petición del dueño, literal:**
-
-> «tal vez deberia de poderse modificar el espacio de nombres desde la galeria»
-
-**Sin investigar.** Salió al hilo de [BUG-FLUID3](PLAN_ARCHIVO.md#-bug-fluid3), pero es otra cosa: aquello era que el
-motor dependiera del espacio de nombres (ya no depende); esto es poder **decidir** en cuál vive una
-pieza — mover `asset:assets/<n>.vox.json` ↔ `hab:<n>` desde la ficha, sin exportar e importar a mano.
-
-**Lo que habrá que mirar cuando toque:** guardar ya enruta por el ORIGEN del dibujo (`serverKind`, ver
-BUG-GAL1/GAL2 y `test_galeria_namespace.js`), así que la pieza que falta es un «mover a la otra
-galería» explícito. Y lo caro no es copiar el fichero: es que **los voxels del mundo guardan la clave
-larga**, así que mover una pieza deja el mundo apuntando a una clave que ya no existe — o hace falta
-reescribir el mundo, o dejar la vieja como alias.
 
 ---
 
@@ -546,6 +184,117 @@ python3 herramientas/carteles_fantasma.py --escribe          # borra (idempotent
 
 **Criterio de cierre:** el dueño lanza la pasada en seco, mira la lista, decide si algún huérfano es
 decoración suya y corre `--escribe` con lo demás.
+
+---
+
+<a id="-bug-sel5"></a>
+
+### BUG-SEL5 · Z en selección deja los corchetes sin revertir — 🔴 abierto 2026-08-20
+
+**Palabras del dueño** (nota de `/map/bugfinder2` en `70,14,30`): «en seleccion control+z va bien pero
+deja los corchetes sin revertir, esos tambien deberian de volver a la posicion previa del historial
+como sí hacen los bloques».
+
+**Redactado, sin investigar.** Los bloques vuelven bien, luego el historial por gesto funciona; lo que
+no entra en el gesto es **la caja de selección** (los corchetes). Dicho de otro modo: la posición de la
+selección debería ser parte de lo que se guarda y se restaura, no solo el contenido.
+
+**Criterio de cierre:** mover la selección, editar, Ctrl+Z → los corchetes vuelven a donde estaban a la
+vez que los bloques, sin un repintado de más.
+
+---
+
+## 💡 Tickets ABIERTOS — Requerimientos y Mejoras
+
+Nuevas características y peticiones de mejora pendientes.
+
+<a id="-req-rs11"></a>
+
+### 🟡 REQ-RS11 · Las piezas de redstone, en carpeta propia — 🟡 abierto 2026-08-07
+
+**Abierto 2026-08-07.** El dueño hizo un `pull` desde otra máquina y las piezas de redstone no
+estaban:
+
+> «no entiendo qué sentido tiene la carpeta habitantes, muévelas a redstone y súbelas»
+
+**Ya está hecha la mitad urgente** (que viajen): las 22 piezas están exceptuadas en `.gitignore` y
+versionadas, 336 KB. Un clon nuevo ya abre el mundo con su redstone. Esto es **la otra mitad**:
+separarlas de verdad.
+
+⚠️ **Lo que impide moverlas sin más, y es el motivo de que esto sea un ticket y no un `mv`:**
+`hab:` **no es una ruta, es un espacio de nombres**, y está **grabado dentro de los mundos
+guardados**. `server.py:11` lo ata a una sola carpeta (`STORE = data/habitantes`) y `app.js:3450`
+resuelve la clave con `fetch('/api/habitantes/' + key.slice(4))`. Referencias vivas hoy:
+
+| dónde | refs a `hab:<pieza de redstone>` |
+|---|---|
+| `data/mundo.json` | 88 |
+| `data/worlds/` (test 65, redstone 44, cubes 34, favicon 25, agents 10, fps 10, lab 8, empty 1) | 197 |
+| código versionado (`redstone-ejemplos.js` 92, `test_redstone_dsl.js` 54, `redstone-piezas.js` 40, …) | ~450 |
+
+O sea: **cambiar la clave no es una opción** — dejaría 285 bloques de mundos reales sin material. La
+carpeta se puede mover, la clave no.
+
+**El camino, entonces:** `data/redstone/` versionada, y el namespace `hab:` **servido desde las dos
+carpetas**. Hay que tocar listar / cargar / guardar / renombrar / borrar en `server.py` y las
+miniaturas de `mundos.py`.
+
+**Sin decidir, y hay que preguntar al dueño:** qué pasa si **editas** una pieza de redstone desde el
+editor — ¿se escribe en la carpeta versionada (y entonces el editor ensucia el repo) o se copia a
+`data/habitantes/` y esa gana (y entonces hay dos verdades)? Y si al listar la galería siguen
+saliendo mezcladas o en un grupo aparte.
+
+**Nota aparte, sin resolver:** el código versionado también referencia otras 9 claves `hab:` que
+**tampoco viajan** (`agua`, `agua-profunda`, `cristal`, `cubo-trans`, `escalera`, `likelava`,
+`like-water`, `rejilla`, `tejado`, ~630 KB). Las usan tests como `test_cubo_translucido.js` o
+`test_escalera_inercia.js`. No se han versionado porque el encargo era el redstone; decidir si
+entran.
+
+---
+
+<a id="-req-doc2"></a>
+
+### 🟡 REQ-DOC2 · Un mapa del estado interno de `app.js` — 🟡 abierto 2026-08-07
+
+**Redactado sin investigar.** Tercera fila de la auditoría externa: «Frontend (`app.js`) — Legible
+pero Denso — Monolito de 778 KB; vendría bien un esquema/mapa de estado interno». La cifra real es
+**749 KB / 11 437 líneas**; la crítica es la mejor puesta de la tabla.
+
+**Esto NO es un ticket para partir `app.js`**, ni para refactorizarlo. Es para escribir el mapa que
+hoy hay que reconstruir a `grep` cada vez: qué vive en `state` (editor), qué en `mc` (mundo) y qué en
+`game` (scripting), quién invalida qué, y dónde está la frontera entre los tres.
+
+Candidatos a entrar, por ser los que ya han costado tickets o me han mordido en sesión:
+
+- `state.voxels` / `state.caras` y el contador `voxRev` que invalida las cachés de render.
+- `mc.grid` (assets 16³ macizos) **vs** `mc.structures` (todo lo que tiene forma, 1/16 de grosor) —
+  ya documentado como concepto, pero sin mapa de qué campo lo decide.
+- `bits` (colisión) vs `bitsAim` (apuntado), y las tres capas de envoltorios de solidez.
+- `mc.blockKey` / la paleta que se re-hornea en cada arranque (los ids **no son estables**).
+- Los ganchos que `app.js` expone sin saber qué son: `mc.sunExtra`, `mcXrayExtra`, `mc.atraviesa`.
+
+Sitio natural: sección nueva en `CLAUDE.md`, lo que lo hace hermano de [REQ-DOC1](PLAN_ARCHIVO.md#-req-doc1) — si el
+fichero no se vuelve navegable antes, este mapa se entierra igual que lo demás.
+
+---
+
+<a id="-req-gal3"></a>
+
+### 🔴 REQ-GAL3 · Cambiar el espacio de nombres de una pieza desde la galería — 🔴 abierto 2026-08-10
+
+**Petición del dueño, literal:**
+
+> «tal vez deberia de poderse modificar el espacio de nombres desde la galeria»
+
+**Sin investigar.** Salió al hilo de [BUG-FLUID3](PLAN_ARCHIVO.md#-bug-fluid3), pero es otra cosa: aquello era que el
+motor dependiera del espacio de nombres (ya no depende); esto es poder **decidir** en cuál vive una
+pieza — mover `asset:assets/<n>.vox.json` ↔ `hab:<n>` desde la ficha, sin exportar e importar a mano.
+
+**Lo que habrá que mirar cuando toque:** guardar ya enruta por el ORIGEN del dibujo (`serverKind`, ver
+BUG-GAL1/GAL2 y `test_galeria_namespace.js`), así que la pieza que falta es un «mover a la otra
+galería» explícito. Y lo caro no es copiar el fichero: es que **los voxels del mundo guardan la clave
+larga**, así que mover una pieza deja el mundo apuntando a una clave que ya no existe — o hace falta
+reescribir el mundo, o dejar la vieja como alias.
 
 ---
 
@@ -714,192 +463,6 @@ sin que ninguna edición se haya perdido por el camino.
 
 ---
 
-<a id="-bug-vid1"></a>
-
-### BUG-VID1 · un vídeo muy corto se guarda con 0 bytes — 🔴 abierto 2026-08-20
-
-**Palabras del dueño** (nota de `/map/bugfinder2` en `38,14,76`): «al intentar grabar un video muy
-corto, se ha guardado como 0 bytes en el servidor, a pesar de que dice que dura 0.1s».
-
-**Reproducido sin tocar nada**, está en el disco:
-
-| fichero | tamaño | `duracion` de su ficha |
-|---|---|---|
-| `data/videos/0001_bugfinder2_20260820-121514.mp4` | **0 B** | 0.05 s |
-| `data/videos/0002_bugfinder2_20260820-121616.mp4` | **0 B** | 0.05 s |
-| `data/videos/0003_bugfinder2_20260820-121700.mp4` | 1,2 MB | (bien) |
-
-Y las fichas de los dos primeros lo dicen a la cara: `"bytes": 0`.
-
-**Son dos fallos encadenados, uno a cada lado:**
-
-1. **Navegador** — `mcIniciarGrabacion` (`app.js:17868`) arranca con `mcMediaRecorder.start(100)`:
-   el `MediaRecorder` suelta un trozo **cada 100 ms**. Parar a los 50 ms ⇒ `ondataavailable`
-   (`app.js:17855`) no llega a correr ni una vez ⇒ `mcVideoChunks` vacío ⇒ `Blob` de tamaño 0. La
-   duración que se enseña sale de `performance.now()`, no del vídeo, y por eso dice «0.1 s» de algo
-   que no existe.
-2. **Servidor** — `POST /api/videos` (`server.py:825`) valida `if not isinstance(vid, str) or not vid`
-   **antes** de quitarle el prefijo `data:`. Un `data:video/mp4;base64,` con la carga vacía es una
-   cadena no vacía ⇒ pasa el filtro, `b64decode('')` devuelve `b''`, y se escribe el fichero de 0 B
-   con su ficha al lado. La comprobación tiene que ser sobre `crudo`, después de decodificar.
-
-**Criterio de cierre:** parar la grabación antes de que haya un solo fotograma avisa («clip demasiado
-corto») y **no** deja fichero; y un `POST /api/videos` con carga vacía contesta 400 en vez de crear un
-0 B. Los dos `.mp4` vacíos que ya están en `data/videos/` los borra el dueño desde `/videos`, no yo.
-
----
-
-<a id="-bug-ranura2"></a>
-
-### BUG-RANURA2 · con un recorte cargado, 1-9 repinta el recorte en vez de elegir bloque — 🔴 abierto 2026-08-20
-
-**Palabras del dueño** (nota de `/map/bugfinder2` en `69,14,59`): «cuando elijo un conjunto de bloques
-con "k" y la herramienta de construir (pico), si luego cambio de ranura ej pulsando "1" se ha de elegir
-ese bloque para construir; no reemplazar los bloques de la estructura seleccionada por bloques de esa
-ranura nueva elegida».
-
-**Localizado.** El repintado no es un accidente: se escribió a propósito para el Ctrl+V y está
-razonado en el comentario de `app.js:15999` — sin él, el número caía en `mcSelectFill` y le cambiaba el
-material a la selección de atrás, «lo de su espalda», que ya no es la caja que ve. Y el commit de
-[REQ-RANURA1](PLAN_ARCHIVO.md#-req-ranura1) (`dcfabf7`, 2026-08-20) presume justo de eso: armar un
-recorte = ponerlo en `clipboard` y llamar a `mcPasteWorld()`, y de ahí salen «gratis» las 24 posturas,
-el plantado con el derecho **y el material con 1-9**.
-
-El precio de esa herencia es este ticket: `mcPasteMaterial` (`app.js:16003`) dispara mirando **solo**
-`mc.pasteActive`, sin preguntar qué herramienta hay en la mano, y quien llama es la línea
-`app.js:20998`:
-
-```js
-if(i<mc.hotbar.length){ if(e.altKey) mcOpenPicker(i); else { mc.sel=i; mcSelectSlot(); if(!mcPasteMaterial(i)) mcSelectFill(i); } }
-```
-
-⚠️ **No es «quitar el repintado»**: en el Ctrl+V lo quiere. Lo que hay que acotar es **cuándo** se
-repinta y cuándo el número es simplemente cambiar de ranura. Preguntarle si la línea que separa los dos
-casos es la herramienta (pico ⇒ elegir bloque) o el origen del cúmulo (recorte de `K` ⇒ elegir bloque,
-Ctrl+V ⇒ repintar), porque no son la misma regla y él ha descrito solo el primer caso.
-
-**Criterio de cierre:** con el recorte de `K` cargado y el pico en la mano, pulsar `1` cambia el bloque
-de construcción y **el recorte no cambia de material**; con Ctrl+V, `1` sigue repintando el cúmulo como
-hasta ahora (`tests/test_ranura1_recortes.js` en verde).
-
----
-
-<a id="-bug-glow9"></a>
-
-### BUG-GLOW9 · las estrellas ni parecen emisivas ni las tapa la niebla — 🔴 abierto 2026-08-20
-
-**Dos notas del dueño en `/map/bugfinder2`, sobre lo mismo:**
-
-- `51,14,58`: «aunque ponga efecto de niebla, se siguen viendo las estrellas en el cielo, ademas se
-  nota que son voxels, teoricamente son autoiluminadas, no deberian verse como puntitos oscuros, a lo
-  sumo puntos luminosos si se hace bien y sin trucos ya que son emisivas de luz».
-- `37,39,62` (puesta arriba del todo, `y=39`, al lado de las estrellas): «Estas estrellas no parecen
-  autoiluminadas».
-
-**Son tres quejas, y conviene no mezclarlas:**
-
-1. **La niebla no las toca — y eso está escrito a propósito.** `mcDrawVoxUI` (`app.js:14026`) dibuja
-   la capa VIVA con `uFogNear = pj.far*8`, `uFogFar = pj.far*10` y `aEmit = 1.0`, y el comentario de
-   `app.js:14049` dice literalmente que con `emit=1` «la niebla sale 0», que es «lo que quieren las
-   estrellas de la capa viva». O sea: **es una decisión que él quiere revisar**, no un descuido.
-   Preguntarle qué quiere exactamente — ¿que la niebla las apague, o que se apaguen solo con la niebla
-   de `game.niebla` y no con la del agua?
-2. **«Se nota que son voxels».** Una estrella es **un voxel fino** y `game.voxelesUI.grosor` la
-   engorda; a `grosor 16` es un bloque entero en el cielo. Hay que medir con qué grosor las está
-   viendo antes de tocar nada.
-3. **«Puntitos oscuros».** Ésta es la que no cuadra con el código y la que hay que reproducir primero:
-   con `aEmit=1` deberían salir a pleno color. Sospechas sin comprobar: `mc.voxUIAlfa < 1` mezcla la
-   estrella con el cielo (`app.js:14039`, `blendFunc(CONSTANT_ALPHA, …)`), o las está viendo por la
-   capa **horneada** (`mc.voxFino`), que sí va con `aEmit = 0.0` y niebla normal (`app.js:14052`) —
-   y ésa sí saldría oscura.
-
-Vecino de [REQ-GLOW5](#-req-glow5) (declarar emisivo un voxel de `game.voxelesUI` con el prefijo `*`),
-que probablemente sea media respuesta a la queja 3.
-
-**Criterio de cierre:** una captura de noche con niebla puesta, y él diciendo que las estrellas se ven
-como quiere. Sin su visto bueno esto no se cierra: es un juicio suyo, no una medida.
-
----
-
-<a id="-req-glow10"></a>
-
-### REQ-GLOW10 · el brillo de los emisivos debe adaptarse a la luz ambiente — 🔴 abierto 2026-08-20
-
-**Palabras del dueño** (nota de `/map/bugfinder2` en `51,14,64`): «la iluminacion de las herramientas,
-voxels emisivos, deben ser más brillantes cuando las condiciones de luz son bajas, han de ser
-adaptativos. Ej: de noche esta bien que brillen, de dia no hace falta que brillen tanto. que sea un
-tunnable, que se pueda elegir el brillo maximo tmb».
-
-**Redactado, sin investigar.** Pide **dos** mandos: la adaptación (cuánto sube el brillo al bajar la
-luz) y el **brillo máximo**.
-
-✅ **Desbloqueado**: [BUG-GLOW8](PLAN_ARCHIVO.md#-bug-glow8) se cerró el 2026-08-20, así que ya hay UNA
-sola ley de luz sobre la que montar el tunable — antes esto habría obligado a retocar dos fórmulas.
-
-🔒 **Cae de lleno bajo el candado**: toca la iluminación del motor ⇒ se lee antes la
-[Ley de la Luz](wiki/paginas/ley-de-la-luz.md) **entera** y se cita el artículo que se aplica. Ojo al
-mandamiento 1 («ni un voxel quedará incorrectamente iluminado»): un brillo que depende de la luz
-ambiente es **exposición**, no campo de luz — si acaba cambiando el nivel de una celda en vez de cómo se
-muestra, está mal por definición.
-
----
-
-<a id="-bug-sel5"></a>
-
-### BUG-SEL5 · Ctrl+Z en selección deja los corchetes sin revertir — 🔴 abierto 2026-08-20
-
-**Palabras del dueño** (nota de `/map/bugfinder2` en `70,14,30`): «en seleccion control+z va bien pero
-deja los corchetes sin revertir, esos tambien deberian de volver a la posicion previa del historial
-como sí hacen los bloques».
-
-**Redactado, sin investigar.** Los bloques vuelven bien, luego el historial por gesto funciona; lo que
-no entra en el gesto es **la caja de selección** (los corchetes). Dicho de otro modo: la posición de la
-selección debería ser parte de lo que se guarda y se restaura, no solo el contenido.
-
-**Criterio de cierre:** mover la selección, editar, Ctrl+Z → los corchetes vuelven a donde estaban a la
-vez que los bloques, sin un repintado de más.
-
----
-
-<a id="-bug-sel3"></a>
-
-### BUG-SEL3 · rotar una selección no rota las piezas finas u orientadas — 🔴 abierto 2026-08-20
-
-**Palabras del dueño** (nota de `/map/bugfinder2` en `48,14,11`): «Cuando se rotan selecciones, se han
-de rotar tambien las posiciones de las estructuras finas o con huecos localmente, ya que por ejemplo,
-si se selecciona una puerta con su marco, el marco si son bloques quedan bien, pero la puerta no rota
-y se sale del marco».
-
-Son **dos giros distintos** y hoy solo se aplica uno: el de la **caja** (dónde cae cada celda) sí, el
-**local de cada pieza** (hacia dónde mira la puerta) no. Por eso el marco —bloques macizos, sin
-orientación— aguanta y la puerta se desencaja.
-
-⛔ **Ojo al tocarlo**: las 24 posturas **se derivan de la clave** (`flor@7`) y se decodifican con
-`mcOriNorm` / `mcOriParts` — nada de `(rot|0)&15` (ver BUG-RS7, BUG-RS8, BUG-ROT2 en el archivo).
-
-**Criterio de cierre:** el ejemplo que él da — seleccionar puerta + marco, rotar, y la puerta sigue en
-su hueco mirando a donde toca. Vale como test automático.
-
----
-
-<a id="-req-sel4"></a>
-
-### REQ-SEL4 · `r` gira en horizontal y `R` en profundidad — 🔴 abierto 2026-08-20
-
-**Palabras del dueño** (nota de `/map/bugfinder2` en `71,14,27`): «seleccion y "r" deberia de rotar en
-el plano horizontal (eje de giro vertical), y "R" en el plano profundidad. se limitaria entonces a 4
-horizontal x 4 profundidad, asi se puede con "r" abrir una ventana de bloques, o con "R" levantar una
-cornisa».
-
-Hermano de [BUG-SEL3](#-bug-sel3): el mismo giro, visto desde el mando en vez de desde la pieza. El
-**4×4 = 16** que él describe encaja con las 24 posturas que ya existen (`mcOriNorm`), así que casi
-seguro no hay que inventar geometría nueva, solo atar las dos teclas a los dos ejes.
-
-**Redactado, sin investigar.** Conviene hacerlo **después** de BUG-SEL3, o se estará girando bien una
-caja cuyo contenido aún no gira.
-
----
-
 <a id="-req-sel6"></a>
 
 ### REQ-SEL6 · ver el pivote de la selección sin pulsar Ctrl — 🔴 abierto 2026-08-20
@@ -948,7 +511,7 @@ Lo importante de la nota es la primera frase: **el orden ya se lo cambia a menud
 que quiere dejar de hacer.
 
 **Redactado, sin investigar.** Ojo con la palabra «herramientas»: en el panel del editor las hay de
-**dibujo** y de **vista**, y no son la misma familia (mismo tropiezo que en [REQ-ED3](#-req-ed3)).
+**dibujo** y de **vista**, y no son la misma familia (mismo tropiezo que en [REQ-ED3](PLAN_ARCHIVO.md#-req-ed3)).
 Aclarar con él a cuáles se refiere antes de empezar.
 
 ---
@@ -991,39 +554,6 @@ ya está a mano ahí. ⛔ Y por lo mismo, ojo: si se la envuelve hay que pasarle
 (comerse el 6º apaga el nadar, el 7º la mirada, sin fallar nada).
 
 Verde y no rojo porque es adorno: no rompe nada mientras no exista.
-
----
-
-<a id="-req-ciudad1"></a>
-
-### 🟢 REQ-CIUDAD1 · Renderizar un `.md` como ciudad de voxels, y deshacerla — 🟢 entregado 2026-08-20, esperando su visto bueno
-
-Pedido del dueño (2026-08-20): **«un script que pueda ejecutar desde consola que genere un mapa»** a
-partir de `PLAN.md` —y de cualquier otro `.md`—, donde los encabezados grandes sean continentes,
-países o edificios según lo anidados que estén sus contenidos, se pueda **llegar al dato final**
-apoyándose en notas, **toda la arquitectura tenga relación con el fichero**, e idealmente **del mapa
-se pueda volver a generar el `.md`**.
-
-Cómo funciona y por qué → [`docs/ciudad-md.md`](docs/ciudad-md.md). Lo que hay hoy:
-
-```bash
-python3 herramientas/md_a_ciudad.py PLAN.md --escribe   # -> /map/plan   (43 carteles, se lee del aire)
-python3 herramientas/ciudad_a_md.py plan --verifica PLAN.md
-```
-
-- **La vuelta es byte a byte** con `--fidelidad=exacta`: `PLAN.md` (79 033 B) sale idéntico, y también
-  un fixture adversario con CRLF, valla de código que contiene `#`, línea de 5000 y un par suplente
-  justo en el corte de nota. Guardián `tests/test_ciudad_md.js` (15 comprobaciones, `--area=general`).
-- **La regla que lo sostiene**: cada rasgo es **PORTADOR** (la partición del suelo en `y=GH` por
-  materiales separadores + las notas) o **DERIVADO** (todo lo demás). Sólo hay **dos** portadores, así
-  que todo el presupuesto estético futuro es gratis: se puede rehacer entero sin tocar la vuelta.
-- **`--enlaces=carteles` se ha caído del plan a propósito**: una nota es PORTADORA, así que un cartel
-  de enlace se colaría en la concatenación y corrompería el `.md`. Los enlaces van como senderos de
-  grava en `y=GH+1`, nunca en `y=GH`.
-
-Queda pendiente de su visto bueno, y sin medir: **`PLAN_ARCHIVO.md` (900 KB) son miles de notas** y
-por orden suya no hay tope ni aviso. La ciudad tira hoy a cementerio de cajas ordenadas; el remedio
-es todo derivado y no toca la ida y vuelta.
 
 ---
 

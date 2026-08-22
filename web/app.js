@@ -3702,6 +3702,13 @@ window.addEventListener('keydown',e=>{
     if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
     openAgentes(); return;
   }
+  // Alt+M = abre el editor de mapa (overlay de habitaciones) en una pestaña nueva del navegador.
+  // Mismas cautelas que Alt+A (e.code, sin Ctrl/⌘, stopImmediatePropagation).
+  if(e.code==='KeyM' && e.altKey && !e.ctrlKey && !e.metaKey){
+    e.preventDefault(); e.stopImmediatePropagation();
+    window.open('/map/', '_blank');
+    return;
+  }
   if(!$('#mc-modal').hidden) return;                                            // en Mundo, los atajos del editor no aplican
   if(e.key==='Escape' && !$('#play-modal').hidden){ closePlay(); return; }
   if(e.key==='Escape' && !$('#room-modal').hidden){ closeRoom(); return; }
@@ -7366,6 +7373,7 @@ const mc={
   hist:[], histRedo:[],           // historial de edición del Mundo (z=deshacer / Z=rehacer): pila y su inversa
   histLock:false, histBusy:false, // histLock: no registrar mientras se aplica un undo/redo; histBusy: evita solapar dos a la vez
   interiorDark:0.1,               // factor de sombra en el fondo sin luz (interiores/pasillos, t7 skylight); 1 = desactivado (game.interiorDark)
+  shakeCaida:{ alturaMin:15, amplitud:0.03, duracion:0.5, frecuencia:9, tiempo:0, fuerza:0, maxAire:0, enAire:false }, // REQ-FX1 · temblor de cámara al caer desde alto
   light:null,                     // Uint8Array 0..MC_MAXLIGHT por celda: luz del cielo difundida por el aire (mcComputeLight)
   shadow:null,                    // MAPA DE SOMBRA del sol vertical: {size,fbo,tex,depth,dirty} — altura de la superficie más alta por téxel (mcRenderShadow)
   sunExtra:null,                  // gancho: geometría que dibuja OTRO (snippets con pasada propia) y que también debe
@@ -12592,13 +12600,48 @@ function mcUpdate(dt){
   mcMoveAxis(0, p[0]+mc.vel[0]*dt);
   mcMoveAxis(2, p[2]+mc.vel[2]*dt);
   let ny=p[1]+mc.vel[1]*dt;
-  if(!mcCollides(p[0],ny,p[2])){ p[1]=ny; mc.onGround=false; }
-  else { if(mc.vel[1]<0 && !mc.volar) mc.onGround=true; mc.vel[1]=0; }   // choca arriba o aterriza (volando nunca se «aterriza»: se apoya y ya)
+  if(!mcCollides(p[0],ny,p[2])){
+    p[1]=ny; mc.onGround=false;
+    if(!mc.volar){
+      if(!mc.shakeCaida.enAire){ mc.shakeCaida.enAire=true; mc.shakeCaida.maxAire=p[1]; }
+      else if(p[1]>mc.shakeCaida.maxAire){ mc.shakeCaida.maxAire=p[1]; }
+    }
+  } else {
+    if(mc.vel[1]<0 && !mc.volar){
+      mc.onGround=true;
+      if(mc.shakeCaida.enAire){
+        const caida = mc.shakeCaida.maxAire - p[1];
+        if(caida >= mc.shakeCaida.alturaMin){
+          const ratio = Math.min(2.5, Math.max(1.0, caida / mc.shakeCaida.alturaMin));
+          mc.shakeCaida.tiempo = performance.now();
+          mc.shakeCaida.fuerza = ratio;
+        }
+        mc.shakeCaida.enAire = false; mc.shakeCaida.maxAire = 0;
+      }
+    }
+    mc.vel[1]=0;
+  }
 }
 function mcViewMatrix(){
   const p=mc.pos, ex=p[0], ey=p[1]+MC_EYE*mc.scale, ez=p[2];   // ojo = pies + altura del ojo (escala con game.playerScale)
   // view = rotX(-pitch)·rotY(-yaw)·translate(-ojo)  (Y-arriba, mira a -Z con yaw=0)
-  return mat4.mul(mat4.rotX(-mc.pitch), mat4.mul(mat4.rotY(-mc.yaw), mat4.translate(-ex,-ey,-ez)));
+  let mat = mat4.mul(mat4.rotX(-mc.pitch), mat4.mul(mat4.rotY(-mc.yaw), mat4.translate(-ex,-ey,-ez)));
+  // REQ-FX1 · temblor de cámara amortiguado tras impacto de caída
+  if(mc.shakeCaida && mc.shakeCaida.tiempo>0){
+    const elapsed = (performance.now() - mc.shakeCaida.tiempo) / 1000;
+    const dur = mc.shakeCaida.duracion || 0.5;
+    if(elapsed < dur){
+      const decay = Math.pow(1 - elapsed / dur, 2);
+      const ang = elapsed * (mc.shakeCaida.frecuencia || 9) * Math.PI * 2;
+      const amp = (mc.shakeCaida.amplitud || 0.03) * (mc.shakeCaida.fuerza || 1) * decay;
+      mat = mat4.mul(mat4.rotZ(Math.cos(ang * 0.7) * amp * 0.6), mat);
+      mat = mat4.mul(mat4.rotX(Math.sin(ang) * amp), mat);
+      mat = mat4.mul(mat4.translate(0, -Math.sin(ang * 1.5) * amp * 0.4, 0), mat);
+    } else {
+      mc.shakeCaida.tiempo = 0; mc.shakeCaida.fuerza = 0;
+    }
+  }
+  return mat;
 }
 function mcProjMatrix(){
   const cv=mc.canvas, aspect=cv.width/Math.max(1,cv.height);
@@ -14619,13 +14662,13 @@ function mcDrawOverlays(pj, view){
         mcPushCornerBrackets(selLines, b[0], b[1], b[2], b[0]+1, b[1]+1, b[2]+1, 0.35, 1.0, 0.85, 0.2);
       }
     }
-    // AGARRE del giro (REQ-SEL1): el bloque sobre el que pivota R / ⇧R / ⌥R. Se pinta en magenta, que ni el
+    // AGARRE del giro (REQ-SEL1 / REQ-SEL6): el bloque sobre el que pivota R / ⇧R / ⌥R. Se pinta en magenta, que ni el
     // amarillo de las esquinas ni el cian de la A lo usan. Mientras se mantiene Ctrl el ratón manda, y si
     // apunta fuera de la selección el candidato queda en nada (soltar Ctrl así = soltar el agarre). Fijado,
-    // solo se dibuja si sigue dentro de alguna caja: fuera, mcRotaCajaEnSitio lo ignora, y lo que no hace
-    // nada no se enseña.
+    // solo se dibuja si sigue dentro de alguna caja. Sin agarre fijado (REQ-SEL6), en reposo se muestra la esquina
+    // mínima sobre la que rotará por defecto.
     if(mc.selCtrlHeld && playing) mc.selPivoteHover = mcSelPivoteApuntado();
-    const piv = mc.selCtrlHeld ? mc.selPivoteHover : (mcSelCajaDe(mc.selPivote)>=0 ? mc.selPivote : null);
+    const piv = mc.selCtrlHeld ? mc.selPivoteHover : (mcSelCajaDe(mc.selPivote)>=0 ? mc.selPivote : (mc.selCajas.length ? [Math.min(mc.selCajas[0].a[0],mc.selCajas[0].b[0]), Math.min(mc.selCajas[0].a[1],mc.selCajas[0].b[1]), Math.min(mc.selCajas[0].a[2],mc.selCajas[0].b[2])] : null));
     if(piv){
       const mag=[1.0, 0.25, 0.85];
       mcPushBoxEdges(selLines, piv[0], piv[1], piv[2], piv[0]+1, piv[1]+1, piv[2]+1, mag[0], mag[1], mag[2]);
@@ -15328,7 +15371,15 @@ function mcRemoveStruct(s, quiet){
 // --- Historial de edición (z=deshacer / Z=rehacer) ---
 // Entradas: {t:'b',x,y,z,before,after} (bloque) · {t:'bb',edits:[{x,y,z,before,after}]} (pegado en bloque) · {t:'s+'|'s-', sp:{key,ox,oy,oz,rot}} (estampar/retirar estructura).
 const MC_HIST_MAX=200;
-function mcPushHist(en){ if(mc.histLock) return; mc.hist.push(en); if(mc.hist.length>MC_HIST_MAX) mc.hist.shift(); mc.histRedo.length=0; }
+function mcPushHist(en){
+  if(mc.histLock) return;
+  if(mc.tool==='select' && mc.selCajas && mc.selCajas.length && !en.selBefore){
+    en.selAfter = mc.selCajas.map(c=>({ a:c.a.slice(), b:c.b.slice() }));
+    en.selBefore = (mc._selCajasBeforeEdit ? mc._selCajasBeforeEdit.map(c=>({ a:c.a.slice(), b:c.b.slice() })) : en.selAfter);
+    mc._selCajasBeforeEdit = null;
+  }
+  mc.hist.push(en); if(mc.hist.length>MC_HIST_MAX) mc.hist.shift(); mc.histRedo.length=0;
+}
 function mcFindStruct(sp){ return mc.structures.find(s=>s.key===sp.key && s.ox===sp.ox && s.oy===sp.oy && s.oz===sp.oz && (s.rot|0)===(sp.rot|0)); }
 // Aplica una entrada en un sentido: forward=true reproduce la acción original; false su inversa. histLock evita re-registrar.
 async function mcApplyHist(en, forward){
@@ -15343,6 +15394,11 @@ async function mcApplyHist(en, forward){
       else { const s=mcFindStruct(en.sp); if(s) mcRemoveStruct(s, true); }
     }
   } finally { mc.histLock=false; }
+  // BUG-SEL5: si la entrada de historial capturó la posición de los corchetes, restaurarla también
+  if(en.selBefore && en.selAfter){
+    const target = forward ? en.selAfter : en.selBefore;
+    if(target && target.length) mc.selCajas = target.map(c=>({ a:c.a.slice(), b:c.b.slice() }));
+  }
   if(en.t==='s+' || en.t==='s-') mcDirtyHeader();
   mcScheduleSave();
 }
@@ -15509,7 +15565,7 @@ function mcPaint(){
   mcSetBlock(c[0],c[1],c[2],id); mcPushHist({t:'b',x:c[0],y:c[1],z:c[2],before,after:id}); mcRemeshAround(c[0],c[2]); mcScheduleSave();
 }
 // Clic derecho: pone al lado / estampa estructura.
-function mcUseRight(){ if(mc.tool==='paint') mcPickBlock(); else mcPlace(); }
+function mcUseRight(){ if(mc.tool==='paint') mcPaint(); else mcPlace(); }
 // Herramientas PASIVAS: no rompen, no colocan y no estampan. Las rutas de estructura
 // y la repetición al mantener pulsado tienen que preguntar por esto y no
 // por `tool!=='select'`, o cada herramienta nueva vuelve a colocar bloques por la puerta de atrás.
@@ -15596,7 +15652,7 @@ function mcDoAction(btn, shift){
   }
   if(mc.tool==='select'){ if(btn===0) mcSelectClick(shift); else if(btn===2) mcSelectPickFill(shift); mcRevealHotbar(); return; }   // Seleccionar: izq marca esquinas (con shift, caja ADEMÁS de las que haya), dcho pilla material y reemplaza (shift o sin caja: limpia). NO rompe/pone
   if(mc.tool==='pick'){ mcPickBlock(); mcRevealHotbar(); return; }   // Cuentagotas: los DOS botones pillan; ninguno rompe ni pone
-  if(mc.tool==='paint'){ if(btn===0) mcPaint(); else if(btn===2) mcPickBlock(); mcRevealHotbar(); return; } // Pintar: izq pinta, dcho cuentagotas
+  if(mc.tool==='paint'){ if(btn===0) mcPickBlock(); else if(btn===2) mcPaint(); mcRevealHotbar(); return; } // Pintar: izq cuentagotas, dcho pinta
   if(mc.tool==='box'){
     if(mc.boxStep===3){ if(btn===2) mcBoxClick(); else if(btn===0) mcBoxClear(); }  // Paso 4: dcho planta, izq reinicia
     else { if(btn===0) mcBoxClick(); else if(btn===2) mcBoxClear(); }               // Pasos 1,2,3: izq define base/altura, dcho cancela
@@ -15885,15 +15941,15 @@ function mcSelectPickFill(shift){
 // SÓLIDOS de dentro (los huecos siguen huecos — se reemplaza lo que hay, no se rellena la caja). Un
 // solo gesto de historial ('bb') para que Ctrl+Z lo deshaga entero, como el corte. Callar y salir si
 // no hay caja o la ranura no da un bloque: el número ya ha hecho lo suyo (activar la ranura).
-function mcSelectFill(i){
+function mcSelectFill(i, soloSolidos){
   if(mc.tool!=='select' || !mc.selBox) return false;
   const sk=mc.slotStruct && mc.slotStruct[i];
-  if(sk) return mcSelectFillPieza(sk, 'La pieza de la ranura '+(i+1));
-  return mcSelectFillId(mc.hotbar[i]);
+  if(sk) return mcSelectFillPieza(sk, 'La pieza de la ranura '+(i+1), soloSolidos);
+  return mcSelectFillId(mc.hotbar[i], undefined, soloSolidos);
 }
 // Rellenar con una PIEZA (estructura), venga de una ranura o del clic derecho sobre el mapa. Lo suyo
 // es resolver clave → id; el reparto por las celdas es de mcSelectFillId.
-function mcSelectFillPieza(sk, quien){
+function mcSelectFillPieza(sk, quien, soloSolidos){
   if(mc.tool!=='select' || !mc.selBox) return false;
   let vk=sk;
   // Lo que es una PIEZA de verdad (está en mc.structs, o va armado en una ranura) tiene dos preguntas
@@ -15924,9 +15980,9 @@ function mcSelectFillPieza(sk, quien){
   if(puesto===false){ toast('Ahí no cabe la pieza (¿estás dentro de la selección?)'); return false; }
   const id=mc.grid[mcIdx(p[0],p[1],p[2])];
   if(!id || id===p[3]){
-    if(mc.blockKey[p[3]]===vk) return mcSelectFillId(p[3]);       // misma pieza y misma postura: no es que no cargue, es que ya estaba
+    if(mc.blockKey[p[3]]===vk) return mcSelectFillId(p[3], undefined, soloSolidos);       // misma pieza y misma postura: no es que no cargue, es que ya estaba
     toast(quien+' aún se está cargando — vuelve a pulsar'); return false; }
-  return mcSelectFillId(id, {x:p[0],y:p[1],z:p[2],before:p[3],after:id});
+  return mcSelectFillId(id, {x:p[0],y:p[1],z:p[2],before:p[3],after:id}, soloSolidos);
 }
 function mcSelForEachConAire(fn){
   const cajas = mc.selCajas; if(!cajas || !cajas.length) return;
@@ -15945,12 +16001,15 @@ function mcSelForEachConAire(fn){
     }
   }
 }
-// Reparte un id ya resuelto por los bloques SÓLIDOS de la caja. `yaHecha` es la celda que
+// Reparte un id ya resuelto por los bloques de la caja. `yaHecha` es la celda que
 // mcSelectFillPieza tuvo que escribir para resolver la clave: se suma al mismo gesto de historial.
-function mcSelectFillId(id, yaHecha){
+// `soloSolidos`: si es true, solo reemplaza los bloques sólidos (Shift+número); si no, rellena todo
+// incluido el aire (número a secas).
+function mcSelectFillId(id, yaHecha, soloSolidos){
   if(mc.tool !== 'select' || !mc.selBox || !id) return false;
   const celdas = [];
-  mcSelForEachConAire((x, y, z, before) => celdas.push([x, y, z, before]));
+  const iter = soloSolidos ? mcSelForEach : mcSelForEachConAire;
+  iter((x, y, z, before) => celdas.push([x, y, z, before]));
   if(!celdas.length){ toast('Nada que rellenar'); return true; }
   const edits = [];
   let desde = 0;
@@ -16043,6 +16102,7 @@ function mcSelExtruir(dir){
   // Con alguna escrita sí se mueve, aunque otras se hayan quedado sin sitio (tope del mundo, celda ocupada):
   // lo que el marco cian enseña es DÓNDE va la siguiente muesca, no cuántos bloques salieron.
   // REQ-SEL1: se mueven TODAS, cada una por su cuenta y a la vez — se extruyó dentro de todas.
+  mc._selCajasBeforeEdit = mc.selCajas.map(c=>({ a:c.a.slice(), b:c.b.slice() }));
   for(const s of mc.selCajas){
     const y0=Math.min(s.a[1],s.b[1]), y1=Math.max(s.a[1],s.b[1]);
     const alta = (s.a[1]>=s.b[1]) ? s.a : s.b;                                 // la esquina que lleva el techo
@@ -16194,6 +16254,7 @@ function mcRotaCajaEnSitio(s, acum, eje){
 const MC_SEL_EJE_NOMBRE={ y:'en planta', x:'de vuelco', z:'de lado' };
 function mcRotateSelBox(eje){
   if(!mc.selCajas.length) return false;
+  mc._selCajasBeforeEdit = mc.selCajas.map(c=>({ a:c.a.slice(), b:c.b.slice() }));
   const acum=new Map();
   const nuevas=mc.selCajas.map(s=>mcRotaCajaEnSitio(s, acum, eje));   // en orden: la 2ª ya ve lo que dejó la 1ª
   const edits=[];
@@ -18678,19 +18739,50 @@ function mcDibujaRecorte(cv, r){
   if(!cv) return;
   const cx=cv.getContext('2d'); cx.clearRect(0,0,cv.width,cv.height);
   if(!r || !r.cells || !r.cells.length) return;
-  const d=mcRecorteDim(r);
-  const p=Math.max(1, Math.floor(Math.min(cv.width/Math.max(1,d.w), cv.height/Math.max(1,d.h))));
-  const ox=Math.floor((cv.width-d.w*p)/2), oy=Math.floor((cv.height-d.h*p)/2);
-  const col=new Map();
-  // De atrás (dy grande) hacia delante: lo cercano tapa a lo lejano sin necesidad de z-buffer.
-  const cel=r.cells.slice().sort((a,b)=>b.dy-a.dy);
+
+  cx.imageSmoothingEnabled = false;
+  const d=typeof mcRecorteDim==='function' ? mcRecorteDim(r) : {w:1, d:1, h:1};
+  const w=Math.max(1, d.w), depth=Math.max(1, d.d);
+  const p=Math.max(1, Math.floor(Math.min(cv.width/w, cv.height/depth)));
+  const ox=Math.floor((cv.width-w*p)/2), oy=Math.floor((cv.height-depth*p)/2);
+
+  const texFaceImg = (val)=>{
+    const v=String(val);
+    if(v.slice(0,4)==='tex:'){
+      const key=v.slice(4);
+      if(typeof getTexFaces==='function'){
+        const fc=getTexFaces(key);
+        if(fc && fc.faces && fc.faces[0]) return { img:fc.faces[0], avg:fc.avg[0] };
+      }
+    }
+    return null;
+  };
+
+  // De abajo hacia arriba (dz menor a mayor) para que las capas superiores tapen a las inferiores
+  const cel=r.cells.slice().sort((a,b)=>a.dz-b.dz);
   for(const c of cel){
-    const v=String(c.c); let rgb=col.get(v);
-    if(rgb===undefined){ rgb=mcHexRGB(v.slice(0,4)==='tex:' ? texRepr(v.slice(4)) : v); col.set(v,rgb); }
-    // La profundidad oscurece: sin esto, una pared plana y un cubo macizo se ven exactamente igual.
-    const t=d.d>1 ? 0.55+0.45*(1-c.dy/(d.d-1)) : 1;
-    cx.fillStyle='rgb('+(rgb[0]*255*t|0)+','+(rgb[1]*255*t|0)+','+(rgb[2]*255*t|0)+')';
-    cx.fillRect(ox+c.dx*p, oy+(d.h-1-c.dz)*p, p, p);
+    const px=ox+c.dx*p, py=oy+c.dy*p;
+    const tf=texFaceImg(c.c);
+    if(tf && tf.img){
+      cx.drawImage(tf.img, px, py, p, p);
+    } else {
+      const colHex = (tf && tf.avg) || (typeof texRepr==='function' && String(c.c).startsWith('tex:') ? texRepr(String(c.c).slice(4)) : String(c.c));
+      const rgb = mcHexRGB(colHex);
+      cx.fillStyle = 'rgb('+(rgb[0]*255|0)+','+(rgb[1]*255|0)+','+(rgb[2]*255|0)+')';
+      cx.fillRect(px, py, p, p);
+    }
+    // Sombreado de relieve según altura (dz)
+    if(d.h>1){
+      const t=0.82 + 0.18*(c.dz/(d.h-1));
+      if(t<0.98){
+        cx.fillStyle='rgba(0,0,0,'+(1-t).toFixed(2)+')';
+        cx.fillRect(px, py, p, p);
+      }
+    }
+    if(p>=8){
+      cx.strokeStyle='rgba(0,0,0,0.12)';
+      cx.strokeRect(px+0.5, py+0.5, p-1, p-1);
+    }
   }
 }
 // La ranura 11. Como la de herramienta (ranura 10), va FUERA del bucle de las nueve: no tiene `mc.hotbar`
@@ -20825,6 +20917,26 @@ Object.defineProperty(game,'uvInset',{ enumerable:true, get:()=>mc.uvInset||0,
 });
 Object.defineProperty(game,'texInset',{ enumerable:true, get:()=>game.uvInset, set:v=>game.uvInset=v });
 
+// game.temblorCaida (REQ-FX1) = temblor de cámara al caer desde alto (≥15 bloques).
+game.temblorCaida = {
+  get alturaMin(){ return mc.shakeCaida.alturaMin; },
+  set alturaMin(v){ mc.shakeCaida.alturaMin = Math.max(1, +v || 15); },
+  get amplitud(){ return mc.shakeCaida.amplitud; },
+  set amplitud(v){ mc.shakeCaida.amplitud = Math.max(0.001, +v || 0.03); },
+  get duracion(){ return mc.shakeCaida.duracion; },
+  set duracion(v){ mc.shakeCaida.duracion = Math.max(0.05, +v || 0.5); },
+  get frecuencia(){ return mc.shakeCaida.frecuencia; },
+  set frecuencia(v){ mc.shakeCaida.frecuencia = Math.max(1, +v || 9); },
+  disparar(fuerza = 1.0){
+    mc.shakeCaida.tiempo = performance.now();
+    mc.shakeCaida.fuerza = fuerza;
+    return 'Temblor disparado con fuerza ' + fuerza;
+  },
+  estado(){
+    return 'REQ-FX1: activo [alturaMin=' + mc.shakeCaida.alturaMin + ', amp=' + mc.shakeCaida.amplitud + ', dur=' + mc.shakeCaida.duracion + 's, freq=' + mc.shakeCaida.frecuencia + 'Hz]';
+  }
+};
+
 // game.showTool (REQ-HELDTOOL) = visualización de la herramienta en primera persona.
 // El pivote de agarre viene del marcador "1" dibujado en el editor 2D/3D con la herramienta 📍.
 // Tunables disponibles: pos, rot, scale, bob, debug.
@@ -21483,6 +21595,14 @@ document.addEventListener('mousemove',e=>{
   if(mc.hbTarget===0 && Math.hypot(mc.vel[0],mc.vel[2])<0.6 && (Math.abs(e.movementX)+Math.abs(e.movementY))>1) mcRevealHotbar();
 });
 window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden || mcRecortesAbierta() || !$('#mc-note').hidden || snipTapaElMundo() || !$('#ag-modal').hidden || (e.target && e.target.matches && e.target.matches('input,select,textarea'))) return;   // selector/editor de nota/código/agentes abierto ⇒ no mover/seleccionar (dividido NO tapa: manda el foco)
+  // Shift+número con Seleccionar y caja confirmada: reemplaza solo los bloques sólidos de la
+  // selección (sin tocar el aire). e.code porque en teclado español Shift+1 = '!' en e.key.
+  if(e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey){
+    const dm=/^Digit([1-9])$/.exec(e.code);
+    if(dm){ const i=+dm[1]-1;
+      if(i<mc.hotbar.length){ mc.sel=i; mcSelectSlot(); mcSelectFill(i, true); }
+      e.preventDefault(); return; }
+  }
   if(/^[1-9]$/.test(e.key)){ const i=+e.key-1;
     // Alt+número: abre el selector de esa ranura (sin Esc+clic derecho); si no, selecciona la ranura.
     // Con la herramienta Seleccionar y una caja marcada, ADEMÁS reemplaza lo seleccionado por ese
@@ -22448,6 +22568,16 @@ $('#mc-canvas').addEventListener('wheel',e=>{
   // Era Shift+rueda hasta el 2026-08-20, cuando el dueño lo pidió en Ctrl (Shift se le quedó para añadir
   // cajas a la selección, REQ-SEL1). Ojo: Ctrl+rueda es el ZOOM del navegador, así que se le corta el
   // paso a cualquier Ctrl+rueda dentro del Mundo aunque no toque extruir — el mapa se iría de escala.
+  // Si hay esquina A fijada (1 clic) pero aún no caja confirmada, Ctrl+rueda auto-confirma la caja con el bloque apuntado como B
+  if(e.ctrlKey && mc.tool==='select' && mc.selA && !mc.selBox){
+    const near = mcRaycast();
+    const b = (near && near.cell[1] >= 0) ? near.cell.slice() : mc.selA.slice();
+    const caja = { a: mc.selA.slice(), b };
+    if(mc.selSuma) mc.selCajas.push(caja); else mc.selBox = caja;
+    mc.selA = null; mc.selSuma = false;
+    const n = mcSelCount();
+    toast(n + ' bloque(s) — auto-selección · Ctrl+rueda extruye/cava');
+  }
   const extru = e.ctrlKey && mc.tool==='select' && !!mc.selBox;
   if(e.ctrlKey){ e.preventDefault(); if(mc.selCtrlHeld) mc.selCtrlUsado = true; }   // este Ctrl ya tiene dueño: al soltarlo no fija agarre
   if(!extru && !mc.ruedaTool) return;
@@ -22530,3 +22660,5 @@ else {
     .catch(e=>console.warn(MC_EDITOR_AUTOARRANQUE+': '+(e && e.message ? e.message : e)))
     .then(()=>{ if(!mc._navegando) mcDestapaApp(); });   // se quedó: el editor, ahora sí, entero
 }
+
+

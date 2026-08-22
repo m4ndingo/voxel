@@ -44,7 +44,7 @@ PASO_ATRIL = 2          # atril + pasillo: un atril de 1×1 cada 2 de rejilla
 ALTO_PLANTA = 4         # forjado de ladrillo_piedra cada 4 ⇒ una planta por `####`
 ALTO_PUERTA = 2
 ANCHO_CALLE = 3         # adoquín entre parcelas (###)
-ANCHO_CANAL = 3         # agua entre barrios (##)
+ANCHO_CANAL = 5         # agua entre barrios (##) - separación de islas
 ANCHO_MAR = 3           # marco de agua alrededor de la isla, que la vuelta recorta primero
 
 DIMS = (96, 128, 192, 256, 384, 512, 768, 1024)   # escalones de lado; se elige el menor que quepa

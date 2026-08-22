@@ -18,6 +18,11 @@ import array
 import os
 import sys
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ciudad_comun as C                                          # noqa: E402
 from ciudad_comun import voxfmt                                   # noqa: E402

@@ -166,14 +166,10 @@ Botón = **bloque con una nota**, identificado **por su texto** ⇒ una pantalla
 
 ## 🔒 Luz y sombra — CANDADO → [`wiki/paginas/ley-de-la-luz.md`](wiki/paginas/ley-de-la-luz.md)
 
-⛔ **NO SE TOCA LA ILUMINACIÓN DEL MOTOR SIN HABER ENTENDIDO ANTES LA LEY DE LA LUZ** (orden del
-dueño, 2026-08-20). Se lee **entera** (10 mandamientos + 8 leyes + Sótano) y se **cita el artículo**
-que se aplica. Dueño: «la iluminación debe ser real y consistente para todo el motor; **no puede haber
-apaños o trucos** para quedar bien». Corolario: si algo se ve mal **no es «un bug raro»** — es que algo
-infringe un artículo, y el documento dice cuál. Implementación → [`docs/luz-y-sombra.md`](docs/luz-y-sombra.md).
-
-**2 sombras distintas, confundirlas ES el bug**: **skylight** (`mc.light`, horneado al mallar) vs
-**sombra proyectada del sol** (mapa de sombra en GPU).
+⛔ **NO SE TOCA LA ILUMINACIÓN SIN ENTENDER LA LEY DE LA LUZ** (orden del dueño, 2026-08-20). Se lee
+**entera** (10 mandamientos + 8 leyes + Sótano) y se **cita el artículo**. Dueño: «iluminación real y
+consistente; **cero apaños**». Si algo se ve mal infringe un artículo. Detalle → [`docs/luz-y-sombra.md`](docs/luz-y-sombra.md).
+**2 sombras distintas**: **skylight** (`mc.light`, horneado) vs **sombra proyectada** (GPU).
 
 ## Redstone → [`docs/redstone.md`](docs/redstone.md)
 

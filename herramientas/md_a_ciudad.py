@@ -15,7 +15,13 @@ lo que impide que se desincronicen.
 import argparse
 import hashlib
 import os
+import re
 import sys
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ciudad_comun as C                                          # noqa: E402
@@ -83,6 +89,16 @@ def compone(barrios_bloques, fidelidad):
             # cuente algo desde el aire. La vuelta la ignora por completo.
             peso = sum(len(b.texto) for p in plantas_bl for b in p)
             alto = min(MAX_PLANTAS_DERIVADAS, 1 + peso // BYTES_POR_PLANTA)
+            # Altura base mínima según el tipo de sección / barrio
+            texto_todo = ''.join(b.texto for p in plantas_bl for b in p)
+            if re.search(r'redstone', texto_todo, re.I):
+                alto = max(alto, 4)
+            elif re.search(r'rendimiento|perf', texto_todo, re.I):
+                alto = max(alto, 3)
+            elif re.search(r'bug|fallo', texto_todo, re.I):
+                alto = max(alto, 2)
+            elif re.search(r'req|requerimiento|mejora', texto_todo, re.I):
+                alto = max(alto, 2)
             while len(plantas) < alto:
                 plantas.append(Planta([]))
             edificios.append(Edificio(plantas, cab.estado if cab else '',
@@ -103,7 +119,78 @@ def compone(barrios_bloques, fidelidad):
     return barrios, W, H
 
 
-# ---------------------------------------------------------------- pintar
+# Tinte del cartel según tipo de ticket (coincidente con colores de post-it / paleta de carteles):
+#   BUG  -> Rosa / Rojo claro (#ffb3c1)
+#   REQ  -> Amarillo / Dorado (#ffe066)
+#   PERF -> Naranja (#ffc078)
+#   DOC  -> Azul (#8fd3ff)
+#   AG / OTRO -> Violeta (#d0bfff)
+TINTES_TICKET = {
+    'BUG': '#ffb3c1',
+    'REQ': '#ffe066',
+    'PERF': '#ffc078',
+    'DOC': '#8fd3ff',
+    'AG': '#d0bfff',
+    'SNP': '#d0bfff',
+    'TOOL': '#ffe066',
+}
+
+RE_TICKET_TIPO = re.compile(r'\b(BUG|REQ|PERF|DOC|AG|SNP|TOOL)-[A-Z0-9]+\b')
+
+def tinte_de_texto(texto):
+    """Devuelve el tinte hex del cartel si el texto contiene un ID de ticket, o None."""
+    m = RE_TICKET_TIPO.search(texto)
+    if m:
+        tipo = m.group(1)
+        return TINTES_TICKET.get(tipo, '#ffe066')
+    return None
+
+
+# Temas visuales de cada isla según el título de la sección:
+#   jardín: material decorativo de la superficie del lote / parque
+#   muro: material de las paredes de edificios
+#   roca/tierra: cimientos
+#   dy: elevación del terreno por encima o por debajo del estándar (y=GH)
+TEMAS_ISLA = [
+    # (regex_coincidencia, dict_tema)
+    (re.compile(r'plaza|# plan', re.I),
+     {'jardin': C.SUELO_HIERBA, 'muro': C.mat('arenisca'), 'dy': 0, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.SUELO_TIERRA}),
+    (re.compile(r'base disponible|precedente', re.I),
+     {'jardin': C.mat('musgo_adoquin'), 'muro': C.mat('ladrillo_piedra'), 'dy': 1, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.SUELO_TIERRA}),
+    (re.compile(r'decisiones|invariante', re.I),
+     {'jardin': C.mat('arena'), 'muro': C.mat('arenisca'), 'dy': 2, 'cimientos_roca': C.mat('arenisca'), 'cimientos_tierra': C.mat('arena')}),
+    (re.compile(r'fases', re.I),
+     {'jardin': C.SUELO_HIERBA, 'muro': C.mat('madera'), 'dy': 1, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.SUELO_TIERRA}),
+    (re.compile(r'índice|indice', re.I),
+     {'jardin': C.mat('tablones'), 'muro': C.mat('tronco'), 'dy': 0, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.mat('madera')}),
+    (re.compile(r'cerrado|archivo', re.I),
+     {'jardin': C.mat('grava'), 'muro': C.mat('obsidiana'), 'dy': -2, 'cimientos_roca': C.mat('obsidiana'), 'cimientos_tierra': C.SUELO_ROCA}),
+    (re.compile(r'bug|error|fallo', re.I),
+     {'jardin': C.mat('red_concrete'), 'muro': C.mat('ladrillo'), 'dy': 3, 'cimientos_roca': C.mat('obsidiana'), 'cimientos_tierra': C.mat('red_concrete')}),
+    (re.compile(r'req|requerimiento|mejora|feature', re.I),
+     {'jardin': C.mat('yellow'), 'muro': C.mat('arenisca'), 'dy': 2, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.mat('yellow')}),
+    (re.compile(r'backlog|ola', re.I),
+     {'jardin': C.mat('musgo_adoquin'), 'muro': C.mat('madera'), 'dy': -1, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.SUELO_TIERRA}),
+    (re.compile(r'redstone', re.I),
+     {'jardin': C.mat('red_concrete'), 'muro': C.mat('ladrillo_piedra'), 'dy': 4, 'cimientos_roca': C.mat('obsidiana'), 'cimientos_tierra': C.mat('red_concrete')}),
+    (re.compile(r'rendimiento|perf', re.I),
+     {'jardin': C.mat('obsidiana'), 'muro': C.mat('ladrillo_piedra'), 'dy': 3, 'cimientos_roca': C.mat('obsidiana'), 'cimientos_tierra': C.SUELO_ROCA}),
+    (re.compile(r'bitácora|bitacora', re.I),
+     {'jardin': C.mat('tablones'), 'muro': C.mat('madera'), 'dy': 0, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.SUELO_TIERRA}),
+]
+
+TEMA_DEFECTO = {'jardin': C.SUELO_HIERBA, 'muro': C.MURO, 'dy': 0, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.SUELO_TIERRA}
+
+def tema_de_barrio(b):
+    """Obtiene el tema visual según el texto del encabezado del barrio."""
+    texto_cab = ''
+    if b.edificios and b.edificios[0].plantas and b.edificios[0].plantas[0].atriles:
+        texto_cab = b.edificios[0].plantas[0].atriles[0]
+    for rx, tema in TEMAS_ISLA:
+        if rx.search(texto_cab):
+            return tema
+    return TEMA_DEFECTO
+
 
 class Lienzo(object):
     """Dict disperso {"x,y,z": "tex:<clave>"}. Lo densifica voxfmt.desde_v1, que ya existe."""
@@ -111,6 +198,7 @@ class Lienzo(object):
     def __init__(self):
         self.vox = {}
         self.notes = {}
+        self.noteTints = {}
 
     def set(self, x, y, z, clave):
         self.vox['%d,%d,%d' % (x, y, z)] = 'tex:' + clave
@@ -123,36 +211,63 @@ class Lienzo(object):
             for x in range(x0, x0 + w):
                 self.set(x, y, z, clave)
 
-    def nota(self, x, y, z, texto):
+    def nota(self, x, y, z, texto, tinte=None):
         self.set(x, y, z, C.ATRIL)
-        self.notes['%d,%d,%d' % (x, y, z)] = texto
+        k = '%d,%d,%d' % (x, y, z)
+        self.notes[k] = texto
+        tin = tinte or tinte_de_texto(texto)
+        if tin:
+            self.noteTints[k] = tin
 
 
-def pinta_terreno(li, W, H, ox, oz):
-    """Roca, tierra y el mar. La capa y=GH la reescriben luego barrios y parcelas."""
-    for y in range(0, C.GH):
-        clave = C.SUELO_ROCA if y < 11 else C.SUELO_TIERRA
-        li.caja(ox, oz, W, H, y, clave)
+def pinta_terreno(li, W, H, ox, oz, barrios):
+    """Roca y tierra sólo bajo cada barrio (islas independientes) con materiales según temática."""
     li.caja(ox, oz, W, H, C.GH, C.SEP_MAR)                # todo hueco del nivel isla ES mar
+    for b in barrios:
+        tema = tema_de_barrio(b)
+        bx, bz = ox + b.x, oz + b.z
+        c_roca = tema['cimientos_roca']
+        c_tierra = tema['cimientos_tierra']
+        for y in range(0, C.GH):
+            clave = c_roca if y < 11 else c_tierra
+            li.caja(bx, bz, b.w, b.h, y, clave)
+        li.caja(bx, bz, b.w, b.h, C.GH, C.SEP_PARCELA)    # suelo de adoquín portador en y=GH
 
 
-def pinta_edificio(li, e, ox, oz):
-    """Parcela + edificio + atriles. La parcela es el edificio con 1 de jardín alrededor."""
-    li.caja(ox, oz, e.w, e.h, C.GH, C.SUELO_HIERBA)       # jardín
+def pinta_edificio(li, e, ox, oz, tema=None):
+    """Parcela + edificio + atriles con jardín y muros según el tema de la isla y altura de planta."""
+    tema = tema or TEMA_DEFECTO
+    mat_jardin = tema['jardin']
+    mat_muro = tema['muro']
+
+    # La capa y=GH es la PORTADORA (jardín de la parcela + forjado del edificio)
+    li.caja(ox, oz, e.w, e.h, C.GH, mat_jardin)           # jardín del tema
     ex, ez = ox + 1, oz + 1                               # esquina del edificio
     ew, eh = e.iw + 2, e.ih + 2
     li.caja(ex, ez, ew, eh, C.GH, C.ATRIL)                # forjado de planta baja
+
+    total_atriles = sum(len(p.atriles) for p in e.plantas)
+
+    # Si sólo hay 1 cartel en todo el edificio (común en esqueleto/secciones cortas),
+    # no creamos un edificio hueco con muros y tejado: se pone al aire libre como monumento/atril abierto.
+    if total_atriles <= 1:
+        for k, planta in enumerate(e.plantas):
+            base = C.GH + C.ALTO_PLANTA * k
+            for i, texto in enumerate(planta.atriles):
+                dx, dz = C.pos_atril(i)
+                li.nota(ex + 1 + dx, base + 1, ez + 1 + dz, texto)
+        return
 
     n = len(e.plantas)
     for k, planta in enumerate(e.plantas):
         base = C.GH + C.ALTO_PLANTA * k
         for y in range(base + 1, base + C.ALTO_PLANTA):   # muros de la planta
             for x in range(ex, ex + ew):
-                li.set(x, y, ez, C.MURO)
-                li.set(x, y, ez + eh - 1, C.MURO)
+                li.set(x, y, ez, mat_muro)
+                li.set(x, y, ez + eh - 1, mat_muro)
             for z in range(ez, ez + eh):
-                li.set(ex, y, z, C.MURO)
-                li.set(ex + ew - 1, y, z, C.MURO)
+                li.set(ex, y, z, mat_muro)
+                li.set(ex + ew - 1, y, z, mat_muro)
         # techo: los de en medio son forjado (PORTADOR: separan plantas); el de arriba, tejado
         techo = C.SEP_PLANTA if k < n - 1 else C.TEJADOS.get(e.estado, C.TEJADOS[''])
         li.caja(ex, ez, ew, eh, base + C.ALTO_PLANTA, techo)
@@ -217,13 +332,13 @@ def pinta(barrios, W, H, dim, enlaces):
     li = Lienzo()
     ox = (dim[0] - W) // 2
     oz = (dim[2] - H) // 2
-    pinta_terreno(li, W, H, ox, oz)
+    pinta_terreno(li, W, H, ox, oz, barrios)
     puertas = {}
     for b in barrios:
+        tema = tema_de_barrio(b)
         bx, bz = ox + b.x, oz + b.z
-        li.caja(bx, bz, b.w, b.h, C.GH, C.SEP_PARCELA)    # todo hueco del barrio ES calle
         for e in b.edificios:
-            pinta_edificio(li, e, bx + e.x, bz + e.z)
+            pinta_edificio(li, e, bx + e.x, bz + e.z, tema)
             if e.ancla:
                 puertas[e.ancla] = puerta_de(li, e, bx + e.x, bz + e.z)
     n_sendero = pinta_senderos(li, puertas, barrios, ox, oz) if enlaces == 'carreteras' else 0
@@ -345,7 +460,7 @@ def main(argv=None):
            'dim': {'x': dim[0], 'y': dim[1], 'z': dim[2]},
            'spawn': {'x': puerta_x + 0.5, 'y': C.GH + 1.0, 'z': puerta_z + 0.5},
            'voxels': li.vox, 'structures': [], 'notes': li.notes,
-           'noteRots': {}, 'noteTints': {}}
+           'noteRots': {}, 'noteTints': li.noteTints}
     par = voxfmt.desde_v1(doc)
     if not par:
         print('  ⛔ voxfmt ha rechazado el mundo')
