@@ -17,8 +17,11 @@ data/*
 # data/habitantes/ es el almacén de runtime de creaciones del usuario (los modelos públicos viven en assets/)
 data/habitantes/
 data/habitantes_trash/
-data/worlds/
+# data/worlds/ almacén de mapas
+!data/worlds/
+data/worlds/*
 !data/worlds/voxelforge.*
+!data/worlds/santuario_zen.*
 *.log
 
 # Playwright: lo usan los 112 tests de navegador (abren el Mundo en un Chromium de verdad, así que

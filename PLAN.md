@@ -46,6 +46,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-TOOL9](#-req-tool9) | poder **elegir qué herramientas entran con `e` y cuáles con `E`** desde el editor (primarias / secundarias) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «cambiar el orden de las herramientas empieza a ser algo habitual». Redactado, sin investigar | 
 | [REQ-CART7](#-req-cart7) | poder **elegir el tipo de cartel** de una nota desde su editor, con los carteles definidos en un sitio | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Él mismo propone la puerta: categoría **«Cartel de Notas»** en la galería. Encaja con que los carteles ya **se derivan** de `mc.notes` y no viven en `mundo.json` ([BUG-CART1](PLAN_ARCHIVO.md#-bug-cart1)) | 
 | [REQ-PROP1](#-req-prop1) | sección **Propuestas (uploads/proposals)** en la galería: subir assets comunitarios, votar, comentar y visualizar | ⛔ bloqueado / 🔴 abierto 2026-08-23 | Petición del dueño para subir assets sin requerir token y que la comunidad los valore/vote/comente. **Bloqueado parcialmente**: la atribución de autor requiere autenticación/identificación multiusuario ([REQ-MULTI1](#-req-multi1)). Redactado con desglose de fases | 
+| [REQ-ART1](#-req-art1) | mapas temáticos de **Showcase Artístico & Atmósfera** con snippets de configuración dinámica (Santuario, Cueva, Cyberpunk) | 🟢 abierto 2026-08-23 | 3 mapas (`/map/santuario_zen`, `/map/cueva_ancestral`, `/map/neon_city`) con sus snippets `mundo-<mapa>` que configuran iluminación, reflejos, partículas, OSD y cámaras cinematográficas | 
 
 ---
 
@@ -447,6 +448,64 @@ Permitir a usuarios sin token de administrador proponer y compartir modelos/asse
 - La galería cuenta con un filtro/sección visible de Propuestas.
 - Un usuario sin token puede subir un modelo a Propuestas desde el editor.
 - Los usuarios pueden visualizar los modelos propuestos en 3D, votar y dejar comentarios.
+
+---
+
+<a id="-req-art1"></a>
+
+### 🟢 REQ-ART1 · Mapas Temáticos de Showcase Artístico & Atmósfera Dinámica — 🟢 abierto 2026-08-23
+
+**Petición del dueño (2026-08-23):**
+> «generes un plan para los 3 conceptos, cada uno tendra su propio mapa y snippets de arranque para configurar la escena, atmosfera, animaciones, etc. que sea parte del desarrollo, queremos ir haciendo estos conceptos cada vez mas afinados y refinados a medida que avance el desarrollo de voxelforge»
+
+**Propósito:**
+Tener 3 mapas showcase permanentes y versionados, acompañados de sus respectivos snippets de arranque (`mundo-<mapa>`), que expriman las características visuales avanzadas de VoxelForge (reflejos en agua en tiempo real, shaders de iluminación emisiva, partículas dinámicas, niebla volumétrica y contrastes de penumbra `interiorDark`). Estos mapas sirven tanto para material audiovisual de alta calidad (r/VoxelArt, Twitter/X, Reddit) como para pruebas de regresión visual en nuevos desarrollos.
+
+---
+
+### Desglose de los 3 Conceptos y Arquitectura de Mapas:
+
+#### 🏯 Mapa 1: `/map/santuario_zen` (Santuario del Lago / Isla Flotante Nocturna)
+- **Foco Visual**: Reflejos en agua en tiempo real ([REQ-ENV5](PLAN_ARCHIVO.md#-req-env5)), partículas flotantes suaves y contrastes de luz cálida contra el atardecer/noche.
+- **Estructuras**: Santuario/pagoda oriental sobre un lago con cerezos (`cerezo`), linternas colgantes emisivas y puente de madera curvo.
+- **Snippet `mundo-santuario-zen`**:
+  - `await game.snippet("ambientes");` + `await game.snippet("efectos-demo");`
+  - Preset: `game.entorno("ATARDECER", 0.8)` o `"NOCHE"`.
+  - Reflejos: `game.reflejoEntorno = true; game.reflejoOndas = true; game.reflejoPlanoY = <nivelAgua>;`
+  - Partículas: Luciérnagas / brasas flotantes (`game.efectos.estrellas.enciende()`).
+  - Modo Cinemático: atajo de cámara lenta / rotación orbital suave para capturas de vídeo.
+
+#### 🪨 Mapa 2: `/map/cueva_ancestral` (Templo Subterráneo con Haz de Luz)
+- **Foco Visual**: Oclusión ambiental extrema (`game.interiorDark = 0.03`), enfoque y haz de luz direccional (`game.glowFocus = 0.85`), contraste de claroscuro y cascadas de agua en penumbra.
+- **Estructuras**: Caverna profunda con una claraboya cenital natural en el techo, pilares de piedra derruidos con musgo, altar central y estanque inferior.
+- **Snippet `mundo-cueva-ancestral`**:
+  - `game.interiorDark = 0.05;`
+  - `game.glowLevel = 15; game.glowFocus = 0.8;`
+  - Efecto de niebla/polvo subterráneo y gotas/humedad.
+  - Alumbrado dinámico con la antorcha o espada de luz en mano del jugador que corta la oscuridad.
+
+#### 🏙️ Mapa 3: `/map/neon_city` (Ciudad Cyberpunk Bajo la Lluvia)
+- **Foco Visual**: Clima adverso (`TORMENTA`), lluvia física con salpicaduras en el suelo, asfalto mojado reflectante y saturación de emisivos multicolor (cian, magenta, amarillo).
+- **Estructuras**: Callejón estrecho de rascacielos con bloques de hormigón arquitectónico, carteles luminosos, ventanas iluminadas y tuberías metálicas.
+- **Snippet `mundo-neon-city`**:
+  - `game.entorno("TORMENTA", 0);`
+  - Lluvia continua: `game.efectos.lluvia.enciende(160);`
+  - Reflejo especular en charcos y asfalto: `game.reflejoEntorno = true;`
+  - Iluminación emisiva urbana densa.
+
+---
+
+### Fases de Implementación del Plan:
+
+1. **Fase 1 · Estructura de Mapas y Snippets Base (Skeleton)**:
+   - Crear los 3 mapas base con sus dimensiones y spawn calibrado en `data/worlds/`.
+   - Crear los 3 snippets de autoarranque: `data/snippets/mundo-santuario-zen.json`, `data/snippets/mundo-cueva-ancestral.json`, `data/snippets/mundo-neon-city.json`.
+2. **Fase 2 · Modelado y Composición de Escenas**:
+   - Construir la volumetría de cada mapa usando los assets oficiales (`cerezo`, `roble`, `agua`, `farol`, `ladrillo_piedra`, `hormigon`, etc.) y la herramienta de selección.
+3. **Fase 3 · Calibración de Luces, Atmósfera y Menú OSD de Director**:
+   - Añadir un menú OSD en cada mapa (tecla `O`) para alternar presets de hora, intensidad de lluvia/partículas, pausar animaciones o activar pase de cámara cinematográfica para grabación (Alt+V).
+4. **Fase 4 · Refinamiento Continuo**:
+   - Actualizar los mapas a medida que se incorporen nuevas características al motor (sombras proyectadas, nuevos emisivos, reflejos mejorados).
 
 ---
 

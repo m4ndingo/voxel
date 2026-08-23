@@ -1,0 +1,130 @@
+{
+  "format": "voxelworld-2",
+  "dim": {
+    "x": 96,
+    "y": 40,
+    "z": 96
+  },
+  "spawn": {
+    "x": 48,
+    "y": 15,
+    "z": 12
+  },
+  "palette": [
+    null,
+    "asset:assets/agua.vox.json",
+    "asset:assets/hierba.vox.json",
+    "asset:assets/tierra.vox.json",
+    "asset:assets/roca.vox.json",
+    "asset:assets/ladrillo_piedra.vox.json",
+    "asset:assets/adoquin.vox.json",
+    "asset:assets/tablones.vox.json",
+    "asset:assets/madera.vox.json",
+    "asset:assets/tejado.vox.json",
+    "asset:assets/oro.vox.json",
+    "asset:assets/arena.vox.json"
+  ],
+  "structures": [
+    {
+      "key": "asset:assets/antorcha.vox.json",
+      "x": 42,
+      "y": 15,
+      "z": 43,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/antorcha.vox.json",
+      "x": 42,
+      "y": 15,
+      "z": 53,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/antorcha.vox.json",
+      "x": 54,
+      "y": 15,
+      "z": 43,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/antorcha.vox.json",
+      "x": 54,
+      "y": 15,
+      "z": 53,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/antorcha.vox.json",
+      "x": 46,
+      "y": 12,
+      "z": 16,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/antorcha.vox.json",
+      "x": 50,
+      "y": 12,
+      "z": 16,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/antorcha.vox.json",
+      "x": 46,
+      "y": 14,
+      "z": 26,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/antorcha.vox.json",
+      "x": 50,
+      "y": 14,
+      "z": 26,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 34,
+      "y": 13,
+      "z": 40,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 60,
+      "y": 13,
+      "z": 42,
+      "rot": 1
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 36,
+      "y": 13,
+      "z": 56,
+      "rot": 2
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 58,
+      "y": 13,
+      "z": 58,
+      "rot": 3
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 38,
+      "y": 13,
+      "z": 8,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 58,
+      "y": 13,
+      "z": 8,
+      "rot": 1
+    }
+  ],
+  "notes": [],
+  "noteRots": [],
+  "noteTints": []
+}

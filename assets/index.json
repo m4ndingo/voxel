@@ -2131,5 +2131,18 @@
     "count": 52,
     "categoria": "herramienta",
     "herramienta": "select"
+  },
+  {
+    "id": "cerezo",
+    "name": "Cerezo en Flor",
+    "role": "Árbol oriental · flor de cerezo (sakura)",
+    "type": "objeto",
+    "icon": "🌸",
+    "size": 32,
+    "file": "assets/cerezo.vox.json",
+    "group": "Naturaleza",
+    "savedAt": "2026-08-23T18:00:00",
+    "createdAt": "2026-08-23T18:00:00",
+    "count": 2165
   }
 ]
