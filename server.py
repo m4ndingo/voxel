@@ -715,26 +715,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if path_only == '/favicon.ico':
             self.path = '/data/ui/favicon-32.png'
             return super().do_GET()
-        if path_only == '/assets/index.json':
-            idx_path = os.path.join(BASE, 'assets', 'index.json')
-            if os.path.exists(idx_path):
-                try:
-                    with open(idx_path, 'r', encoding='utf-8') as f:
-                        idx = json.load(f)
-                    valid_idx = []
-                    changed = False
-                    for item in idx:
-                        rel = item.get('file', '')
-                        if rel and os.path.exists(os.path.join(BASE, rel)):
-                            changed |= completar_fechas_asset(item, os.path.join(BASE, rel))
-                            valid_idx.append(item)
-                        else:
-                            changed = True
-                    if changed:
-                        atomic_dump(valid_idx, idx_path)
-                    return self._send(200, valid_idx)
-                except Exception:
-                    pass
+        if path_only in ('/assets/index.json', '/api/assets'):
+            return self._send(200, list_assets_auto())
         # /map y /map/ (sin nombre) = listado de mundos; /map/<nombre> = la SPA con ese mundo.
         if path_only in ('/map', '/map/'):
             self.path = '/mapas.html'

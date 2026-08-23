@@ -2414,5 +2414,85 @@
     "createdAt": "2026-08-23T18:30:00",
     "count": 3428,
     "description": "Roble — árbol voxel 32³ (MOCK, aún no es asset)."
+  },
+  {
+    "id": "bambu",
+    "name": "Caña de Bambú",
+    "role": "Vegetación · caña de bambú vertical zen",
+    "icon": "🎋",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/bambu.vox.json",
+    "savedAt": "2026-08-23T19:11:20",
+    "createdAt": "2026-08-23T19:11:20",
+    "count": 76,
+    "categoria": "naturaleza",
+    "alias": "bambu",
+    "description": "Caña de bambú verde esbelta que crece vertical hacia arriba."
+  },
+  {
+    "id": "flor-azul",
+    "name": "Lirio azul zen",
+    "role": "Flor · lirio azul / loto silvestre",
+    "icon": "🪻",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 15,
+      "z": 8
+    },
+    "file": "assets/flor-azul.vox.json",
+    "savedAt": "2026-08-23T19:11:20",
+    "createdAt": "2026-08-23T19:11:20",
+    "count": 52,
+    "categoria": "naturaleza",
+    "alias": "lirio_azul",
+    "description": "Flor de lirio azul y violeta silvestre para orillas y jardines zen."
+  },
+  {
+    "id": "flor-blanca",
+    "name": "Flor blanca zen",
+    "role": "Flor · loto blanco / jazmín silvestre",
+    "icon": "💮",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 15,
+      "z": 8
+    },
+    "file": "assets/flor-blanca.vox.json",
+    "savedAt": "2026-08-23T19:11:20",
+    "createdAt": "2026-08-23T19:11:20",
+    "count": 52,
+    "categoria": "naturaleza",
+    "alias": "flor_blanca",
+    "description": "Flor silvestre blanca para jardines sagrados."
+  },
+  {
+    "id": "hojas_sakura",
+    "name": "Hojas de Sakura",
+    "role": "Bloque · flor de cerezo rosa (sakura leaves)",
+    "icon": "🌸",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hojas_sakura.vox.json",
+    "savedAt": "2026-08-23T19:11:20",
+    "createdAt": "2026-08-23T19:11:20",
+    "count": 1548,
+    "categoria": "naturaleza",
+    "alias": "sakura_leaves",
+    "description": "Follaje translúcido de flor de cerezo rosa con la misma estructura y transparencia que leaves."
   }
 ]
