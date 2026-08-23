@@ -2,7 +2,7 @@
   "format": "voxelworld-2",
   "dim": {
     "x": 96,
-    "y": 44,
+    "y": 48,
     "z": 96
   },
   "spawn": {
@@ -24,59 +24,10 @@
     "asset:assets/oro.vox.json",
     "asset:assets/arena.vox.json",
     "asset:assets/red_concrete.vox.json",
-    "asset:assets/leaves.vox.json",
+    "asset:assets/hojas_sakura.vox.json",
     "asset:assets/valla-madera.vox.json"
   ],
   "structures": [
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 4,
-      "y": 13,
-      "z": 18,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 44,
-      "y": 13,
-      "z": 18,
-      "rot": 1
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 2,
-      "y": 13,
-      "z": 40,
-      "rot": 2
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 46,
-      "y": 13,
-      "z": 40,
-      "rot": 3
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 24,
-      "y": 14,
-      "z": 52,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 2,
-      "y": 13,
-      "z": -14,
-      "rot": 1
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 46,
-      "y": 13,
-      "z": -14,
-      "rot": 2
-    },
     {
       "key": "asset:assets/farolillo-zen.vox.json",
       "x": 40,
