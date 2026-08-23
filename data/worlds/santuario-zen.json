@@ -30,73 +30,52 @@
   "structures": [
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 31,
+      "x": 4,
       "y": 13,
-      "z": 44,
+      "z": 18,
       "rot": 0
     },
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 65,
+      "x": 44,
       "y": 13,
-      "z": 46,
+      "z": 18,
       "rot": 1
     },
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 33,
+      "x": 2,
       "y": 13,
-      "z": 62,
+      "z": 40,
       "rot": 2
     },
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 63,
+      "x": 46,
       "y": 13,
-      "z": 64,
-      "rot": 3
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 48,
-      "y": 14,
-      "z": 71,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 35,
-      "y": 13,
-      "z": 11,
-      "rot": 1
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 61,
-      "y": 13,
-      "z": 11,
-      "rot": 2
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 48,
-      "y": 13,
-      "z": 6,
+      "z": 40,
       "rot": 3
     },
     {
       "key": "asset:assets/cerezo.vox.json",
       "x": 24,
-      "y": 12,
-      "z": 14,
+      "y": 14,
+      "z": 52,
       "rot": 0
     },
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 72,
-      "y": 12,
-      "z": 14,
+      "x": 2,
+      "y": 13,
+      "z": -14,
       "rot": 1
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 46,
+      "y": 13,
+      "z": -14,
+      "rot": 2
     },
     {
       "key": "asset:assets/farolillo-zen.vox.json",
