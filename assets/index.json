@@ -2144,5 +2144,23 @@
     "savedAt": "2026-08-23T18:00:00",
     "createdAt": "2026-08-23T18:00:00",
     "count": 2165
+  },
+  {
+    "id": "farolillo-zen",
+    "name": "Farolillo Zen",
+    "role": "Farolillo de piedra japonés (Tōrō)",
+    "type": "objeto",
+    "icon": "🏮",
+    "group": "Objetos",
+    "categoria": "decoracion",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/farolillo-zen.vox.json",
+    "savedAt": "2026-08-23T18:23:00",
+    "createdAt": "2026-08-23T18:23:00",
+    "count": 600
   }
 ]
