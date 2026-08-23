@@ -330,8 +330,71 @@ def completar_fechas_asset(item, ruta):
                 item['count'] = len(json.load(f).get('voxels', {}) or {})
         except Exception:
             item['count'] = 0
-        tocado = True
-    return tocado
+def list_assets_auto():
+    """Devuelve el catálogo de assets garantizando que TODO archivo .vox.json en assets/ esté incluido."""
+    idx_path = os.path.join(BASE, 'assets', 'index.json')
+    assets_dir = os.path.join(BASE, 'assets')
+    idx = []
+    if os.path.exists(idx_path):
+        try:
+            with open(idx_path, 'r', encoding='utf-8') as f:
+                idx = json.load(f)
+        except Exception:
+            idx = []
+
+    indexed_files = {item.get('file') for item in idx if item.get('file')}
+    tocado = False
+
+    # Escanear assets/ para descubrir archivos nuevos creados en disco
+    for root, _, files in os.walk(assets_dir):
+        for fn in files:
+            if fn.endswith('.vox.json'):
+                full_p = os.path.join(root, fn)
+                rel_p = os.path.relpath(full_p, BASE).replace('\\', '/')
+                if rel_p in indexed_files:
+                    continue
+                try:
+                    with open(full_p, 'r', encoding='utf-8') as f:
+                        doc = json.load(f) or {}
+                except Exception:
+                    continue
+                meta = doc.get('meta', {})
+                raw_id = fn.replace('.vox.json', '')
+                name = meta.get('name') or raw_id.replace('-', ' ').replace('_', ' ').title()
+                tipo = meta.get('type', 'objeto')
+                role = meta.get('role', f'Asset · {name}')
+                icon = meta.get('icon', '🧱' if tipo == 'textura' else '📦')
+                group = 'Bloques de construcción' if tipo == 'textura' else ('Naturaleza' if any(k in raw_id for k in ('cerezo', 'arbol', 'hoja', 'palmera', 'pino', 'roble')) else 'Objetos')
+                size = doc.get('size', 16)
+                vox_count = len(doc.get('voxels', {}) or {})
+                item = {
+                    'id': raw_id,
+                    'name': name,
+                    'role': role,
+                    'icon': icon,
+                    'type': tipo,
+                    'group': group,
+                    'size': size,
+                    'file': rel_p,
+                    'savedAt': doc.get('savedAt') or now_iso(),
+                    'createdAt': doc.get('createdAt') or now_iso(),
+                    'count': vox_count
+                }
+                if 'categoria' in meta: item['categoria'] = meta['categoria']
+                if 'herramienta' in meta: item['herramienta'] = meta['herramienta']
+                if 'alias' in meta: item['alias'] = meta['alias']
+                if 'description' in meta: item['description'] = meta['description']
+                idx.append(item)
+                indexed_files.add(rel_p)
+                tocado = True
+
+    if tocado:
+        try:
+            atomic_dump(idx, idx_path)
+        except Exception:
+            pass
+
+    return idx
 
 
 def list_all():
@@ -751,15 +814,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._send(200, json.load(open(fp, encoding='utf-8')))
             return self._send(404, {'error': 'no existe agente'})
         if path_only == '/api/assets':
-            idx_path = os.path.join(BASE, 'assets', 'index.json')
-            if os.path.exists(idx_path):
-                try:
-                    with open(idx_path, 'r', encoding='utf-8') as f:
-                        idx = json.load(f)
-                    return self._send(200, idx)
-                except Exception:
-                    pass
-            return self._send(200, [])
+            return self._send(200, list_assets_auto())
         aid = self._asset_id()
         if aid:
             fp = self._asset_path(aid)
