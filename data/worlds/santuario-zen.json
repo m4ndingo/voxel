@@ -25,7 +25,12 @@
     "asset:assets/arena.vox.json",
     "asset:assets/red_concrete.vox.json",
     "asset:assets/hojas_sakura.vox.json",
-    "asset:assets/valla-madera.vox.json"
+    "asset:assets/valla-madera.vox.json",
+    "asset:assets/flor-roja.vox.json",
+    "asset:assets/flor-amarilla.vox.json",
+    "asset:assets/flor-azul.vox.json",
+    "asset:assets/flor-blanca.vox.json",
+    "asset:assets/bambu.vox.json"
   ],
   "structures": [
     {
