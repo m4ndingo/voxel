@@ -1632,25 +1632,6 @@
     "herramienta": "pick"
   },
   {
-    "id": "varita-de-selecci-n",
-    "name": "Varita de Selección",
-    "role": "Herramienta · varita de selección de bloques (selection wand)",
-    "icon": "🪄",
-    "type": "objeto",
-    "group": "Objetos",
-    "size": {
-      "x": 16,
-      "y": 16,
-      "z": 16
-    },
-    "file": "assets/varita-de-selecci-n.vox.json",
-    "savedAt": "2026-08-23T12:10:33",
-    "createdAt": "2026-08-12T10:28:30",
-    "count": 52,
-    "categoria": "herramienta",
-    "herramienta": "select"
-  },
-  {
     "id": "pico-de-piedra",
     "name": "Pico de Piedra",
     "role": "Herramienta · pico de piedra (stone pickaxe)",
@@ -2131,5 +2112,24 @@
     "savedAt": "2026-08-23T12:12:09",
     "createdAt": "2026-08-23T12:12:09",
     "count": 24
+  },
+  {
+    "id": "varita-de-selecci-n",
+    "name": "Varita de Selección",
+    "role": "Herramienta · varita de selección de bloques (selection wand)",
+    "icon": "🪄",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/varita-de-selecci-n.vox.json",
+    "savedAt": "2026-08-23T14:02:32",
+    "createdAt": "2026-08-23T14:02:32",
+    "count": 52,
+    "categoria": "herramienta",
+    "herramienta": "select"
   }
 ]

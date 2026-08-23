@@ -12,54 +12,12 @@ data/*
 # hasta que alguien entrase en /images y publicase. Son unos KB. La fuente de verdad sigue siendo el
 # DIBUJO (assets/ o data/habitantes/) más la asignación de data/ui/ranuras.json: los .png se
 # rehornean enteros desde ahí y NO se editan a mano nunca.
+# Iconos de la aplicación
 !data/ui/
-# La galería (data/habitantes/) es runtime: son los dibujos del dueño y pesa 5,7 MB. PERO las piezas
-# de redstone que viven ahí NO son runtime: las genera redstone/make_piezas.py, el código versionado
-# las nombra por clave (`hab:cable` y compañía, ~450 referencias) y los mundos guardados las tienen
-# grabadas dentro. Sin ellas, un clon recién hecho abre el mundo con el redstone en blanco.
-#
-# ⚠️ La clave `hab:` la resuelve server.py contra ESTA carpeta, así que las piezas no se pueden mover
-# a otro sitio sin romper los mundos: 285 bloques de data/mundo.json y data/worlds/ las referencian.
-# Separarlas de verdad (carpeta propia + el namespace servido desde dos sitios) es REQ-RS11.
-#
-# Para volver a incluir ficheros hay que re-incluir ANTES la carpeta: si el directorio sigue
-# excluido, git no baja a mirar dentro y las excepciones de abajo no llegan a evaluarse nunca.
-!data/habitantes/
-data/habitantes/*
-# La lista es la de PIEZAS en redstone/make_piezas.py, más las tres que ese script NO genera
-# (antorcha, antorcha-apagada y lampara-pegada: están dibujadas a mano).
-!data/habitantes/antorcha.json
-!data/habitantes/antorcha-apagada.json
-!data/habitantes/boton.json
-!data/habitantes/boton-on.json
-!data/habitantes/cable.json
-!data/habitantes/cable-on.json
-!data/habitantes/inversor.json
-!data/habitantes/inversor-on.json
-!data/habitantes/lampara-pegada.json
-!data/habitantes/palanca.json
-!data/habitantes/palanca-on.json
-!data/habitantes/piston.json
-!data/habitantes/piston-cabeza.json
-!data/habitantes/piston-on.json
-!data/habitantes/placa.json
-!data/habitantes/placa-on.json
-!data/habitantes/puerta.json
-!data/habitantes/puerta-abierta.json
-!data/habitantes/puerta-alta.json
-!data/habitantes/puerta-alta-abierta.json
-!data/habitantes/repetidor.json
-!data/habitantes/repetidor-on.json
+# data/habitantes/ es el almacén de runtime de creaciones del usuario (los modelos públicos viven en assets/)
+data/habitantes/
 data/habitantes_trash/
 data/worlds/
-# recursos compartidos publicos
-!data/habitantes/pincel-de-texturizado.json
-!data/habitantes/caja-de-volumen.json
-!data/habitantes/varita-de-selecci-n.json
-!data/habitantes/pico-de-piedra.json
-!data/habitantes/cuentagotas.json
-!data/habitantes/mano-de-desplazamiento.json
-!data/habitantes/el-analista-de-espectro.json
 !data/worlds/voxelforge.*
 *.log
 
