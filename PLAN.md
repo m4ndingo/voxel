@@ -139,8 +139,6 @@ entero; los cambios de código van por parche idempotente por marca, como el res
 
 ---
 
----
-
 ## 💡 Tickets ABIERTOS — Requerimientos y Mejoras
 
 Nuevas características y peticiones de mejora pendientes.
@@ -206,8 +204,6 @@ BUG-GAL1/GAL2 y `test_galeria_namespace.js`), así que la pieza que falta es un 
 galería» explícito. Y lo caro no es copiar el fichero: es que **los voxels del mundo guardan la clave
 larga**, así que mover una pieza deja el mundo apuntando a una clave que ya no existe — o hace falta
 reescribir el mundo, o dejar la vieja como alias.
-
----
 
 ---
 

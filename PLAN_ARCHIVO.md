@@ -563,6 +563,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[BUG-FLUID6](#-bug-fluid6)~~ | ~~columna de fluido (agua): **desaparece la cara lateral si al lado hay una estructura con huecos**~~ | ✅ resuelto 2026-08-23 | validado en snippet `parche-culling-agua` y graduado a `web/app.js`. `tapaAlFluido()` valida si la estructura fina vecina es maciza (`pielCubre`) antes de ocultar la cara |
 | ~~[BUG-CART1](#-bug-cart1)~~ | ~~**carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce~~ | ✅ resuelto 2026-08-23 | arreglado en cliente (marca `efimera` viaja en llamada de `mcStampStruct`), autocuración en caliente y pasada en seco/limpieza confirmada limpia en todos los mundos |
 | ~~[REQ-DOC2](#-req-doc2)~~ | ~~falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas)~~ | ✅ cerrado 2026-08-23 | documentado en `CLAUDE.md`, `SYMBOLS.md` y `docs/` con el mapa de estado de `state`, `mc` y `game` |
 | ~~[REQ-SPAWN1](#-req-spawn1)~~ | ~~**pensar el tema de los puntos de aparición** (spawn)~~ | ✅ cerrado 2026-08-23 | propuesta escrita y saldada; derivados acotados a los tickets de convivencia/multijugador |
@@ -11054,3 +11055,33 @@ Pantalla nueva aparte del editor: 1ª persona, WASD + ratón, terreno plano, con
 - 2026-08-11 · 💧 [REQ-FLUID4](#-req-fluid4) · **2ª ronda de la fase 3, tras probarlo el dueño:** «quiero por lo menos un far 100, ver las cosas de lejos en el agua, y no se ven las paredes o bloques que no son agua cuando esta buceando, deberian verse». Las dos quejas eran el mismo fallo: con la niebla a 11 bloques, todo lo que hay detras ES niebla. Subir el far sin mas devolvia el problema contrario (no se tiñe nada), asi que se separan las dos palancas: **`uFogMin`**, uniforme nuevo en los cuatro shaders con niebla, es un SUELO de tinte constante que no depende de la distancia. Ahora `far:100` (se ven las paredes) + `tinte:0.30` (parece agua). Fuera del agua vale 0 ⇒ `f = 0 + 1·f`, identico al render de antes. Lava: `far:6, tinte:0.80`. Nuevo tunable `game.vistaAgua({tinte:…})`. Verificado con `node test_vista_subacuatica.js` (35 ok, TODO OK) y sin regresion en `test_sin_sombra.js`.
 
 - 2026-08-11 · 🐞 [BUG-FLUID4](#-bug-fluid4) · **Resuelto, y la sospecha del dia anterior era la buena.** `mcTapaCara` devuelve `false` sobre TODA celda fina —es la regla de las hojas «fancy», esta ahi para que por los agujeros de una copa no se vea el vacio—, asi que ninguna de las tres reglas de `tapadasFluido` cullaba la cara del fluido contra una flor o una escalera metida en el lago: el liquido emitia las 5 caras que la rodean, y como sus vecinas fluido↔fluido SI se cullan, la superviviente se queda **suelta** — la lamina traslucida marcando el hueco que fotografio el dueño. Medido con el A/B: `flor-roja` daba **10** caras donde `roca` da 5; agua y lava igual. El arreglo es que dentro del culling de fluido la pregunta es otra: no «¿tapa la cara del vecino?» sino **«¿ocupa la celda?»**. Sin waterlogging (un material por celda), una pieza fina que no es fluido ha REEMPLAZADO al liquido y la cara que da a ella no se ve. `tapaAlFluido` es local a `tapadasFluido` y solo entra en su primera rama; **`mcTapaCara` no se toca** (su contrato general tiene que seguir diciendo `false`, y `test_rayo_apuntado.js` extrae verbatim a sus vecinas). El hueco de AIRE sigue emitiendo, porque `nId` es 0 y no llega a la rama. Verificado: 10 → 5 en las dos, la valvula `mc.sinCullingFluido` sigue devolviendo el lago-rejilla (444), `flor-roja` sigue en el lote opaco, y el mundo del dueño quedo como estaba. `node test_caras_fluido.js` §5, con anti-falso-verde (si el arreglo cullease de mas todo daria 0 y el test pasaria sin mirar nada).
+
+---
+
+<a id="-bug-fluid6"></a>
+
+### ~~🔴 BUG-FLUID6 · Cara lateral de columna de agua desaparece junto a estructuras con huecos~~ — ✅ resuelto 2026-08-23
+
+**Petición del dueño (2026-08-23):**
+> «hacer un snippet que parchee como se renderiza el agua ante un bug que he detectado. si con la herramienta de seleccion se construye una columna de agua, que eso esta bien. si al lado de la columna, en el bloque de al lado hay una estructura con huecos, la cara de la columna de agua desaparece y no deberia»
+
+**Diagnóstico Técnico:**
+1. En `mcMeshChunk` ([`web/app.js:11082-11087`](file:///C:/Users/Alberto/Documents/Claude/voxel/web/app.js#L11082-L11087)), la función interna de culling `tapaAlFluido(ax, ay, az)` comprueba:
+   ```javascript
+   const tapaAlFluido = (ax, ay, az) => {
+     if (mcTapaCara(ax, ay, az)) return true;
+     if (!GEO || !mcInside(ax, ay, az)) return false;
+     const nId = mc.grid[mcIdx(ax, ay, az)];
+     return !!(nId && GEO[nId] && !(FT[nId] || '')); // pieza fina que NO es fluido: asume que ocupa la celda entera
+   };
+   ```
+2. Si al lado de la celda de agua hay una estructura/bloque fino con huecos (como una escalera, verja, marco o pieza decorativa fina que no cubre por completo la cara de contacto con el fluido), `GEO[nId]` existe y no es fluido, por lo que `tapaAlFluido` devolvía `true`.
+3. Esto provocaba que el agua considerase tapada esa cara lateral y **no emitiese el quad de agua**, dejando ver el hueco vacío o el interior de la columna a través de los huecos de la estructura vecina.
+4. Para tapar la cara del agua, el vecino debe o bien ser un bloque macizo (`mcTapaCara` o `pielCubre`), o bien tener geometría que cubra esa cara compartida. Si es una estructura con huecos (`!pielCubre` o con caras abiertas), la cara del agua debe emitirse.
+
+**Estrategia de Parche (Desarrollo Desacoplado):**
+- Crear el snippet `data/snippets/parche-culling-agua.json` con control `game.parcheCullingAgua` (`on()`, `off()`, `estado()`).
+- Interceptar `mcMeshChunk` envolviendo la rutina de cálculo de caras o reemplazando dinámicamente la función para permitir validación en caliente A/B.
+
+**Resolución:**
+Validado previamente mediante snippet desacoplado `data/snippets/parche-culling-agua.json` y graduado a `web/app.js:11075-11090`. `tapaAlFluido()` ahora verifica si la estructura vecina es maciza (`blockLike` o `pielCubre` sin caras ni translucidez) antes de ocultar la cara del agua. Las estructuras finas con huecos emiten la cara lateral del agua correctamente.

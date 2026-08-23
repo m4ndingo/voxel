@@ -11073,17 +11073,18 @@ function mcMeshChunk(cx,cz){
     // cubo se marca— en vez de una lámina de agua. El camino de cubo (mc.grid) ya hacía este culling; el
     // camino FINO no, y agua y lava van siempre por el fino porque son translúcidas.
     const FT = mc.sinCullingFluido ? null : mcTablaFluido();   // válvula (tests y F12): vuelve al lago-rejilla
-    // BUG-FLUID4: mcTapaCara dice `false` sobre TODA celda fina (la regla de las hojas «fancy»), así que
-    // una flor o una escalera metida en el lago no tapaba ninguna cara y el fluido emitía las 5 caras que
-    // la rodean —láminas translúcidas sueltas marcando el hueco, que es lo que se ve en las capturas—.
-    // Aquí la pregunta es otra: no «¿tapa la cara del vecino?» sino «¿OCUPA esta celda?». No tenemos
-    // waterlogging (un material por celda), así que una pieza fina que no es fluido ha REEMPLAZADO al
-    // líquido y la cara que da a ella no se ve. El hueco de AIRE sigue emitiendo: nId es 0 y no entra aquí.
+    // BUG-FLUID4/BUG-FLUID6: mcTapaCara dice `false` sobre TODA celda fina (la regla de las hojas «fancy»).
+    // Para el fluido, solo tapa si el vecino es macizo o si su geometría fina cubre la celda entera (pielCubre).
+    // Si es una pieza fina con huecos (escalera, verja, flores, etc.), la cara lateral del agua se emite.
     const tapaAlFluido=(ax,ay,az)=>{
       if(mcTapaCara(ax,ay,az)) return true;                  // vecino macizo: lo de siempre
       if(!GEO || !mcInside(ax,ay,az)) return false;
       const nId = mc.grid[mcIdx(ax,ay,az)];
-      return !!(nId && GEO[nId] && !(FT[nId]||''));           // pieza fina que NO es fluido: ocupa la celda
+      if(!nId || !GEO[nId] || (FT && FT[nId])) return false;
+      const k = mc.blockKey && mc.blockKey[nId];
+      const base = (typeof mcClaveBase === 'function') ? mcClaveBase(k) : (k?k.replace(/@\d{1,2}$/,''):k);
+      const rec = mc.structs && mc.structs[base];
+      return !!(rec && (rec.blockLike || (rec.pielCubre && !rec.conCaras && !rec.translucido)));
     };
     const tapadasFluido=(x,y,z,id,fH)=>{
       const tipo = FT ? (FT[id]||'') : '';
@@ -12379,30 +12380,43 @@ function mcCollides(px,py,pz){   // ¿el AABB del jugador en (px,py,pz) solapa a
   }
   return false;
 }
-// Si el jugador quedó EMBUTIDO (p.ej. tras estampar/cargar una sala bajo sus pies), lo sube en pasos finos
-// hasta quedar libre (lo deja de pie encima de lo que estorbe). El techo escala con el jugador: un gigante
-// (playerScale alto) mide 1.8·scale de alto, así que subir 3 bloques fijos no lo sacaba de la estructura.
+// Si el jugador quedó EMBUTIDO (p.ej. tras estampar/cargar una sala bajo sus pies o ser empujado),
+// lo sube en pasos finos hasta quedar libre en la posición de aire más cercana (no a la cima del mapa).
 function mcUnstick(){
   if(!mcCollides(mc.pos[0], mc.pos[1], mc.pos[2])) return true;
-  // Búsqueda instantánea O(1): superficie más alta del terreno en esta columna
-  const px=Math.floor(mc.pos[0]), pz=Math.floor(mc.pos[2]);
-  const surf=(typeof mcSurfaceY==='function')? mcSurfaceY(px, pz) : -1;
-  if(surf>=0){
-    const targetY=surf+1;
-    if(!mcCollides(mc.pos[0], targetY, mc.pos[2])){
-      mc.pos[1]=targetY; mc.vel[1]=0; mc.onGround=true; return true;
+  // Búsqueda vertical ascendente desde la altura actual hacia arriba, buscando el hueco de aire más cercano
+  const startY = mc.pos[1];
+  const top = mc.dim.y + MC_PH * mc.scale + 2;
+  const pasoFino = 1 / MC_TILE;
+  
+  // 1. Probar primero en pasos finos hasta +2 bloques (cubre estructuras, losas, bloques a medias)
+  const maxFino = Math.min(top, startY + 2.5);
+  for(let fy = startY + pasoFino; fy <= maxFino; fy += pasoFino){
+    if(!mcCollides(mc.pos[0], fy, mc.pos[2])){
+      mc.pos[1] = fy; mc.vel[1] = 0; mc.onGround = true; return true;
     }
   }
-  // Búsqueda vertical rápida por bloques enteros y ajuste fino
-  const top=mc.dim.y+MC_PH*mc.scale+2;
-  for(let y=Math.floor(mc.pos[1])+1; y<=top; y++){
+  
+  // 2. Si no encontró en los primeros 2.5 bloques, buscar por bloques enteros y ajustar fino hacia abajo
+  for(let y = Math.floor(startY) + 1; y <= top; y++){
+    if(y < startY) continue;
     if(!mcCollides(mc.pos[0], y, mc.pos[2])){
-      let bestY=y;
-      for(let fy=y-1/MC_TILE; fy>=y-1; fy-=1/MC_TILE){
-        if(!mcCollides(mc.pos[0], fy, mc.pos[2])) bestY=fy;
+      let bestY = y;
+      for(let fy = y - pasoFino; fy >= startY; fy -= pasoFino){
+        if(!mcCollides(mc.pos[0], fy, mc.pos[2])) bestY = fy;
         else break;
       }
-      mc.pos[1]=bestY; mc.vel[1]=0; mc.onGround=true; return true;
+      mc.pos[1] = bestY; mc.vel[1] = 0; mc.onGround = true; return true;
+    }
+  }
+  
+  // 3. Fallback de emergencia a la superficie del terreno si todo lo demás falló
+  const px = Math.floor(mc.pos[0]), pz = Math.floor(mc.pos[2]);
+  const surf = (typeof mcSurfaceY === 'function') ? mcSurfaceY(px, pz) : -1;
+  if(surf >= 0){
+    const targetY = surf + 1;
+    if(!mcCollides(mc.pos[0], targetY, mc.pos[2])){
+      mc.pos[1] = targetY; mc.vel[1] = 0; mc.onGround = true; return true;
     }
   }
   return false;   // no encontró hueco subiendo (raro) → el llamador reubica al spawn
@@ -21095,7 +21109,14 @@ Object.defineProperty(game,'useOldStructBuildCall',{ enumerable:true, get:()=>mc
 try{ const d=parseFloat(localStorage.getItem('vf_mcInteriorDark')); if(isFinite(d)) mc.interiorDark=Math.max(0,Math.min(MC_INTERIOR_DARK_MAX,d)); }catch(e){}
 Object.defineProperty(game,'interiorDark',{ enumerable:true, get:()=>mc.interiorDark,
   set:v=>{ v=Math.max(0,Math.min(MC_INTERIOR_DARK_MAX, isFinite(+v)?+v:0.1)); mc.interiorDark=v; try{localStorage.setItem('vf_mcInteriorDark',v);}catch(e){}
-    if(mc.grid){ mcMeshAll(); if(mc.structures.length) mcRestampAll(); }   // re-oscurece terreno Y estructuras en vivo
+    if(mc.grid){
+      mcComputeLight();
+      mc._blEmiSig=null;
+      if(typeof mcComputeBlockLight==='function') mcComputeBlockLight();
+      mcMeshAll();
+      if(mc.structures.length) mcRestampAll();
+      if(typeof mcDynSync==='function') mcDynSync();
+    }   // re-calcula skylight y re-oscurece terreno Y estructuras en vivo inmediatamente
     return v; } });
 // game.sunShade = SOMBRA PROYECTADA del sol vertical, que es COSA APARTE de game.interiorDark. interiorDark es
 // oclusión ambiental (cuánto cielo abierto tienes a mano, medido en horizontal); esto es geometría: si hay algo por
