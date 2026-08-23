@@ -2,13 +2,13 @@
   "format": "voxelworld-2",
   "dim": {
     "x": 96,
-    "y": 40,
+    "y": 44,
     "z": 96
   },
   "spawn": {
     "x": 48,
     "y": 15,
-    "z": 12
+    "z": 10
   },
   "palette": [
     null,
@@ -19,112 +19,182 @@
     "asset:assets/ladrillo_piedra.vox.json",
     "asset:assets/adoquin.vox.json",
     "asset:assets/tablones.vox.json",
-    "asset:assets/madera.vox.json",
+    "asset:assets/tronco.vox.json",
     "asset:assets/tejado.vox.json",
     "asset:assets/oro.vox.json",
-    "asset:assets/arena.vox.json"
+    "asset:assets/arena.vox.json",
+    "asset:assets/red_concrete.vox.json",
+    "asset:assets/leaves.vox.json",
+    "asset:assets/valla-madera.vox.json"
   ],
   "structures": [
     {
-      "key": "asset:assets/antorcha-apagada.vox.json",
-      "x": 42,
-      "y": 15,
-      "z": 43,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/antorcha-apagada.vox.json",
-      "x": 42,
-      "y": 15,
-      "z": 53,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/antorcha-apagada.vox.json",
-      "x": 54,
-      "y": 15,
-      "z": 43,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/antorcha-apagada.vox.json",
-      "x": 54,
-      "y": 15,
-      "z": 53,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/antorcha-apagada.vox.json",
-      "x": 46,
-      "y": 12,
-      "z": 16,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/antorcha-apagada.vox.json",
-      "x": 50,
-      "y": 12,
-      "z": 16,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/antorcha-apagada.vox.json",
-      "x": 46,
-      "y": 14,
-      "z": 26,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/antorcha-apagada.vox.json",
-      "x": 50,
-      "y": 14,
-      "z": 26,
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 31,
+      "y": 13,
+      "z": 44,
       "rot": 0
     },
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 34,
+      "x": 65,
       "y": 13,
-      "z": 40,
-      "rot": 0
-    },
-    {
-      "key": "asset:assets/cerezo.vox.json",
-      "x": 60,
-      "y": 13,
-      "z": 42,
+      "z": 46,
       "rot": 1
     },
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 36,
+      "x": 33,
       "y": 13,
-      "z": 56,
+      "z": 62,
       "rot": 2
     },
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 58,
+      "x": 63,
       "y": 13,
-      "z": 58,
+      "z": 64,
       "rot": 3
     },
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 38,
-      "y": 13,
-      "z": 8,
+      "x": 48,
+      "y": 14,
+      "z": 71,
       "rot": 0
     },
     {
       "key": "asset:assets/cerezo.vox.json",
-      "x": 58,
+      "x": 35,
       "y": 13,
-      "z": 8,
+      "z": 11,
       "rot": 1
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 61,
+      "y": 13,
+      "z": 11,
+      "rot": 2
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 48,
+      "y": 13,
+      "z": 6,
+      "rot": 3
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 24,
+      "y": 12,
+      "z": 14,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/cerezo.vox.json",
+      "x": 72,
+      "y": 12,
+      "z": 14,
+      "rot": 1
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 40,
+      "y": 14,
+      "z": 43,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 56,
+      "y": 14,
+      "z": 43,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 40,
+      "y": 14,
+      "z": 61,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 56,
+      "y": 14,
+      "z": 61,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 44,
+      "y": 12,
+      "z": 37,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 52,
+      "y": 12,
+      "z": 37,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 45,
+      "y": 13,
+      "z": 17,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 51,
+      "y": 13,
+      "z": 17,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 45,
+      "y": 15,
+      "z": 27,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 51,
+      "y": 15,
+      "z": 27,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 41,
+      "y": 11,
+      "z": 19,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 55,
+      "y": 11,
+      "z": 19,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 33,
+      "y": 13,
+      "z": 53,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/farolillo-zen.vox.json",
+      "x": 63,
+      "y": 13,
+      "z": 53,
+      "rot": 0
     }
-  ],
-  "notes": [],
-  "noteRots": [],
-  "noteTints": []
+  ]
 }
