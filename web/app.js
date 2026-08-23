@@ -2161,6 +2161,7 @@ function galMontaOrden(barra, onCambio){
 let habKind = null;
 let habSearch = '';
 let habFilter = 'all';
+let habOrigin = 'all';  // 'all' | 'asset' | 'hab' (REQ-GAL3)
 
 function initHabPickerUI(){
   if(window._habPickerInited) return;
@@ -2175,6 +2176,21 @@ function initHabPickerUI(){
     };
   }
   galMontaOrden(searchInput && searchInput.closest('.mc-picker-bar'), renderHabGrid);
+
+  // Filtro por Origen / Espacio de Nombres ('all', 'asset', 'hab')
+  const originContainer = $('#hab-picker-origin');
+  if(originContainer){
+    originContainer.onclick = (e) => {
+      const btn = e.target.closest('.mc-pick-filter');
+      if(!btn) return;
+      originContainer.querySelectorAll('.mc-pick-filter').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      habOrigin = btn.dataset.orig || 'all';
+      renderHabGrid();
+    };
+  }
+
+  // Filtro por Categoría ('all', 'general', 'redstone')
   const filterContainer = $('#hab-picker-filters');
   if(filterContainer){
     filterContainer.onclick = (e) => {
@@ -2199,13 +2215,21 @@ function habOrdena(entradas){
 }
 const HAB_ORDEN=['habitante','objeto','habitacion','textura'];
 
-async function openHabitantes(kind){
-  habKind = (typeof kind==='string' && HAB_TITLE[kind]) ? kind : null;
+async function openHabitantes(kind, forceReload=true){
+  const nuevoKind = (typeof kind==='string' && HAB_TITLE[kind]) ? kind : null;
+  const cambiaKind = nuevoKind !== habKind;
+  habKind = nuevoKind;
   const modal=$('#hab-modal'), grid=$('#hab-grid');
   const titleEl=$('#hab-title'); if(titleEl) titleEl.textContent = habKind ? HAB_TITLE[habKind] : 'Galería';
   modal.hidden=false;
-  grid.innerHTML='<p class="hab-empty">Cargando…</p>';
   initHabPickerUI();
+
+  // Si ya tenemos datos y no se fuerza recarga ni ha cambiado de tipo de galería, mantener el DOM y scroll
+  if(!forceReload && !cambiaKind && (habRawList.length || habRawAssets.length) && grid.children.length > 0){
+    return;
+  }
+
+  grid.innerHTML='<p class="hab-empty">Cargando…</p>';
 
   try{ habRawList=await apiHabitantes(); }
   catch(e){ grid.innerHTML='<p class="hab-empty">No se pudo conectar con el servidor.</p>'; return; }
@@ -2220,8 +2244,8 @@ async function openHabitantes(kind){
 function renderHabGrid(){
   const grid=$('#hab-grid'); if(!grid) return;
   
-  let list = habRawList;
-  let assets = habRawAssets;
+  let list = (habOrigin === 'asset') ? [] : habRawList;
+  let assets = (habOrigin === 'hab') ? [] : habRawAssets;
 
   // Filtrado por búsqueda de texto
   if(habSearch){
@@ -2259,6 +2283,9 @@ function renderHabGrid(){
     const card=document.createElement('div'); card.className='hab-card';
     card.dataset.bucket=e.b;
     if(e.asset){ const a=e.asset;
+    card.dataset.kind='asset';
+    card.dataset.id=a.id;
+    card.dataset.file=a.file;
     card.innerHTML=`<div class="hab-thumb"><canvas width="150" height="150"></canvas></div>
       <div class="hab-name" title="${esc(a.name)}">${(a.icon?esc(a.icon)+' ':'')}${esc(a.name)} <span class="badge" style="margin:0">asset</span></div>
       <p class="hab-sub">${esc(a.role||a.type||'')} · del juego</p>
@@ -2279,8 +2306,10 @@ function renderHabGrid(){
     card.querySelector('[data-a=ren]').onclick=()=>renameAsset(a.id,a.name);
     card.querySelector('[data-a=del]').onclick=()=>delAsset(a.id,a.name);
     } else { const h=e.hab;
+    card.dataset.kind='hab';
+    card.dataset.id=h.id;
     card.innerHTML=`<div class="hab-thumb"><canvas width="150" height="150"></canvas></div>
-      <div class="hab-name" title="${esc(h.name)}">${esc(h.name)}</div>
+      <div class="hab-name" title="${esc(h.name)}">${esc(h.name)} <span class="badge" style="margin:0; background:#243548; border-color:#385270">hab</span></div>
       <p class="hab-sub">${esc(h.role||h.type||'')} · ${h.count} vox</p>
       <p class="hab-date">${fmtDate(h.savedAt)}</p>
       <div class="hab-acts">
@@ -2300,18 +2329,8 @@ function renderHabGrid(){
 }
 function closeHabitantes(){ $('#hab-modal').hidden=true; }
 
-// ── Ficha de un asset ──────────────────────────────────────────────────────────────────────────────
-// Desde el editor y la galería solo se ve el ROTULO («Hormigón Verde / Hojas»), y desde un script hace
-// falta otra cosa. La ficha enseña las claves que ya funcionan hoy (id, rótulo, basename) y deja
-// declarar un NOMBRE CORTO propio: la textura que otro programa generó como «green_concrete» se
-// referencia así en vez de por «hormig-n-verde-hojas». El alias no mueve el fichero ni el id: la
-// identidad de un asset es su fichero, porque cada voxel del mundo guarda 'asset:assets/<id>.vox.json'.
+// ── Ficha de un asset: cómo se llama desde un script y cambio de espacio de nombres (REQ-GAL3) ────
 let fichaAsset=null;
-// Espejo de mcIndexAssets: si cambias las claves que se registran allí, cámbialas aquí — esta lista es
-// justo lo que el dueño va a copiar al script, y mentirle es peor que no enseñar nada.
-// 'asset' | 'hab'. Los habitantes NO pasan por mcIndexAssets, así que no tienen nombre corto, ni id ni
-// rótulo que sirvan de clave: la única que funciona es 'hab:<id>'. Enseñar eso es justo el trabajo de
-// la ficha — el cable de redstone se rompió por confundir los dos espacios de nombres (BUG-RS5).
 let fichaKind='asset';
 function fichaClave(a){ return fichaKind==='hab' ? 'hab:'+a.id : 'asset:'+a.file; }
 function fichaClaves(a){
@@ -2320,8 +2339,8 @@ function fichaClaves(a){
   if(a.alias) cl.push({k:String(a.alias).trim().toLowerCase(), nota:'nombre corto', alias:true});
   if(a.id) cl.push({k:String(a.id).trim().toLowerCase(), nota:'id'});
   if(a.name) cl.push({k:String(a.name).trim().toLowerCase(), nota:'rótulo'});
-  const base=a.file.split('/').pop().replace(/\.vox\.json$/,'').toLowerCase();
-  if(!cl.some(c=>c.k===base)) cl.push({k:base, nota:'fichero'});
+  const base=(a.file||'').split('/').pop().replace(/\.vox\.json$/,'').toLowerCase();
+  if(base && !cl.some(c=>c.k===base)) cl.push({k:base, nota:'fichero'});
   return cl;
 }
 function fichaEjemplo(){
@@ -2338,18 +2357,34 @@ function fichaPinta(){
   $('#ficha-ejemplo').value=fichaEjemplo();
   const sz=a.size&&typeof a.size==='object' ? `${a.size.x}×${a.size.y}×${a.size.z}` : (a.size||16)+'³';
   $('#ficha-datos').innerHTML=[
-    ['Tipo', a.type||'—'], ['Grupo', esHab?'Mis piezas guardadas':(a.group||'—')], ['Rol', a.role||'—'],
-    ['Tamaño', sz], ['Fichero', esHab?('data/habitantes/'+a.id+'.json'):a.file]
+    ['Tipo', a.type||'—'], ['Grupo', esHab?'Mis piezas guardadas (Usuario)':(a.group||'—')], ['Rol', a.role||'—'],
+    ['Tamaño', sz], ['Espacio', esHab?'hab: (data/habitantes/)':'asset: (assets/)'],
+    ['Fichero', esHab?('data/habitantes/'+a.id+'.json'):a.file]
   ].map(([k,v])=>`<dt>${esc(k)}</dt><dd title="${esc(String(v))}">${esc(String(v))}</dd>`).join('');
   $('#ficha-claves').innerHTML=esHab
-    ? '<li class="hab-sub">Ninguno: una pieza guardada solo responde a su clave entera, <code>'+esc(clave)+'</code>.</li>'
+    ? '<li class="hab-sub">Ninguno: una pieza guardada de usuario solo responde a su clave entera, <code>'+esc(clave)+'</code>.</li>'
     : fichaClaves(a)
       .map(c=>`<li class="${c.alias?'es-alias':''}">${esc(c.k)} <span class="hab-sub">· ${esc(c.nota)}</span></li>`).join('');
+
+  // REQ-GAL3: textos y estado de la sección para cambiar espacio de nombres
+  const descMover = $('#ficha-mover-desc');
+  const btnMover = $('#ficha-btn-mover');
+  const btnMoverTop = $('#ficha-mover');
+  if(descMover && btnMover){
+    if(esHab){
+      descMover.innerHTML = 'Esta pieza vive en <code>hab:</code> (usuario / local). Puedes moverla a <code>asset:</code> para hacerla pública del servidor.';
+      btnMover.textContent = '🌐 Mover a Assets públicos (asset:)';
+      if(btnMoverTop) btnMoverTop.textContent = '🌐 Mover a asset:';
+    } else {
+      descMover.innerHTML = 'Esta pieza vive en <code>asset:</code> (público / servidor). Puedes moverla a <code>hab:</code> para que sea pieza privada de usuario.';
+      btnMover.textContent = '👤 Mover a piezas de Usuario (hab:)';
+      if(btnMoverTop) btnMoverTop.textContent = '👤 Mover a hab:';
+    }
+  }
+
   getRoomData(clave).then(d=>drawThumb($('#ficha-thumb'),d)).catch(()=>{});
 }
-// kind='hab' para las piezas de data/habitantes: se ven igual, pero no admiten nombre corto ni icono
-// (el servidor solo deja renombrarlas), así que esa mitad del formulario se esconde en vez de fingir
-// que se puede editar. Sin esto, media galería no tenía forma de enseñar su clave (BUG-GAL2).
+
 function openFicha(a, kind){
   fichaAsset=a; fichaKind=kind||'asset';
   const esHab=fichaKind==='hab';
@@ -2366,6 +2401,148 @@ function openFicha(a, kind){
   $('#ficha-modal').hidden=false;
 }
 function closeFicha(){ $('#ficha-modal').hidden=true; fichaAsset=null; fichaKind='asset'; }
+
+async function moverEspacioNombres(){
+  const a=fichaAsset; if(!a) return;
+  const esHab=fichaKind==='hab';
+  const origen = esHab ? 'hab' : 'asset';
+  const destino = esHab ? 'asset' : 'hab';
+  const targetName = a.name || a.id;
+  const msg = esHab
+    ? `¿Mover «${targetName}» de hab: a asset: (público del juego)?`
+    : `¿Mover «${targetName}» de asset: a hab: (usuario / privado)?`;
+  if(!confirm(msg)) return;
+
+  let savedToken = sessionStorage.getItem('voxelforge_token') || '';
+
+  const ejecutarPeticion = async (token) => {
+    const payload = { from: origen, to: destino, id: a.id || a.file };
+    if(token) payload.token = token;
+    return fetch('/api/namespace', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? {'X-VoxelForge-Token': token} : {})
+      },
+      body: JSON.stringify(payload)
+    });
+  };
+
+  try{
+    let r = await ejecutarPeticion(savedToken);
+    let res = await r.json().catch(()=>({}));
+
+    // Si el servidor exige token (401 o 403) o el token previo falló
+    if(r.status === 401 || r.status === 403 || res.requiresToken){
+      const pedido = prompt('Este servidor requiere autorización (VOXELFORGE_TOKEN) para mover piezas de espacio de nombres.\n\nIntroduce el token:');
+      if(!pedido || !pedido.trim()){
+        toast('Operación cancelada: no se ha proporcionado el token');
+        return;
+      }
+      savedToken = pedido.trim();
+      r = await ejecutarPeticion(savedToken);
+      res = await r.json().catch(()=>({}));
+      if(!r.ok){
+        sessionStorage.removeItem('voxelforge_token');
+        alert(res.error || 'No se ha podido autorizar la operación (token inválido o sin permisos).');
+        toast(res.error || 'No se ha podido autorizar la operación');
+        return;
+      }
+      sessionStorage.setItem('voxelforge_token', savedToken);
+    } else if(!r.ok) {
+      toast(res.error || 'Error al cambiar de espacio de nombres');
+      return;
+    }
+
+    // Si el editor 2D/3D tenía cargado este mismo objeto, actualizar su serverKind y serverId
+    if(serverId === (a.id || a.file)){
+      serverKind = res.kind;
+      serverId = res.id;
+    }
+
+    // Actualizar datos en memoria para que no se desincronicen
+    if(origen === 'hab'){
+      habRawList = habRawList.filter(h => h.id !== a.id);
+      const nuevoAsset = {
+        id: a.id,
+        name: a.name || a.id,
+        file: 'assets/' + a.id + '.vox.json',
+        type: a.type || 'objeto',
+        role: a.role || '',
+        icon: a.icon || '',
+        group: a.group || '',
+        savedAt: a.savedAt || '',
+        createdAt: a.createdAt || '',
+        count: a.count || 0
+      };
+      if(!habRawAssets.some(it => it.id === a.id || it.file === nuevoAsset.file)){
+        habRawAssets.push(nuevoAsset);
+      }
+    } else {
+      habRawAssets = habRawAssets.filter(item => item.id !== a.id && item.file !== a.file);
+      const nuevoHab = {
+        id: a.id || (a.file ? a.file.split('/').pop().replace(/\.vox\.json$/, '') : 'objeto'),
+        name: a.name || a.id,
+        type: a.type || 'objeto',
+        role: a.role || '',
+        icon: a.icon || '',
+        savedAt: a.savedAt || '',
+        createdAt: a.createdAt || '',
+        count: a.count || 0
+      };
+      if(!habRawList.some(it => it.id === nuevoHab.id)){
+        habRawList.push(nuevoHab);
+      }
+    }
+
+    // Quitar la tarjeta de la galería directamente para mantener el scroll y el foco
+    const grid = $('#hab-grid');
+    if(grid){
+      const card = grid.querySelector(`.hab-card[data-kind="${origen}"][data-id="${a.id || ''}"]`)
+        || (origen === 'asset' && a.file ? grid.querySelector(`.hab-card[data-file="${a.file}"]`) : null);
+      if(card) card.remove();
+      // Si la galería quedó vacía con los filtros actuales
+      if(!grid.querySelector('.hab-card')){
+        grid.innerHTML = '<p class="hab-empty">' + (habKind ? HAB_EMPTY[habKind] : 'No se encontraron elementos con los filtros seleccionados.') + '</p>';
+      }
+    }
+
+    // Reindexar assets si ha cambiado el catálogo
+    try{
+      const idx=await fetch('assets/index.json',{cache:'no-store'}).then(x=>x.json());
+      // Si se movió de asset a hab, limpiar la clave huérfana de mcAssetsRegistry y MC_MAT_ALIAS
+      if(origen === 'asset'){
+        const fileRel = a.file || ('assets/' + a.id + '.vox.json');
+        const fileBase = fileRel.split('/').pop().replace(/\.vox\.json$/, '').toLowerCase();
+        delete mcAssetsRegistry[fileBase];
+        delete MC_MAT_ALIAS[fileBase];
+        if(a.id){
+          delete mcAssetsRegistry[String(a.id).toLowerCase()];
+          delete MC_MAT_ALIAS[String(a.id).toLowerCase()];
+        }
+      }
+      mcIndexAssets(idx);
+      if(typeof refreshTexturas==='function') refreshTexturas(idx);
+    }catch(e){}
+
+    // Invalidar cachés del Mundo de la clave anterior y la nueva para que se re-resuelvan
+    mcKindCache.clear();
+    if(typeof mcRefreshSavedKey === 'function'){
+      if(res.prevClave) await mcRefreshSavedKey(res.prevClave);
+      if(res.clave) await mcRefreshSavedKey(res.clave);
+    }
+
+    toast(`Movido a ${res.clave}`);
+    closeFicha();
+    refreshRosters();
+  }catch(e){
+    toast('Error de conexión al mover de espacio');
+  }
+}
+
+$('#ficha-mover').onclick = moverEspacioNombres;
+$('#ficha-btn-mover').onclick = moverEspacioNombres;
+
 async function guardarFicha(){
   const a=fichaAsset; if(!a) return;
   if(fichaKind==='hab') return;   // no hay alias que guardar, y /api/assets no es su sitio
@@ -3637,11 +3814,20 @@ document.addEventListener('pointerdown',e=>{
   if(e.target.closest('#mas-menu') || e.target.closest('#btn-mas')) return;
   cerrarMas();
 },true);
+let mcOrigenPrevio = null; // 'galeria' | 'codigo' | 'agentes' | 'mapa' | null
+
 $('#btn-habitantes').onclick=()=>openHabitantes('habitante');
 $('#btn-habitaciones').onclick=()=>openHabitantes('habitacion');
 $('#btn-texturas').onclick=()=>openHabitantes('textura');
 $('#hab-close').onclick=closeHabitantes;
 $('#hab-refresh').onclick=()=>openHabitantes(habKind);   // recarga sin cambiar lo que se está viendo
+if($('#hab-go-mundo')){
+  $('#hab-go-mundo').onclick=()=>{
+    mcOrigenPrevio = { tipo: 'galeria', kind: habKind };
+    $('#hab-modal').hidden = true;
+    openWorld();
+  };
+}
 $('#ficha-close').onclick=closeFicha;
 $('#ficha-save').onclick=guardarFicha;
 // Copiar la clave / el ejemplo. La confirmación va por toast: el dueño mira desde el móvil y un
@@ -3848,8 +4034,41 @@ async function getRoomData(key){
   const base = (typeof mcFluidBase === 'function') ? mcFluidBase(mcClaveBase(key)) : mcClaveBase(key);
   if(base!==key){ const p=getRoomData(base); roomDataCache.set(key,p); return p; }
   const p=(async()=>{
-    if(key.startsWith('asset:')) return fetch(key.slice(6),{cache:'no-store'}).then(r=>r.json());
-    if(key.startsWith('hab:'))   return fetch('/api/habitantes/'+key.slice(4),{cache:'no-store'}).then(r=>r.json());
+    if(key.startsWith('hab:')){
+      const habId = key.slice(4);
+      try{
+        const r = await fetch('/api/habitantes/' + habId, {cache:'no-store'});
+        if(r.ok) return await r.json();
+      }catch(e){}
+      // Fallback 2º: Si no está en usuario, buscar en assets del servidor
+      const fileFromReg = typeof mcAssetsRegistry !== 'undefined' ? mcAssetsRegistry[habId] : null;
+      const assetPath = fileFromReg || ('assets/' + habId + '.vox.json');
+      try{
+        const rAsset = await fetch(assetPath, {cache:'no-store'});
+        if(rAsset.ok) return await rAsset.json();
+      }catch(e){}
+    } else if(key.startsWith('asset:')){
+      const pathRel = key.slice(6);
+      const fileBase = pathRel.split('/').pop().replace(/\.vox\.json$/, '');
+      // 1º Intentar fetch directo del archivo del asset
+      try{
+        const r = await fetch(pathRel, {cache:'no-store'});
+        if(r.ok) return await r.json();
+      }catch(e){}
+      // 2º Si no existe la ruta exacta, buscar si está registrado con otro archivo (ej. yellow -> yellow_concrete)
+      const fileFromReg = typeof mcAssetsRegistry !== 'undefined' ? (mcAssetsRegistry[fileBase] || mcAssetsRegistry[fileBase.toLowerCase()]) : null;
+      if(fileFromReg && fileFromReg !== pathRel){
+        try{
+          const rReg = await fetch(fileFromReg, {cache:'no-store'});
+          if(rReg.ok) return await rReg.json();
+        }catch(e){}
+      }
+      // 3º Fallback usuario: buscar si el usuario lo tiene en sus piezas privadas (hab:)
+      try{
+        const rHab = await fetch('/api/habitantes/' + fileBase, {cache:'no-store'});
+        if(rHab.ok) return await rHab.json();
+      }catch(e){}
+    }
     return {voxels:{}};
   })();
   roomDataCache.set(key,p); return p;
@@ -14929,18 +15148,46 @@ function mcMatName(id){
   const corto=mcClaveBase(bruto).replace(/^asset:assets\//,'').replace(/^hab:/,'').replace(/\.vox\.json$/,'');
   return (corto ? corto+(ori?'@'+ori:'') : '') || ('#'+id);
 }
-// Tipo de material para la etiqueta de rayos-X: CÓMO se coloca (bloque de terreno vs estructura fina) y de DÓNDE
-// sale (badge de la galería: bloque / textura / guardada). Memoizado porque las etiquetas se rehacen cada frame;
-// sin catálogo cargado (aún no se abrió el selector) se deduce del prefijo de la clave.
+// Tipo de material para la etiqueta de rayos-X: CÓMO se coloca (bloque vs estructura) y de DÓNDE
+// sale (servidor / público vs usuario / hab). Memoizado porque las etiquetas se rehacen cada frame.
 const mcKindCache=new Map();
+function mcEsHabReal(key){
+  const kStr = String(key || '');
+  const baseId = mcClaveBase(kStr).replace(/^asset:assets\//,'').replace(/^hab:/,'').replace(/\.vox\.json$/,'');
+  const fileRel = 'assets/' + baseId + '.vox.json';
+
+  // 1. Si está indexado como asset del servidor en mcAssetsRegistry o habRawAssets/mc.catalog
+  const esAssetRegistrado = !!(
+    (typeof mcAssetsRegistry !== 'undefined' && (mcAssetsRegistry[baseId] || Object.values(mcAssetsRegistry).includes(fileRel))) ||
+    (habRawAssets && habRawAssets.some(a => a.id === baseId || a.file === fileRel)) ||
+    (mc.catalog && mc.catalog.some(o => o.key === 'asset:' + fileRel || o.key === 'asset:assets/' + baseId + '.vox.json'))
+  );
+
+  // 2. Si está en la lista de habitantes cargados
+  const esHabRegistrado = !!(
+    (habRawList && habRawList.some(h => h.id === baseId)) ||
+    (mc.catalog && mc.catalog.some(o => o.key === 'hab:' + baseId))
+  );
+
+  if(esAssetRegistrado && !esHabRegistrado) return false;
+  if(esHabRegistrado && !esAssetRegistrado) return true;
+
+  // Fallback por prefijo si no está en las listas en memoria
+  return kStr.startsWith('hab:');
+}
 function mcMatKind(key, isStruct){
   const ck=(isStruct?'s|':'b|')+key; let t=mcKindCache.get(ck);
   if(t===undefined){
-    const c=mc.catalog && mc.catalog.find(o=>o.key===key);
+    const kStr = String(key || '');
+    const esHab = mcEsHabReal(kStr);
+    const c = mc.catalog && mc.catalog.find(o=>o.key===key || o.key==='hab:'+mcClaveBase(kStr).replace(/^asset:assets\//,'').replace(/\.vox\.json$/,'') || o.key==='asset:assets/'+mcClaveBase(kStr).replace(/^hab:/,'')+'.vox.json');
     const isFl = (typeof game !== 'undefined' && game.fluidos && game.fluidos.isFluid(key)) ||
                  (c && (c.categoria === 'fluido' || c.badge === 'fluido')) ||
-                 (String(key).toLowerCase().includes('agua') || String(key).toLowerCase().includes('lava'));
-    t=(isStruct?'estructura':'bloque')+' · '+(isFl ? 'fluido' : (c ? c.badge : (String(key).slice(0,4)==='hab:' ? 'guardada' : 'asset')));
+                 (kStr.toLowerCase().includes('agua') || kStr.toLowerCase().includes('lava'));
+    
+    const rol = isFl ? 'fluido' : (isStruct ? 'estructura' : 'bloque');
+    const origen = esHab ? 'usuario (hab)' : 'servidor (asset)';
+    t = rol + ' · ' + origen;
     mcKindCache.set(ck,t);
   }
   return t;
@@ -14984,10 +15231,9 @@ function mcUpdateXrayLabels(){
   const p=mc.pos, R=3, cx=Math.floor(p[0]), cy=Math.floor(p[1]), cz=Math.floor(p[2]);
   let n=0;
   // Coloca (o reutiliza del pool) una etiqueta de tres líneas (coords / tipo / material) en el punto de mundo
-  // (wx,wy,wz). La línea de TIPO dice si esa celda es un bloque de terreno o una estructura fina: a simple vista
-  // un 16³ macizo se ve igual de las dos formas, y solo la estructura conserva el alpha.
-  // isStruct la tiñe como estructura (naranja, igual que su caja de rayos-X). Devuelve true si quedó en pantalla.
-  function emit(wx,wy,wz, coText, tipoText, matText, isStruct, extraText){
+  // (wx,wy,wz). La línea de TIPO dice si esa celda es un bloque de terreno o una estructura fina y su origen.
+  // isStruct la tiñe como estructura; esHab resalta piezas de usuario (hab:). Devuelve true si quedó en pantalla.
+  function emit(wx,wy,wz, coText, tipoText, matText, isStruct, extraText, esHab){
     const cw=pv[3]*wx+pv[7]*wy+pv[11]*wz+pv[15];
     if(cw<=0.01) return false;                                               // detrás de la cámara
     const ndx=(pv[0]*wx+pv[4]*wy+pv[8]*wz+pv[12])/cw, ndy=(pv[1]*wx+pv[5]*wy+pv[9]*wz+pv[13])/cw;
@@ -15006,14 +15252,16 @@ function mcUpdateXrayLabels(){
     if(el._m.textContent!==matText) el._m.textContent=matText;
     extraText=extraText||''; if(el._x.textContent!==extraText) el._x.textContent=extraText;
     el.classList.toggle('mc-xlbl-struct', !!isStruct);                       // el pool se comparte → refresca el marcador cada vez
+    el.classList.toggle('mc-xlbl-hab', !!esHab);
     if(el.hidden) el.hidden=false; n++;
     return true;
   }
   // Bloques de rejilla del entorno.
   for(let x=cx-R;x<=cx+R;x++) for(let y=cy-1;y<=cy+3;y++) for(let z=cz-R;z<=cz+R;z++){
     if(mcInside(x,y,z) && mc.grid[mcIdx(x,y,z)]){ const id=mc.grid[mcIdx(x,y,z)];
-      emit(x+0.5,y+0.5,z+0.5, x+','+y+','+z, mcMatKind(mc.blockKey[id], false), mcMatName(id), false,
-           mcXrayExtraTexto(mc.blockKey[id], null, x, y, z)); }
+      const k=mc.blockKey[id]||'';
+      emit(x+0.5,y+0.5,z+0.5, x+','+y+','+z, mcMatKind(k, false), mcMatName(id), false,
+           mcXrayExtraTexto(k, null, x, y, z), mcEsHabReal(k)); }
   }
   // Estructuras finas cercanas: una etiqueta por instancia en el centro de su AABB (rayos-X ya dibuja su caja naranja).
   // La coord es su celda de origen y el «material» su clave cruda (hab:cristal / asset:…) — igual que la muestran los bloques.
@@ -15022,7 +15270,7 @@ function mcUpdateXrayLabels(){
     const mxc=(a[0]+a[3])/2, myc=(a[1]+a[4])/2, mzc=(a[2]+a[5])/2;
     if(Math.abs(mxc-p[0])>R+8 || Math.abs(mzc-p[2])>R+8) continue;           // solo el entorno (como los bloques)
     emit(mxc, myc, mzc, s.ox+','+s.oy+','+s.oz, mcMatKind(s.key, true), String(s.key), true,
-         mcXrayExtraTexto(s.key, s, s.ox, s.oy, s.oz));
+         mcXrayExtraTexto(s.key, s, s.ox, s.oy, s.oz), mcEsHabReal(s.key));
   }
   // Impacto del rayo de apuntado: si paró en un voxel fino o en un bloque, y dónde caería el bloque nuevo.
   const r=mc.rayFijo||mcRayoInfo();
@@ -21489,6 +21737,15 @@ function closeWorld(){
   snipPintaDividido();   // REQ-SPLIT1 · sin Mundo no hay nada que dividir: el editor recupera la pantalla
   mcDestapaApp();   // REQ-EDIT1 · CONSTRUIR sale al editor sin recargar: la tapa no puede seguir puesta
   mcMarcaSync();
+
+  // Si se llegó al Mundo desde la galería (u otra vista con retorno), volver a abrirla al salir
+  if(mcOrigenPrevio){
+    const prev = mcOrigenPrevio;
+    mcOrigenPrevio = null;
+    if(prev.tipo === 'galeria'){
+      openHabitantes(prev.kind, false);
+    }
+  }
 }
 // La salida táctil. Desde REQ-MOV1 es una LÍNEA del menú ☰ de `#mc-touch` (antes un ✕ suelto), no el
 // «✕ Cerrar» de la esquina (quitado en REQ-OSD1): en escritorio no existe, y aquí no hace falta

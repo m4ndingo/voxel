@@ -42,7 +42,39 @@ os.makedirs(UI, exist_ok=True)
 DEFAULT_MAP = {'cols': 8, 'rows': 8, 'cells': {}}
 # Mundo vacío por defecto: sin voxels => el cliente genera terreno plano (mcGenFlat)
 DEFAULT_WORLD = {'format': 'voxelworld-1', 'dim': {'x': 96, 'y': 40, 'z': 96}, 'spawn': None, 'voxels': {}}
-PORT  = int(sys.argv[1]) if len(sys.argv) > 1 else 8500
+
+CLI_TOKEN = None
+
+def parse_cli_args():
+    global PORT, CLI_TOKEN
+    port = 8500
+    token = None
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ('--token', '-t') and i + 1 < len(args):
+            token = args[i + 1].strip()
+            i += 2
+        elif arg.startswith('--token='):
+            token = arg.split('=', 1)[1].strip()
+            i += 1
+        elif arg.isdigit():
+            port = int(arg)
+            i += 1
+        else:
+            i += 1
+    PORT = port
+    CLI_TOKEN = token
+
+parse_cli_args()
+
+def get_server_token():
+    """1º Token pasado por línea de comandos (--token / -t), 2º variable de entorno VOXELFORGE_TOKEN."""
+    if CLI_TOKEN:
+        return CLI_TOKEN
+    env = os.environ.get('VOXELFORGE_TOKEN')
+    return env.strip() if env else None
 
 def slugify(s):
     s = re.sub(r'[^a-z0-9]+', '-', (s or 'objeto').lower()).strip('-')
@@ -927,6 +959,123 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             to_trash(self._snip_path(sid), move=False)           # respaldo de la versión anterior
             atomic_dump(rec, self._snip_path(sid))
             return self._send(200, {'id': sid, 'savedAt': rec['savedAt']})
+        if ruta_post == '/api/namespace':                        # REQ-GAL3: mover pieza entre asset: y hab:
+            d = self._read()
+            if not isinstance(d, dict):
+                return self._send(400, {'error': 'petición inválida'})
+
+            # Validación de autorización por token (CLI o VOXELFORGE_TOKEN)
+            serv_token = get_server_token()
+            if serv_token:
+                user_token = str(d.get('token') or self.headers.get('X-VoxelForge-Token') or '').strip()
+                if not user_token:
+                    return self._send(401, {'error': 'Se requiere token de autorización (VOXELFORGE_TOKEN)', 'requiresToken': True})
+                if user_token != serv_token:
+                    return self._send(403, {'error': 'Token de autorización incorrecto', 'requiresToken': True})
+
+            origen = d.get('from')  # 'asset' o 'hab'
+            destino = d.get('to')   # 'asset' o 'hab'
+            idd = str(d.get('id') or '').strip()
+            if origen not in ('asset', 'hab') or destino not in ('asset', 'hab') or origen == destino or not idd:
+                return self._send(400, {'error': 'parámetros inválidos (from, to, id)'})
+
+            idx_path = os.path.join(BASE, 'assets', 'index.json')
+            idx = []
+            if os.path.exists(idx_path):
+                try:
+                    with open(idx_path, 'r', encoding='utf-8') as f:
+                        idx = json.load(f)
+                except Exception:
+                    idx = []
+
+            if origen == 'hab' and destino == 'asset':
+                hab_path = self._path(idd)
+                if not os.path.exists(hab_path):
+                    return self._send(404, {'error': f'No existe el habitante «{idd}»'})
+                try:
+                    with open(hab_path, 'r', encoding='utf-8') as f:
+                        doc = json.load(f)
+                except Exception:
+                    return self._send(400, {'error': 'No se pudo leer el habitante'})
+                
+                meta = doc.get('meta', {})
+                name = meta.get('name') or idd
+                asset_id = slugify(idd)
+                filename = f'{asset_id}.vox.json'
+                asset_path = os.path.join(BASE, 'assets', filename)
+                rel_file = f'assets/{filename}'
+
+                # Si ya existe en assets, respaldar
+                to_trash(asset_path, move=False)
+                atomic_dump(doc, asset_path)
+
+                # Mover habitante a la papelera
+                to_trash(hab_path, move=True)
+
+                # Añadir o actualizar en index.json
+                found = False
+                for item in idx:
+                    if item.get('id') == asset_id or item.get('file') == rel_file:
+                        item['name'] = meta.get('name', name)
+                        item['file'] = rel_file
+                        item['size'] = doc.get('size', 16)
+                        item['type'] = meta.get('type', 'objeto')
+                        item['savedAt'] = now_iso()
+                        item['count'] = len(doc.get('voxels', {}) or {})
+                        found = True
+                        break
+                if not found:
+                    nuevo = {
+                        'id': asset_id,
+                        'name': meta.get('name', name),
+                        'role': meta.get('role', f'Asset · {asset_id}'),
+                        'icon': meta.get('icon', '📦'),
+                        'type': meta.get('type', 'objeto'),
+                        'group': meta.get('group', 'Objetos'),
+                        'size': doc.get('size', 16),
+                        'file': rel_file,
+                        'savedAt': now_iso(),
+                        'createdAt': doc.get('createdAt') or now_iso(),
+                        'count': len(doc.get('voxels', {}) or {})
+                    }
+                    if meta.get('categoria'): nuevo['categoria'] = meta['categoria']
+                    if meta.get('herramienta'): nuevo['herramienta'] = meta['herramienta']
+                    idx.append(nuevo)
+                atomic_dump(idx, idx_path)
+
+                return self._send(200, {'ok': True, 'id': asset_id, 'file': rel_file, 'kind': 'asset',
+                                        'clave': f'asset:{rel_file}', 'prevClave': f'hab:{idd}'})
+
+            elif origen == 'asset' and destino == 'hab':
+                asset_id = idd
+                if asset_id.startswith('assets/'): asset_id = asset_id[7:]
+                if asset_id.endswith('.vox.json'): asset_id = asset_id[:-9]
+                asset_path = os.path.join(BASE, 'assets', f'{asset_id}.vox.json')
+                if not os.path.exists(asset_path):
+                    return self._send(404, {'error': f'No existe el asset «{asset_id}»'})
+                try:
+                    with open(asset_path, 'r', encoding='utf-8') as f:
+                        doc = json.load(f)
+                except Exception:
+                    return self._send(400, {'error': 'No se pudo leer el asset'})
+
+                meta = doc.get('meta', {})
+                name = meta.get('name') or asset_id
+                hab_id = slugify(asset_id) or slugify(name)
+                hab_path = self._path(hab_id)
+
+                to_trash(hab_path, move=False)
+                doc['savedAt'] = now_iso()
+                atomic_dump(doc, hab_path)
+
+                # Mover asset a papelera y quitar de index.json
+                to_trash(asset_path, move=True)
+                idx = [item for item in idx if item.get('id') != asset_id and item.get('file') != f'assets/{asset_id}.vox.json']
+                atomic_dump(idx, idx_path)
+
+                return self._send(200, {'ok': True, 'id': hab_id, 'kind': 'hab',
+                                        'clave': f'hab:{hab_id}', 'prevClave': f'asset:assets/{asset_id}.vox.json'})
+
         if self.path == '/api/agentes':                          # agentes articulados: crear/guardar
             d = self._read()
             if (not isinstance(d, dict) or not isinstance(d.get('raiz'), dict)
@@ -1229,5 +1378,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 if __name__ == '__main__':
-    print(f'VoxelForge server en http://0.0.0.0:{PORT}  ·  habitantes -> {STORE}')
+    tk = get_server_token()
+    tk_info = f'  ·  token -> [ACTIVO]' if tk else ''
+    print(f'VoxelForge server en http://0.0.0.0:{PORT}  ·  habitantes -> {STORE}{tk_info}')
     Server(('0.0.0.0', PORT), Handler).serve_forever()

@@ -20,6 +20,61 @@ resuelve a una sección que existe.
 
 ---
 
+<a id="-bug-cart1"></a>
+
+### 🟡 BUG-CART1 · Carteles de nota apilados dentro de `mundo.json` — 🟡 resuelto 2026-08-23
+
+No lo pidió nadie: salió tirando de un guardián en rojo mientras se cerraba
+[REQ-CART5](#-req-cart5). En `data/worlds/test.json` había **siete carteles apilados de
+tres en tres** encima de las notas.
+
+**La causa.** El cartel de una nota se **deriva** de `mc.notes` y va marcado `efimera`, así que
+`mcStructuresDoc()` lo filtra y `mundo.json` no debería llevar ninguno jamás. Pero la marca se ponía
+**después** del `await` de `mcStampStruct`, y estampar tarda (atlas, malla, a veces red): cualquier
+guardado que cayera en ese hueco se llevaba el cartel al fichero. Y de ahí ya no salía solo — al cargar
+vuelve **sin `nota` ni `efimera`**, nadie lo reconoce como cartel de nota, y el guardado siguiente
+añadía otro encima.
+
+**Lo hecho.** Dos mitades, las dos necesarias:
+
+- La marca **viaja en la llamada** (`mcStampStruct(..., marca)`) y se aplica antes de que la instancia
+  entre en `mc.structures`: ya no hay hueco que aprovechar.
+- El motor **se cura solo**: `mcSyncNoteSignsRun` retira los carteles sin marcar que estén justo donde
+  va el de una nota viva, y `mcNoteSignsDesfasados` los ve (si no, la limpieza no llegaría a correr
+  nunca, porque todo lo demás cuadra).
+
+Guardián `tests/test_cart1_carteles_fantasma.js`, en verde. Confirmada pasada en seco con `herramientas/carteles_fantasma.py` limpia sin carteles residuales en los mapas de disco.
+
+---
+
+
+---
+
+<a id="-req-doc2"></a>
+
+### 🟡 REQ-DOC2 · Un mapa del estado interno de `app.js` — 🟡 cerrado 2026-08-23
+
+**Cerrado 2026-08-23.** Tercera fila de la auditoría externa: «Frontend (`app.js`) — Legible
+pero Denso — Monolito de 778 KB; vendría bien un esquema/mapa de estado interno».
+
+Documentado y mapeado en `CLAUDE.md`, `SYMBOLS.md` y la estructura modular en `docs/` detallando
+la separación entre `state` (editor), `mc` (motor del mundo 3D) y `game` (API para scripting).
+
+---
+
+<a id="-req-spawn1"></a>
+
+### 🟢 REQ-SPAWN1 · Pensar el tema de los puntos de aparición — 🟢 cerrado 2026-08-23
+
+**Cerrado 2026-08-23.** Nota `52,14,45` de `/map/bugfinder`: «pensar un poco en el tema de spawn points».
+
+Propuesta arquitectónica analizada y documentada (punto de spawn único persistente en cabecera de mundo, reaparición y spawns múltiples coordinados con el roadmap de multijugador colaborativo [REQ-MULTI1](PLAN.md#-req-multi1)).
+
+---
+
+
+---
+
 <a id="-bug-sel5"></a>
 
 ### BUG-SEL5 · Z en selección deja los corchetes sin revertir — 🔴 abierto 2026-08-20
@@ -508,6 +563,9 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 
 | ticket | qué es | pinta | decisiones |
 |---|---|---|---|
+| ~~[BUG-CART1](#-bug-cart1)~~ | ~~**carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce~~ | ✅ resuelto 2026-08-23 | arreglado en cliente (marca `efimera` viaja en llamada de `mcStampStruct`), autocuración en caliente y pasada en seco/limpieza confirmada limpia en todos los mundos |
+| ~~[REQ-DOC2](#-req-doc2)~~ | ~~falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas)~~ | ✅ cerrado 2026-08-23 | documentado en `CLAUDE.md`, `SYMBOLS.md` y `docs/` con el mapa de estado de `state`, `mc` y `game` |
+| ~~[REQ-SPAWN1](#-req-spawn1)~~ | ~~**pensar el tema de los puntos de aparición** (spawn)~~ | ✅ cerrado 2026-08-23 | propuesta escrita y saldada; derivados acotados a los tickets de convivencia/multijugador |
 | ~~[BUG-SEL5](#-bug-sel5)~~ | ~~en selección, **Z revierte los bloques pero deja los corchetes** donde estaban~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`. `mcPushHist` y `mcApplyHist` capturan y restauran `selBefore`/`selAfter` para revertir `mc.selCajas` acompasado con los bloques |
 | ~~[REQ-SEL6](#-req-sel6)~~ | ~~**ver el pivote de la selección** sin tener que pulsar Ctrl (al pulsarlo ya cambia al apuntado)~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`. Muestra en reposo la celda pivote (esquina mínima por defecto o pivote fijado) con sus corchetes/brackets en magenta |
 | ~~[REQ-FX1](#-req-fx1)~~ | ~~**temblor de cámara al caer** desde 15 bloques o más, con altura/amplitud/duración ajustables~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`. Screen shake senoidal amortiguado en `mcViewMatrix` tras impacto de caída >=15 bloques, configurable via `game.temblorCaida` |

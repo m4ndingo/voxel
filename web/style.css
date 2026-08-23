@@ -1030,6 +1030,7 @@ body.mc-escaparate .mc-modal{background:transparent}
   font:600 10px/1.2 ui-monospace,Menlo,Consolas,monospace; color:#fff;
   background:rgba(150,10,10,.72); text-shadow:0 1px 1px rgba(0,0,0,.8)}
 .mc-xlbl-struct{background:rgba(190,90,10,.74)}   /* estructura fina: mismo naranja que su caja de rayos-X */
+.mc-xlbl.mc-xlbl-hab{background:rgba(18,78,140,.82); border:1px solid rgba(80,160,255,.5)}   /* pieza de usuario (hab:): azul distintivo con borde */
 .mc-xlbl-mat{font-weight:400; font-size:9px; opacity:.9; color:#ffe08a}   /* nombre de material, usable tal cual en tntMat/setVoxel */
 .mc-xlbl-tipo{font-weight:400; font-size:9px; opacity:.8; color:#cfe9ff}   /* bloque de terreno vs estructura fina + origen en la galería */
 /* El hueco del snippet. `pre-line` (contra el nowrap del padre) porque el texto lo componen varios

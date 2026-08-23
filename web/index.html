@@ -305,14 +305,20 @@
     <div class="modal-head">
       <div><strong id="hab-title">Galería</strong> <span class="muted">lo guardado en el servidor y los assets del juego</span></div>
       <div class="modal-actions">
+        <button class="btn sm tab-play" id="hab-go-mundo" title="Ir al Mundo directamente desde la galería">🌍 Mundo</button>
         <button class="btn sm" id="hab-refresh" title="Recargar">↻ Recargar</button>
         <button class="btn sm" id="hab-close" title="Cerrar (Esc)">✕ Cerrar</button>
       </div>
     </div>
     <div class="mc-picker-bar" style="background:rgba(0,0,0,0.3); border-bottom:1px solid rgba(255,255,255,0.1)">
       <input type="search" id="hab-picker-search" class="mc-picker-search" placeholder="🔍 Buscar por nombre o tipo (3 letras mín.)..." autocomplete="off">
+      <div class="mc-picker-filters" id="hab-picker-origin">
+        <button class="mc-pick-filter active" data-orig="all" title="Ver todo">Todos</button>
+        <button class="mc-pick-filter" data-orig="asset" title="Assets públicos del proyecto (servidor)">🌐 Públicos (assets)</button>
+        <button class="mc-pick-filter" data-orig="hab" title="Piezas propias guardadas por el usuario">👤 Usuario (hab)</button>
+      </div>
       <div class="mc-picker-filters" id="hab-picker-filters">
-        <button class="mc-pick-filter active" data-cat="all">Todos</button>
+        <button class="mc-pick-filter active" data-cat="all">Categorías</button>
         <button class="mc-pick-filter" data-cat="general">General</button>
         <button class="mc-pick-filter" data-cat="redstone">⚡ Redstone</button>
       </div>
@@ -325,6 +331,7 @@
     <div class="modal-head">
       <div><strong id="ficha-title">Ficha</strong> <span class="muted">nombres y metadatos de la pieza</span></div>
       <div class="modal-actions">
+        <button class="btn sm" id="ficha-mover" title="Mover a la otra galería (asset: ↔ hab:)">⇄ Cambiar espacio de nombres</button>
         <button class="btn sm" id="ficha-save" title="Guardar los cambios">💾 Guardar</button>
         <button class="btn sm" id="ficha-close" title="Cerrar (Esc)">✕ Cerrar</button>
       </div>
@@ -344,6 +351,14 @@
           </div>
           <p class="ficha-hint">Nombres que ya funcionan hoy para esta pieza:</p>
           <ul class="ficha-claves" id="ficha-claves"></ul>
+        </section>
+
+        <section class="ficha-sec" id="ficha-sec-mover">
+          <h3>Espacio de nombres (Ubicación)</h3>
+          <p class="ficha-hint" id="ficha-mover-desc">Esta pieza está en el espacio de nombres <code>asset:</code> (público / servidor).</p>
+          <div class="ficha-copy">
+            <button class="btn sm" id="ficha-btn-mover" style="width:100%">⇄ Mover a piezas de Usuario (hab:)</button>
+          </div>
         </section>
 
         <section class="ficha-sec">

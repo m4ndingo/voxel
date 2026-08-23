@@ -41,13 +41,11 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-GAL3](#-req-gal3) | poder **cambiar el espacio de nombres de una pieza desde la galería** (mover `asset:` ↔ `hab:`) | 🔴 abierto 2026-08-10 | idea del dueño al hilo de BUG-FLUID3. No es el arreglo de los importados (el motor ya no depende del espacio), sino la herramienta para **colocar** una pieza donde la quieres. Redactado, sin investigar |
 | [BUG-SNP4](#-bug-snp4) | los cambios hechos en el **editor de código del Mundo se revierten** al volver al mapa y reabrirlo | 🔴 abierto 2026-08-11 | **Redactado, sin investigar.** Sospecha (sin comprobar): el snippet tiene **dos copias vivas** y al reabrir el editor se relee la que se cargó al abrir el Mundo, no la editada. Ojo: el dueño dice **Ctrl+C**, `CLAUDE.md` documenta **Alt+C** |
 | [REQ-RS11](#-req-rs11) | las piezas de redstone viven mezcladas con los dibujos del dueño en `data/habitantes/`: **carpeta propia**, sin romper `hab:` | 🟡 abierto 2026-08-07 | ya viajan con el repo (excepciones en `.gitignore`); lo que falta es **separarlas** — el namespace tendría que servirse desde dos carpetas. **Sin investigar a fondo** |
-| [REQ-DOC2](#-req-doc2) | falta un **mapa del estado interno** de `app.js` (749 KB, 11 437 líneas) | 🟡 abierto 2026-08-07 | la crítica mejor puesta de la auditoría; no es partir el fichero, es documentar qué vive en `state`, `mc` y `game`. **Sin investigar a fondo** |
-| [BUG-CART1](#-bug-cart1) | **carteles de nota apilados dentro de `mundo.json`**: el cartel se DERIVA de la nota y no debería guardarse nunca, pero se colaban y al cargar ya nadie los reconoce | 🟡 arreglado 2026-08-20, **falta una pasada del dueño** | encontrado tirando de un guardián en rojo, no pedido. La causa (la marca `efimera` se ponía DESPUÉS del `await` de estampar) está arreglada y el motor se cura solo en caliente. Queda lo que ya está escrito en los ficheros: `python3 herramientas/carteles_fantasma.py` (en seco) y luego `--escribe`. **No lo puedo lanzar yo**: la caja de arena me deniega escribir en `data/worlds/` |
 | [REQ-MULTI1](#-req-multi1) | **multijugador colaborativo**: varios jugadores en el mismo mapa, viéndose entre sí (con el arma en la mano y su etiqueta de nombre) y con los cambios del mundo sincronizados | 🟢 abierto 2026-08-19 | pedido por el dueño el 2026-08-19 al hilo de «pisar el mundo»: si el mapa es de todos, **nadie pisa a nadie**. Es el ticket más grande del plan. **Acotado ya por él (2026-08-19)**: tope **10** jugadores de momento (idealmente sin tope), **internet y red local**, y se **juega Y se construye** a la vez. A favor: medio camino hecho sin querer — `POST /api/mundo/edits` ya manda **el delta**, no el mundo. En contra: hoy no hay proceso servidor con estado (stdlib, un `Handler` por petición), ni identidad, ni cuerpo de jugador dibujable. Construir a la vez obliga a que **el servidor sea el árbitro**, no el navegador |
-| [REQ-SPAWN1](#-req-spawn1) | **pensar el tema de los puntos de aparición** (spawn) | 🟢 **propuesta escrita 2026-08-20**, esperando su visto bueno | nota del dueño en `/map/bugfinder`, tal cual: es un **encargo de pensar**, no un arreglo. Hoy hay un único `spawn` en la cabecera del mundo |
 | [REQ-SEL2](#-req-sel2) | copiar/pegar debería llevarse el **redstone pegado a la cara** de los bloques copiados | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «son difíciles de seleccionar». Toca la frontera `mc.grid` ↔ `mc.structures`, la misma que [BUG-RS10](#-bug-rs10) | 
 | [REQ-TOOL9](#-req-tool9) | poder **elegir qué herramientas entran con `e` y cuáles con `E`** desde el editor (primarias / secundarias) | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`: «cambiar el orden de las herramientas empieza a ser algo habitual». Redactado, sin investigar | 
-| [REQ-CART7](#-req-cart7) | poder **elegir el tipo de cartel** de una nota desde su editor, con los carteles definidos en un sitio | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Él mismo propone la puerta: categoría **«Cartel de Notas»** en la galería. Encaja con que los carteles ya **se derivan** de `mc.notes` y no viven en `mundo.json` ([BUG-CART1](#-bug-cart1)) | 
+| [REQ-CART7](#-req-cart7) | poder **elegir el tipo de cartel** de una nota desde su editor, con los carteles definidos en un sitio | 🔴 abierto 2026-08-20 | nota de `/map/bugfinder2`. Él mismo propone la puerta: categoría **«Cartel de Notas»** en la galería. Encaja con que los carteles ya **se derivan** de `mc.notes` y no viven en `mundo.json` ([BUG-CART1](PLAN_ARCHIVO.md#-bug-cart1)) | 
+| [REQ-PROP1](#-req-prop1) | sección **Propuestas (uploads/proposals)** en la galería: subir assets comunitarios, votar, comentar y visualizar | ⛔ bloqueado / 🔴 abierto 2026-08-23 | Petición del dueño para subir assets sin requerir token y que la comunidad los valore/vote/comente. **Bloqueado parcialmente**: la atribución de autor requiere autenticación/identificación multiusuario ([REQ-MULTI1](#-req-multi1)). Redactado con desglose de fases | 
 
 ---
 
@@ -141,49 +139,6 @@ entero; los cambios de código van por parche idempotente por marca, como el res
 
 ---
 
-<a id="-bug-cart1"></a>
-
-### 🟡 BUG-CART1 · Carteles de nota apilados dentro de `mundo.json` — 🟡 arreglado 2026-08-20, falta una pasada del dueño
-
-No lo pidió nadie: salió tirando de un guardián en rojo mientras se cerraba
-[REQ-CART5](PLAN_ARCHIVO.md#-req-cart5). En `data/worlds/test.json` había **siete carteles apilados de
-tres en tres** encima de las notas.
-
-**La causa.** El cartel de una nota se **deriva** de `mc.notes` y va marcado `efimera`, así que
-`mcStructuresDoc()` lo filtra y `mundo.json` no debería llevar ninguno jamás. Pero la marca se ponía
-**después** del `await` de `mcStampStruct`, y estampar tarda (atlas, malla, a veces red): cualquier
-guardado que cayera en ese hueco se llevaba el cartel al fichero. Y de ahí ya no salía solo — al cargar
-vuelve **sin `nota` ni `efimera`**, nadie lo reconoce como cartel de nota, y el guardado siguiente
-añadía otro encima.
-
-**Lo hecho.** Dos mitades, las dos necesarias:
-
-- La marca **viaja en la llamada** (`mcStampStruct(..., marca)`) y se aplica antes de que la instancia
-  entre en `mc.structures`: ya no hay hueco que aprovechar.
-- El motor **se cura solo**: `mcSyncNoteSignsRun` retira los carteles sin marcar que estén justo donde
-  va el de una nota viva, y `mcNoteSignsDesfasados` los ve (si no, la limpieza no llegaría a correr
-  nunca, porque todo lo demás cuadra).
-
-Guardián `tests/test_cart1_carteles_fantasma.js`, en verde. `/map/test` ya está limpio (7 notas del
-dueño, `carteles: []`).
-
-**Lo que queda, y por qué no lo cierro yo.** Los **huérfanos** —carteles de un bloque que ya no tiene
-nota— no se tocan a propósito: no se distinguen de uno puesto a mano como decoración, así que borrarlos
-adivinando iría contra la regla de arranque. Para ésos está
-`herramientas/carteles_fantasma.py`, que hace pasada en seco por defecto:
-
-```
-python3 herramientas/carteles_fantasma.py                    # lista lo que hay en todos los mapas
-python3 herramientas/carteles_fantasma.py --escribe          # borra (idempotente)
-```
-
-**No lo puedo lanzar yo**: escribe en `data/worlds/` y la caja de arena me lo deniega.
-
-**Criterio de cierre:** el dueño lanza la pasada en seco, mira la lista, decide si algún huérfano es
-decoración suya y corre `--escribe` con lo demás.
-
----
-
 ---
 
 ## 💡 Tickets ABIERTOS — Requerimientos y Mejoras
@@ -234,32 +189,6 @@ entran.
 
 ---
 
-<a id="-req-doc2"></a>
-
-### 🟡 REQ-DOC2 · Un mapa del estado interno de `app.js` — 🟡 abierto 2026-08-07
-
-**Redactado sin investigar.** Tercera fila de la auditoría externa: «Frontend (`app.js`) — Legible
-pero Denso — Monolito de 778 KB; vendría bien un esquema/mapa de estado interno». La cifra real es
-**749 KB / 11 437 líneas**; la crítica es la mejor puesta de la tabla.
-
-**Esto NO es un ticket para partir `app.js`**, ni para refactorizarlo. Es para escribir el mapa que
-hoy hay que reconstruir a `grep` cada vez: qué vive en `state` (editor), qué en `mc` (mundo) y qué en
-`game` (scripting), quién invalida qué, y dónde está la frontera entre los tres.
-
-Candidatos a entrar, por ser los que ya han costado tickets o me han mordido en sesión:
-
-- `state.voxels` / `state.caras` y el contador `voxRev` que invalida las cachés de render.
-- `mc.grid` (assets 16³ macizos) **vs** `mc.structures` (todo lo que tiene forma, 1/16 de grosor) —
-  ya documentado como concepto, pero sin mapa de qué campo lo decide.
-- `bits` (colisión) vs `bitsAim` (apuntado), y las tres capas de envoltorios de solidez.
-- `mc.blockKey` / la paleta que se re-hornea en cada arranque (los ids **no son estables**).
-- Los ganchos que `app.js` expone sin saber qué son: `mc.sunExtra`, `mcXrayExtra`, `mc.atraviesa`.
-
-Sitio natural: sección nueva en `CLAUDE.md`, lo que lo hace hermano de [REQ-DOC1](PLAN_ARCHIVO.md#-req-doc1) — si el
-fichero no se vuelve navegable antes, este mapa se entierra igual que lo demás.
-
----
-
 <a id="-req-gal3"></a>
 
 ### 🔴 REQ-GAL3 · Cambiar el espacio de nombres de una pieza desde la galería — 🔴 abierto 2026-08-10
@@ -279,23 +208,6 @@ larga**, así que mover una pieza deja el mundo apuntando a una clave que ya no 
 reescribir el mundo, o dejar la vieja como alias.
 
 ---
-
-<a id="-req-spawn1"></a>
-
-### 🟢 REQ-SPAWN1 · Pensar el tema de los puntos de aparición — 🟢 abierto 2026-08-19
-
-Nota `52,14,45` de **`/map/bugfinder`**, entera: «*pensar un poco en el tema de spawn points*».
-
-Es un **encargo de pensar**, no un arreglo: no hay bug que reproducir. Lo que hay hoy es **un único**
-`spawn` en la cabecera del mundo (`{x,y,z}`, se ve en `/api/mundo?map=…`), que es donde apareces al
-entrar y a donde vuelves. Lo que no hay: varios puntos, punto por agente/criatura, reaparecer donde
-moriste, ni marcarlos desde el Mundo.
-
-**Criterio de cierre:** una propuesta corta escrita (aquí mismo) con lo que él quiera de eso, y los
-tickets que salgan. No se toca código hasta que la apruebe.
-
-Engancha con [REQ-MULTI1](#-req-multi1): con varios jugadores, «dónde aparece cada uno» deja de ser un
-punto y pasa a ser una regla.
 
 ---
 
@@ -392,7 +304,7 @@ a un fallo que ya está pasando.
    se disfruta enseguida y no puede corromper ningún mundo.
 2. **Ver los cambios de los demás**: retransmitir los `edits` que ya se mandan. Ahí aparecen la luz
    incremental (`mcRelightBox`) y el re-mallado del chunk del vecino.
-3. **Reglas de convivencia**: conflictos, quién puede editar, y los spawn points ([REQ-SPAWN1](#-req-spawn1)).
+3. **Reglas de convivencia**: conflictos, permisos, quién entra, y los puntos de aparición ([REQ-SPAWN1](PLAN_ARCHIVO.md#-req-spawn1)).
 
 **Acotado por el dueño (2026-08-19), sus palabras:**
 
@@ -434,7 +346,7 @@ a un fallo que ya está pasando.
 2. **Construir juntos** — retransmitir los `edits` con el servidor de árbitro. Aquí aparecen la luz
    incremental (`mcRelightBox`) y el re-mallado del chunk del vecino, que ya son incrementales y exactos:
    es la pieza que hace esto viable.
-3. **Convivencia** — conflictos, permisos, quién entra, y los puntos de aparición ([REQ-SPAWN1](#-req-spawn1)).
+3. **Convivencia** — conflictos, permisos, quién entra, y los puntos de aparición ([REQ-SPAWN1](PLAN_ARCHIVO.md#-req-spawn1)).
 
 **Criterio de cierre (fase 1):** dos navegadores en `/map/test` se ven el uno al otro moverse, con su
 arma en la mano y su nombre encima, sin que ninguno de los dos note que los fps bajan.
@@ -493,7 +405,7 @@ que son elementos especiales».
 Trae la puerta ya propuesta por él: una **categoría propia en la galería**, «Cartel de Notas», como
 tienen los habitantes y las habitaciones.
 
-Encaja bien con lo que se acaba de cerrar en [BUG-CART1](#-bug-cart1): los carteles **se derivan** de
+Encaja bien con lo que se acaba de cerrar en [BUG-CART1](PLAN_ARCHIVO.md#-bug-cart1): los carteles **se derivan** de
 `mc.notes` al cargar y ya **no** se guardan en `mundo.json`. Luego el tipo de cartel es un dato **de la
 nota**, no un voxel del mundo — y ahí es donde debe guardarse, junto a `noteRots` / `noteTints`.
 
@@ -502,6 +414,43 @@ distintas — sin que aparezca ni un voxel de cartel en `mundo.json`
 (`herramientas/carteles_fantasma.py` en cero).
 
 ---
+
+<a id="-req-prop1"></a>
+
+### ⛔ REQ-PROP1 · Sección Propuestas (Uploads / Proposals) en la galería — ⛔ bloqueado / 🔴 abierto 2026-08-23
+
+**Petición del dueño (2026-08-23):**
+> «vamos a añadir una seccion nueva para los assets que sea tambien uploads, imaginemos que un usuario quiere subir un asset al mundo, pero no conoce el token, pero le gustaria que formase parte del proyecto. queremos que pueda subir su asset a una seccion donde se proponen assets (proposals) que ademas pueda ser visualizada por otros usuarios, votada, que pueda poner comentarios, e incluso atribucion del usuario (esto tendria un block hasta que se haga la parte de autenticacion/identificacion multiusuario, es un ticket). Por lo tanto, hay que añadir esta otra seccion visible en las categorias. como es algo extension con bloqueos abrir un ticket antes de peticion de implentacion»
+
+**Propósito:**
+Permitir a usuarios sin token de administrador proponer y compartir modelos/assets para que la comunidad los explore, vote y comente. Un administrador con token puede posteriormente promover una propuesta a asset oficial (`asset:assets/...`) o moverla.
+
+**Bloqueos identificados (⛔ Dependencies):**
+- **Atribución de Autor y Votos seguros**: Bloqueado por la falta de identidad / autenticación de usuario. Depende de la capa de usuarios/sesión multiusuario ([REQ-MULTI1](#-req-multi1)). Mientras no exista sistema de login o sesión, la atribución y los votos son anónimos o por alias local no verificado.
+
+**Desglose en Fases de Implementación:**
+
+1. **Fase A · Categoría y Almacén de Propuestas (Subida básica sin token)**:
+   - Nueva categoría/sección en la galería (`proposals` / `uploads`).
+   - Directorio de almacenamiento aislado: `data/propuestas/` (ficheros `.json` o `.vox.json` propuestos).
+   - Endpoints en `server.py`:
+     - `GET /api/propuestas` (listar propuestas con metadata, conteo de votos y comentarios).
+     - `POST /api/propuestas` (subir nuevo asset propuesto sin requerir `VOXELFORGE_TOKEN`, validando schema voxelforge).
+     - `GET /api/propuestas/<id>` (obtener modelo para vista previa 3D / thumbnail).
+2. **Fase B · Interacción Comunitaria (Comentarios y Votos)**:
+   - Sistema de votación (`POST /api/propuestas/<id>/votar`).
+   - Sistema de comentarios (`GET/POST /api/propuestas/<id>/comentarios`).
+   - Persistencia de interacciones en `data/propuestas/<id>.meta.json` o base de datos ligera.
+3. **Fase C · Atribución y Verificación de Usuario (Desbloqueable con [REQ-MULTI1](#-req-multi1))**:
+   - Vincular autoría al perfil/identidad de usuario autenticado.
+   - Evitar votos duplicados por identidad única.
+4. **Fase D · Aprobación y Promoción a Asset Oficial (Admin con Token)**:
+   - Acción en la ficha para administradores con token: «Aprobar y mover a `asset:` públicos».
+
+**Criterio de Cierre:**
+- La galería cuenta con un filtro/sección visible de Propuestas.
+- Un usuario sin token puede subir un modelo a Propuestas desde el editor.
+- Los usuarios pueden visualizar los modelos propuestos en 3D, votar y dejar comentarios.
 
 ---
 

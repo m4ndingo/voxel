@@ -39,6 +39,8 @@ TRASH = os.path.join(BASE, 'data', 'habitantes_trash')
 # ---------------------------------------------------------------- escala de la maqueta
 
 GH = 14                 # altura del suelo, la misma que mcGenFlat (web/app.js:8550)
+AGUA_Y = 12             # nivel de superficie del agua (1 bloque por encima del lecho marino)
+SUELO_MAR_Y = 11        # fondo del mar / canales (lecho somero inmediatamente debajo del agua)
 COLS = 8                # atriles por fila dentro de una planta
 PASO_ATRIL = 2          # atril + pasillo: un atril de 1×1 cada 2 de rejilla
 ALTO_PLANTA = 4         # forjado de ladrillo_piedra cada 4 ⇒ una planta por `####`
@@ -65,6 +67,7 @@ SEP_PLANTA = mat('ladrillo_piedra')  # forjado entre plantas (####)
 SUELO_ROCA = mat('roca')             # y < 11
 SUELO_TIERRA = mat('tierra')         # 11..13
 SUELO_HIERBA = mat('hierba')         # y = GH
+SUELO_ARENA = mat('arena')           # lecho marino / playas someras
 # ⛔ El muro NO puede ser adoquín aunque quede mejor: es un material separador, y un edificio que
 #    llene su parcela justo le pondría a la vuelta una columna de adoquín de lado a lado del
 #    estante, que la partiría por la mitad. Los reservados son EXCLUSIVOS de la partición.
@@ -76,6 +79,8 @@ CITA = mat('alfombra')               # cita `>`
 SENDERO = mat('grava')               # enlace interno, con --enlaces=carreteras
 FAROLA_POSTE = mat('tronco')
 FAROLA_LUZ = mat('cubo-blanco-brillante')
+PUENTE = mat('granito-pulido')       # pasarela/tablero de los puentes inter-islas (y=13..14)
+PUENTE_BARANDILLA = mat('valla-madera') # barandilla protectora de los puentes (y=14..15)
 
 # Estado del ticket → material del tejado. Vocabulario medido en PLAN.md.
 TEJADOS = {
@@ -83,7 +88,7 @@ TEJADOS = {
     '🟡': mat('hormig-n-amarillo-i'),
     '🟢': mat('hormig-n-verde'),
     '⬜': mat('white_whool'),
-    '🟨': mat('yellow'),
+    '🟨': mat('yellow_concrete'),
     '✅': mat('oro'),
     '⛔': mat('obsidiana'),
     '': mat('adoquin'),              # sección sin estado

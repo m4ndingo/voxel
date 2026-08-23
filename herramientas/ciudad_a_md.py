@@ -73,9 +73,9 @@ def _parte(capa, x0, x1, z0, z1, claves):
 
 
 def parcelas(capa):
-    """Mundo → parcelas en orden de documento. Dos cortes: mar/canal (##) y luego calle (###)."""
+    """Mundo → parcelas en orden de documento. Dos cortes: mar/canal/puente (##) y luego calle (###)."""
     fuera = []
-    for bx0, bx1, bz0, bz1 in _parte(capa, 0, capa.dx, 0, capa.dz, {C.SEP_BARRIO}):
+    for bx0, bx1, bz0, bz1 in _parte(capa, 0, capa.dx, 0, capa.dz, {C.SEP_BARRIO, C.PUENTE}):
         fuera.extend(_parte(capa, bx0, bx1, bz0, bz1, {C.SEP_PARCELA}))
     return fuera
 

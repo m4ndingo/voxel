@@ -221,17 +221,31 @@ class Lienzo(object):
 
 
 def pinta_terreno(li, W, H, ox, oz, barrios):
-    """Roca y tierra sólo bajo cada barrio (islas independientes) con materiales según temática."""
-    li.caja(ox, oz, W, H, C.GH, C.SEP_MAR)                # todo hueco del nivel isla ES mar
+    """Bases de islas escalonadas con colores temáticos visibles sobre el agua, fondo somero y canales bajos."""
+    # 1. Lecho marino somero de arena/roca (y<=11) y UN ÚNICO nivel de agua profunda en los canales/mar (y=12)
+    for y in range(0, C.SUELO_MAR_Y + 1):
+        li.caja(ox, oz, W, H, y, C.SUELO_ROCA if y < C.SUELO_MAR_Y else C.SUELO_ARENA)
+    li.caja(ox, oz, W, H, C.AGUA_Y, C.SEP_MAR)
+
+    # 2. Islas independientes con cimientos temáticos y bases escalonadas
     for b in barrios:
         tema = tema_de_barrio(b)
         bx, bz = ox + b.x, oz + b.z
         c_roca = tema['cimientos_roca']
         c_tierra = tema['cimientos_tierra']
-        for y in range(0, C.GH):
-            clave = c_roca if y < 11 else c_tierra
-            li.caja(bx, bz, b.w, b.h, y, clave)
-        li.caja(bx, bz, b.w, b.h, C.GH, C.SEP_PARCELA)    # suelo de adoquín portador en y=GH
+        
+        # Nivel 1 bajo el agua / lecho (y<=11): cimientos de roca temática
+        for y in range(0, C.SUELO_MAR_Y + 1):
+            li.caja(bx, bz, b.w, b.h, y, c_roca)
+
+        # Nivel 2 al ras del agua (y=AGUA_Y=12): escalón de roca/cimientos que emerge del agua
+        li.caja(bx, bz, b.w, b.h, C.AGUA_Y, c_roca)
+            
+        # Nivel 3 sobre el agua (y=13): escalón intermedio con el color secundario de la temática (tierra/base)
+        li.caja(bx, bz, b.w, b.h, C.GH - 1, c_tierra)
+
+        # Nivel 4 portador (y=GH=14): suelo de la isla (calles de adoquín portador)
+        li.caja(bx, bz, b.w, b.h, C.GH, C.SEP_PARCELA)
 
 
 def pinta_edificio(li, e, ox, oz, tema=None):
@@ -313,6 +327,71 @@ def pinta_senderos(li, puertas, barrios, ox, oz):
     return puesto
 
 
+def pinta_puentes(li, barrios, ox, oz):
+    """DERIVADO: puentes peatonales a nivel de suelo (y=GH) para cruzar caminando sin tener que saltar."""
+    puestos = 0
+    ancho_p = 2  # ancho del puente para caminar con holgura
+    y_tablero = C.GH  # tablero al mismo nivel del suelo (y=GH=14) para paso continuo
+
+    for i in range(len(barrios)):
+        b1 = barrios[i]
+        b1_x0, b1_x1 = ox + b1.x, ox + b1.x + b1.w
+        b1_z0, b1_z1 = oz + b1.z, oz + b1.z + b1.h
+
+        for j in range(i + 1, len(barrios)):
+            b2 = barrios[j]
+            b2_x0, b2_x1 = ox + b2.x, ox + b2.x + b2.w
+            b2_z0, b2_z1 = oz + b2.z, oz + b2.z + b2.h
+
+            # ¿Vecinos en X?
+            solap_z0 = max(b1_z0, b2_z0)
+            solap_z1 = min(b1_z1, b2_z1)
+            dist_x = min(abs(b1_x0 - b2_x1), abs(b2_x0 - b1_x1)) if (b1_x1 <= b2_x0 or b2_x1 <= b1_x0) else 999
+
+            if dist_x <= C.ANCHO_CANAL + 2 and (solap_z1 - solap_z0) >= ancho_p:
+                x_ini = min(b1_x1, b2_x1)
+                x_fin = max(b1_x0, b2_x0)
+                z_mid = (solap_z0 + solap_z1 - ancho_p) // 2
+                for x in range(x_ini, x_fin):
+                    for dz in range(ancho_p):
+                        z = z_mid + dz
+                        # Tablero del puente a ras de suelo en y=GH
+                        li.set(x, y_tablero, z, C.PUENTE)
+                        # Soporte bajo el puente
+                        for yp in range(C.AGUA_Y, C.GH):
+                            li.set(x, yp, z, C.mat('ladrillo_piedra'))
+                        puestos += 1
+                    # Barandillas laterales en y=GH+1
+                    li.set(x, y_tablero + 1, z_mid - 1, C.PUENTE_BARANDILLA)
+                    li.set(x, y_tablero + 1, z_mid + ancho_p, C.PUENTE_BARANDILLA)
+
+            # ¿Vecinos en Z?
+            solap_x0 = max(b1_x0, b2_x0)
+            solap_x1 = min(b1_x1, b2_x1)
+            dist_z = min(abs(b1_z0 - b2_z1), abs(b2_z0 - b1_z1)) if (b1_z1 <= b2_z0 or b2_z1 <= b1_z0) else 999
+
+            if dist_z <= C.ANCHO_CANAL + 2 and (solap_x1 - solap_x0) >= ancho_p:
+                z_ini = min(b1_z1, b2_z1)
+                z_fin = max(b1_z0, b2_z0)
+                x_mid = (solap_x0 + solap_x1 - ancho_p) // 2
+                for z in range(z_ini, z_fin):
+                    for dx in range(ancho_p):
+                        x = x_mid + dx
+                        # Tablero del puente a ras de suelo en y=GH
+                        li.set(x, y_tablero, z, C.PUENTE)
+                        # Soporte bajo el puente
+                        for yp in range(C.AGUA_Y, C.GH):
+                            li.set(x, yp, z, C.mat('ladrillo_piedra'))
+                        puestos += 1
+                    # Barandillas laterales en y=GH+1
+                    li.set(x_mid - 1, y_tablero + 1, z, C.PUENTE_BARANDILLA)
+                    li.set(x_mid + ancho_p, y_tablero + 1, z, C.PUENTE_BARANDILLA)
+
+    return puestos
+
+    return puestos
+
+
 def pinta_farolas(li, barrios, ox, oz):
     """DERIVADO: una farola en la esquina de cada parcela. También vive por encima de y=GH."""
     n = 0
@@ -333,6 +412,7 @@ def pinta(barrios, W, H, dim, enlaces):
     ox = (dim[0] - W) // 2
     oz = (dim[2] - H) // 2
     pinta_terreno(li, W, H, ox, oz, barrios)
+    n_puentes = pinta_puentes(li, barrios, ox, oz)
     puertas = {}
     for b in barrios:
         tema = tema_de_barrio(b)
@@ -343,7 +423,7 @@ def pinta(barrios, W, H, dim, enlaces):
                 puertas[e.ancla] = puerta_de(li, e, bx + e.x, bz + e.z)
     n_sendero = pinta_senderos(li, puertas, barrios, ox, oz) if enlaces == 'carreteras' else 0
     n_farola = pinta_farolas(li, barrios, ox, oz)
-    return li, ox, oz, n_sendero, n_farola
+    return li, ox, oz, n_sendero, n_farola, n_puentes
 
 
 # ---------------------------------------------------------------- el mundo
@@ -411,7 +491,7 @@ def main(argv=None):
     if max(W, H) + 2 > min(dim[0], dim[2]):
         p.error('la ciudad mide %dx%d y no cabe en --dim %dx%dx%d' % ((W, H) + dim))
 
-    li, ox, oz, n_sendero, n_farola = pinta(barrios, W, H, dim, args.enlaces)
+    li, ox, oz, n_sendero, n_farola, n_puentes = pinta(barrios, W, H, dim, args.enlaces)
 
     # La placa va en el atril 0 de la planta 0 del edificio 0 de la plaza: el PRIMERO del barrido
     # raster, así la vuelta la encuentra sin buscarla.
@@ -440,8 +520,8 @@ def main(argv=None):
           % (len(barrios), sum(len(b.edificios) for b in barrios), args.fidelidad))
     print('  ciudad    %dx%d   dim %dx%dx%d   .vox %.2f MB'
           % (W, H, dim[0], dim[1], dim[2], dim[0] * dim[1] * dim[2] * 2 / 1e6))
-    print('  derivado  %d de sendero   %d farolas   (nada de esto lo lee la vuelta)'
-          % (n_sendero, n_farola))
+    print('  derivado  %d de sendero   %d farolas   %d bloques puente'
+          % (n_sendero, n_farola, n_puentes))
 
     if not args.escribe:
         print('  (sin --escribe no se ha escrito nada)')

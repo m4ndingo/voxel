@@ -1,53 +1,5 @@
 [
   {
-    "id": "taberna",
-    "name": "Taberna",
-    "role": "Habitación",
-    "type": "bloque",
-    "icon": "🍺",
-    "size": {
-      "x": 112,
-      "y": 112,
-      "z": 52
-    },
-    "file": "assets/taberna.vox.json",
-    "savedAt": "2026-07-20T08:41:27",
-    "createdAt": "2026-07-20T08:41:27",
-    "count": 55317
-  },
-  {
-    "id": "herreria",
-    "name": "Herrería",
-    "role": "Habitación",
-    "type": "bloque",
-    "icon": "🔨",
-    "size": {
-      "x": 112,
-      "y": 112,
-      "z": 52
-    },
-    "file": "assets/herreria.vox.json",
-    "savedAt": "2026-07-20T08:41:27",
-    "createdAt": "2026-07-20T08:41:27",
-    "count": 48171
-  },
-  {
-    "id": "mazmorra",
-    "name": "Mazmorra",
-    "role": "Habitación",
-    "type": "bloque",
-    "icon": "🕯️",
-    "size": {
-      "x": 112,
-      "y": 112,
-      "z": 52
-    },
-    "file": "assets/mazmorra.vox.json",
-    "savedAt": "2026-07-20T08:41:27",
-    "createdAt": "2026-07-20T08:41:27",
-    "count": 51825
-  },
-  {
     "id": "cubo",
     "name": "Cubo",
     "role": "Bloque básico 16³",
@@ -1306,24 +1258,6 @@
     "count": 4096
   },
   {
-    "id": "1-voxel",
-    "name": "1 voxel",
-    "role": "Bloque básico 16³",
-    "icon": "🧱",
-    "type": "objeto",
-    "group": "Bloques de construcción",
-    "size": {
-      "x": 16,
-      "y": 16,
-      "z": 16
-    },
-    "file": "assets/1-voxel.vox.json",
-    "savedAt": "2026-08-17T11:33:56",
-    "createdAt": "2026-08-17T11:33:56",
-    "count": 1,
-    "description": "Cubo sólido de 16x16x16 voxels, bloque básico para construir."
-  },
-  {
     "id": "coco",
     "name": "Coco",
     "role": "Bloque · fruto de coco tropical",
@@ -1379,23 +1313,6 @@
     "count": 1314,
     "alias": "hojas_palmera",
     "description": "Frondas de palmera con nervaduras doradas y calados al viento."
-  },
-  {
-    "id": "capa-de-nieve",
-    "name": "Capa de nieve",
-    "role": "Bloque · capa de nieve (snow layer)",
-    "icon": "❄️",
-    "type": "textura",
-    "group": "Bloques de construcción",
-    "size": {
-      "x": 16,
-      "y": 16,
-      "z": 2
-    },
-    "file": "assets/capa-de-nieve.vox.json",
-    "savedAt": "2026-08-19T21:30:00",
-    "createdAt": "2026-08-19T21:30:00",
-    "count": 512
   },
   {
     "id": "hormig-n-arquitect-nico",
@@ -1585,5 +1502,634 @@
     "count": 4096,
     "description": "Pavimento de asfalto mate con grano.",
     "alias": "asphalt"
+  },
+  {
+    "id": "mano-de-desplazamiento",
+    "name": "Mano de Desplazamiento",
+    "role": "Herramienta · mano para mover/arrastrar (hand tool)",
+    "icon": "✋",
+    "type": "herramienta",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/mano-de-desplazamiento.vox.json",
+    "savedAt": "2026-08-23T12:06:16",
+    "createdAt": "2026-08-18T00:16:35",
+    "count": 87
+  },
+  {
+    "id": "calamar",
+    "name": "Calamar",
+    "role": "Fauna acuática · calamar",
+    "icon": "📦",
+    "type": "personaje",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/calamar.vox.json",
+    "savedAt": "2026-08-23T12:06:21",
+    "createdAt": "2026-08-15T22:34:56",
+    "count": 304,
+    "categoria": "herramienta"
+  },
+  {
+    "id": "el-analista-de-espectro",
+    "name": "El Analista de Espectro",
+    "role": "Sintonizador Forense",
+    "icon": "📦",
+    "type": "personaje",
+    "group": "Objetos",
+    "size": {
+      "x": 32,
+      "y": 32,
+      "z": 32
+    },
+    "file": "assets/el-analista-de-espectro.vox.json",
+    "savedAt": "2026-08-23T12:07:42",
+    "createdAt": "2026-08-23T12:07:42",
+    "count": 2983
+  },
+  {
+    "id": "c-mara-de-fotos",
+    "name": "Cámara de Fotos",
+    "role": "Herramienta · cámara fotográfica portátil",
+    "icon": "📷",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/c-mara-de-fotos.vox.json",
+    "savedAt": "2026-08-23T12:07:58",
+    "createdAt": "2026-08-20T14:14:06",
+    "count": 190,
+    "categoria": "herramienta",
+    "herramienta": "paint"
+  },
+  {
+    "id": "caja-de-volumen",
+    "name": "Caja de volumen",
+    "role": "Herramienta · volumen y caja multibloque",
+    "icon": "📦",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/caja-de-volumen.vox.json",
+    "savedAt": "2026-08-23T12:08:04",
+    "createdAt": "2026-08-16T11:10:00",
+    "count": 56,
+    "categoria": "herramienta",
+    "herramienta": "box"
+  },
+  {
+    "id": "pico-de-piedra-mango-azul",
+    "name": "Pico de Piedra Mango Azul",
+    "role": "Herramienta · pico de piedra (stone pickaxe)",
+    "icon": "⛏️",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/pico-de-piedra-mango-azul.vox.json",
+    "savedAt": "2026-08-23T12:08:14",
+    "createdAt": "2026-08-18T14:16:42",
+    "count": 48,
+    "categoria": "herramienta",
+    "herramienta": "build"
+  },
+  {
+    "id": "espada-de-luz",
+    "name": "Espada de Luz",
+    "role": "Asset · espada-de-luz",
+    "icon": "📦",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/espada-de-luz.vox.json",
+    "savedAt": "2026-08-23T12:08:18",
+    "createdAt": "2026-08-19T11:41:32",
+    "count": 87,
+    "categoria": "herramienta",
+    "herramienta": "pick"
+  },
+  {
+    "id": "varita-de-selecci-n",
+    "name": "Varita de Selección",
+    "role": "Herramienta · varita de selección de bloques (selection wand)",
+    "icon": "🪄",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/varita-de-selecci-n.vox.json",
+    "savedAt": "2026-08-23T12:10:33",
+    "createdAt": "2026-08-12T10:28:30",
+    "count": 52,
+    "categoria": "herramienta",
+    "herramienta": "select"
+  },
+  {
+    "id": "pico-de-piedra",
+    "name": "Pico de Piedra",
+    "role": "Herramienta · pico de piedra (stone pickaxe)",
+    "icon": "⛏️",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/pico-de-piedra.vox.json",
+    "savedAt": "2026-08-23T12:10:36",
+    "createdAt": "2026-08-12T10:22:44",
+    "count": 48,
+    "categoria": "herramienta"
+  },
+  {
+    "id": "pincel-de-texturizado",
+    "name": "Pincel de Texturizado",
+    "role": "Herramienta · pincel / brocha (paint brush)",
+    "icon": "🖌️",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/pincel-de-texturizado.vox.json",
+    "savedAt": "2026-08-23T12:10:40",
+    "createdAt": "2026-08-12T10:22:55",
+    "count": 60
+  },
+  {
+    "id": "cuentagotas",
+    "name": "Cuentagotas",
+    "role": "Herramienta · cuentagotas / pipeta (eyedropper)",
+    "icon": "💧",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/cuentagotas.vox.json",
+    "savedAt": "2026-08-23T12:10:43",
+    "createdAt": "2026-08-12T10:25:25",
+    "count": 60
+  },
+  {
+    "id": "cama-cl-sica",
+    "name": "Cama Clásica",
+    "role": "Mobiliario · cama roja estilo minecraft (16³)",
+    "icon": "📦",
+    "type": "decoracion",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 32,
+      "z": 16
+    },
+    "file": "assets/cama-cl-sica.vox.json",
+    "savedAt": "2026-08-23T12:10:48",
+    "createdAt": "2026-08-16T19:24:42",
+    "count": 686,
+    "categoria": "decoracion"
+  },
+  {
+    "id": "escalera",
+    "name": "Escalera",
+    "role": "Bloque básico 16³",
+    "icon": "📦",
+    "type": "bloque",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 1,
+      "z": 16
+    },
+    "file": "assets/escalera.vox.json",
+    "savedAt": "2026-08-23T12:10:54",
+    "createdAt": "2026-08-16T19:19:03",
+    "count": 160
+  },
+  {
+    "id": "puerta-alta",
+    "name": "puerta-alta",
+    "role": "Asset · puerta-alta",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/puerta-alta.vox.json",
+    "savedAt": "2026-08-23T12:10:57",
+    "createdAt": "2026-08-06T17:39:44",
+    "count": 512,
+    "categoria": "redstone"
+  },
+  {
+    "id": "puerta",
+    "name": "puerta",
+    "role": "Asset · puerta",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/puerta.vox.json",
+    "savedAt": "2026-08-23T12:11:00",
+    "createdAt": "2026-08-06T17:29:08",
+    "count": 516,
+    "categoria": "redstone"
+  },
+  {
+    "id": "cable",
+    "name": "cable",
+    "role": "Asset · cable",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/cable.vox.json",
+    "savedAt": "2026-08-23T12:11:03",
+    "createdAt": "2026-08-06T13:50:11",
+    "count": 36,
+    "categoria": "redstone"
+  },
+  {
+    "id": "cable-on",
+    "name": "cable-on",
+    "role": "Asset · cable-on",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/cable-on.vox.json",
+    "savedAt": "2026-08-23T12:11:06",
+    "createdAt": "2026-08-06T13:51:05",
+    "count": 36,
+    "categoria": "redstone"
+  },
+  {
+    "id": "antorcha-apagada",
+    "name": "antorcha-apagada",
+    "role": "Asset · antorcha-apagada",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/antorcha-apagada.vox.json",
+    "savedAt": "2026-08-23T12:11:13",
+    "createdAt": "2026-08-05T17:19:59",
+    "count": 48,
+    "categoria": "redstone"
+  },
+  {
+    "id": "antorcha",
+    "name": "antorcha",
+    "role": "Asset · antorcha",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/antorcha.vox.json",
+    "savedAt": "2026-08-23T12:11:16",
+    "createdAt": "2026-07-23T22:44:37",
+    "count": 48,
+    "categoria": "redstone"
+  },
+  {
+    "id": "puerta-alta-abierta",
+    "name": "puerta-alta-abierta",
+    "role": "Asset · puerta-alta-abierta",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/puerta-alta-abierta.vox.json",
+    "savedAt": "2026-08-23T12:11:18",
+    "createdAt": "2026-08-23T12:11:18",
+    "count": 512,
+    "categoria": "redstone"
+  },
+  {
+    "id": "puerta-abierta",
+    "name": "puerta-abierta",
+    "role": "Asset · puerta-abierta",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/puerta-abierta.vox.json",
+    "savedAt": "2026-08-23T12:11:22",
+    "createdAt": "2026-08-23T12:11:22",
+    "count": 520,
+    "categoria": "redstone"
+  },
+  {
+    "id": "piston-on",
+    "name": "piston-on",
+    "role": "Asset · piston-on",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/piston-on.vox.json",
+    "savedAt": "2026-08-23T12:11:30",
+    "createdAt": "2026-08-23T12:11:30",
+    "count": 3136,
+    "categoria": "redstone"
+  },
+  {
+    "id": "piston",
+    "name": "piston",
+    "role": "Asset · piston",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/piston.vox.json",
+    "savedAt": "2026-08-23T12:11:33",
+    "createdAt": "2026-08-23T12:11:33",
+    "count": 3856,
+    "categoria": "redstone"
+  },
+  {
+    "id": "inversor",
+    "name": "inversor",
+    "role": "Asset · inversor",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/inversor.vox.json",
+    "savedAt": "2026-08-23T12:11:36",
+    "createdAt": "2026-08-23T12:11:36",
+    "count": 315,
+    "categoria": "redstone"
+  },
+  {
+    "id": "inversor-on",
+    "name": "inversor-on",
+    "role": "Asset · inversor-on",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/inversor-on.vox.json",
+    "savedAt": "2026-08-23T12:11:38",
+    "createdAt": "2026-08-23T12:11:38",
+    "count": 315,
+    "categoria": "redstone"
+  },
+  {
+    "id": "piston-cabeza",
+    "name": "piston-cabeza",
+    "role": "Asset · piston-cabeza",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/piston-cabeza.vox.json",
+    "savedAt": "2026-08-23T12:11:42",
+    "createdAt": "2026-08-23T12:11:42",
+    "count": 976,
+    "categoria": "redstone"
+  },
+  {
+    "id": "repetidor-on",
+    "name": "repetidor-on",
+    "role": "Asset · repetidor-on",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/repetidor-on.vox.json",
+    "savedAt": "2026-08-23T12:11:45",
+    "createdAt": "2026-08-23T12:11:45",
+    "count": 424,
+    "categoria": "redstone"
+  },
+  {
+    "id": "palanca",
+    "name": "palanca",
+    "role": "Asset · palanca",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/palanca.vox.json",
+    "savedAt": "2026-08-23T12:11:47",
+    "createdAt": "2026-08-23T12:11:47",
+    "count": 108,
+    "categoria": "redstone"
+  },
+  {
+    "id": "palanca-on",
+    "name": "palanca-on",
+    "role": "Asset · palanca-on",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/palanca-on.vox.json",
+    "savedAt": "2026-08-23T12:11:50",
+    "createdAt": "2026-08-23T12:11:50",
+    "count": 108,
+    "categoria": "redstone"
+  },
+  {
+    "id": "repetidor",
+    "name": "repetidor",
+    "role": "Asset · repetidor",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/repetidor.vox.json",
+    "savedAt": "2026-08-23T12:11:53",
+    "createdAt": "2026-08-23T12:11:53",
+    "count": 412,
+    "categoria": "redstone"
+  },
+  {
+    "id": "boton-on",
+    "name": "boton-on",
+    "role": "Asset · boton-on",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/boton-on.vox.json",
+    "savedAt": "2026-08-23T12:11:56",
+    "createdAt": "2026-08-23T12:11:56",
+    "count": 72,
+    "categoria": "redstone"
+  },
+  {
+    "id": "boton",
+    "name": "boton",
+    "role": "Asset · boton",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/boton.vox.json",
+    "savedAt": "2026-08-23T12:11:58",
+    "createdAt": "2026-08-23T12:11:58",
+    "count": 88,
+    "categoria": "redstone"
+  },
+  {
+    "id": "placa-on",
+    "name": "placa-on",
+    "role": "Asset · placa-on",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/placa-on.vox.json",
+    "savedAt": "2026-08-23T12:12:03",
+    "createdAt": "2026-08-23T12:12:03",
+    "count": 144,
+    "categoria": "redstone"
+  },
+  {
+    "id": "placa",
+    "name": "placa",
+    "role": "Asset · placa",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/placa.vox.json",
+    "savedAt": "2026-08-23T12:12:06",
+    "createdAt": "2026-08-23T12:12:06",
+    "count": 144,
+    "categoria": "redstone"
+  },
+  {
+    "id": "lampara-pegada",
+    "name": "lampara pegada",
+    "role": "Asset · lampara-pegada",
+    "icon": "📦",
+    "type": "textura",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 1
+    },
+    "file": "assets/lampara-pegada.vox.json",
+    "savedAt": "2026-08-23T12:12:09",
+    "createdAt": "2026-08-23T12:12:09",
+    "count": 24
   }
 ]
