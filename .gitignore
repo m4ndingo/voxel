@@ -21,7 +21,7 @@ data/habitantes_trash/
 !data/worlds/
 data/worlds/*
 !data/worlds/voxelforge.*
-!data/worlds/santuario_zen.*
+!data/worlds/santuario-zen.*
 *.log
 
 # Playwright: lo usan los 112 tests de navegador (abren el Mundo en un Chromium de verdad, así que
