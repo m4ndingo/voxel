@@ -13373,7 +13373,7 @@ function mcBuildToolTransform(eye, yaw, pitch){
   const tRot = (hDef && hDef.rot) || mc.toolRot || [-10, -80, -30];
   const escBase = (hDef && hDef.escala != null) ? hDef.escala
                 : (mc.toolScale !== undefined ? +mc.toolScale : 0.8);
-  const esc = escBase * mc.scale;
+  const esc = escBase;   // El arma en 1ª persona va en espacio de cámara: su tamaño en pantalla es constante independientemente de game.playerScale (mc.scale)
 
   // Balanceo natural al caminar (view bobbing) con amortiguación suave
   const sp = mc.vel ? Math.hypot(mc.vel[0], mc.vel[2]) : 0;
