@@ -16,6 +16,10 @@
 
 It bridges asset creation and gameplay without frameworks or build steps: draw voxel objects, drop them into a Minecraft-style chunked world, rig them into articulated agents, and automate the entire experience directly from the JavaScript console.
 
+<p align="center">
+  <video src="docs/img/voxelforge.mp4" autoplay loop muted playsinline width="900" poster="docs/img/voxelforge.png"></video>
+</p>
+
 ## Key Technical Features
 
 - **Zero Dependencies**: Pure vanilla JavaScript with a custom-crafted, allocation-free WebGL rendering pipeline.
