@@ -10980,9 +10980,73 @@ function mcMeshChunk(cx,cz){
   const SS=mc.sinSombra;     // REQ-SHADOW2 · id → banderas de sombra (1 no recibe, 2 no proyecta). null = coste cero
   const GEO=mcTablaFina();   // id → geometría real (o null): las celdas que no son cubos, ver más abajo
   const finas=[];            // …y dónde están: [x,y,z,id, x,y,z,id, …] (plano, sin objetos por celda)
+  const tapasSuperficie=[];  // [x,y,z,idAgua] tapas de agua superficial sobre piezas finas sumergidas
+
+  function obtenerTipoFluidoMesh(id){
+    if(!id || !mc.blockKey) return '';
+    const FT = (typeof mcTablaFluido === 'function') ? mcTablaFluido() : null;
+    if(FT && FT[id]) return FT[id];
+    const k = mc.blockKey[id];
+    if(typeof k !== 'string') return '';
+    const lo = k.toLowerCase();
+    if(lo.includes('agua') || lo.includes('water')) return 'WATER';
+    if(lo.includes('lava')) return 'LAVA';
+    return '';
+  }
+
+  function esMacizaMesh(key){
+    if(!key || !mc.structs) return false;
+    const base = (typeof mcClaveBase === 'function') ? mcClaveBase(key) : key.replace(/@\d{1,2}$/,'');
+    const rec = mc.structs[base];
+    if(!rec) return false;
+    return !!(rec.blockLike || (rec.pielCubre && !rec.conCaras && !rec.translucido));
+  }
+
+  function encontrarIdAguaMesh(){
+    if(!mc || !mc.blockKey) return 0;
+    for(let i = 1; i < mc.blockKey.length; i++){
+      if(obtenerTipoFluidoMesh(i) === 'WATER') return i;
+    }
+    return 0;
+  }
+
+  function esBambuSumergidoMesh(x, y, z){
+    if(!mc || !mc.grid || !mcInside(x, y, z)) return false;
+    const id = mc.grid[mcIdx(x, y, z)];
+    if(!id) return false;
+    if(!GEO || !GEO[id]) return false;
+    if(obtenerTipoFluidoMesh(id)) return false;
+    const k = mc.blockKey && mc.blockKey[id];
+    if(esMacizaMesh(k)) return false;
+    const dirs = [[0,1,0], [1,0,0], [-1,0,0], [0,0,1], [0,0,-1]];
+    for(let d = 0; d < dirs.length; d++){
+      const nx = x + dirs[d][0], ny = y + dirs[d][1], nz = z + dirs[d][2];
+      if(mcInside(nx, ny, nz)){
+        if(obtenerTipoFluidoMesh(mc.grid[mcIdx(nx, ny, nz)]) === 'WATER') return true;
+      }
+    }
+    return false;
+  }
+
+  const idAguaMundo = encontrarIdAguaMesh();
+  const gAgua = idAguaMundo && GEO ? GEO[idAguaMundo] : null;
+
   for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
     const id=mc.grid[mcIdx(x,y,z)]; if(!id) continue;
-    if(GEO && GEO[id]){ finas.push(x,y,z,id); continue; }   // no es un cubo: se emite abajo con sus voxels
+    if(GEO && GEO[id]){
+      finas.push(x,y,z,id);
+      if(idAguaMundo && gAgua && esBambuSumergidoMesh(x, y, z)){
+        const arriba = y + 1;
+        const arribaDentro = (arriba < dim.y && mcInside(x, arriba, z));
+        const arribaId = arribaDentro ? mc.grid[mcIdx(x, arriba, z)] : 0;
+        const arribaEsAgua = (obtenerTipoFluidoMesh(arribaId) === 'WATER');
+        const arribaEsSumergido = arribaDentro && esBambuSumergidoMesh(x, arriba, z);
+        if(!arribaEsAgua && !arribaEsSumergido){
+          tapasSuperficie.push(x, y, z, idAguaMundo);
+        }
+      }
+      continue;
+    }
     const rects=mc.palette[id]; if(!rects) continue;
 
     const fluidH = mcGetFluidHeight(x, y, z);
@@ -10990,6 +11054,11 @@ function mcMeshChunk(cx,cz){
     for(let f=0;f<6;f++){
       const F=MC_FACES[f], d=F.dir;
       const ax=x+d[0], ay=y+d[1], az=z+d[2];
+
+      if(obtenerTipoFluidoMesh(id) === 'WATER' && esBambuSumergidoMesh(ax, ay, az)){
+        if(f !== 0) continue;
+      }
+
       if(fluidH >= 0.999 && mcTapaCara(ax,ay,az)) continue;   // el vecino la tapa => cara interna
 
       if (fluidH < 0.999) {
@@ -11037,9 +11106,10 @@ function mcMeshChunk(cx,cz){
   // medida: el culling de fluido (`tap`) puede saltarse caras, y por eso se sube `subarray(0,n)`.
   let capC=0, capA=0;
   for(let i=0;i<finas.length;i+=4){ const g=GEO[finas[i+3]]; if(!g) continue; capC+=g.colCount*9; capA+=g.alphaCount*9; }
+  if(tapasSuperficie.length && gAgua){ capA += (tapasSuperficie.length / 4) * (gAgua.alphaCount * 9); }
   const fcol={buf: capC?new Float32Array(capC):null, n:0};
   const falpha={buf: capA?new Float32Array(capA):null, n:0};
-  if(finas.length){
+  if(finas.length || (tapasSuperficie.length && gAgua)){
     // Traslada un flujo fino (stride 9) a la celda de mundo y hornea la luz del entorno por CARA con su
     // celda-muestra: exactamente la misma cuenta que mcBuildStructMesh, pero acumulando en un array común
     // en vez de subir una VBO por instancia.
@@ -11076,27 +11146,29 @@ function mcMeshChunk(cx,cz){
     // BUG-FLUID4/BUG-FLUID6: mcTapaCara dice `false` sobre TODA celda fina (la regla de las hojas «fancy»).
     // Para el fluido, solo tapa si el vecino es macizo o si su geometría fina cubre la celda entera (pielCubre).
     // Si es una pieza fina con huecos (escalera, verja, flores, etc.), la cara lateral del agua se emite.
-    const tapaAlFluido=(ax,ay,az)=>{
+    const tapaAlFluido=(ax,ay,az,f)=>{
       if(mcTapaCara(ax,ay,az)) return true;                  // vecino macizo: lo de siempre
       if(!GEO || !mcInside(ax,ay,az)) return false;
       const nId = mc.grid[mcIdx(ax,ay,az)];
-      if(!nId || !GEO[nId] || (FT && FT[nId])) return false;
+      if(!nId || !GEO[nId] || (FT && FT[nId]) || obtenerTipoFluidoMesh(nId)) return false;
       const k = mc.blockKey && mc.blockKey[nId];
-      const base = (typeof mcClaveBase === 'function') ? mcClaveBase(k) : (k?k.replace(/@\d{1,2}$/,''):k);
-      const rec = mc.structs && mc.structs[base];
-      return !!(rec && (rec.blockLike || (rec.pielCubre && !rec.conCaras && !rec.translucido)));
+      if(esMacizaMesh(k)) return true;
+      if(esBambuSumergidoMesh(ax,ay,az)) return (f !== 0);
+      return false;
     };
     const tapadasFluido=(x,y,z,id,fH)=>{
-      const tipo = FT ? (FT[id]||'') : '';
+      const tipo = FT ? (FT[id]||'') : (obtenerTipoFluidoMesh(id) || '');
       if(!tipo) return 0;                                    // no es fluido: cero coste y cero cambio
       let bits=0;
       for(let f=0;f<6;f++){
         const d=MC_FACES[f].dir, ax=x+d[0], ay=y+d[1], az=z+d[2];
         // Vecino opaco que tapa la cara entera: la misma regla que el camino de cubo. Solo con el bloque
         // lleno; si el fluido no llega arriba del todo, sus caras no llegan al plano que el vecino tapa.
-        if(fH>=0.999 ? tapaAlFluido(ax,ay,az) : (f===1 && y>0 && tapaAlFluido(ax,ay,az))){ bits|=1<<f; continue; }
+        if(fH>=0.999 ? tapaAlFluido(ax,ay,az,f) : (f===1 && y>0 && tapaAlFluido(ax,ay,az,f))){ bits|=1<<f; continue; }
         const nId = mcInside(ax,ay,az) ? mc.grid[mcIdx(ax,ay,az)] : 0;
-        if(!nId || (FT[nId]||'') !== tipo) continue;          // TIPO, no id: hab:agua-3 es la misma agua
+        const nTipo = FT ? (FT[nId]||'') : (obtenerTipoFluidoMesh(nId) || '');
+        const nEsFluidoOsumergido = (nTipo === tipo) || esBambuSumergidoMesh(ax,ay,az);
+        if(!nId || !nEsFluidoOsumergido) continue;          // TIPO, no id: hab:agua-3 es la misma agua
         // Vertical: dos celdas del mismo fluido apiladas comparten el plano exacto (mcGetFluidHeight ya
         // devuelve 1.0 cuando tiene fluido encima), así que la cara de en medio sobra siempre.
         if(f<2){ bits|=1<<f; continue; }
@@ -11109,9 +11181,19 @@ function mcMeshChunk(cx,cz){
       const fH = mcGetFluidHeight(x, y, z);
       const ss = SS?(SS[id]|0):0;
       const tap = tapadasFluido(x,y,z,id,fH);
-      const agua = FT ? (FT[id]||'')==='WATER' : false;   // REQ-FLUID5: solo el agua refleja (la lava, no: es otro caso)
+      const agua = FT ? (FT[id]||'')==='WATER' : (obtenerTipoFluidoMesh(id)==='WATER');   // REQ-FLUID5: solo el agua refleja (la lava, no: es otro caso)
       copia(g.colLocal,   g.colCount,   g.colSC,   g.colFD,   fcol,   x,y,z, fH, ss, tap, agua);
       copia(g.alphaLocal, g.alphaCount, g.alphaSC, g.alphaFD, falpha, x,y,z, fH, ss, tap, agua);
+    }
+    if(tapasSuperficie.length && gAgua){
+      for(let i=0;i<tapasSuperficie.length;i+=4){
+        const x=tapasSuperficie[i], y=tapasSuperficie[i+1], z=tapasSuperficie[i+2], idW=tapasSuperficie[i+3];
+        const fH = 1.0;
+        const ss = SS ? (SS[idW]|0) : 0;
+        const tap = 0b111110; // Solo emite cara 0 (+Y)
+        copia(gAgua.colLocal, gAgua.colCount, gAgua.colSC, gAgua.colFD, fcol, x, y, z, fH, ss, tap, true);
+        copia(gAgua.alphaLocal, gAgua.alphaCount, gAgua.alphaSC, gAgua.alphaFD, falpha, x, y, z, fH, ss, tap, true);
+      }
     }
   }
   const key=cx+','+cz; let ch=mc.chunks.get(key);
@@ -15764,7 +15846,7 @@ function mcPlace(){
     // Lo que se proyecta sobre las 6 caras del cubo no puede —ahí no se ve el giro— y se sigue estampando.
     // ...salvo dentro del agua: la celda ya está ocupada por el fluido y escribir la pieza lo borraría
     // (hueco en la superficie, foto #46). Ahí cae al estampado, que convive con el voxel de agua.
-    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk)) && !mcCeldaFluida(nx,ny,nz)){
+    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk))){
       mcPonEnRejilla(nx,ny,nz, mcClaveConOri(sk,rot)); return; }
     const o=mcStructOrigin(sk, nx, ny, nz, rot, n);               // orientación a mano (R giro / Shift+R vuelco); centro en suelo, canto en pared
     mcStampStruct(sk, o[0], o[1], o[2], rot); return; }           // ranura de estructura: estampa la habitación entera con la orientación elegida
@@ -15813,7 +15895,7 @@ function mcPaint(){
   const c=hit.cell; if(c[1]<0) return;
   if(sk){
     const rot=mcPreviewOri();
-    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk)) && !mcCeldaFluida(c[0],c[1],c[2])){
+    if(!mc.useOldStructBuild && mcCabeEnRejilla(sk) && (rot===0 || mcEsFinaEnRejilla(sk))){
       mcPonEnRejilla(c[0],c[1],c[2], mcClaveConOri(sk,rot)); return;
     }
     // el fluido NO se vacía para hacerle sitio a la pieza: se estampa dentro y se ve sumergida
@@ -19911,21 +19993,7 @@ function mcSetVoxel(x,y,z,material){
   // pieza y sigue costando 0 draw calls: es una celda de rejilla, no una instancia.
   if(id) mcAvisaSiFino(material, id);   // solo para lo que de verdad no cabe: la transparencia real
   if(mcQuitaPiezaEn(x,y,z) && !mc.batching){ clearTimeout(mcStampT); mcStampT=setTimeout(mcFlushStamp, 80); }
-  // Dentro del AGUA una pieza fina NO puede escribirse en la rejilla: hay un id por celda, así que la
-  // escritura se lleva por delante el voxel de agua y abre un hueco en la superficie del lago (foto #46 a
-  // mano, foto #59 desde script: el badlands siembra `hierba-alta` en charcos de 1 de hondo y el agua
-  // desaparecía debajo de cada mata). La MANO ya lo resolvía cayendo al estampado —mcPlace y mcPaint, con
-  // su `&& !mcCeldaFluida(...)`—, pero el scripting seguía escribiendo a pelo. Esto trae la MISMA regla
-  // aquí, y es un desvío del MOTOR a propósito: así un script que siembra un prado no tiene que saber si
-  // está mojado (orden del dueño: los scripts generados no crecen para distinguir los dos caminos).
-  // Se desvía SOLO lo fino: un macizo (roca, arena) escrito en el agua la sustituye, que es lo que se
-  // espera, y un fluido tampoco (poner agua sobre agua es el motor de fluidos propagándose, REQ-FLUID4).
-  // Precio, el mismo que paga la mano: cada pieza sumergida es un draw call y una línea de mundo.json.
-  if(mcFinoEnRejilla(id) && !mcIsReplaceable(id,x,y,z) && mcCeldaFluida(x,y,z)){
-    const k=mc.blockKey[id];
-    game.stamp(mcClaveBase(k), x, y, z, mcClaveOri(k));   // async como el camino de material pendiente: el script no espera
-    return true;
-  }
+
   mcSetBlock(x,y,z, id); mcBuildN++; mcMarcaBuild(x,z);
   // En modo lote (beginBatch/endBatch) NO se re-malla por bloque; endBatch() dispara un único mcFlushBuild al cerrar.
   if(!mc.batching){ clearTimeout(mcBuildT); mcBuildT=setTimeout(mcFlushBuild, 80); }   // re-malla+guarda una vez al acabar la ráfaga

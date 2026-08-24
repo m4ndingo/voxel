@@ -30,7 +30,8 @@
     "asset:assets/flor-amarilla.vox.json",
     "asset:assets/flor-azul.vox.json",
     "asset:assets/flor-blanca.vox.json",
-    "asset:assets/bambu.vox.json"
+    "asset:assets/bambu.vox.json",
+    "asset:assets/agua.vox.json-1"
   ],
   "structures": [
     {
@@ -130,6 +131,51 @@
       "y": 15,
       "z": 53,
       "rot": 0
+    },
+    {
+      "key": "asset:assets/bambu.vox.json",
+      "x": 70,
+      "y": 9,
+      "z": 70,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/bambu.vox.json",
+      "x": 70,
+      "y": 10,
+      "z": 70,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/bambu.vox.json",
+      "x": 72,
+      "y": 9,
+      "z": 70,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/bambu.vox.json",
+      "x": 72,
+      "y": 10,
+      "z": 70,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/bambu.vox.json",
+      "x": 22,
+      "y": 9,
+      "z": 42,
+      "rot": 0
+    },
+    {
+      "key": "asset:assets/bambu.vox.json",
+      "x": 22,
+      "y": 10,
+      "z": 42,
+      "rot": 0
     }
-  ]
+  ],
+  "notes": {},
+  "noteRots": {},
+  "noteTints": {}
 }
