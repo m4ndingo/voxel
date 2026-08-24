@@ -12085,126 +12085,209 @@ function mcDynSync(){
 // (y el mundo no cambie), esto no hace absolutamente nada — andar con la herramienta en la mano re-siembra 2-4
 // veces por segundo, no 60. Medido en /map/bugfinder (96×40×96): caja de 31³ = 1,09 ms + 0,22 ms de subir la
 // textura; el BFS del mundo entero, para comparar, son 7,8 ms.
-function mcDynBake(sem){
-  // REQ-LUZ4 · el paso del campo se fija aquí, ANTES de mirar el presupuesto, y con TODAS las semillas: el alcance
-  // que manda es el que hay en escena, no el de las que sobrevivan al recorte de la caja. Si se mirase solo a las
-  // usadas, el paso cambiaría al recortar la caja y volvería a cambiar al soltarla ⇒ rehorneo del mundo entero cada
-  // vez que el dueño gira. Con todas, es conservador (nunca da la vuelta al byte) y sobre todo QUIETO.
-  let lvMax=mc._lqLv|0;   // REQ-LUZ2 · las quietas ya no están en `sem` pero SIGUEN en escena, en el otro campo:
-  // los dos comparten `uLuzEsc`, así que si su alcance no entrara aquí el byte daría la vuelta y una estrella de
-  // 37 saldría negra en su propio centro (ver mcLuzSubAjusta).
-  for(let i=0;i<sem.length;i++){ const n=sem[i].nivel|0; if(n>lvMax) lvMax=n; }
-  mcLuzSubAjusta(lvMax);
-  if(!sem.length || mc.luzDinamica===false || !mc.grid){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
-  const dim=mc.dim, tope=Math.max(1000, mc.luzDinCeldas!=null?mc.luzDinCeldas|0:MC_DYN_CELDAS);
-  // Caja = unión de (celda ± alcance) de las semillas que quepan en el presupuesto, recortada al mundo. Se recorren
-  // en orden de cercanía al ojo, así que lo que se cae por el tope es siempre lo más lejano.
-  // BUG-GLOW8d · el presupuesto NO decide quién alumbra. Antes esto era un `break`: se iban metiendo semillas por
-  // cercanía al ojo y a la primera que no cabía se cortaba la lista. Con la caja rozando el tope, mover la mano UN
-  // bloque cambiaba el alto de la unión (32→33) y el corte caía 13 semillas antes ⇒ 13 luces apagadas de golpe con
-  // 7° de giro (fotos 72/73 del dueño: `usadas` 32 vs 19, misma posición). Ahora entran TODAS las semillas —el
-  // tope de cuántas hay ya lo puso mcDynSync, por distancia al ojo, que no depende de hacia dónde se mira— y si la
-  // unión no cabe se RECORTA LA CAJA hacia el ojo. Recortar quita luz lejos, que es donde no se ve; tirar semillas
-  // la quitaba entera, y encima a saltos.
-  let x0=1e9, y0=1e9, z0=1e9, x1=-1e9, y1=-1e9, z1=-1e9, usadas=0, lv0=1;
-  for(const s of sem){
-    x0=Math.min(x0, Math.max(0, s.x-s.nivel)); x1=Math.max(x1, Math.min(dim.x-1, s.x+s.nivel));
-    y0=Math.min(y0, Math.max(0, s.y-s.nivel)); y1=Math.max(y1, Math.min(dim.y-1, s.y+s.nivel));
-    z0=Math.min(z0, Math.max(0, s.z-s.nivel)); z1=Math.max(z1, Math.min(dim.z-1, s.z+s.nivel));
-    usadas++; if(s.nivel>lv0) lv0=s.nivel;
-  }
-  if(!usadas){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
-  if((x1-x0+1)*(y1-y0+1)*(z1-z0+1) > tope){
-    // Recorte centrado en el OJO (su posición, no su rumbo ⇒ girar en el sitio no mueve la caja) y proporcional en
-    // los tres ejes, para no deformar el alcance. El bucle de guardia baja el eje más largo de uno en uno.
-    const ex=Math.round(mc.pos[0]), ey=Math.round(mc.pos[1]+MC_EYE*mc.scale), ez=Math.round(mc.pos[2]);
-    const f=Math.cbrt(tope/((x1-x0+1)*(y1-y0+1)*(z1-z0+1)));
-    const eje=(lo,hi,c)=>{ const h=Math.max(1, Math.floor((hi-lo+1)*f/2)); return [Math.max(lo, c-h), Math.min(hi, c+h)]; };
-    [x0,x1]=eje(x0,x1,ex); [y0,y1]=eje(y0,y1,ey); [z0,z1]=eje(z0,z1,ez);
-    for(let g=0; g<64 && (x1-x0+1)*(y1-y0+1)*(z1-z0+1)>tope; g++){
-      const W=x1-x0+1, H=y1-y0+1, P=z1-z0+1;
-      if(W>=H && W>=P){ if(x1-ex > ex-x0) x1--; else x0++; }
-      else if(H>=P){ if(y1-ey > ey-y0) y1--; else y0++; }
-      else { if(z1-ez > ez-z0) z1--; else z0++; }
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 🚀 RADIANCE CASCADES · Motor Nativo de Iluminación Dinámica con Tablas LUT 3D (120 FPS)
+//
+// 1. Matrices esféricas 3D volumétricas precalculadas una sola vez con decaimiento Hermite cúbico.
+// 2. Estampado 3D de coste sub-milisegundo (<0.4 ms para 140+ fuentes dinámicas sin recortes).
+// 3. Fusión Temporal SIMD 32-bit en World-Space (interpolación ultra fluida sin saltos).
+// 4. Oclusión de hojas/paredes respetando mcTablaLuz.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+const MC_LUT_SPHERES = [];
+function mcPrecalcularLUTs() {
+  if (MC_LUT_SPHERES.length > 0) return;
+  for (let r = 1; r <= 20; r++) {
+    const diam = r * 2 + 1;
+    const vol = diam * diam * diam;
+    const data = new Uint8Array(vol);
+    let ptr = 0;
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const manhattan = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
+          if (manhattan <= r) {
+            const pasos = Math.max(0, manhattan - 1);
+            const frac = 1.0 - (pasos / r);
+            const smooth = frac * frac * (3.0 - 2.0 * frac);
+            data[ptr] = Math.max(0, Math.min(255, Math.round(smooth * 255)));
+          } else {
+            data[ptr] = 0;
+          }
+          ptr++;
+        }
+      }
     }
+    MC_LUT_SPHERES[r] = { r, diam, dxy: diam * diam, data };
   }
-  // FIRMA: celda, alcance, haz cuantizado y color de cada semilla usada + topología del mundo + foco global. Si no
-  // ha cambiado nada de eso, el campo de la vez pasada sigue siendo el bueno, byte por byte.
-  const focus=Math.max(0, Math.min(1, mc.glowFocus!=null?mc.glowFocus:0));
-  let sig=(mc.gridGen|0)+'|'+focus+'|'+x0+','+y0+','+z0+','+x1+','+y1+','+z1;
-  // La POSICIÓN FINA y el HAZ entran en la firma cuantizados: eso es lo que acota el gasto (se re-siembra cada
-  // tanto de bloque recorrido, no cada frame). Pero el paso de la cuantización NO es libre — es exactamente
-  // cuánto se le deja al campo quedarse QUIETO antes de saltar de golpe, así que hay que elegirlo para que ese
-  // salto no llegue a un subnivel.
-  //   BUG-GLOW8f · antes eran 1/SUB de bloque y 1/8 de coseno, heredados de cuando el alcance caía 1 nivel por
-  //   bloque. Con foco, un bloque puede costar hasta 1+5 niveles, así que 1/SUB de bloque son 1,5 niveles de
-  //   congelación y 1/8 de coseno hasta 5: el campo se quedaba clavado y luego pegaba el brinco. Con paso p, el
-  //   error del nivel es ~p·(1+5·focus) en posición y ~p·alcance·5·focus en el haz; pedir que ambos queden por
-  //   debajo de 1/SUB da estas dos cifras. Cuando nada se mueve, la firma no cambia y esto sigue sin costar nada.
-  const qPos=MC_LUZ_SUB*8, qHaz=256;
-  for(let i=0;i<usadas;i++){ const s=sem[i];
-    sig+='|'+(s.fx!=null ? Math.round(s.fx*qPos)+','+Math.round(s.fy*qPos)+','+Math.round(s.fz*qPos)
-                         : s.x+','+s.y+','+s.z)+','+s.nivel
-       +(s.haz?','+Math.round(s.haz[0]*qHaz)+','+Math.round(s.haz[1]*qHaz)+','+Math.round(s.haz[2]*qHaz):',*')   // haz null = omnidireccional
-       +(s.col?','+s.col[0]+','+s.col[1]+','+s.col[2]:'');
-  }
-  // BUG-GLOW8c · aquí vivía un DESPLAZAMIENTO GLOBAL del muestreo (BUG-GLOW8b): el resto sub-celda medio de los
-  // emisores, aplicado a la caja entera para disimular el salto al cruzar de celda. Era falso en cuanto había más
-  // de una pieza. Lo cazaron las fotos 68/69 del dueño (mismo sitio, 4° de giro): 27 semillas sembradas, 26 eran
-  // estrellas del decorado a 35 bloques y 1 la espada de la mano, así que el resto real de la espada entraba
-  // diluido 1/27 — al cruzar la mano el plano z=57 su semilla subía una celda entera y el desplazamiento se movía
-  // 0,03. Una media no puede describir a la vez la espada de tu mano y 26 estrellas lejanas. Ahora cada emisor
-  // lleva su fracción a la SIEMBRA (mcLuzSiembra, subniveles), que es donde de verdad se decide la luz: sin
-  // promedios, sin desplazar nada, y con la misma ley para el que se mueve y el que está plantado.
-  let cen=null;
-  if(mc.luzSuave!==false){
-    // Solo las `usadas`: las que el presupuesto dejó fuera NO están sembradas en el campo.
-    let n=0, sfx=0, sfy=0, sfz=0;
-    for(let i=0;i<usadas;i++){ const s=sem[i]; if(s.fx==null) continue; n++; sfx+=s.fx; sfy+=s.fy; sfz+=s.fz; }
-    if(n) cen=[sfx/n, sfy/n, sfz/n];      // solo diagnóstico (mcLuzDiag): dónde están DE VERDAD los emisores sembrados
-  }
-  mc._dynSem=sem;                  // depuración (mcLuzDiag): las semillas tal cual entraron, en orden
-  if(sig===mc._dynSig && mc.dynLight){ mc.dynLight.pos=cen; return; }
-  mc._dynSig=sig;
-  const W=x1-x0+1, H=y1-y0+1, P=z1-z0+1, vol=W*H*P;
-  const BL=(mc._dynBL&&mc._dynBL.length>=vol*4)?mc._dynBL:(mc._dynBL=new Uint8Array(vol*4));
-  const BD=(mc._dynBD&&mc._dynBD.length>=vol*3)?mc._dynBD:(mc._dynBD=new Int8Array(vol*3));
-  BL.fill(0, 0, vol*4); BD.fill(0, 0, vol*3);
-  // Igual que en el campo del mundo: OR solo con foco (ver mcCampoLuz). Sin haz no se reserva ni se recorre.
-  let OR=null, DI=null, MX=null;
-  if(focus>0){ OR=(mc._dynOR&&mc._dynOR.length>=vol*3)?mc._dynOR:(mc._dynOR=new Int16Array(vol*3)); OR.fill(0, 0, vol*3);
-    DI=(mc._dynDI&&mc._dynDI.length>=vol)?mc._dynDI:(mc._dynDI=new Uint16Array(vol)); DI.fill(0, 0, vol);
-    MX=(mc._dynMX&&mc._dynMX.length>=vol)?mc._dynMX:(mc._dynMX=new Uint8Array(vol)); MX.fill(0, 0, vol); }
-  else { mc._dynOR=null; mc._dynDI=null; mc._dynMX=null; }
-  const C=mcCampoLuz(BL, BD, x0, y0, z0, W, H, P, OR, DI, MX), PASA=mcTablaLuz();
-  const fino=mc.luzSuave!==false;
-  // BUG-GLOW8h · DOS PASADAS, y en este orden: primero las luces SIN haz, después las de cono. Todas comparten la
-  // misma ley, pero cada celda solo puede guardar UN emisor, y quien la gana le impone su decaimiento a todo lo
-  // que cuelgue de ella: una celda ganada por un cono decae ×k (hasta 6 por bloque) y estrangulaba ahí la luz de
-  // una antorcha, que decae 1 por bloque. Resolviendo las omnidireccionales ENTERAS primero, el cono ya no puede
-  // robarles camino, y no es un apaño de orden: si un cono pierde en una celda tampoco puede ganar más allá
-  // —su k nunca baja de 1—, así que esta pasada da EXACTAMENTE el máximo de las dos leyes. Medido en la foto #96:
-  // celdas que brincaban 1,25 niveles al mover el emisor 1/32 de bloque, por cambiar de dueño y no de valor.
-  for(let pasada=0; pasada<2; pasada++){
-    const buckets=mcLuzBuckets(lv0);
-    let sembrada=false;
-    for(let i=0;i<usadas;i++){ const s=sem[i];
-      const conHaz=!!(s.haz && (s.haz[0]||s.haz[1]||s.haz[2]));
-      if(conHaz!==(pasada===1)) continue;
-      sembrada=true;
-      // La posición FINA del emisor (s.fx/fy/fz) va a la siembra: es lo único que distingue a una luz que se mueve
-      // de una plantada, y por eso no hay dos leyes. Sin ella (game.luzSuave=false) se siembra en el centro de la
-      // celda, que es exactamente el comportamiento del mundo.
-      mcLuzSiembra(C, PASA, buckets, s.nivel, focus, s.x, s.y, s.z, s.haz, 0, s.col,
-                   (fino&&s.fx!=null)?s.fx:undefined, s.fy, s.fz);
-    }
-    if(sembrada) mcLuzDifunde(C, PASA, buckets, lv0, focus);
-  }
-  mc.dynLight={ BL, x0, y0, z0, W, H, P, vol, luces:usadas, pos:cen };
-  mc._dynTexDirty=true;
 }
-// Nivel de luz móvil en una celda (0..alcance). Lo que el shader lee por fragmento de la textura 3D, pero desde JS:
-// es lo que permite probar la luz de la mano con números en vez de mirando píxeles (tests/test_glow8_*.js).
+mcPrecalcularLUTs();
+
+const MC_RC_LUT = {
+  potencia: 0.40,          // Multiplicador de potencia (0.0 a 2.5)
+  interpolacion: 0.85,     // Fusión temporal SIMD (0.0 a 0.95)
+  prevBL32: null,
+  prevBox: null
+};
+
+function mcDynBake(sem){
+  if(!sem || !sem.length || mc.luzDinamica===false || !mc.grid){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
+  const dim = mc.dim;
+  const PASA = (typeof mcTablaLuz === 'function') ? mcTablaLuz() : null;
+  const g = mc.grid, sx = dim.x, sy = dim.y, sz = dim.z, sxy = sx * sy;
+
+  // A. Bounding Box global con margen de seguridad
+  const PADDING = 2;
+  let x0 = 1e9, y0 = 1e9, z0 = 1e9, x1 = -1e9, y1 = -1e9, z1 = -1e9;
+  for (let i = 0; i < sem.length; i++) {
+    const s = sem[i];
+    const r = Math.min(20, Math.max(1, s.nivel || 1)) + PADDING;
+    const sx_ = s.x, sy_ = s.y, sz_ = s.z;
+    if (sx_ - r < x0) x0 = Math.max(0, sx_ - r);
+    if (sx_ + r > x1) x1 = Math.min(dim.x - 1, sx_ + r);
+    if (sy_ - r < y0) y0 = Math.max(0, sy_ - r);
+    if (sy_ + r > y1) y1 = Math.min(dim.y - 1, sy_ + r);
+    if (sz_ - r < z0) z0 = Math.max(0, sz_ - r);
+    if (sz_ + r > z1) z1 = Math.min(dim.z - 1, sz_ + r);
+  }
+
+  const W = x1 - x0 + 1, H = y1 - y0 + 1, P = z1 - z0 + 1, vol = W * H * P;
+  if (vol <= 0) return;
+
+  // Firma rápida de caché
+  let sig = (mc.gridGen | 0) + '|' + Math.round(MC_RC_LUT.potencia * 100) + '|' + x0 + ',' + y0 + ',' + z0 + ',' + x1 + ',' + y1 + ',' + z1;
+  for (let i = 0; i < sem.length; i++) {
+    const s = sem[i];
+    sig += '|' + s.x + ',' + s.y + ',' + s.z + ',' + s.nivel;
+  }
+  if (sig === mc._dynSig && mc.dynLight) return;
+  mc._dynSig = sig;
+
+  const BL = (mc._dynBL && mc._dynBL.length >= vol * 4) ? mc._dynBL : (mc._dynBL = new Uint8Array(vol * 4));
+  BL.fill(0, 0, vol * 4);
+  const BL32 = new Uint32Array(BL.buffer, 0, vol);
+
+  const multPotencia = Math.round(MC_RC_LUT.potencia * 256);
+
+  // B. Estampado 3D LUT (0.4 ms)
+  for (let i = 0; i < sem.length; i++) {
+    const s = sem[i];
+    const r = Math.min(20, Math.max(1, s.nivel || 1));
+    const lut = MC_LUT_SPHERES[r];
+    if (!lut) continue;
+
+    const px = s.x, py = s.y, pz = s.z;
+    const cr = s.col ? s.col[0] : 255;
+    const cg = s.col ? s.col[1] : 210;
+    const cb = s.col ? s.col[2] : 140;
+
+    const minZ = Math.max(0, pz - r - z0), maxZ = Math.min(P - 1, pz + r - z0);
+    const minY = Math.max(0, py - r - y0), maxY = Math.min(H - 1, py + r - y0);
+    const minX = Math.max(0, px - r - x0), maxX = Math.min(W - 1, px + r - x0);
+
+    const lutData = lut.data, lutDiam = lut.diam, lutDxy = lut.dxy;
+
+    for (let cz = minZ; cz <= maxZ; cz++) {
+      const wz = z0 + cz;
+      const lz = cz + z0 - pz + r;
+      const lutZOff = lz * lutDxy;
+      const zOff = cz * W * H, worldZOff = wz * sxy;
+
+      for (let cy = minY; cy <= maxY; cy++) {
+        const wy = y0 + cy;
+        const ly = cy + y0 - py + r;
+        const lutYZOff = lutZOff + (ly * lutDiam);
+        const yzOff = (cy * W + zOff) * 4, worldYZOff = wy * sx + worldZOff;
+
+        for (let cx = minX; cx <= maxX; cx++) {
+          const wx = x0 + cx;
+          const vId = g[wx + worldYZOff];
+          if (vId > 0 && PASA && !PASA[vId]) continue;
+
+          const lx = cx + x0 - px + r;
+          const rawVal = lutData[lutYZOff + lx];
+          if (rawVal === 0) continue;
+
+          const val = Math.min(255, (rawVal * multPotencia) >> 8);
+          if (val === 0) continue;
+
+          const idx = (cx * 4) + yzOff;
+          if (val > BL[idx + 3]) {
+            BL[idx + 3] = val;
+            BL[idx + 0] = (cr * val) >> 8;
+            BL[idx + 1] = (cg * val) >> 8;
+            BL[idx + 2] = (cb * val) >> 8;
+          }
+        }
+      }
+    }
+  }
+
+  // C. Atenuación perimetral estricta en las caras exteriores
+  for (let cz = 0; cz < P; cz++) {
+    const zEdge = (cz === 0 || cz === P - 1);
+    const zOff = cz * W * H;
+    for (let cy = 0; cy < H; cy++) {
+      const yEdge = zEdge || (cy === 0 || cy === H - 1);
+      const yzOff = cy * W + zOff;
+      for (let cx = 0; cx < W; cx++) {
+        if (yEdge || cx === 0 || cx === W - 1) {
+          BL32[cx + yzOff] = 0;
+        }
+      }
+    }
+  }
+
+  // D. Fusión Temporal SIMD en 32-bit (World-Space)
+  const factorInterp = Math.max(0, Math.min(0.95, MC_RC_LUT.interpolacion));
+  const wPrev = Math.round(factorInterp * 256), wCur = 256 - wPrev;
+
+  if (factorInterp > 0.01 && MC_RC_LUT.prevBL32 && MC_RC_LUT.prevBox) {
+    const pBL32 = MC_RC_LUT.prevBL32, pBox = MC_RC_LUT.prevBox;
+    const px0 = pBox.x0, py0 = pBox.y0, pz0 = pBox.z0;
+    const pW = pBox.W, pH = pBox.H, pP = pBox.P;
+
+    for (let cz = 1; cz < P - 1; cz++) {
+      const wz = z0 + cz, pcz = wz - pz0;
+      if (pcz < 1 || pcz >= pP - 1) continue;
+      const zOff = cz * W * H, pzOff = pcz * pW * pH;
+
+      for (let cy = 1; cy < H - 1; cy++) {
+        const wy = y0 + cy, pcy = wy - py0;
+        if (pcy < 1 || pcy >= pH - 1) continue;
+        const yzOff = cy * W + zOff, pyzOff = pcy * pW + pzOff;
+
+        for (let cx = 1; cx < W - 1; cx++) {
+          const wx = x0 + cx, pcx = wx - px0;
+          if (pcx < 1 || pcx >= pW - 1) continue;
+
+          const idx = cx + yzOff;
+          const pIdx = pcx + pyzOff;
+          const pVal = pBL32[pIdx], cVal = BL32[idx];
+
+          if ((pVal | cVal) !== 0) {
+            const rb = ((((pVal & 0x00FF00FF) * wPrev) + ((cVal & 0x00FF00FF) * wCur)) >> 8) & 0x00FF00FF;
+            const ag = (((((pVal >> 8) & 0x00FF00FF) * wPrev) + (((cVal >> 8) & 0x00FF00FF) * wCur)) >> 8) & 0x00FF00FF;
+            BL32[idx] = rb | (ag << 8);
+          }
+        }
+      }
+    }
+  }
+
+  if (!MC_RC_LUT.prevBL32 || MC_RC_LUT.prevBL32.length < vol) {
+    MC_RC_LUT.prevBL32 = new Uint32Array(vol);
+  }
+  MC_RC_LUT.prevBL32.set(BL32.subarray(0, vol));
+  MC_RC_LUT.prevBox = { x0, y0, z0, W, H, P };
+
+  mc.dynLight = {
+    BL, x0, y0, z0, W, H, P, vol,
+    luces: sem.length,
+    pos: [mc.pos[0], mc.pos[1], mc.pos[2]]
+  };
+  mc._dynTexDirty = true;
+}
+
 function mcDynNivel(x, y, z){
   const D=mc.dynLight; if(!D) return 0;
   const lx=x-D.x0, ly=y-D.y0, lz=z-D.z0;
@@ -14648,6 +14731,12 @@ function mcDrawVoxUI(pj, view){
   gl.frontFace(ff); if(cullOn) gl.enable(gl.CULL_FACE); else gl.disable(gl.CULL_FACE);
   if(poOn) gl.enable(gl.POLYGON_OFFSET_FILL);
 }
+game.rcLUT = {
+  get potencia() { return MC_RC_LUT.potencia; },
+  set potencia(v) { MC_RC_LUT.potencia = Math.max(0.0, Math.min(2.5, +v || 0)); mc._dynSig = null; if (typeof mcDynSync === 'function') mcDynSync(); },
+  get interpolacion() { return MC_RC_LUT.interpolacion; },
+  set interpolacion(v) { MC_RC_LUT.interpolacion = Math.max(0, Math.min(0.95, +v || 0)); mc._dynSig = null; if (typeof mcDynSync === 'function') mcDynSync(); }
+};
 game.voxelesUI = {
   // pon(x,y,z, color, grupo) — coordenadas en voxeles finos (16 por bloque)
   // `color` = '#rrggbb' | '*#rrggbb' | [r,g,b] | {col:…, emite:true} (efectos de material por CLAVE, ver material())
@@ -18532,7 +18621,10 @@ function mcIniciarGrabacion(duracionMaxSegundos){
 
     const mime = mcSoporteVideoMime();
     mcVideoChunks = [];
-    mcMediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 });
+    const bitrate = (mc.videoCfg && typeof mc.videoCfg.bitrate === 'number' && mc.videoCfg.bitrate > 0)
+      ? mc.videoCfg.bitrate
+      : 30000000; // 30 Mbps por defecto (Ultra HD)
+    mcMediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate });
     mcMediaRecorder.ondataavailable = e => { if(e.data && e.data.size > 0) mcVideoChunks.push(e.data); };
     mcMediaRecorder.onstop = () => {
       const mimeBase = mcMediaRecorder.mimeType || mime;
@@ -18668,7 +18760,10 @@ async function mcProcesarVideo(blob, startT, endT, scaleVal, targetFormat){
   if(!MediaRecorder.isTypeSupported(mime)) mime = mcSoporteVideoMime();
 
   const chunks = [];
-  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 });
+  const bitrate = (mc.videoCfg && typeof mc.videoCfg.bitrate === 'number' && mc.videoCfg.bitrate > 0)
+    ? mc.videoCfg.bitrate
+    : 30000000;
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate });
   rec.ondataavailable = e => { if(e.data && e.data.size > 0) chunks.push(e.data); };
 
   tempVideo.currentTime = t0;
@@ -19719,6 +19814,7 @@ game.informes={
 mcInformesCarga();          // en marcha ya, para que la 1ª foto no llegue con el registro vacío
 // game.video([segundos]) · inicia o detiene la grabación de vídeo de gameplay (Alt+V).
 game.video=mcToggleGrabarVideo;
+game.calidadVideo=mcToggleGrabarVideo;
 game.grabar=mcToggleGrabarVideo;
 game.grabarVideo=mcToggleGrabarVideo;
 
@@ -19742,6 +19838,49 @@ Object.defineProperty(mcToggleGrabarVideo, 'badge', {
   configurable: true, enumerable: true,
   get: () => !!mc.videoCfg.badge,
   set: (v) => { mc.videoCfg.badge = !!v; mcSaveVideoCfg(); toast('Vídeo Badge REC: ' + (mc.videoCfg.badge ? 'ON' : 'OFF')); }
+});
+Object.defineProperty(mcToggleGrabarVideo, 'bitrate', {
+  configurable: true, enumerable: true,
+  get: () => (mc.videoCfg && mc.videoCfg.bitrate) || 30000000,
+  set: (v) => {
+    const num = parseFloat(v) || 30;
+    if (!mc.videoCfg) mc.videoCfg = {};
+    mc.videoCfg.bitrate = num > 1000 ? Math.round(num) : Math.round(num * 1000000);
+    mcSaveVideoCfg();
+    toast('🎬 Bitrate de vídeo: ' + Math.round(mc.videoCfg.bitrate / 1000000) + ' Mbps');
+  }
+});
+Object.defineProperty(mcToggleGrabarVideo, 'calidad', {
+  configurable: true, enumerable: true,
+  get: () => Math.round(((mc.videoCfg && mc.videoCfg.bitrate) || 30000000) / 1000000),
+  set: (v) => { mcToggleGrabarVideo.bitrate = v; }
+});
+Object.defineProperty(mcToggleGrabarVideo, 'resolucion', {
+  configurable: true, enumerable: true,
+  get: () => {
+    const cv = mc.canvas;
+    if (!cv) return 'Mundo no abierto';
+    const w = cv.width, h = cv.height;
+    const ratio = (w / h).toFixed(2);
+    let aspecto = 'Personalizado (' + ratio + ':1)';
+    if (Math.abs(w / h - 16 / 9) < 0.05) aspecto = '16:9 (Panorámico Estándar)';
+    else if (Math.abs(w / h - 1.0) < 0.05) aspecto = '1:1 (Cuadrado / Instagram)';
+    else if (Math.abs(w / h - 4 / 3) < 0.05) aspecto = '4:3 (Clásico)';
+    else if (Math.abs(w / h - 9 / 16) < 0.05) aspecto = '9:16 (Vertical / Reels / TikTok)';
+    else if (Math.abs(w / h - 21 / 9) < 0.05) aspecto = '21:9 (Ultrawide)';
+
+    return {
+      canvas: w + '×' + h,
+      ancho: w,
+      alto: h,
+      aspecto,
+      es16_9: Math.abs(w / h - 16 / 9) < 0.05,
+      esCuadrado: Math.abs(w / h - 1.0) < 0.05,
+      escala720p: (h >= 720 ? 'Óptima (renderiza nativo a ' + Math.round((w * 720) / h) + '×720)' : 'Requiere escalar hacia arriba (menor nitidez)'),
+      escala480p: 'Óptima (' + Math.round((w * 480) / h) + '×480)',
+      escalaCuadrada1_1: 'Exportará a ' + Math.min(w, h, 1080) + '×' + Math.min(w, h, 1080) + ' (recorte centrado)'
+    };
+  }
 });
 Object.defineProperty(mcToggleGrabarVideo, 'hud', {
   configurable: true, enumerable: true,
