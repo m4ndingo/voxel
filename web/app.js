@@ -7556,6 +7556,9 @@ const mc={
   structGhostAlpha:1,             // transparencia de la vista-previa de estructuras/habitaciones —caja de huella + malla renderizada— (game.structGhostAlpha, 0..1)
   structBias:0,                   // sesgo de profundidad de las estructuras: negativo = un pelo hacia la cámara, así su cara GANA el empate contra el terreno pegado (game.structBias; 0 = sin sesgo, lo resuelve structCull)
   structCull:true,                // culling de caras traseras en las estructuras: rompe el empate entre DOS bloques estampados vecinos, que el sesgo no puede romper (game.structCull)
+  toolFantasma:true,              // la parte de la herramienta en mano que TAPA un bloque se dibuja igual, en gris translúcido, en vez de salir cortada (game.toolFantasma; false = como antes)
+  toolFantasmaAlpha:0.30,         // transparencia de ese fantasma (game.toolFantasmaAlpha, 0..1): donde la pieza es gruesa el gris se acumula, ver mcToolFantasma
+  toolFantasmaColor:[0.85,0.88,0.94],  // su color plano (game.toolFantasmaColor, [r,g,b] 0..1): blanco frío, se despega del terreno sin cantar
   toolAlphaFix:true,              // herramienta en mano con voxeles translúcidos: pasada muda de profundidad + LEQUAL para que sus caras salgan ordenadas (game.toolAlphaFix; false = como antes, sin ordenar)
   selVoxeles:{ activo:true, tam:1, largo:5 },   // corchetes de la herramienta Seleccionar hechos de VOXELES (game.selVoxeles): grosor y largo del brazo en voxeles finos; activo:false vuelve a los de líneas
   voxUI:null,                     // capa de voxeles de color plantados a mano (game.voxelesUI): Map grupo → Map "x,y,z" → [r,g,b(,1 si emite)], en voxeles finos
@@ -13407,6 +13410,9 @@ function mcRender(){
   // el translúcido, NO al final con el overlay. Fuera del `if` de abajo a propósito: ese bloque se salta
   // entero cuando no hay estructuras, y las partículas tienen que salir igual.
   mcDrawVoxUI(pj, view);
+  // REQ-TOOLGHOST · y aquí mismo el fantasma de lo tapado de la herramienta: tiene que ir ANTES de las
+  // pasadas de estructuras, cuando la profundidad lleva el terreno pero NO la herramienta todavía.
+  mcToolFantasma(pj, view);
 
   // EL CIELO TAMBIÉN VA FUERA DEL `if`, y por la misma razón. Estaba dentro, entre la pasada 2 y la 3, así
   // que un mundo SIN NINGUNA estructura se quedaba sin degradado: se veía el color plano de la niebla. Y la
@@ -14894,6 +14900,73 @@ function mcVoxUILuces(){
   }
   mc._voxUILuz=out;
   return out;
+}
+// REQ-TOOLGHOST · Lo TAPADO de la herramienta en mano, en rayos X (orden del dueño, 2026-08-25: «*cuando
+// parte de la herramienta no se ve porque la tapa [un bloque] quiero que la parte tapada salga en modo
+// "fantasma"*»). La herramienta es una estructura de verdad y recibe prueba de profundidad, así que
+// pegado a una pared el trozo escondido no se dibuja y la pieza sale cortada; esto lo devuelve en gris
+// claro translúcido. Va JUSTO DESPUÉS de mcDrawVoxUI y ANTES de las pasadas de estructuras, y ahí está
+// todo el asunto: en ese punto la profundidad lleva el terreno pero la herramienta AÚN NO, así que
+// «detrás de lo pintado» es «detrás de un bloque» y nada más. Movida detrás de las estructuras, la
+// herramienta ya habría escrito su propia profundidad y saldría fantasma también donde SE TAPA A SÍ
+// MISMA: una neblina gris por encima del pico entero. Luego el motor pinta encima la parte visible con su
+// pasada normal y cada trozo queda en su sitio.
+// No recompila NINGÚN shader: se dibuja la misma geometría con el programa de estructuras y todo menos la
+// posición va en ATRIBUTOS CONSTANTES (mcAttribs apaga los arrays y vertexAttrib*f pone el valor fijo).
+// LIMITACIÓN CONOCIDA: no escribe profundidad y no ordena, así que donde la pieza tiene varias capas de
+// grosor el gris se acumula y se ve más denso. A propósito: ordenar por distancia obligaría a rehacer el
+// VBO cada frame (es el mismo motivo por el que existe BUG-TOOL3), y en una silueta translúcida ese
+// engrosamiento se lee como volumen. Se ajusta con game.toolFantasmaAlpha.
+// Los tres lotes de una estructura: `aPos` son SIEMPRE los 3 primeros floats del vértice, así que con el
+// stride correcto y desplazamiento 0 se leen los tres con el mismo programa — aunque el lote texturado
+// tenga otro layout (aPos+aTile+aRect+aShade), que aquí da igual porque lo demás va constante.
+const MC_TF_LOTES = [
+  { vbo:'colVbo',   n:'colCount',   stride: 9*4 },
+  { vbo:'texVbo',   n:'texCount',   stride:10*4 },
+  { vbo:'alphaVbo', n:'alphaCount', stride: 9*4 }
+];
+function mcToolFantasma(pj, view){
+  if(!mc.toolFantasma) return;
+  const s = mc._heldToolStruct;                 // null cuando no hay herramienta o está escondida
+  if(!s || !mc.structProg) return;
+  const gl = mc.gl, SL = mc.structLoc;
+  if(!gl || !SL) return;
+  let hay=false; for(const L of MC_TF_LOTES) if(s[L.n] && s[L.vbo]){ hay=true; break; }
+  if(!hay) return;
+
+  const c = mc.toolFantasmaColor || [0.85,0.88,0.94];
+  const al = isFinite(+mc.toolFantasmaAlpha) ? Math.max(0,Math.min(1,+mc.toolFantasmaAlpha)) : 0.30;
+
+  mcStructGL(true);                             // culling y sesgo, igual que las pasadas de estructuras
+  gl.useProgram(mc.structProg);
+  gl.uniformMatrix4fv(SL.uProj,false,pj.m); gl.uniformMatrix4fv(SL.uView,false,view);
+  gl.uniformMatrix4fv(SL.uModel,false,mcModelOf(s));
+  if(SL.uClipY) gl.uniform1f(SL.uClipY, -1000.0);   // el FS descarta por uClipY si vale > -999
+
+  // Solo la POSICIÓN sale del buffer; el resto son constantes.
+  mcAttribs([SL.aPos]);
+  gl.vertexAttrib3f(SL.aColor, c[0], c[1], c[2]);
+  gl.vertexAttrib1f(SL.aShade, 1.0);            // mcViento(1.0)=0 ⇒ SIN viento: con el bit puesto el
+                                                // fantasma ondearía respecto de la herramienta real
+  gl.vertexAttrib1f(SL.aEmit,  1.0);            // ⇒ color pelado, sin luz ni niebla
+  gl.vertexAttrib1f(SL.aAlpha, al);
+
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.depthMask(false);
+  gl.depthFunc(gl.GREATER);                     // ⬅ LA línea: solo lo que queda DETRÁS de lo ya pintado
+
+  for(const L of MC_TF_LOTES){
+    const n=s[L.n], vbo=s[L.vbo];
+    if(!n || !vbo) continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.vertexAttribPointer(SL.aPos, 3, gl.FLOAT, false, L.stride, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, n);
+  }
+
+  // Devolver el estado como estaba: esta pasada va EN MEDIO del frame. Dejarse el GREATER puesto borra
+  // media escena a partir de aquí (es el mismo pisotón que BUG-FLUID6, por el otro lado).
+  gl.depthFunc(gl.LESS); gl.depthMask(true); gl.disable(gl.BLEND);
+  mcStructGL(false);
 }
 // Los cubos de game.voxelesUI son CUERPOS SÓLIDOS DEL MUNDO (partículas, sangre, estrellas), no adorno de
 // interfaz ⇒ se dibujan CON EL MUNDO: después de todo lo opaco y ANTES de la pasada translúcida y del cielo.
@@ -16824,6 +16897,74 @@ function mcSelExtruir(dir){
 
   if(arriba) mcForceUnstick();
 
+  return true;
+}
+// REQ-EXTRU2 · Shift+rueda con una caja confirmada: hermano de mcSelExtruir, pero por el eje HORIZONTAL
+// al que se mira en vez de por Y (orden del dueño, 2026-08-25: «*en un muro profundizar cavidades con
+// shift+ruedaarriba y traer muros/tuneles hacia mi […] con shift+rueda abajo*»).
+//   rueda ARRIBA → HUNDE: se lleva la capa que da la cara ⇒ la cavidad se hace más profunda
+//   rueda ABAJO  → TRAE : pone una capa hacia el jugador  ⇒ el muro se acerca / el túnel se alarga
+// ⚠️ Son los sentidos INVERSOS de Ctrl (allí arriba construye y abajo cava). A propósito: aquí «arriba»
+// es alejarse y «abajo» acercarse, que es como se lee el gesto mirando de frente a una pared.
+// Trabaja por FILAS (las dos coordenadas que no son el eje) y SIEMPRE por el bloque que DA LA CARA, igual
+// que mcSelExtruir trabaja por columnas y por el más alto: así una selección sobre una pared irregular
+// entra y sale siguiendo su propia silueta en vez de dejar una plancha plana.
+// El eje se recalcula EN CADA MUESCA, no se recuerda: el jugador se gira y el gesto se gira con él.
+function mcEjeMirada(){
+  // Convenio de app.js (el de mcRaycast y compañía): adelante = [-sin(yaw)·cos(pitch), …, -cos(yaw)·cos(pitch)].
+  // Aquí solo importa el horizontal, así que el coseno del pitch (positivo salvo mirando en vertical) no cambia
+  // qué eje gana ni su signo. `sN` apunta AL FRENTE, o sea alejándose del jugador.
+  const fx = -Math.sin(mc.yaw||0), fz = -Math.cos(mc.yaw||0);
+  if(Math.abs(fx) >= Math.abs(fz)) return { eje:0, sN: fx>=0?1:-1, nombre: fx>=0?'+X':'-X' };
+  return { eje:2, sN: fz>=0?1:-1, nombre: fz>=0?'+Z':'-Z' };
+}
+function mcSelExtruirFrente(dir){
+  if(mc.tool!=='select' || !mc.selBox || !dir) return false;
+  const dentro = dir>0;                                   // rueda arriba = hundir · rueda abajo = traer
+  const m = mcEjeMirada(), eje = m.eje, sN = m.sN;
+  const lim = eje===0 ? mc.dim.x : mc.dim.z;
+  // Una sola pasada por la selección quedándose con el bloque de cada FILA que da a la cara. La fila es
+  // (caja, las otras dos coordenadas) y NO solo las coordenadas: dos cajas pueden caer sobre la misma fila
+  // a distinta profundidad y son dos caras, no una — el mismo motivo por el que mcSelExtruir mete `ci` en
+  // la clave de la columna (REQ-SEL1).
+  const fila=new Map();
+  mcSelForEach((x,y,z,id,ci)=>{
+    const p = eje===0 ? x : z;
+    const k = ci+':'+y+','+(eje===0?z:x), v=fila.get(k);
+    if(!v || (sN>0 ? p<v.p : p>v.p)) fila.set(k,{x,y,z,p,id});   // «cerca» = el menor si se mira a +, el mayor si a −
+  });
+  if(!fila.size){ toast('La selección no tiene bloques: nada que '+(dentro?'hundir':'traer')); return false; }
+  const edits=[];
+  for(const c of fila.values()){
+    if(dentro){
+      mcSetBlock(c.x,c.y,c.z,0);                          // se lleva la capa de la cara; la siguiente muesca ve la de detrás
+      edits.push({x:c.x,y:c.y,z:c.z,before:c.id,after:0});
+    } else {
+      const x=c.x-(eje===0?sN:0), z=c.z-(eje===2?sN:0);   // justo delante, hacia el jugador
+      if(!mcInside(x,c.y,z)) continue;                    // borde del mundo
+      const before=mc.grid[mcIdx(x,c.y,z)];
+      mcSetBlock(x,c.y,z,c.id);                           // mcSetBlock y no mc.grid[..]=: es un cambio de
+      edits.push({x,y:c.y,z,before,after:c.id});          // TOPOLOGÍA y tiene que re-iluminar (mc.gridGen)
+    }                                                     // con SU material: un muro de varios viene entero
+  }
+  // Si NINGUNA fila pudo escribir no ha pasado nada, y la caja tampoco se mueve: moverla sería mentir. Es
+  // la misma regla que mcSelExtruir aprendió a la fuerza (una muesca y su contraria dejan los bloques como
+  // estaban). Ojo: eso vale para los BLOQUES; la CAJA no recupera su profundidad, porque hundir con
+  // profundidad 1 la mueve entera y traer después crece solo por el borde activo ⇒ queda de 2. Mismo
+  // comportamiento que Ctrl en Y, y se deja igual a posta: que los gestos hermanos difieran confunde más.
+  if(!edits.length){ toast(dentro?'Nada que hundir':'No cabe nada más hacia ti'); return false; }
+  mc._selCajasBeforeEdit = mc.selCajas.map(s=>({ a:s.a.slice(), b:s.b.slice() }));
+  for(const s of mc.selCajas){
+    const p0=Math.min(s.a[eje],s.b[eje]), p1=Math.max(s.a[eje],s.b[eje]);
+    const cerca = ((sN>0)===(s.a[eje]<=s.b[eje])) ? s.a : s.b;      // la esquina que da la cara
+    const lejos = (cerca===s.a) ? s.b : s.a;
+    if(dentro){ const np = sN>0 ? Math.min(lim-1,p0+1) : Math.max(0,p1-1);
+                cerca[eje]=np; if(sN>0 ? p1<np : p0>np) lejos[eje]=np; }   // profundidad 1 ⇒ la caja entera avanza
+    else cerca[eje] = sN>0 ? Math.max(0,p0-1) : Math.min(lim-1,p1+1);
+  }
+  mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
+  toast((dentro?'Hundido':'Traído')+' — '+edits.length+' bloque(s) · eje '+m.nombre);
+  if(!dentro) mcForceUnstick();                           // traer el muro puede dejar al jugador dentro
   return true;
 }
 // Ctrl+C: vuelca la caja seleccionada a `clipboard` (portapapeles global del editor). Cada bloque de mundo se
@@ -21225,6 +21366,19 @@ try{ const a=localStorage.getItem('vf_mcToolAlphaFix'); if(a!=null) mc.toolAlpha
 // calls de un objeto pequeño). No afecta a las herramientas opacas, que no pasan por ahí.
 Object.defineProperty(game,'toolAlphaFix',{ enumerable:true, get:()=>mc.toolAlphaFix,
   set:v=>{ v=!!v; mc.toolAlphaFix=v; try{localStorage.setItem('vf_mcToolAlphaFix', v?'1':'0');}catch(e){} return v; } });
+try{ const a=localStorage.getItem('vf_mcToolFantasma'); if(a!=null) mc.toolFantasma=(a==='1'); }catch(e){}
+try{ const a=localStorage.getItem('vf_mcToolFantasmaAlpha'); if(a!=null) mc.toolFantasmaAlpha=+a; }catch(e){}
+try{ const a=JSON.parse(localStorage.getItem('vf_mcToolFantasmaColor')||'null'); if(Array.isArray(a)&&a.length===3) mc.toolFantasmaColor=a.map(Number); }catch(e){}
+// game.toolFantasma = el trozo de la pieza en la mano que TAPA un bloque se dibuja igualmente, en gris
+// translúcido (REQ-TOOLGHOST, ver mcToolFantasma). false = como antes, la herramienta sale cortada.
+// game.toolFantasmaAlpha (0..1) y game.toolFantasmaColor ([r,g,b] 0..1) ajustan el tono: donde la pieza es
+// gruesa el gris se acumula, así que bajar el alfa es lo que suele querer verse.
+Object.defineProperty(game,'toolFantasma',{ enumerable:true, get:()=>mc.toolFantasma,
+  set:v=>{ v=!!v; mc.toolFantasma=v; try{localStorage.setItem('vf_mcToolFantasma', v?'1':'0');}catch(e){} return v; } });
+Object.defineProperty(game,'toolFantasmaAlpha',{ enumerable:true, get:()=>mc.toolFantasmaAlpha,
+  set:v=>{ v=Math.max(0,Math.min(1, isFinite(+v)?+v:0.30)); mc.toolFantasmaAlpha=v; try{localStorage.setItem('vf_mcToolFantasmaAlpha',v);}catch(e){} return v; } });
+Object.defineProperty(game,'toolFantasmaColor',{ enumerable:true, get:()=>mc.toolFantasmaColor.slice(),
+  set:v=>{ if(Array.isArray(v)&&v.length===3){ mc.toolFantasmaColor=v.map(n=>+n||0); try{localStorage.setItem('vf_mcToolFantasmaColor',JSON.stringify(mc.toolFantasmaColor));}catch(e){} } return mc.toolFantasmaColor; } });
 try{ const g=JSON.parse(localStorage.getItem('vf_mcSelVoxeles')||'null'); if(g && typeof g==='object') Object.assign(mc.selVoxeles, g); }catch(e){}
 // game.selVoxeles = corchetes de esquina de las herramientas Seleccionar y Volumen dibujados con VOXELES en vez
 // de con líneas (orden del dueño, 2026-08-18): un cubo blanco por vértice, apoyado por fuera de la caja, y tres brazos
@@ -22154,6 +22308,9 @@ const MC_VARS_DOC={
   useOldStructBuildCall:['estructuras y mallado','diagnóstico: vuelve al camino viejo de construir estructuras'],
 
   toolAlphaFix:   ['herramienta','arregla el alfa de la pieza en la mano'],
+  toolFantasma:   ['herramienta','lo tapado de la pieza en la mano, en gris translúcido'],
+  toolFantasmaAlpha:['herramienta','transparencia de ese fantasma'],
+  toolFantasmaColor:['herramienta','color plano de ese fantasma'],
   toolGuardar:    ['herramienta','muestra el botón de guardar de la herramienta'],
   playerTool:     ['herramienta','qué se lleva en la mano'],
 
@@ -23333,28 +23490,34 @@ $('#mc-canvas').addEventListener('wheel',e=>{
   // cajas a la selección, REQ-SEL1). Ojo: Ctrl+rueda es el ZOOM del navegador, así que se le corta el
   // paso a cualquier Ctrl+rueda dentro del Mundo aunque no toque extruir — el mapa se iría de escala.
   // Si hay esquina A fijada (1 clic) pero aún no caja confirmada, Ctrl+rueda auto-confirma la caja con el bloque apuntado como B
-  if(e.ctrlKey && mc.tool==='select' && mc.selA && !mc.selBox){
+  if((e.ctrlKey || (e.shiftKey && !e.altKey && !e.metaKey)) && mc.tool==='select' && mc.selA && !mc.selBox){
     const near = mcRaycast();
     const b = (near && near.cell[1] >= 0) ? near.cell.slice() : mc.selA.slice();
     const caja = { a: mc.selA.slice(), b };
     if(mc.selSuma) mc.selCajas.push(caja); else mc.selBox = caja;
     mc.selA = null; mc.selSuma = false;
     const n = mcSelCount();
-    toast(n + ' bloque(s) — auto-selección · Ctrl+rueda extruye/cava');
+    toast(n + ' bloque(s) — auto-selección · ' +
+          (e.shiftKey && !e.ctrlKey ? 'Shift+rueda hunde/trae' : 'Ctrl+rueda extruye/cava'));
   }
   const extru = e.ctrlKey && mc.tool==='select' && !!mc.selBox;
+  // REQ-EXTRU2 · el mismo trato para Shift, pero hundiendo/trayendo por el eje que se mira
+  // (mcSelExtruirFrente). Sin Ctrl/Alt/Meta: Shift a secas. Shift+clic sigue siendo añadir caja
+  // (REQ-SEL1) — son gestos distintos, no se pisan.
+  const extruF = e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && mc.tool==='select' && !!mc.selBox;
   if(e.ctrlKey){ e.preventDefault(); if(mc.selCtrlHeld) mc.selCtrlUsado = true; }   // este Ctrl ya tiene dueño: al soltarlo no fija agarre
-  if(!extru && !mc.ruedaTool) return;
+  if(!extru && !extruF && !mc.ruedaTool) return;
   e.preventDefault();
   // El acumulador es el mismo para los dos gestos, pero se vacía al cambiar de gesto: media muesca de
   // rosca a medias no puede acabar extruyendo (ni al revés).
-  if(mc._ruedaExtru !== extru){ mc._ruedaExtru = extru; mc._ruedaAcum = 0; }
+  const gesto = extru ? 'y' : (extruF ? 'frente' : 'rosca');
+  if(mc._ruedaExtru !== gesto){ mc._ruedaExtru = gesto; mc._ruedaAcum = 0; }
   mc._ruedaAcum = (mc._ruedaAcum || 0) + e.deltaY;
   const umbral = (isFinite(+mc.ruedaUmbral) && +mc.ruedaUmbral > 0) ? +mc.ruedaUmbral : 30;
   if(Math.abs(mc._ruedaAcum) < umbral) return;
   const paso = mc._ruedaAcum > 0 ? -1 : 1;   // deltaY > 0 = rosca hacia abajo = bajar en la escalera
   mc._ruedaAcum = 0;
-  if(extru) mcSelExtruir(paso); else mcRuedaHerramienta(paso);
+  if(extru) mcSelExtruir(paso); else if(extruF) mcSelExtruirFrente(paso); else mcRuedaHerramienta(paso);
 }, {passive:false});
 
 buildPalette();
