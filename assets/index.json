@@ -2126,11 +2126,12 @@
       "z": 16
     },
     "file": "assets/varita-de-selecci-n.vox.json",
-    "savedAt": "2026-08-23T14:02:32",
+    "savedAt": "2026-08-25T13:43:12",
     "createdAt": "2026-08-23T14:02:32",
     "count": 52,
     "categoria": "herramienta",
-    "herramienta": "select"
+    "herramienta": "select",
+    "description": "Varita para delimitar un área o grupo de bloques en el mapa."
   },
   {
     "id": "cerezo",
