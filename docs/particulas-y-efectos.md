@@ -210,6 +210,15 @@ game.voxelesUI.info().focosVivos                    // cuántas luces está apor
 ```
 
 Claves de hoy: **`emite`** (¿alumbra?) y **`luz`** (**alcance en bloques**; por defecto `game.glowLevel`, 15).
+
+⚠️ **El `luz` de un grupo no es solo alcance: es CUÁNTO COLOR deja pasar.** `mcLuzSiembra` cuantiza el color de
+la semilla contra su propio nivel (`round(col/255 · lv0)`), así que con `luz: 6` el color solo tiene **6
+escalones** y una luciérnaga cálida acaba indistinguible del cálido de la casa (1 · 0,85 · 0,50); encima
+`mcLitGlow` mete el tinte con fuerza proporcional al nivel (`mix(vec3(1.0), rgbCol, b*0.75)`). Por eso las
+luciérnagas de `efectos-demo` pasaron a **`luz: 10`** (dueño, 2026-08-25, fotos #134/#139): subir el alcance es
+la vía barata de ganar color, cuesta caja de BFS y **cero draw calls**.
+
+
 `material(grupo, {…})` **mezcla**, no reemplaza; `material(grupo)` lee; `material(grupo, null)` borra. Una clave
 desconocida **avisa por consola** en vez de tragársela.
 
