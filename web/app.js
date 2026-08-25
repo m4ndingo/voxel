@@ -7591,7 +7591,8 @@ const mc={
   hotbarHide:14,                  // distancia (bloques) de carrera continua tras la que se oculta la hotbar (game.hotbarHide; 0 = desactiva)
   hist:[], histRedo:[],           // historial de edición del Mundo (z=deshacer / Z=rehacer): pila y su inversa
   histLock:false, histBusy:false, // histLock: no registrar mientras se aplica un undo/redo; histBusy: evita solapar dos a la vez
-  interiorDark:0.1,               // factor de sombra en el fondo sin luz (interiores/pasillos, t7 skylight); 1 = desactivado (game.interiorDark)
+  luzLey:true,                    // qué bake reparte la luz que se MUEVE: true = la Ley (BFS por el aire), false = la Radiance Cascades LUT. Mando: game.luzLey. NO persiste: la LUT es un modo de comparar, no un ajuste
+  interiorDark:0.15,            // factor de sombra en el fondo sin luz (interiores/pasillos, t7 skylight); 1 = desactivado (game.interiorDark). 0,15 lo fijó el dueño el 2026-08-25 (tanda #132-#139): con 0,1 el interior se cerraba demasiado y con 0 no hay luz móvil que lo levante (ver el setter)
   shakeCaida:{ alturaMin:15, amplitud:0.03, duracion:0.5, frecuencia:9, tiempo:0, fuerza:0, maxAire:0, enAire:false }, // REQ-FX1 · temblor de cámara al caer desde alto
   light:null,                     // Uint8Array 0..MC_MAXLIGHT por celda: luz del cielo difundida por el aire (mcComputeLight)
   shadow:null,                    // MAPA DE SOMBRA del sol vertical: {size,fbo,tex,depth,dirty} — altura de la superficie más alta por téxel (mcRenderShadow)
@@ -10847,6 +10848,27 @@ function mcGetFluidHeight(x, y, z) {
   return Math.max(0.125, (16 - fInfo.fluidLevel * 2) / 16);
 }
 
+// Semilla de la firma de malla de un chunk: TODO lo que se hornea en el vértice y NO se lee celda a celda
+// en el barrido (eso lo añade quien llama: grid + light + blockLight). Si algo que se hornea falta aquí, la
+// firma no cambia, `mcMeshChunk` sale por su early return y el chunk se queda con lo viejo hasta que algo
+// mueva `gridGen` — o peor: el ping-pong de `_cache` devuelve un slot horneado con OTROS ajustes.
+// Estaba duplicada en dos sitios que ya se habían desincronizado (uno con las banderas de sombra y otro sin
+// ellas): una sola función, y los dos caminos guardan LA MISMA firma.
+function mcMeshSigSemilla(){
+  let sig = (mc.palette.length|0) * 1000003 + (mc.gridGen|0)
+            + (mc.sinCullingFluido ? 7919 : 0);   // REQ-FLUID4: la válvula cambia la malla, así que invalida la caché
+  // BUG-DARK1 (foto #138 del dueño) · `interiorDark` se hornea en el shade de cada cara vía lightLut
+  // (`interiorDark^((MAX-lv)/MAX)`), pero NO cambia ni el grid ni mc.light ⇒ sin esto la firma salía idéntica
+  // y `game.interiorDark = 0.1` no re-mallaba NADA: el interior seguía con la penumbra del valor anterior y
+  // «romper un bloque lo arregla» (sube gridGen ⇒ firma nueva ⇒ re-horneado, pero solo de ese chunk, que es
+  // por qué salía a rejillas). En milésimas porque el mando es continuo (0..4) y la firma es entera.
+  sig = ((sig*29 + Math.round((mc.interiorDark||0)*1000)) | 0);
+  // REQ-SHADOW2 · las banderas de sombra se hornean en el shade, así que cambiarlas invalida las mallas
+  // cacheadas aunque no se haya movido un solo voxel. Va en la semilla, no por celda: recorrer la paleta
+  // (unos cientos) al lado del barrido del chunk (miles) no se nota, y ahorra que el snippet tenga que avisar.
+  const SS0=mc.sinSombra; if(SS0){ for(let i=0;i<SS0.length;i++) if(SS0[i]) sig=((sig*13 + i*7 + SS0[i])|0); }
+  return sig;
+}
 // Mesha un chunk: por cada cara con vecino aire emite un quad (culling de caras internas) → VBO. O(chunk).
 function mcMeshChunk(cx,cz){
   const gl=mc.gl, dim=mc.dim;
@@ -10895,12 +10917,7 @@ function mcMeshChunk(cx,cz){
   const chEarly = mc.chunks.get(chunkKeyEarly);
   let _sigCalc = 0, _sigListo = false;
   if(chEarly){
-    let sig = (mc.palette.length|0) * 1000003 + (mc.gridGen|0)
-              + (mc.sinCullingFluido ? 7919 : 0);   // REQ-FLUID4: la válvula cambia la malla, así que invalida la caché
-    // REQ-SHADOW2 · las banderas de sombra se hornean en el shade, así que cambiarlas invalida las mallas
-    // cacheadas aunque no se haya movido un solo voxel. Va en la semilla, no por celda: recorrer la paleta
-    // (unos cientos) al lado del barrido del chunk (miles) no se nota, y ahorra que el snippet tenga que avisar.
-    const SS0=mc.sinSombra; if(SS0){ for(let i=0;i<SS0.length;i++) if(SS0[i]) sig=((sig*13 + i*7 + SS0[i])|0); }
+    let sig = mcMeshSigSemilla();
     const g0=mc.grid, L0=mc.light, BL0=_CACHE_STRICT ? mc.blockLight : null;
     const NX=dim.x, sxyEarly=NX*dim.y;
     for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
@@ -11216,8 +11233,7 @@ function mcMeshChunk(cx,cz){
   // PERF-RS1: si el chunk se acaba de crear (no existía chEarly), _sigListo=false y hay que
   // guardar la firma ahora. Si existía y la firma ya se calculó arriba, ya está guardada.
   if(!_sigListo){
-    let sig = (mc.palette.length|0) * 1000003 + (mc.gridGen|0)
-              + (mc.sinCullingFluido ? 7919 : 0);   // REQ-FLUID4: la válvula cambia la malla, así que invalida la caché
+    let sig = mcMeshSigSemilla();
     const strict = (typeof game === 'undefined') || game.cacheStrict !== false;
     const g0=mc.grid, L0=mc.light, BL0=strict ? mc.blockLight : null, NX=dim.x, sxyE2=NX*dim.y;
     for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) for(let y=0;y<dim.y;y++){
@@ -12129,7 +12145,12 @@ const MC_RC_LUT = {
   prevBox: null
 };
 
-function mcDynBake(sem){
+// ✨ Radiance Cascades LUT — el bake que entró en 5940da4. Ya NO es el que manda (ver mcDynBake, el
+// despachador, más abajo), pero se queda entera: es lo que el dueño quiere poder comparar de noche, y
+// se enciende con `game.luzLey.off()`. Lo que infringe está medido y escrito en docs/luz-y-sombra.md:
+// escribe el byte en 0..255 crudos contra un techo legal de `alcance × MC_LUZ_SUB`, y la fusión temporal
+// hace TEMBLAR el campo entre rondas idénticas.
+function mcDynBakeRC(sem){
   if(!sem || !sem.length || mc.luzDinamica===false || !mc.grid){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
   const dim = mc.dim;
   const PASA = (typeof mcTablaLuz === 'function') ? mcTablaLuz() : null;
@@ -12286,6 +12307,212 @@ function mcDynBake(sem){
     pos: [mc.pos[0], mc.pos[1], mc.pos[2]]
   };
   mc._dynTexDirty = true;
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+// ☀️ LA LEY DE LA LUZ — el bake que MANDA (foto #115 del dueño → snippet `parche-luz-dia-ley` →
+// aquí, 2026-08-25, con su visto bueno)
+//
+// Lo de abajo es el `mcDynBake` de este mismo fichero ANTES de la Radiance Cascades LUT, traído
+// VERBATIM desde git (commit 5940da4^) por herramientas/parche_app_luz_ley.py. No está copiado a
+// mano a propósito: es el texto que validaron los guardianes de luz. Si hay que tocarlo, se toca aquí
+// y se entiende primero wiki/paginas/ley-de-la-luz.md — es CANDADO.
+// ═════════════════════════════════════════════════════════════════════════════════════════════
+function mcDynBakeLey(sem){
+  // REQ-LUZ4 · el paso del campo se fija aquí, ANTES de mirar el presupuesto, y con TODAS las semillas: el alcance
+  // que manda es el que hay en escena, no el de las que sobrevivan al recorte de la caja. Si se mirase solo a las
+  // usadas, el paso cambiaría al recortar la caja y volvería a cambiar al soltarla ⇒ rehorneo del mundo entero cada
+  // vez que el dueño gira. Con todas, es conservador (nunca da la vuelta al byte) y sobre todo QUIETO.
+  let lvMax=mc._lqLv|0;   // REQ-LUZ2 · las quietas ya no están en `sem` pero SIGUEN en escena, en el otro campo:
+  // los dos comparten `uLuzEsc`, así que si su alcance no entrara aquí el byte daría la vuelta y una estrella de
+  // 37 saldría negra en su propio centro (ver mcLuzSubAjusta).
+  for(let i=0;i<sem.length;i++){ const n=sem[i].nivel|0; if(n>lvMax) lvMax=n; }
+  mcLuzSubAjusta(lvMax);
+  if(!sem.length || mc.luzDinamica===false || !mc.grid){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
+  const dim=mc.dim, tope=Math.max(1000, mc.luzDinCeldas!=null?mc.luzDinCeldas|0:MC_DYN_CELDAS);
+  // Caja = unión de (celda ± alcance) de las semillas que quepan en el presupuesto, recortada al mundo. Se recorren
+  // en orden de cercanía al ojo, así que lo que se cae por el tope es siempre lo más lejano.
+  // BUG-GLOW8d · el presupuesto NO decide quién alumbra. Antes esto era un `break`: se iban metiendo semillas por
+  // cercanía al ojo y a la primera que no cabía se cortaba la lista. Con la caja rozando el tope, mover la mano UN
+  // bloque cambiaba el alto de la unión (32→33) y el corte caía 13 semillas antes ⇒ 13 luces apagadas de golpe con
+  // 7° de giro (fotos 72/73 del dueño: `usadas` 32 vs 19, misma posición). Ahora entran TODAS las semillas —el
+  // tope de cuántas hay ya lo puso mcDynSync, por distancia al ojo, que no depende de hacia dónde se mira— y si la
+  // unión no cabe se RECORTA LA CAJA hacia el ojo. Recortar quita luz lejos, que es donde no se ve; tirar semillas
+  // la quitaba entera, y encima a saltos.
+  let x0=1e9, y0=1e9, z0=1e9, x1=-1e9, y1=-1e9, z1=-1e9, usadas=0, lv0=1;
+  for(const s of sem){
+    x0=Math.min(x0, Math.max(0, s.x-s.nivel)); x1=Math.max(x1, Math.min(dim.x-1, s.x+s.nivel));
+    y0=Math.min(y0, Math.max(0, s.y-s.nivel)); y1=Math.max(y1, Math.min(dim.y-1, s.y+s.nivel));
+    z0=Math.min(z0, Math.max(0, s.z-s.nivel)); z1=Math.max(z1, Math.min(dim.z-1, s.z+s.nivel));
+    usadas++; if(s.nivel>lv0) lv0=s.nivel;
+  }
+  if(!usadas){ if(mc.dynLight||mc._dynSig) mcDynApaga(); return; }
+  if((x1-x0+1)*(y1-y0+1)*(z1-z0+1) > tope){
+    // Recorte centrado en el OJO (su posición, no su rumbo ⇒ girar en el sitio no mueve la caja) y proporcional en
+    // los tres ejes, para no deformar el alcance. El bucle de guardia baja el eje más largo de uno en uno.
+    const ex=Math.round(mc.pos[0]), ey=Math.round(mc.pos[1]+MC_EYE*mc.scale), ez=Math.round(mc.pos[2]);
+    const f=Math.cbrt(tope/((x1-x0+1)*(y1-y0+1)*(z1-z0+1)));
+    const eje=(lo,hi,c)=>{ const h=Math.max(1, Math.floor((hi-lo+1)*f/2)); return [Math.max(lo, c-h), Math.min(hi, c+h)]; };
+    [x0,x1]=eje(x0,x1,ex); [y0,y1]=eje(y0,y1,ey); [z0,z1]=eje(z0,z1,ez);
+    for(let g=0; g<64 && (x1-x0+1)*(y1-y0+1)*(z1-z0+1)>tope; g++){
+      const W=x1-x0+1, H=y1-y0+1, P=z1-z0+1;
+      if(W>=H && W>=P){ if(x1-ex > ex-x0) x1--; else x0++; }
+      else if(H>=P){ if(y1-ey > ey-y0) y1--; else y0++; }
+      else { if(z1-ez > ez-z0) z1--; else z0++; }
+    }
+  }
+  // FIRMA: celda, alcance, haz cuantizado y color de cada semilla usada + topología del mundo + foco global. Si no
+  // ha cambiado nada de eso, el campo de la vez pasada sigue siendo el bueno, byte por byte.
+  const focus=Math.max(0, Math.min(1, mc.glowFocus!=null?mc.glowFocus:0));
+  let sig=(mc.gridGen|0)+'|'+focus+'|'+x0+','+y0+','+z0+','+x1+','+y1+','+z1;
+  // La POSICIÓN FINA y el HAZ entran en la firma cuantizados: eso es lo que acota el gasto (se re-siembra cada
+  // tanto de bloque recorrido, no cada frame). Pero el paso de la cuantización NO es libre — es exactamente
+  // cuánto se le deja al campo quedarse QUIETO antes de saltar de golpe, así que hay que elegirlo para que ese
+  // salto no llegue a un subnivel.
+  //   BUG-GLOW8f · antes eran 1/SUB de bloque y 1/8 de coseno, heredados de cuando el alcance caía 1 nivel por
+  //   bloque. Con foco, un bloque puede costar hasta 1+5 niveles, así que 1/SUB de bloque son 1,5 niveles de
+  //   congelación y 1/8 de coseno hasta 5: el campo se quedaba clavado y luego pegaba el brinco. Con paso p, el
+  //   error del nivel es ~p·(1+5·focus) en posición y ~p·alcance·5·focus en el haz; pedir que ambos queden por
+  //   debajo de 1/SUB da estas dos cifras. Cuando nada se mueve, la firma no cambia y esto sigue sin costar nada.
+  const qPos=MC_LUZ_SUB*8, qHaz=256;
+  for(let i=0;i<usadas;i++){ const s=sem[i];
+    sig+='|'+(s.fx!=null ? Math.round(s.fx*qPos)+','+Math.round(s.fy*qPos)+','+Math.round(s.fz*qPos)
+                         : s.x+','+s.y+','+s.z)+','+s.nivel
+       +(s.haz?','+Math.round(s.haz[0]*qHaz)+','+Math.round(s.haz[1]*qHaz)+','+Math.round(s.haz[2]*qHaz):',*')   // haz null = omnidireccional
+       +(s.col?','+s.col[0]+','+s.col[1]+','+s.col[2]:'');
+  }
+  // BUG-GLOW8c · aquí vivía un DESPLAZAMIENTO GLOBAL del muestreo (BUG-GLOW8b): el resto sub-celda medio de los
+  // emisores, aplicado a la caja entera para disimular el salto al cruzar de celda. Era falso en cuanto había más
+  // de una pieza. Lo cazaron las fotos 68/69 del dueño (mismo sitio, 4° de giro): 27 semillas sembradas, 26 eran
+  // estrellas del decorado a 35 bloques y 1 la espada de la mano, así que el resto real de la espada entraba
+  // diluido 1/27 — al cruzar la mano el plano z=57 su semilla subía una celda entera y el desplazamiento se movía
+  // 0,03. Una media no puede describir a la vez la espada de tu mano y 26 estrellas lejanas. Ahora cada emisor
+  // lleva su fracción a la SIEMBRA (mcLuzSiembra, subniveles), que es donde de verdad se decide la luz: sin
+  // promedios, sin desplazar nada, y con la misma ley para el que se mueve y el que está plantado.
+  let cen=null;
+  if(mc.luzSuave!==false){
+    // Solo las `usadas`: las que el presupuesto dejó fuera NO están sembradas en el campo.
+    let n=0, sfx=0, sfy=0, sfz=0;
+    for(let i=0;i<usadas;i++){ const s=sem[i]; if(s.fx==null) continue; n++; sfx+=s.fx; sfy+=s.fy; sfz+=s.fz; }
+    if(n) cen=[sfx/n, sfy/n, sfz/n];      // solo diagnóstico (mcLuzDiag): dónde están DE VERDAD los emisores sembrados
+  }
+  mc._dynSem=sem;                  // depuración (mcLuzDiag): las semillas tal cual entraron, en orden
+  if(sig===mc._dynSig && mc.dynLight){ mc.dynLight.pos=cen; return; }
+  mc._dynSig=sig;
+  const W=x1-x0+1, H=y1-y0+1, P=z1-z0+1, vol=W*H*P;
+  const BL=(mc._dynBL&&mc._dynBL.length>=vol*4)?mc._dynBL:(mc._dynBL=new Uint8Array(vol*4));
+  const BD=(mc._dynBD&&mc._dynBD.length>=vol*3)?mc._dynBD:(mc._dynBD=new Int8Array(vol*3));
+  BL.fill(0, 0, vol*4); BD.fill(0, 0, vol*3);
+  // Igual que en el campo del mundo: OR solo con foco (ver mcCampoLuz). Sin haz no se reserva ni se recorre.
+  let OR=null, DI=null, MX=null;
+  if(focus>0){ OR=(mc._dynOR&&mc._dynOR.length>=vol*3)?mc._dynOR:(mc._dynOR=new Int16Array(vol*3)); OR.fill(0, 0, vol*3);
+    DI=(mc._dynDI&&mc._dynDI.length>=vol)?mc._dynDI:(mc._dynDI=new Uint16Array(vol)); DI.fill(0, 0, vol);
+    MX=(mc._dynMX&&mc._dynMX.length>=vol)?mc._dynMX:(mc._dynMX=new Uint8Array(vol)); MX.fill(0, 0, vol); }
+  else { mc._dynOR=null; mc._dynDI=null; mc._dynMX=null; }
+  const C=mcCampoLuz(BL, BD, x0, y0, z0, W, H, P, OR, DI, MX), PASA=mcTablaLuz();
+  const fino=mc.luzSuave!==false;
+  // BUG-GLOW8h · DOS PASADAS, y en este orden: primero las luces SIN haz, después las de cono. Todas comparten la
+  // misma ley, pero cada celda solo puede guardar UN emisor, y quien la gana le impone su decaimiento a todo lo
+  // que cuelgue de ella: una celda ganada por un cono decae ×k (hasta 6 por bloque) y estrangulaba ahí la luz de
+  // una antorcha, que decae 1 por bloque. Resolviendo las omnidireccionales ENTERAS primero, el cono ya no puede
+  // robarles camino, y no es un apaño de orden: si un cono pierde en una celda tampoco puede ganar más allá
+  // —su k nunca baja de 1—, así que esta pasada da EXACTAMENTE el máximo de las dos leyes. Medido en la foto #96:
+  // celdas que brincaban 1,25 niveles al mover el emisor 1/32 de bloque, por cambiar de dueño y no de valor.
+  for(let pasada=0; pasada<2; pasada++){
+    const buckets=mcLuzBuckets(lv0);
+    let sembrada=false;
+    for(let i=0;i<usadas;i++){ const s=sem[i];
+      const conHaz=!!(s.haz && (s.haz[0]||s.haz[1]||s.haz[2]));
+      if(conHaz!==(pasada===1)) continue;
+      sembrada=true;
+      // La posición FINA del emisor (s.fx/fy/fz) va a la siembra: es lo único que distingue a una luz que se mueve
+      // de una plantada, y por eso no hay dos leyes. Sin ella (game.luzSuave=false) se siembra en el centro de la
+      // celda, que es exactamente el comportamiento del mundo.
+      mcLuzSiembra(C, PASA, buckets, s.nivel, focus, s.x, s.y, s.z, s.haz, 0, s.col,
+                   (fino&&s.fx!=null)?s.fx:undefined, s.fy, s.fz);
+    }
+    if(sembrada) mcLuzDifunde(C, PASA, buckets, lv0, focus);
+  }
+  mc.dynLight={ BL, x0, y0, z0, W, H, P, vol, luces:usadas, pos:cen };
+  mc._dynTexDirty=true;
+}
+
+// ── El color propio de las partículas ────────────────────────────────────────────────────────────────
+// `mcDynSync` siembra la capa `game.voxelesUI` con (-1,-1,-1) en las tres casillas de color = «sin color
+// propio», y entonces `mcLuzSiembra` reparte el cálido de la casa (1 · 0,85 · 0,50). Resultado: una
+// luciérnaga verde alumbraba naranja. Aquí se le devuelve a cada semilla el color de SU voxel, que
+// `mc.voxUI` sí guarda y que `mcVoxUILuces` tira al agrupar por celda.
+//
+// ⚠️ Esto NO toca la Ley de la Luz: la Ley habla de NIVELES (el byte del campo) y aquí no se sube ni uno.
+// Se cambia la PROPORCIÓN entre canales, que es `rgbCol` en `mcLitGlow`. Exagerar (saturacion > 1) SOLO
+// BAJA canales: el más alto —el que fija el nivel, `a = max(...)`— se queda donde está.
+const MC_LUZ_CALIDO = [255, 217, 128];     // (1 · 0,85 · 0,50)×255 = lo que reparte mcLuzSiembra sin color
+const MC_LUZ_SAT_MAX = 3;                  // tope de la exageración · 1 = el color de la partícula tal cual
+// saturacion 2 la fijó el dueño el 2026-08-25 (fotos #132-#139): con 1 no se distingue del cálido, porque
+// la paleta de las luciérnagas de `efectos-demo` YA ES cálida; a 2 los canales se separan lo justo.
+const MC_LUZ_COLOR = { activo: true, saturacion: 2, pintadas: 0, _luz: null, _mapa: null };
+
+// Celda del mundo → color 0..255, agrupando EXACTAMENTE igual que mcVoxUILuces (misma celda, misma media).
+// Si agrupara distinto, la clave no casaría con la de la semilla y no pintaría nada.
+function mcLuzColorMapa(){
+  if (MC_LUZ_COLOR._mapa && MC_LUZ_COLOR._luz === mc._voxUILuz) return MC_LUZ_COLOR._mapa;
+  const mapa = new Map();
+  if (mc.voxUI && mc.voxUILuces !== false) {
+    const paso = MC_VOX * Math.max(1, mc.voxUITam | 0), celdas = new Map();
+    for (const [nombre, m] of mc.voxUI) {
+      if (!(mcVoxUINivel(nombre) > 0)) continue;          // grupo con la luz apagada: ni se recorre
+      const mat = mcVoxUIMat(nombre), medio = paso * mcVoxUIGrosor(nombre) * 0.5;
+      for (const [k, c] of m) {
+        if (!mcVoxUIEmite(c, mat)) continue;              // no emite: es adorno brillante y ya
+        const q = k.split(','),
+              wx = +q[0] * paso + medio, wy = +q[1] * paso + medio, wz = +q[2] * paso + medio;
+        const ck = Math.floor(wx) + ',' + Math.floor(wy) + ',' + Math.floor(wz);
+        let a = celdas.get(ck); if (!a) { a = [0, 0, 0, 0]; celdas.set(ck, a); }
+        a[0] += c[0]; a[1] += c[1]; a[2] += c[2]; a[3]++;
+      }
+    }
+    for (const [ck, a] of celdas)
+      mapa.set(ck, [a[0] / a[3] * 255, a[1] / a[3] * 255, a[2] / a[3] * 255]);
+  }
+  MC_LUZ_COLOR._mapa = mapa; MC_LUZ_COLOR._luz = mc._voxUILuz;
+  return mapa;
+}
+
+// De 0 a 1 `saturacion` MEZCLA entre el cálido de la casa (0 = como si esto no existiera) y el color de
+// verdad de la partícula (1). Pasado 1, EXAGERA separando los canales del más alto (continuo en s=1).
+function mcLuzColorPinta(sem){
+  if (!MC_LUZ_COLOR.activo) return 0;
+  const mapa = mcLuzColorMapa(); if (!mapa.size) return 0;
+  const s = Math.max(0, Math.min(MC_LUZ_SAT_MAX, MC_LUZ_COLOR.saturacion));
+  let n = 0;
+  for (const sd of sem) {
+    if (sd.col) continue;                                 // ya trae color propio: estructura o pieza en la mano
+    const c = mapa.get(sd.x + ',' + sd.y + ',' + sd.z);
+    if (!c) continue;                                     // no sale de la capa voxelesUI: no es asunto nuestro
+    const m = Math.min(1, s);
+    let col = [MC_LUZ_CALIDO[0] + (c[0] - MC_LUZ_CALIDO[0]) * m,
+               MC_LUZ_CALIDO[1] + (c[1] - MC_LUZ_CALIDO[1]) * m,
+               MC_LUZ_CALIDO[2] + (c[2] - MC_LUZ_CALIDO[2]) * m];
+    if (s > 1) {
+      const mx = Math.max(col[0], col[1], col[2]);
+      col = col.map(v => Math.max(0, mx - (mx - v) * s));
+    }
+    sd.col = col.map(Math.round);
+    n++;
+  }
+  return n;
+}
+
+// EL DESPACHADOR. Las dos versiones conviven y esto decide cuál corre. El cambio va por aquí y NO
+// reasignando `window.mcDynBake`, que es lo que hacía el snippet desde fuera: aquello funciona (en un
+// script clásico la declaración ES una propiedad del window, por eso el parche en caliente podía
+// cambiar el bake sin tocar el motor), pero deja al motor corriendo una función que no está escrita en
+// el motor. Ahora que está escrita, el interruptor también.
+function mcDynBake(sem){
+  if (mc.luzLey === false) return mcDynBakeRC(sem);
+  MC_LUZ_COLOR.pintadas = mcLuzColorPinta(sem);   // pintar ANTES: el color entra en la firma del bake
+  return mcDynBakeLey(sem);
 }
 
 function mcDynNivel(x, y, z){
@@ -14730,6 +14957,55 @@ function mcDrawVoxUI(pj, view){
   if(blOn) gl.enable(gl.BLEND); else gl.disable(gl.BLEND);
   gl.frontFace(ff); if(cullOn) gl.enable(gl.CULL_FACE); else gl.disable(gl.CULL_FACE);
   if(poOn) gl.enable(gl.POLYGON_OFFSET_FILL);
+}
+// game.luzLey — qué bake reparte la luz que se MUEVE (la herramienta en la mano, un agente, una
+// partícula). Dos, y solo dos:
+//   game.luzLey.on()    · LA LEY (por defecto): BFS por el aire, haz anisótropo, posición fina en la
+//                         siembra. El byte no pasa del techo legal `alcance × MC_LUZ_SUB` y NO tiembla.
+//   game.luzLey.off()   · la Radiance Cascades LUT (mcDynBakeRC), que es lo que el dueño quiere poder
+//                         volver a ver de noche. Se ajusta con game.rcLUT.
+//   game.luzLey.color(v) · el color propio de las partículas. false / 0..3 / {saturacion:n}.
+//                          0 = el cálido de la casa de siempre; 1 = su color exacto; >1 exagera.
+// Cambiar cualquiera de las dos cosas TIRA el campo y lo reparte de cero: la LUT mezcla el frame anterior
+// en espacio de mundo, así que sin esto el campo nuevo sale contaminado con el viejo varios segundos.
+game.luzLey = {
+  get instalado() { return mc.luzLey !== false; },
+  on() { mc.luzLey = true; mcLuzLeyDeCero(); return this.diag(); },
+  off() { mc.luzLey = false; mcLuzLeyDeCero(); return this.diag(); },
+  conmutar() { return (mc.luzLey === false) ? this.on() : this.off(); },
+  color(v) {
+    if (v === false || v === true) MC_LUZ_COLOR.activo = v;
+    else if (v && typeof v === 'object') {
+      if ('saturacion' in v) MC_LUZ_COLOR.saturacion = Math.max(0, Math.min(MC_LUZ_SAT_MAX, +v.saturacion || 0));
+      MC_LUZ_COLOR.activo = ('activo' in v) ? !!v.activo : MC_LUZ_COLOR.saturacion > 0;
+    } else if (isFinite(+v)) {
+      MC_LUZ_COLOR.saturacion = Math.max(0, Math.min(MC_LUZ_SAT_MAX, +v));
+      MC_LUZ_COLOR.activo = +v > 0;
+    } else {
+      // Callarse aquí es el peor fallo posible en un mando de depuración: el dueño probó
+      // `color({saturacion:1000})` cuando esto solo aceptaba números, `isFinite(+{})` dio NaN y la
+      // llamada se fue por el desagüe SIN AVISAR. Dos fotos perdidas por eso.
+      console.warn('game.luzLey.color: no entiendo «' + v + '» (true/false, 0..' + MC_LUZ_SAT_MAX + ' o {saturacion:n})');
+      return this.diag();
+    }
+    mcLuzLeyDeCero();
+    return this.diag();
+  },
+  // El objeto crudo, para que el informe «color-particulas» del snippet lea EL estado y no una copia.
+  get _color() { return MC_LUZ_COLOR; },
+  diag() {
+    return { bake: (mc.luzLey === false) ? 'Radiance Cascades LUT' : 'Ley de la Luz',
+             colorPropio: MC_LUZ_COLOR.activo, saturacion: MC_LUZ_COLOR.saturacion,
+             topeDeSaturacion: MC_LUZ_SAT_MAX, semillasPintadas: MC_LUZ_COLOR.pintadas,
+             semillas: (mc._dynSem || []).length };
+  }
+};
+// Tirar el rastro: la firma del campo, la caché de color y —sobre todo— la fusión temporal de la LUT.
+function mcLuzLeyDeCero(){
+  MC_LUZ_COLOR._mapa = null; MC_LUZ_COLOR._luz = null;
+  if (typeof MC_RC_LUT !== 'undefined' && MC_RC_LUT) { MC_RC_LUT.prevBL32 = null; MC_RC_LUT.prevBox = null; }
+  mc._dynSig = null;
+  if (typeof mcDynSync === 'function' && mc.grid) mcDynSync();
 }
 game.rcLUT = {
   get potencia() { return MC_RC_LUT.potencia; },
@@ -21306,7 +21582,10 @@ Object.defineProperty(game,'useOldStructBuildCall',{ enumerable:true, get:()=>mc
 // (mcComputeLight) perdiendo 1 nivel por bloque; la sombra de cada cara depende de la LUZ que le llega: plena junto
 // a una boca / a cielo abierto, y hasta interiorDark en el fondo sin luz de un túnel. Al basarse en la luz REAL, no
 // hay bandas por el grosor de tierra encima y una figura flotante apenas ensombrece el suelo (la luz entra de lado).
-// Mapeo exponencial `interiorDark^((MAX-lv)/MAX)`: 1 = desactivado; 0.55 por defecto; **0 = interiores hasta negro**
+// Mapeo exponencial `interiorDark^((MAX-lv)/MAX)`: 1 = desactivado; **0.15 por defecto** (2026-08-25); **0 = interiores hasta negro**
+// ⚠️ y el 0 es una vía muerta: hornea un shade de CERO en el vértice y `dynLift` repone DIVIDIENDO (shade/dark^dyn),
+// así que 0 entre lo que sea sigue siendo 0 ⇒ con el mando a 0 ni las luciérnagas ni la herramienta alumbran un
+// interior. Si quieres «lo más negro posible» pero con lámparas vivas, 0.02, no 0.
 // (una sala con poca luz se apaga del todo, no solo el fondo con luz 0). Re-malla el terreno en vivo y persiste.
 // REQ-GLOW7 · **el recorrido llega a MC_INTERIOR_DARK_MAX (4), ya no a 1**. Pasar de 1 invierte el mando: la penumbra
 // sale MÁS clara que la luz plena, o sea SOBREEXPOSICIÓN para inspeccionar («*hace falta poder subir game.interiorDark

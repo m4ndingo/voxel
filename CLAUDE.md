@@ -170,6 +170,8 @@ Botón = **bloque con una nota**, identificado **por su texto** ⇒ una pantalla
 **entera** (10 mandamientos + 8 leyes + Sótano) y se **cita el artículo**. Dueño: «iluminación real y
 consistente; **cero apaños**». Si algo se ve mal infringe un artículo. Detalle → [`docs/luz-y-sombra.md`](docs/luz-y-sombra.md).
 **2 sombras distintas**: **skylight** (`mc.light`, horneado) vs **sombra proyectada** (GPU).
+**2 bakes** de luz móvil: `mcDynBake` sólo **despacha** → `mcDynBakeLey` (defecto) / `mcDynBakeRC` (LUT, `game.luzLey.off()`).
+⛔ `interiorDark` **0 mata** la luz móvil (shade 0 y `dynLift` DIVIDE); lo horneado en el shade va a **`mcMeshSigSemilla`** o no refresca.
 
 ## Redstone → [`docs/redstone.md`](docs/redstone.md)
 

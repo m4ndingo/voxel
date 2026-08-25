@@ -321,6 +321,46 @@ Guardián: `node tests/test_shadow3_mandos.js`.
 
 ---
 
+## Dos bakes en el motor, y cuál manda — `game.luzLey` (2026-08-25)
+
+La caja de luz de lo que se MUEVE (la herramienta en la mano, un agente, una partícula) tiene **dos** implementaciones
+vivas en `app.js`, y un despachador de tres líneas que elige:
+
+| | quién | cuándo |
+|---|---|---|
+| **`mcDynBakeLey`** | BFS por el aire, haz anisótropo, posición fina en la siembra, oclusión real | **por defecto** — es la Ley |
+| `mcDynBakeRC` | Radiance Cascades LUT (commit 5940da4) | `game.luzLey.off()`, para comparar de noche · se ajusta con `game.rcLUT` |
+
+`function mcDynBake(sem)` es el despachador; el resto del motor lo sigue llamando por su nombre y no sabe que hay dos.
+
+Historia, porque explica la forma: la LUT daba sombras sin sentido de día (foto #115) y lo que se veía **no era una
+sombra**, era su caja de luz escrita fuera de escala y sin haz — byte 101 contra un techo legal de 64, y temblando 8,85
+entre rondas idénticas por la fusión temporal. La vuelta a la Ley nació como snippet (`parche-luz-dia-ley`, LEY DE ORO:
+se valida en caliente antes de tocar el motor), se comparó a fotos durante toda la tanda #115–#139, y el dueño la dio
+por buena. La bajó `herramientas/parche_app_luz_ley.py`, que **extrae el cuerpo VERBATIM de git** (el padre del commit
+que metió `MC_LUT_SPHERES`) en vez de copiarlo a mano: copiarlo a mano es cómo derivan las cosas.
+
+Del snippet **solo queda el informe de foto** `color-particulas` (Alt+F): es una herramienta de depuración y su sitio
+son los snippets. Al cargarse detecta que el motor ya trae la Ley (`typeof mcDynBakeLey === 'function'`) y entonces no
+instala nada — instalar sería poner una segunda copia encima, y `off()` acabaría devolviendo el despachador en vez de
+la LUT.
+
+### El color propio de las partículas — `game.luzLey.color(v)`
+
+`mcDynSync` siembra la capa `game.voxelesUI` con `(-1,-1,-1)` en el color = «sin color propio», y entonces
+`mcLuzSiembra` reparte el cálido de la casa: una luciérnaga verde alumbraba naranja. `mcLuzColorPinta` le devuelve a
+cada semilla el color de SU voxel (que `mc.voxUI` sí guarda y `mcVoxUILuces` tira al agrupar por celda) **antes** de
+entregarla al bake.
+
+- `0` = el cálido de siempre · `1` = su color exacto · hasta `MC_LUZ_SAT_MAX` (3) = exagerado. Por defecto **2**.
+- ⚠️ **No infringe la Ley**: la Ley habla de NIVELES y aquí no se sube ni un byte. Se cambia la PROPORCIÓN entre canales
+  (`rgbCol` en `mcLitGlow`), y exagerar **solo baja** canales — el más alto, que es el que fija el nivel (`a = max(…)`),
+  no se toca.
+- Con `1` casi no se nota, y no es culpa del mando: la paleta de las luciérnagas de `efectos-demo` **ya es** el cálido
+  de la casa. Lo que sí se nota es el alcance (ver `docs/particulas-y-efectos.md`: el color se cuantiza en el nivel).
+
+---
+
 ## UNA sola ley, y por qué el campo daba bandazos (BUG-GLOW8h)
 
 Orden del dueño: «*la iluminación debe ser real y consistente para todo el motor, no puede haber apaños ni trucos
@@ -532,8 +572,8 @@ Para «ver hasta dónde llega la espada» el mando es `glowLevel` (alcance en bl
 
 | valor | qué hace |
 |---|---|
-| `0` | la penumbra baja **hasta negro** |
-| `0.55` (defecto) | penumbra normal |
+| `0` | la penumbra baja **hasta negro** — ⛔ y es una **vía muerta**, ver abajo |
+| `0.15` (defecto desde 2026-08-25) | penumbra normal |
 | `1` | **desactivado** (neutro: todo a plena luz) |
 | `>1`, hasta `MC_INTERIOR_DARK_MAX` = **4** | **SOBREEXPONE**: lo que NO tiene luz sale más claro que lo que la tiene |
 
@@ -544,6 +584,43 @@ en una escena a oscuras. A 4 el fondo sin luz ya sale a tope y subir más no ens
 vale 1, y `mcMeshChunk` / `mcCapaGeom` solo construyen la `lightLut` si `dark!==1`. Si alguna de esas comparaciones
 vuelve a `<1` / `>=1`, la sobreexposición se queda **sin `mc.light` que leer** y no se ve nada. La excepción es
 `dynLift` en el shader, que sí sigue en `uDynDark>=1.0`: con la penumbra ya subida en el vértice, dividir la bajaría.
+
+### ⛔ `interiorDark = 0` mata la luz móvil (y no hay parche que lo salve)
+
+El dueño, 2026-08-25: «*con `game.interiorDark` a 0 no iluminan ni las luciérnagas ni la herramienta el caseto por
+dentro*». No es una decisión de diseño, es una **degeneración aritmética**, y la cadena tiene tres piezas:
+
+1. **el horneado** (`mcMeshChunk`, y por cara en `mcStructGeom`): `s *= lightLut[lv]`, con
+   `lightLut[lv] = Math.pow(dark,(15−lv)/15)`. Con `dark = 0`, toda cara sin skylight pleno se hornea a **shade = 0**;
+2. **la reposición** (`dynLift`): repone **DIVIDIENDO** — `shade / pow(max(uDynDark,0.001), dyn)`. El `max` protege el
+   divisor, pero el dividendo ya es cero. **0 entre lo que sea sigue siendo 0**;
+3. **`mcLitGlow`** multiplica sobre esa base, que ya venía anulada.
+
+O sea: las semillas están ahí y el campo se siembra (el informe las cuenta), pero el píxel no puede subir porque su
+multiplicador murió en el vértice. **Si quieres «lo más negro posible» con las lámparas vivas, `0.02`, no `0`**: a
+0.02 el interior queda en 5/255 y la herramienta en mano (dyn≈1) lo repone entero.
+
+| `interiorDark` | shade horneado (lv 0) | con luciérnaga (dyn≈0,18) | con la herramienta (dyn≈1) |
+|---|---|---|---|
+| **0** | 0 | **0** | **0** |
+| 0.02 | 0,020 | 0,040 | **1,0** |
+| 0.15 (defecto) | 0,150 | 0,213 | **1,0** |
+
+### El mando no refrescaba nada: `interiorDark` en la firma de malla (BUG-DARK1)
+
+Foto **#138**: `game.interiorDark = 0.1` y el interior seguía como estaba; **romper un bloque lo arreglaba**, y solo
+en ese chunk (de ahí el aspecto «a rejillas» de la #136). La firma de malla del chunk (PERF-RS1) se calculaba con
+paleta + `gridGen` + fluidos + banderas de sombra + `grid`/`light`/`blockLight` — y **`interiorDark` no estaba**. Como
+no cambia ni la rejilla ni `mc.light`, la firma salía **idéntica**: `mcMeshChunk` se iba por su *early return* y el
+`mcMeshAll()` del setter no re-horneaba nada. Romper un bloque sube `gridGen` ⇒ firma nueva ⇒ re-horneado de ESE chunk.
+Y peor: el ping-pong de `_cache` podía devolver un VBO horneado con **otro** valor del mando (el riesgo que su propio
+comentario ya avisaba).
+
+Arreglado con **`mcMeshSigSemilla()`**: una sola función con todo lo que se hornea en el vértice y no se lee celda a
+celda, usada por los **dos** caminos que guardaban firma (que además se habían desincronizado: uno metía las banderas
+de sombra y el otro no). **Regla**: lo que se hornee en el shade y no viva en `grid`/`light`/`blockLight` va ahí, o no
+se refresca hasta que alguien rompa un bloque. Lo que es **uniforme** (`sunShade`, `luzGlobal`, `glowGain`…) no: eso
+cambia en el frame siguiente y no toca la malla.
 
 ---
 
