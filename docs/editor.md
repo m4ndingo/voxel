@@ -174,7 +174,15 @@ sigue directo por necesitar `g3d` fresco), y la **media resolución del arrastre
    **Ctrl+arrastre** = pan; **Alt+clic** = cuentagotas momentáneo (toma el color y MANTIENE la
    herramienta actual — igual que Alt+clic en la vista Capas); **herramienta Mano** (`tool='hand'`, 1ª en las
    barras) arrastra = pan; rueda = zoom al cursor (`zoom3dAt`); botones ⟲⟳ giran yaw 45°; arrastrar
-   sobre un voxel aplica la herramienta. Cursores contextuales (`update3dCursor`+`CURSORS`):
+   sobre un voxel aplica la herramienta. **Botón «Frontal»** (`toggleCamFront`): ortogonal de frente,
+   `pitch=0` y `yaw=`**`MC_FRONTAL_YAW`**` = π` — **π y no 0**. Con `yaw=0` la profundidad de `+Y` sale
+   positiva (`+Y` se aleja) ⇒ la cámara queda en `−Y`, asomada por el **borde de arriba** del plano de
+   Capas, y desde ahí izquierda y derecha se cambian: es el «los dibujos salen espejados» que cazó el
+   dueño (2026-08-25). Con π la cámara se pone en `+Y`, que además es **donde estará el jugador** en el
+   mapa (`editor-Y` = profundidad → `mundo-Z`, y un jugador con yaw 0 mira hacia `−Z`). ⛔ El `-x1` de
+   `project3d` («espejo horizontal…») **NO** tiene que ver, por más que lo parezca: con la cámara libre
+   compensa exacto y el 2D, la miniatura iso y la 3D libre ya coincidían — quitarlo rompe esas tres para
+   arreglar una. Guardián `tests/test_espejo_2d3d.js` (compara las 4 vistas con la misma marca). Cursores contextuales (`update3dCursor`+`CURSORS`):
    lápiz/goma/… sobre voxel, mano con Mano, cuentagotas con Alt. Nota: los SVG de cursor usan `#`
    real (encodeURIComponent los codifica una vez); NO poner `%23` o quedan en negro.
    `pickVoxel3d` recorre de cerca→lejos y usa `inQuad` sobre `facePoly3d` de las caras visibles;

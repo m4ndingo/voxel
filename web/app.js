@@ -3038,7 +3038,19 @@ function applyShowPreview(v){
 $('#mode-tabs').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) setMode(b.dataset.mode); });
 $('#e3-rot-left').onclick =()=>{ view3d.yaw+=Math.PI/4; leaveCamFront(); hover3d=null; hoverCara3d=null; drawEdit3d(); };
 $('#e3-rot-right').onclick=()=>{ view3d.yaw-=Math.PI/4; leaveCamFront(); hover3d=null; hoverCara3d=null; drawEdit3d(); };
-// Alternar entre la orientación libre actual y la proyección ortogonal frontal (yaw=pitch=0, se ve X↔horizontal, Z↔vertical)
+// Lado desde el que mira el botón «Frontal». π, NO 0 (queja del dueño, 2026-08-25: «*como se diseña
+// en la vista 2d, al ir a la vista 3d sale espejado; si es de izq→der sale de der→izq*»). Con yaw=0 la
+// profundidad de +Y sale POSITIVA —o sea, +Y se aleja— y la cámara queda en −Y: asomada por el borde de
+// ARRIBA del plano de Capas. Mirando un plano desde arriba del papel, la izquierda y la derecha se
+// cambian, y de ahí el «espejo» (que no lo era: era el otro lado). Con π la cámara se pone en +Y, que
+// además es DONDE ESTARÁ EL JUGADOR en el mapa —editor-Y es la profundidad, editor-Y → mundo-Z, y un
+// jugador con yaw 0 mira hacia −Z—, así que el «Frontal» enseña a la vez lo que se acaba de dibujar en
+// Capas y lo que se verá al estampar la pieza.
+// ⛔ El `-x1` de project3d («espejo horizontal…») NO tiene nada que ver, por más que lo parezca al
+// leerlo: con la cámara libre compensa exacto, y el 2D, la miniatura iso y la vista 3D libre ya estaban
+// de acuerdo entre sí. Quitarlo rompería esas tres para arreglar ésta. Guardián: tests/test_espejo_2d3d.js.
+const MC_FRONTAL_YAW = Math.PI;
+// Alternar entre la orientación libre actual y la proyección ortogonal frontal (pitch=0 y yaw=MC_FRONTAL_YAW: se ve X↔horizontal, Z↔vertical, con +X a la derecha como en Capas)
 function updateCamBtn(){ const b=$('#e3-cam'); if(!b) return;
   b.classList.toggle('on', camFront);
   b.textContent = camFront ? 'Libre' : 'Frontal';
@@ -3047,7 +3059,7 @@ function updateCamBtn(){ const b=$('#e3-cam'); if(!b) return;
 function leaveCamFront(){ if(!camFront) return; camFront=false; camSaved=null; updateCamBtn(); }  // el usuario rotó: deja de estar bloqueado en frontal
 function toggleCamFront(){
   if(camFront){ if(camSaved){ view3d.yaw=camSaved.yaw; view3d.pitch=camSaved.pitch; } camSaved=null; camFront=false; }
-  else { camSaved={yaw:view3d.yaw, pitch:view3d.pitch}; view3d.yaw=0; view3d.pitch=0; camFront=true; }
+  else { camSaved={yaw:view3d.yaw, pitch:view3d.pitch}; view3d.yaw=MC_FRONTAL_YAW; view3d.pitch=0; camFront=true; }
   hover3d=null; updateCamBtn(); drawEdit3d();
 }
 $('#e3-cam').onclick=toggleCamFront;
