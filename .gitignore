@@ -40,3 +40,14 @@ releases/
 # Borradores de depuración de un rato (probe_*.js en la raíz). Lo que merece sobrevivir se escribe
 # como sonda en performance/ o como test en tests/, nunca como un probe_ suelto en la raíz.
 /probe_*.js
+
+# ── MULTIJUGADOR (REQ-MULTI1) · vive en OTRO repositorio, privado ───────────────────────────────────
+# /multi/ es un repo git aparte que se clona AQUÍ DENTRO. No es un submódulo a propósito: .gitmodules
+# se versiona y llevaría la URL del repo privado dentro del público, además de obligar a un commit
+# aquí por cada avance de allí. Con dos clones independientes no se filtra nada.
+#   producción:  git clone <público> voxel && git clone <privado> voxel/multi && python3 server.py
+# Cuando el dueño quiera publicarlo, se borran estas dos reglas y ya está.
+/multi/
+# El cliente se publica con POST /api/snippets y aterriza en data/snippets/, que SÍ se versiona: sin
+# esta línea el snippet del multijugador se subiría a GitHub sin que nadie lo pidiera.
+data/snippets/multi-*.json
