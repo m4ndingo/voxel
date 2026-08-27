@@ -305,8 +305,16 @@ cuatro, enseña la clave exacta `asset:assets/<id>.vox.json` y deja editar `alia
   `realpath` (única que aguanta `..` a media ruta y enlaces simbólicos) y «ningún tramo empieza por
   punto» (el POST *limpia* el id borrando lo que no le vale, y `..%2f..%2fPLAN` se quedaba en
   `..2f..2fPLAN`, que no se escapa pero se colaba en la galería y en el índice).
-- El id lleva la carpeta; el **rótulo no** — nadie quiere leer «Trees_Mock/Pino». Guardián:
-  `tests/test_assets_subcarpeta.js` (36 comprobaciones, servidor vivo).
+- El id lleva la carpeta; el **rótulo no** — nadie quiere leer «Trees_Mock/Pino». Guardianes:
+  `tests/test_assets_subcarpeta.js` (36 comprobaciones, la API a pelo) y
+  `tests/test_editor_asset_subcarpeta.js` (12, **el camino que hizo él** en un navegador de verdad).
+  Hacen falta **los dos**: entre la API y el editor hay tres piezas que pueden tirar la carpeta y no se
+  ven desde la API — la galería pasa `a.id` a `loadFromUrl(url, id)`, `save()` manda ese `serverId`, y
+  Borrar arma `'/api/assets/' + id` con la `/` sin escapar.
+- ⚠️ Y ojo con **de dónde sale el índice**: `/assets/index.json` está **interceptado** por
+  `list_assets_auto()` (`server.py:749`), así que el `fetch('assets/index.json')` del cliente NO lee el
+  fichero a pelo. Un asset que ya está en el índice se sirve tal cual; el escaneo sólo pone id a los
+  `.vox.json` que no figuran. Por eso migrar los ids del índice fue parte del arreglo y no un adorno.
 - Solo assets del juego. Las piezas de `data/habitantes/` (`hab:<id>`) **no tienen alias**: no pasan por
   `mcIndexAssets`, así que ni su id ni su rótulo valen como clave — la única que funciona es `hab:<id>`.
   Su ficha (`openFicha(h,'hab')`, `fichaKind`) enseña eso y **esconde** la mitad editable en vez de
