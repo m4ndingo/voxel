@@ -260,7 +260,7 @@
     "count": 4096
   },
   {
-    "id": "yellow",
+    "id": "yellow_concrete",
     "name": "Yellow",
     "role": "Bloque · Hormigón Amarillo (yellow concrete)",
     "icon": " ",
@@ -2221,7 +2221,7 @@
     "description": "Estípite de palmera con corteza anillada y fibras tropicales."
   },
   {
-    "id": "adoquin",
+    "id": "blocks_mock/adoquin",
     "name": "Adoquín",
     "role": "Bloque · piedra irregular (cobblestone)",
     "icon": "🪨",
@@ -2235,7 +2235,7 @@
     "description": "Adoquín — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "arena",
+    "id": "blocks_mock/arena",
     "name": "Arena",
     "role": "Bloque · arena (sand)",
     "icon": "🏜️",
@@ -2249,7 +2249,7 @@
     "description": "Arena — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "arenisca",
+    "id": "blocks_mock/arenisca",
     "name": "Arenisca",
     "role": "Bloque · arenisca en capas (sandstone)",
     "icon": "🧱",
@@ -2263,7 +2263,7 @@
     "description": "Arenisca — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "bloque_redstone",
+    "id": "blocks_mock/bloque_redstone",
     "name": "Bloque de redstone",
     "role": "Bloque · fuente permanente (redstone block)",
     "icon": "🟥",
@@ -2277,7 +2277,7 @@
     "description": "Bloque de redstone — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "grava",
+    "id": "blocks_mock/grava",
     "name": "Grava",
     "role": "Bloque · grava (gravel)",
     "icon": "⚪",
@@ -2291,7 +2291,7 @@
     "description": "Grava — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "ladrillo",
+    "id": "blocks_mock/ladrillo",
     "name": "Ladrillo",
     "role": "Bloque · ladrillo rojo (bricks)",
     "icon": "🧱",
@@ -2305,7 +2305,7 @@
     "description": "Ladrillo — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "ladrillo_piedra",
+    "id": "blocks_mock/ladrillo_piedra",
     "name": "Ladrillo de piedra",
     "role": "Bloque · sillar gris (stone bricks)",
     "icon": "🧱",
@@ -2319,7 +2319,7 @@
     "description": "Ladrillo de piedra — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "musgo_adoquin",
+    "id": "blocks_mock/musgo_adoquin",
     "name": "Adoquín musgoso",
     "role": "Bloque · adoquín con musgo (mossy)",
     "icon": "🟩",
@@ -2333,7 +2333,7 @@
     "description": "Adoquín musgoso — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "obsidiana",
+    "id": "blocks_mock/obsidiana",
     "name": "Obsidiana",
     "role": "Bloque · obsidiana (obsidian)",
     "icon": "🟣",
@@ -2347,7 +2347,7 @@
     "description": "Obsidiana — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "tablones",
+    "id": "blocks_mock/tablones",
     "name": "Tablones",
     "role": "Bloque · madera de roble (oak planks)",
     "icon": "🪵",
@@ -2361,7 +2361,7 @@
     "description": "Tablones — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "tronco",
+    "id": "blocks_mock/tronco",
     "name": "Tronco",
     "role": "Bloque · tronco de roble (oak log)",
     "icon": "🌳",
@@ -2375,7 +2375,7 @@
     "description": "Tronco — bloque de construcción 16³ (MOCK, aún no es asset)."
   },
   {
-    "id": "cerezo",
+    "id": "trees_mock/cerezo",
     "name": "Cerezo",
     "role": "Árbol · cerezo en flor",
     "icon": "🌸",
@@ -2389,21 +2389,7 @@
     "description": "Cerezo — árbol voxel 32³ (MOCK, aún no es asset)."
   },
   {
-    "id": "pino",
-    "name": "Pino",
-    "role": "Árbol · pino conífera",
-    "icon": "🌲",
-    "type": "objeto",
-    "group": "Objetos",
-    "size": 32,
-    "file": "assets/trees_mock/pino.vox.json",
-    "savedAt": "2026-08-23T18:30:00",
-    "createdAt": "2026-08-23T18:30:00",
-    "count": 1408,
-    "description": "Pino — árbol voxel 32³ (MOCK, aún no es asset)."
-  },
-  {
-    "id": "roble",
+    "id": "trees_mock/roble",
     "name": "Roble",
     "role": "Árbol · roble frondoso",
     "icon": "🌳",
@@ -2495,5 +2481,19 @@
     "categoria": "naturaleza",
     "alias": "sakura_leaves",
     "description": "Follaje translúcido de flor de cerezo rosa con la misma estructura y transparencia que leaves."
+  },
+  {
+    "id": "trees_mock/pino",
+    "name": "Pino",
+    "role": "Árbol · pino conífera",
+    "icon": "🌲",
+    "type": "objeto",
+    "group": "Naturaleza",
+    "size": 32,
+    "file": "assets/trees_mock/pino.vox.json",
+    "savedAt": "2026-08-27T14:11:09",
+    "createdAt": "2026-08-27T14:11:09",
+    "count": 1408,
+    "description": "Pino — árbol voxel 32³ (MOCK, aún no es asset)."
   }
 ]

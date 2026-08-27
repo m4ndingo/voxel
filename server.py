@@ -359,8 +359,14 @@ def list_assets_auto():
                 except Exception:
                     continue
                 meta = doc.get('meta', {})
-                raw_id = fn.replace('.vox.json', '')
-                name = meta.get('name') or raw_id.replace('-', ' ').replace('_', ' ').title()
+                # ⛔ El id es la RUTA dentro de `assets/`, no el nombre del fichero. Con el nombre a secas,
+                # `trees_mock/pino` y `pino` eran el mismo asset para todo el servidor: al guardar el de la
+                # subcarpeta se escribía `assets/pino.vox.json`, y al borrar el viejo se borraba el nuevo
+                # (lo vio el dueño, 2026-08-27). Los mocks son assets como los demás: lo que los distingue
+                # es dónde están. Ojo, la separación es siempre `/`, también en Windows: es un id, no una ruta.
+                raw_id = rel_p[len('assets/'):-len('.vox.json')]
+                # …pero el NOMBRE visible sigue saliendo del fichero: nadie quiere leer «Trees_Mock/Pino».
+                name = meta.get('name') or raw_id.split('/')[-1].replace('-', ' ').replace('_', ' ').title()
                 tipo = meta.get('type', 'objeto')
                 role = meta.get('role', f'Asset · {name}')
                 icon = meta.get('icon', '🧱' if tipo == 'textura' else '📦')
@@ -694,7 +700,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def _agente_path(self, idd):
         return os.path.join(AGENTS, idd + '.json')
     def _asset_id(self):
-        m = re.match(r'^/api/assets/([A-Za-z0-9_.-]+)$', self.path)
+        # La `/` va DENTRO de la clase: un asset en subcarpeta (`trees_mock/pino`) lleva la carpeta en
+        # el id, porque su identidad es el FICHERO. Sin ella, `pino` señalaba a dos sitios distintos y
+        # guardar en uno borraba el otro. Quien valida que eso no se escape de `assets/` es
+        # `_asset_path`, no este `re`: aquí sólo se recorta la URL.
+        m = re.match(r'^/api/assets/([A-Za-z0-9_.\-/]+)$', self.path)
         if not m:
             return None
         aid = m.group(1)
@@ -702,7 +712,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             aid = aid[:-9]
         return aid
     def _asset_path(self, idd):
-        return os.path.join(BASE, 'assets', f'{idd}.vox.json')
+        """Ruta en disco de un asset, o `None` si el id pretende salirse de `assets/`.
+
+        ⛔ Devolver `None` no es una formalidad: desde que el id admite `/`, un id como `../../etc/passwd`
+        sería un fichero cualquiera del disco, y por aquí pasan un POST que escribe y un DELETE que
+        borra. Se comprueba con `realpath` sobre el resultado, que es lo único que aguanta `..` a
+        mitad de camino, enlaces simbólicos y rutas absolutas; mirar el id «a ojo» no aguanta ninguna
+        de las tres. Todos los llamantes tienen que tratar el `None`.
+
+        ⚠️ Ningún tramo del id puede empezar por punto, y esto va ADEMÁS del `realpath`, no en su lugar.
+        El `realpath` sólo mira dónde acaba la ruta, y el POST *limpia* el id borrando lo que no le vale:
+        `..%2f..%2fPLAN` perdía los `%` y se quedaba en `..2f..2fPLAN`, que ya no se sale de `assets/` —
+        el `realpath` lo daba por bueno y escribía ese adefesio en la galería, y en el índice (lo cazó el
+        guardián `test_assets_subcarpeta.js` a la primera). Escapar no escapaba; ensuciar, sí."""
+        for tramo in str(idd).split('/'):
+            if not tramo or tramo.startswith('.'):
+                return None
+        raiz = os.path.realpath(os.path.join(BASE, 'assets'))
+        p = os.path.realpath(os.path.join(raiz, f'{idd}.vox.json'))
+        if p != raiz and not p.startswith(raiz + os.sep):
+            return None
+        return p
 
     def do_GET(self):
         # SPA: /map/<nombre> (elige el mundo por URL) sirve el mismo index.html; el cliente lee el nombre
@@ -800,7 +830,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         aid = self._asset_id()
         if aid:
             fp = self._asset_path(aid)
-            if os.path.exists(fp):
+            if fp and os.path.exists(fp):
                 try:
                     return self._send(200, json.load(open(fp, encoding='utf-8')))
                 except Exception:
@@ -1145,9 +1175,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             raw_id = str(d.get('id') or '')
             if raw_id.startswith('assets/'): raw_id = raw_id[7:]
             if raw_id.endswith('.vox.json'): raw_id = raw_id[:-9]
-            idd = re.sub(r'[^A-Za-z0-9_.-]', '', raw_id) or slugify(name)
+            # ⛔ La `/` SE QUEDA: el id de un asset en subcarpeta es `trees_mock/pino`, y comérsela era la
+            # otra mitad del bug de 2026-08-27 (guardar el pino del mock escribía `assets/pino.vox.json`).
+            # Los `..` los para `_asset_path`, que es quien decide si la ruta se sale de `assets/`; aquí
+            # sólo se limpia lo que no puede formar parte de un id.
+            idd = re.sub(r'[^A-Za-z0-9_./-]', '', raw_id).strip('/') or slugify(name)
             filename = f'{idd}.vox.json'
-            asset_path = os.path.join(BASE, 'assets', filename)
+            asset_path = self._asset_path(idd)
+            if not asset_path:
+                return self._send(400, {'error': 'id de asset inválido: %s' % idd})
+            # Alta en subcarpeta: el directorio puede no existir todavía (`atomic_dump` no lo crea).
+            os.makedirs(os.path.dirname(asset_path), exist_ok=True)
             # El editor no conoce alias/icon/description (no hay campos para ellos en el panel «Objeto»), y
             # este POST vuelca el .vox.json ENTERO con lo que manda: sin esto, guardar una textura desde
             # el editor le borraría el nombre corto del fichero. El índice lo conservaría, pero a la
@@ -1251,7 +1289,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_PATCH(self):
         aid = self._asset_id()
-        if aid and os.path.exists(self._asset_path(aid)):
+        ap = self._asset_path(aid) if aid else None
+        if ap and os.path.exists(ap):
             body = self._read()
             name = (body.get('name') or '').strip()
             # «Renombrar» manda solo name; la ficha manda alias/icon/description. Cada campo es
@@ -1284,7 +1323,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # el fichero (como si hace el rename de habitantes) dejaria sin textura cada bloque pintado
             # con el en cada mundo. El nombre es de la vitrina; el fichero es la identidad. El alias
             # tampoco mueve nada: es otra puerta de entrada al mismo fichero.
-            d = json.load(open(self._asset_path(aid), encoding='utf-8'))
+            d = json.load(open(ap, encoding='utf-8'))
             meta = d.setdefault('meta', {})
             if 'name' in body:
                 meta['name'] = name
@@ -1296,7 +1335,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 meta['alias'] = alias
             elif alias is not None:
                 meta.pop('alias', None)
-            atomic_dump(d, self._asset_path(aid))
+            atomic_dump(d, ap)
 
             # El indice es el espejo del que se alimenta el cliente (mcIndexAssets solo lee de aqui:
             # sin esto habria que bajar los ~79 .vox.json en cada arranque para saber los alias).
@@ -1393,8 +1432,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 to_trash(self._agente_path(gid)); return self._send(200, {'ok': True})   # a papelera, no borrado real
             return self._send(404, {'error': 'no existe agente'})
         aid = self._asset_id()
-        if aid and os.path.exists(self._asset_path(aid)):
-            to_trash(self._asset_path(aid))
+        ap = self._asset_path(aid) if aid else None      # `None` = el id pretendía salirse de `assets/`
+        if ap and os.path.exists(ap):
+            to_trash(ap)
             idx_path = os.path.join(BASE, 'assets', 'index.json')
             if os.path.exists(idx_path):
                 try:

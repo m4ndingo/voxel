@@ -291,6 +291,22 @@ cuatro, enseña la clave exacta `asset:assets/<id>.vox.json` y deja editar `alia
   (PATCH con `alias:''`), no guardar.
 - La identidad de un asset sigue siendo **su fichero**: ni renombrar ni poner alias mueven nada, porque
   cada voxel del mundo guarda `asset:assets/<id>.vox.json`.
+- ⛔ …y «su fichero» significa **su RUTA dentro de `assets/`**, no el nombre: el id de un asset en
+  subcarpeta es `trees_mock/pino`, con la carpeta dentro. Hasta el 2026-08-27 el catálogo lo sacaba del
+  nombre del fichero y tiraba la carpeta, así que `trees_mock/pino` y `pino` eran el **mismo** asset para
+  todo el servidor. Lo cazó el dueño usando el editor: abrir el pino del mock, guardar → creaba
+  `assets/pino.vox.json`; borrar «el antiguo» → borraba el recién guardado. **Dos síntomas, una causa.**
+  Y no sobraban ficheros: conviven `trees_mock/cerezo` («Cerezo», 2165 vox) y `cerezo` («Gran Cerezo
+  Imperial», 34102 vox), dos dibujos distintos que el id viejo aplastaba en uno. Los **mocks son assets
+  como los demás**; lo que los distingue es dónde están.
+- ⛔ Si el id admite `/`, admite `..`, y por el id pasan un POST que **escribe** y un DELETE que
+  **borra**. `_asset_path` es el único sitio que decide la ruta y devuelve **`None`** si se sale de
+  `assets/`; sus cuatro llamantes tienen que tratarlo. Son **dos** comprobaciones y hacen falta las dos:
+  `realpath` (única que aguanta `..` a media ruta y enlaces simbólicos) y «ningún tramo empieza por
+  punto» (el POST *limpia* el id borrando lo que no le vale, y `..%2f..%2fPLAN` se quedaba en
+  `..2f..2fPLAN`, que no se escapa pero se colaba en la galería y en el índice).
+- El id lleva la carpeta; el **rótulo no** — nadie quiere leer «Trees_Mock/Pino». Guardián:
+  `tests/test_assets_subcarpeta.js` (36 comprobaciones, servidor vivo).
 - Solo assets del juego. Las piezas de `data/habitantes/` (`hab:<id>`) **no tienen alias**: no pasan por
   `mcIndexAssets`, así que ni su id ni su rótulo valen como clave — la única que funciona es `hab:<id>`.
   Su ficha (`openFicha(h,'hab')`, `fichaKind`) enseña eso y **esconde** la mitad editable en vez de
