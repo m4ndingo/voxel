@@ -2497,24 +2497,6 @@
     "description": "Pino — árbol voxel 32³ (MOCK, aún no es asset)."
   },
   {
-    "id": "cara-de-claude",
-    "name": "Cara de Claude",
-    "role": "Cara del muñeco de Claude · se pega a la cara delantera de la cabeza",
-    "icon": "🧱",
-    "type": "objeto",
-    "group": "Bloques de construcción",
-    "size": {
-      "x": 12,
-      "y": 8,
-      "z": 2
-    },
-    "file": "assets/cara-de-claude.vox.json",
-    "savedAt": "2026-08-27T16:31:19",
-    "createdAt": "2026-08-27T16:31:19",
-    "count": 28,
-    "description": "Prototipo para retocar. El fondo va VACÍO a propósito: por detrás se ve el color propio de cada jugador, y una placa de piel lo taparía. La nariz es lo único en z=1, para que de perfil se note hacia dónde mira. Generado por multi/hago_mi_cara.py."
-  },
-  {
     "id": "trees_mockpino",
     "name": "Pino",
     "role": "Árbol · pino conífera",
@@ -2531,23 +2513,5 @@
     "createdAt": "2026-08-27T16:36:06",
     "count": 1395,
     "description": "Pino — árbol voxel 32³ (MOCK, aún no es asset)."
-  },
-  {
-    "id": "cabeza-de-claude",
-    "name": "Cabeza de Claude",
-    "role": "Pieza de agente · cabeza de Claude (la de personaje-1 con mi cara)",
-    "icon": "🧱",
-    "type": "textura",
-    "group": "Bloques de construcción",
-    "size": {
-      "x": 15,
-      "y": 15,
-      "z": 15
-    },
-    "file": "assets/cabeza-de-claude.vox.json",
-    "savedAt": "2026-08-27T20:54:47",
-    "createdAt": "2026-08-27T19:09:09",
-    "count": 3367,
-    "description": "Retócala aquí y se ve en la partida: es LA pieza que lleva puesta mi muñeco, no una calcomanía encima. Rehacerla desde cero (perdiendo lo retocado, que queda en la papelera): python3 multi/hago_mi_cara.py. Quién la lleva lo decide la tabla CABEZAS de multi/cliente.js."
   }
 ]
