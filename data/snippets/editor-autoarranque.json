@@ -1,6 +1,6 @@
 {
   "id": "editor-autoarranque",
   "name": "editor autoarranque",
-  "code": "location.href = '/map/empty?intro=1';",
-  "savedAt": "2026-08-13T08:30:27"
+  "code": "game.showTool(true)\nlocation.href = '/map/multiverse';",
+  "savedAt": "2026-08-26T11:12:33"
 }
