@@ -586,6 +586,9 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 | ~~[BUG-GLOW6](#-bug-glow6)~~ | ~~**la luz dinámica atraviesa los sólidos**: las estrellas alumbran cuartos cerrados y la espada alumbra al otro lado de la pared~~ | ✅ resuelto 2026-08-20 | `game.luzOcluye`. **Dos mitades, ninguna sola llega**: en el **shader**, una cara no recibe la luz que le da por detrás (exacto y gratis — la normal ya la sacan `sunFactor`/`blkLuz` de `cross(dFdx,dFdy)`), y eso arregla el grosor de la pared; en la **CPU**, una luz que no ve al ojo no se sube (`mcLuzLibre`, con la MISMA tabla que la difusión horneada, `mcTablaLuz`), y eso apaga el cuarto cerrado y la espada metida dentro de un bloque. La exacta sería un raycast por fragmento y por luz ⇒ descartada por fps. Visibilidad **con fundido** de 0,18 s: conmutar de golpe se ve peor que el fallo. `tests/test_glow6_luz_ocluida.js` |
 | ~~[REQ-CART5](#-req-cart5)~~ | ~~poder **mover una nota ya plantada**, con un botón «mover» en su propio panel~~ | ✅ resuelto 2026-08-20 | botón «Mover» en el panel: `mcStartNoteMove()` **guarda lo tecleado** y reentra en el Modo Cartel que ya existía para plantar (fantasma, `R`, `Esc`); `mcMoveNoteA()` aterriza. Mover **es cambiar de clave**, así que texto, giro y tinte cambian los tres a la vez o el cartel nuevo sale sin color y el viejo se queda huérfano. No pisa otra nota ni se borra al soltarla en su sitio. El cartel se replanta solo (`mcSyncNoteSigns`). `tests/test_cart5_mover_nota.js` |
 | ~~[REQ-EXTRU1](#-req-extru1)~~ | ~~**extrusión con la herramienta de selección**: seleccionar y con Ctrl+rueda subir (extruir) o bajar (cavar)~~ | ✅ resuelto 2026-08-20 | `mcSelExtruir(±1)` colgado del manejador de rueda de REQ-TOOL6. Va **por columnas `(x,z)`**, no por capas: la extrusión sigue la **silueta** del terreno. La caja se estira una celda por el lado del que se tira, así que la muesca siguiente sigue subiendo/cavando sola. Arriba y abajo **SON inversos** (vuelta del dueño el mismo día; deshacer de verdad es `z`, un gesto `'bb'` por muesca). Con Ctrl no pisa la rosca y funciona aunque `mc.ruedaTool` esté apagado. `tests/test_extru1_seleccion.js` |
+| ~~REQ-EXTRU5~~ | ~~la extrusión tiene **cuatro puertas** (Ctrl/Shift × cara normal/opuesta) y no se sabe qué va a salir hasta que sale: una **guía ✚/▬** que lo diga antes de girar la rueda~~ | ✅ resuelto 2026-08-28 | detalle en [`docs/rejilla-y-estructuras.md`](docs/rejilla-y-estructuras.md) · «*funcionan correctos ambos el-guia-extrusion y paste-ancla aplicalos a app.js*». La guía **lee la MISMA tabla que la rueda** (`mcSelGuiaGesto`), no una copia: si alguien cambia una y no la otra, la guía miente. Se pinta con `game.voxelesUI` (la tapa el agua y el cristal), con tope de glifos (220 → un punto) y tope duro (4000 vox → una de cada N). Con **UNA sola esquina marcada también** (`mcSelGuiaFantasma`: la caja que la rueda va a confirmar, recorrida como una caja más con su `ci`), invalidada por **sello de estado** y no sólo por frame. Tramo I de `tests/test_extru1_seleccion.js` |
+| ~~REQ-PASTE1~~ | ~~el **agarre** elegido con Ctrl+apuntar se perdía al copiar: el pegado volvía a agarrar por la esquina y había que recolocar a ojo~~ | ✅ resuelto 2026-08-28 | detalle en [`docs/rejilla-y-estructuras.md`](docs/rejilla-y-estructuras.md) · `mcAnclaDeCopia()` traduce `mc.selPivote` a coordenadas **del recorte** al copiar/cortar y lo deja en `clipboard.ancla`; el fantasma y el pegado real agarran por ahí. Fuera de las dimensiones del recorte ⇒ `null` y se agarra por la esquina, como antes. Al extruir, `mcSelGuiaNormaliza()` lo **arrastra con la caja** |
+| ~~REQ-PREV1~~ | ~~**cambiar de herramienta plantaba el fantasma de la estructura** que llevara la ranura activa: al volver al pico salía media habitación translúcida delante de la cara sin haberla pedido~~ | ✅ resuelto 2026-08-28 | detalle en [`docs/rejilla-y-estructuras.md`](docs/rejilla-y-estructuras.md) · «*si el pico tiene una estructura no quiero que salga el preview hasta que de al boton de la ranura […] desde cualquier herramienta a pico me refiero*». Cambiar de herramienta y elegir qué colocar son **dos decisiones**: el pestillo `mc.previewMudo` las separa —lo echa `mcSetPlayerTool` (**sólo si `mc.tool` cambia de verdad**), lo quita `mcSelectSlot` (la ranura que sea, **incluso la misma**)—. Callan **las dos piezas o ninguna**: malla (`mcUpdatePreview`) y caja de huella (`mcDrawOverlays`), que no depende de la malla. ⛔ No toca el fantasma de bloque suelto ni el de las notas. `tests/test_preview_ranura.js` |
 | ~~[REQ-SEL1](#-req-sel1)~~ | ~~la selección debía poder ser de **N cajas** (Shift+clic añade) y operar con todas a la vez; y el giro, **sobre la base de cada una** y en las **24 posturas**~~ | ✅ resuelto 2026-08-20 | `mc.selCajas` es la selección; `mc.selBox` pasó a **accesor** de la última caja (leer/asignar/`null` se comportan como siempre, y así no hubo que tocar los veinte sitios que la tratan como una sola). `mcSelForEach(fn(x,y,z,id,ci))` es LA puerta: recorre todas y **no repite el solape** ⇒ contar, copiar, cortar, guardar el recorte y extruir salieron gratis. El giro usa `MC_ORI` (`R` en planta, `Shift+R` vuelco, `Alt+R` de lado) y admite **agarre** con Ctrl+apuntar. `tests/test_sel1_multiseleccion.js` |
 | ~~[BUG-GLOW8](#-bug-glow8)~~ | ~~la luz de un emisivo **en la mano** era un **círculo pintado encima**, no la luz del mundo: halo redondo donde el mundo hace rombos, se apagaba al meter la pieza en un bloque, y no llevaba el color del voxel~~ | ✅ resuelto 2026-08-20 | había **dos modelos de luz** (BFS por el aire vs punto analítico en el shader) y se arregló **borrando el segundo**, no afinándolo: lo que llevas en la mano es ya luz de bloque de verdad, misma tabla, mismo BFS, mismo color. `MC_DYN_CERCA` y `mcLuzLibre` **desaparecen**; `uDynPos`/`uDynDir`/`uDynCara`/`uDynCerca` solo quedan en el comentario que cuenta su entierro (`app.js:9590`). De aquí salió la **Ley de la Luz** ([`wiki/paginas/ley-de-la-luz.md`](wiki/paginas/ley-de-la-luz.md)) y el **candado** de `CLAUDE.md`. `tests/test_glow8_luz_una_sola.js` |
 | ~~[BUG-CUT1](#-bug-cut1)~~ | ~~al **cortar (Ctrl+X)** las caras que quedaban al aire se veían **negras o transparentes** hasta poner o romper otro bloque cerca~~ | ✅ resuelto 2026-08-20 | no era el mallado, era **la luz**: cortar/pegar/rotar/rellenar escriben `mc.grid` a pelo y se saltaban el contador de topología `mc.gridGen`, así que `mcRemeshAround` re-mallaba pero **no re-iluminaba**. Arreglado en `mcRemeshEdiciones` —la puerta común de todas las ráfagas— con el **mismo predicado** que usa `mcSetBlock` (`mcCambiaTopologia`). `tests/test_bug_cut1_luz_al_cortar.js` |
@@ -734,6 +737,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 | ~~[BUG-ESC1](#-bug-esc1)~~ | ~~al montar en una escalera se conserva el movimiento lateral: te mueve solo y te tira~~ | ✅ | colgado mandaba la rama de aire de `app.js` (sin rozamiento ni reescritura desde teclas); agarrado se manda por la de tierra |
 | ~~[BUG-ROT1](#-bug-rot1)~~ | ~~`R` y `Shift+R` no alcanzan las 24 orientaciones: hay colocaciones imposibles~~ | ✅ resuelto 2026-08-06 | eran 16 (faltaba el tercer cuarto de vuelta); `MC_ORI` se **deriva**, y sale agrupada de 4 en 4 ⇒ `ori = cara*4 + giro` es el gesto que pidió el dueño |
 | ~~[PERF-MC2](#-perf-mc2)~~ | ~~sub-chunk culling de estructuras~~ | ❌ cerrado 2026-08-07 | **sin hacer, por decisión del dueño**: nadie ha vuelto a reportar fps bajos por estructuras desde que se midió que el cuello era otro |
+| [REQ-GAL3](#-req-gal3) | poder **cambiar el espacio de nombres de una pieza desde la galería** (mover `asset:` ↔ `hab:`) | ✅ resuelto 2026-08-29 | hecho: la ficha del asset trae la sección de cambio de espacio de nombres (`app.js`, «Ficha de un asset») y el servidor expone **`POST /api/namespace`**, con petición de `VOXELFORGE_TOKEN` si el servidor lo exige |
 
 ---
 
@@ -5066,7 +5070,7 @@ motor de antes: **11 fallos**; ahora verde. `test_req_fluid1_sistema_fluidos.js`
 `test_setvoxel_autocarga.js` 21/21.
 
 **Lo que este arreglo NO hace:** mover la pieza de galería. Si la quieres como `hab:agua` para
-escribirlo así en los snippets, eso es [REQ-GAL3](PLAN.md#-req-gal3).
+escribirlo así en los snippets, eso es [REQ-GAL3](#-req-gal3).
 
 ---
 
@@ -11085,3 +11089,36 @@ Pantalla nueva aparte del editor: 1ª persona, WASD + ratón, terreno plano, con
 
 **Resolución:**
 Validado previamente mediante snippet desacoplado `data/snippets/parche-culling-agua.json` y graduado a `web/app.js:11075-11090`. `tapaAlFluido()` ahora verifica si la estructura vecina es maciza (`blockLike` o `pielCubre` sin caras ni translucidez) antes de ocultar la cara del agua. Las estructuras finas con huecos emiten la cara lateral del agua correctamente.
+
+<a id="-req-gal3"></a>
+
+### ✅ REQ-GAL3 · Cambiar el espacio de nombres de una pieza desde la galería — ✅ resuelto 2026-08-29
+
+**Petición del dueño, literal:**
+
+> «tal vez deberia de poderse modificar el espacio de nombres desde la galeria»
+
+**Sin investigar.** Salió al hilo de [BUG-FLUID3](PLAN_ARCHIVO.md#-bug-fluid3), pero es otra cosa: aquello era que el
+motor dependiera del espacio de nombres (ya no depende); esto es poder **decidir** en cuál vive una
+pieza — mover `asset:assets/<n>.vox.json` ↔ `hab:<n>` desde la ficha, sin exportar e importar a mano.
+
+**Lo que habrá que mirar cuando toque:** guardar ya enruta por el ORIGEN del dibujo (`serverKind`, ver
+BUG-GAL1/GAL2 y `test_galeria_namespace.js`), así que la pieza que falta es un «mover a la otra
+galería» explícito. Y lo caro no es copiar el fichero: es que **los voxels del mundo guardan la clave
+larga**, así que mover una pieza deja el mundo apuntando a una clave que ya no existe — o hace falta
+reescribir el mundo, o dejar la vieja como alias.
+
+---
+
+**Resuelto (2026-08-29).** Está hecho en las dos puntas:
+
+- **Front** — la ficha de un asset lleva su sección de cambio de espacio de nombres (`web/app.js`,
+  «Ficha de un asset: cómo se llama desde un script y cambio de espacio de nombres (REQ-GAL3)»).
+- **Servidor** — `POST /api/namespace` hace el movimiento; si el servidor pide `VOXELFORGE_TOKEN`,
+  la UI lo reclama por `prompt` y reintenta.
+
+Lo que el ticket señalaba como caro —que los voxels del mundo guardan la clave larga— dejó de morder
+solo: el motor ya no depende del espacio de nombres (`mcNombreMat`/`mcClaveDeNombre`, [BUG-FLUID3](#-bug-fluid3)),
+así que mover una pieza no deja el mundo apuntando a un material inexistente.
+
+---
