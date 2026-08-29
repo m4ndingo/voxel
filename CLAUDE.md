@@ -11,7 +11,7 @@ Estilo telegráfico **a propósito** (orden del dueño, 2026-08-13): denso > leg
 
 ## 🗺️ MAPA — no navegar a ciegas
 
-`web/app.js` = **14907 líneas / ~232 k tokens** ⇒ NO cabe, NO se lee entero. Localizar función →
+`web/app.js` = **23762 líneas / ~419 k tokens** ⇒ NO cabe, NO se lee entero. Localizar función →
 **`SYMBOLS.md`** (`función → web/app.js:línea`; orden de regenerar en su cabecera, guardián
 `tests/test_symbols_sync.js`). ! motor **mudado a `web/` el 2026-08-13**: `app.js:1234` de antes vale
 como línea, pero el fichero es `web/app.js`.

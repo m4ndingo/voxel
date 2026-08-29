@@ -458,6 +458,26 @@ material que ya está en `mc.blocks` lo **duplicaría**. El cuerpo real vive en 
 Guardián: `node test_setvoxel_autocarga.js` (21 ok). Busca solo él un mote del índice que **no** esté
 ya en la paleta del mundo, porque las flores ya están plantadas en `/map/test`.
 
+### `mcSetBlock` es la puerta de ABAJO, y desde un snippet avisa (REQ-SETBLOCK1)
+
+`mcSetBlock(x,y,z,id)` quiere un **índice numérico** de la paleta de **este** mundo, así que quien la
+llama a pelo traduce nombre→índice a mano. Ahí se cae todo lo de arriba, y **en silencio**:
+
+- un índice que no existe **no falla: pinta aire** ⇒ la construcción sale a medias sin que nada grite;
+- **se salta la autocarga** de esta misma sección, que solo vive en `mcSetVoxel` porque es la que pide
+  el material **por NOMBRE** ⇒ revienta en un mapa cuya paleta aún no lo tenga (así se rompió
+  `construye-casa`: «la paleta de este mundo no tiene "farolillo-zen"»);
+- **no re-malla**: apunta la celda en `mcDirty`, que es la cola de **guardado**, no la de mallado ⇒ lo
+  construido puede quedarse **invisible** aunque esté de verdad en la rejilla.
+
+La puerta buena es **`setVoxel(x, y, z, 'nombre')`**. Los ~25 llamadores de `mcSetBlock` **dentro** de
+`app.js` son legítimos (`mcSetVoxel` el primero), así que el aviso **solo le habla a quien la llama
+directamente desde un snippet**: se mira `mc._snippetActual` y el marco `[3]` de la pila, que
+`mcCorreSnippet` marca con `//# sourceURL=vf-snippet/<nombre>`. Como construir una pila es caro, se
+sondea ≤30 veces por snippet y se calla para siempre en cuanto avisa una vez — 20 000 bloques cuestan
+30 pilas, no 20 000. Sonda: `node tests/probe_aviso_setblock.js` (avisa · calla con `setVoxel` · un
+solo aviso para 300 bloques).
+
 ⚠️ **El bucle de `mcBuildPaletteImpl` va EN SERIE a propósito y no se paraleliza** (PERF-MC3): rasteriza
 sobre un canvas compartido y escribe `mc.palette[id]` en orden, y **el id de bloque es la posición en
 `mc.blockKey`**, que es lo que llevan dentro los mundos guardados — desordenarlo los corrompe. Lo que sí
@@ -567,6 +587,245 @@ mira **antes** que la rosca y **sin** consultar `mc.ruedaTool`: lleva Ctrl, así
 quien haya apagado la rosca sigue queriendo extruir. El acumulador `mc._ruedaAcum` es el mismo para los
 dos, pero se **vacía al cambiar de gesto** (`mc._ruedaExtru`) o media muesca de rosca acabaría
 extruyendo.
+
+### La caja VACÍA también se mueve (REQ-EXTRU3)
+
+*(2026-08-28, dueño: «*cuando hago shift+wheel o control+wheel me dice a veces "la seleccion no tiene
+bloques, nada que cavar", no importa si no tiene bloques, la seleccion ha de moverse igualmente*»)*
+
+Marcas la caja en el aire y el gesto se quedaba en un aviso: ni extruía —no hay de qué— ni movía el
+marco, así que para bajarla al suelo había que volver a marcar las dos esquinas. Ahora las dos guardas de
+«no tiene bloques» (una en `mcSelExtruir`, otra en `mcSelExtruirFrente`) llaman a **`mcSelMueveVacia`**.
+
+⚠️ **Cada una de esas dos funciones tiene DOS guardas que se parecen y están a veinte líneas la una de la
+otra. Sólo una mueve la caja:**
+
+| guarda | significa | qué hace |
+|---|---|---|
+| `!col.size` / `!fila.size` | la caja **no tiene ni un bloque** | **mueve** el marco (esto) |
+| `!edits.length` | hay bloques, pero **ninguno se pudo escribir** | **no lo mueve** — regla del dueño de 2026-08-20 (un `wup` y un `wdown` dejan los bloques como estaban) |
+
+Tres decisiones, todas medidas en `tests/probe_sel_vacia.js`:
+
+- **Se traslada, NO se estira.** Con bloques dentro la caja se mueve por su borde **activo** (el de
+  arriba con Ctrl, el que da la cara con Shift) porque ahí acaba de aparecer o desaparecer una capa.
+  Vacía no aparece ni desaparece nada, así que encoger un borde no significaría nada — y una caja vacía
+  de alto 3 se quedaría **quieta dos muescas** antes de empezar a bajar. Viaja **entera**, conservando la
+  forma que costó marcar, hasta meterse en el terreno; en cuanto pilla un bloque manda otra vez la
+  extrusión de siempre.
+- **El tope del mundo se mira sobre el CONJUNTO de cajas** (REQ-SEL1): recortar caja a caja las
+  deformaría y les cambiaría las distancias entre ellas. O se mueven todas o no se mueve ninguna. El
+  **agarre** del giro (`mc.selPivote`) viaja con ellas, o el motor lo daría por fuera de la selección
+  (`mcSelCajaDe(...)<0`) y rotar pasaría a pivotar por la esquina mínima sin avisar.
+- **No hay deshacer de este viaje.** Ctrl+Z restaura la caja sólo si va pegada a una edición
+  (`mc._selCajasBeforeEdit`, que consume `mcPushHist`), y aquí no se edita ni un bloque. Por eso
+  **tampoco se toca esa variable**: dejarla puesta pegaría el viaje a la **siguiente** edición y el
+  deshacer teletransportaría el marco.
+
+Nació como snippet (`data/snippets/sel-mueve-vacia.json`, Ley de Oro) y bajó al motor con
+`herramientas/parche_app_sel_vacia.py`. El snippet sigue publicado y **se aparta solo** al ver
+`mcSelMueveVacia` en `app.js`. En el motor sale además más barato: el snippet tenía que recorrer la
+selección por su cuenta antes de cada muesca para saber si estaba vacía, y aquí la respuesta ya está
+hecha —`col`/`fila` salen de la única pasada que da el original—, así que desaparece el segundo barrido.
+
+### …y la caja VACÍA también se RELLENA desde una ranura
+
+*(2026-08-29, dueño: «*seleccionar suelo, clic central, control arriba → sube seleccion pero nada en ella
+(vacia), clic en ranura dice "Nada que reemplazar" pero en realidad hay "aire" que reemplazar*»)*
+
+Clic en una ranura (o su número) con la selección hecha **rellena la caja entera, aire incluido**; con
+**Shift** sólo reemplaza los **sólidos**. Con la caja vacía lo primero no hacía nada… **según lo que
+llevara la ranura**, y de ahí las otras dos frases del dueño («*si tiene 16x16x16 voxels funciona, pero si
+tiene menos no*», «*si seleccionas un solido, y luego uno que no lo es, entonces sí deja … se puede hacer
+con un paso extra, no deberia requerirse*»). Las tres son el mismo fallo visto por tres sitios, porque
+`mcSelectFill` reparte por **dos caminos**:
+
+| lo que hay en la ranura | quién lo atiende | por qué |
+|---|---|---|
+| **16³ macizo** | `mcSelectFillId` | es `blockLike`: va a `mc.hotbar` como un id más de la paleta, y esa función **ya** elige `mcSelForEachConAire` cuando no le piden sólo-sólidos ⇒ funcionaba |
+| **menos de 16³** | `mcSelectFillPieza` | es una PIEZA: va a `mc.slotStruct`, y para resolver la clave a un id tiene que **escribir una primera celda** por el camino de plantar a mano (`mcPonEnRejilla`, el único que da de alta la clave en la paleta) |
+
+Esa **celda semilla** se buscaba siempre con `mcSelForEach` —sólidos—, así que sin un solo sólido no había
+por dónde empezar y salía por «Nada que reemplazar» teniendo aire de sobra que rellenar. El «paso extra»
+del dueño era justo eso: rellenar antes con un sólido le dejaba la semilla. El arreglo es **una línea** —
+la semilla sale del mismo reparto que va a hacer el reparto de después (`soloSolidos ? mcSelForEach :
+mcSelForEachConAire`), porque sin Shift **todas** las celdas de la caja se van a tocar y cualquiera vale.
+
+⛔ **Shift+ranura sigue sin rellenar**: «sólo sólidos» y no hay ninguno es que de verdad no hay nada que
+reemplazar; rellenar ahí convertiría el gesto de REEMPLAZAR en uno de CREAR. Es la §4 del guardián.
+
+Nació como snippet (`data/snippets/sel-rellena-vacia.json`, Ley de Oro), medido con
+`tests/probe_sel_rellena_vacia.js` —§1 bloque suelto, §2 el fallo, §3 lo que ya iba, §4 Shift, §5 que el
+iterador prestado se devuelva— y bajó al motor con `herramientas/parche_app_sel_rellena_vacia.py`. El
+snippet sigue publicado y **se aparta solo** al ver `mcSelForEachConAire` dentro de `mcSelectFillPieza`.
+
+### El clic CENTRAL cambia la CARA de trabajo (REQ-EXTRU4)
+
+*(2026-08-28, dueño: «*si un bloque esta en el aire se le podrian poner patas seleccionando sus bloques,
+clic central, y luego control+abajo*» · «*seguir empujando hacia adelante pero rellenando con los bloques
+seleccionados (por ejemplo para construir puentes)*».)*
+
+Seleccionar trabaja **siempre por una cara** de la caja: la de **arriba** con Ctrl, la que **da la cara**
+al jugador con Shift. Por esa cara construye en un sentido de la rueda y come en el otro. El **clic
+central** (con la herramienta puesta) cambia **cuál es esa cara**: pasa a la de **abajo** y a la del
+**fondo**. El estado vive en `mc.selOpuesta` y **no se persiste**.
+
+| | normal | `mc.selOpuesta` |
+|---|---|---|
+| **Ctrl** | ↑ construye ENCIMA · ↓ come por arriba | **↓ construye DEBAJO** (patas) · ↑ come por abajo |
+| **Shift** | ↑ come por la cara (hueco) · ↓ construye hacia ti | **↑ construye ADELANTE** (puente) · ↓ come por el fondo |
+
+⛔ **NO es «invertir la rueda».** Ése fue el primer intento y el dueño lo rechazó: «*no se cambia la
+direccion de la rueda, se cambia como se comporta la herramienta*». Darle la vuelta al signo deja Shift↑
+**trayendo** bloques hacia el jugador, que es justo lo contrario de lo que pidió (seguir empujando hacia
+adelante, pero rellenando). El snippet `sel-rueda-invertida` que hacía eso está en la papelera.
+
+Tres decisiones que no se ven en el código:
+
+- **Las dos muescas que COMEN (Ctrl↑, Shift↓) no las pidió nadie**: son la inversa de las que sí pidió, y sin
+  ellas se rompe dentro de este modo la regla del dueño de 2026-08-20 («*un wup seguido de un wdown
+  debería dejar los bloques iguales que como estaban*»).
+- **El bloque nuevo se replica del que hay EN ESA CARA** (`c.id`), no del de la mano: «*replicando los
+  seleccionados*». Un muro de varios materiales se prolonga entero, cada columna con el suyo.
+- **La caja se estira por esa misma cara** (crece al construir, encoge al comer, y con grosor 1 se
+  desplaza entera), igual que el motor hace por la suya. Es lo que permite que las patas salgan de una
+  tacada sin volver a marcar esquinas.
+
+⚠️ **El clic central lo comparte con redstone** (`redstone/redstone-piezas.js`, conmuta palancas), que
+escucha en `window` en **captura** y llega antes. Por eso esto sólo mira con `mc.tool==='select'`; aun
+así, clic central apuntando a una palanca conmuta la palanca **también**.
+
+Nació como snippet (`data/snippets/sel-cara-opuesta.json`, Ley de Oro), validado con
+`tests/probe_sel_cara_opuesta.js`, y bajó al motor con `herramientas/parche_app_sel_cara_opuesta.py`
+(`mcSelExtruirAbajo`, `mcSelExtruirFondo`, `mcSelConmutaCaraOpuesta`). El snippet sigue publicado y **se
+aparta solo** al ver `mcSelExtruirAbajo` en `app.js`.
+
+### La guía ✚/▬ dice qué va a pasar ANTES de girar la rueda (REQ-EXTRU5)
+
+*(2026-08-27/28, dueño: «*funcionan correctos ambos el-guia-extrusion y paste-ancla aplicalos a app.js*»)*
+
+Cuatro puertas (Ctrl/Shift × cara normal/opuesta) y una rueda que sube o baja: **la mitad de las veces no
+sabes qué va a salir hasta que sale**. Mientras se mantiene **Ctrl o Shift** con la herramienta Seleccionar,
+la guía pinta sobre la selección **lo que la próxima muesca va a hacer**: una **✚ verde** en cada celda que
+va a NACER y un **▬ rojo** en cada una que va a MORIR. Se dibuja con
+[`game.voxelesUI`](particulas-y-efectos.md) en tres grupos (`sel-guia-mas`, `sel-guia-menos`,
+`sel-guia-mueve`), **no** con overlays: así el agua y el cristal la tapan en vez de quedar pintada encima.
+
+- **Lee la MISMA tabla que la rueda**, no una copia: `mcSelGuiaGesto(modo)` resuelve la cara con
+  `mc.selOpuesta` y `mcEjeMirada()` exactamente como el manejador. Si alguien cambia la tabla y no la guía,
+  ésta miente — y mentir es peor que no estar.
+- **La celda que va a nacer no existe todavía**, así que la ✚ se dibuja **centrada en el aire** de su celda
+  (`MC_SELGUIA_DACENTRO`); el ▬ va **pegado a la piel** del bloque que se lleva (`MC_SELGUIA_DAPIEL`), que es
+  donde el ojo lo busca.
+- **Escala o no sirve**: por encima de `MC_SELGUIA_TOPE_GLIFO` (220 caras) cada celda pasa a **un punto**, y
+  `MC_SELGUIA_TOPE_VOX` (4000) es el tope duro —a partir de ahí se dibuja **una de cada N**—. Una selección de
+  un chunk entero pintada glifo a glifo sería un tirón de segundos por frame.
+- **Un solo rayo por frame**: `mcSelGuiaFirma()` resume el estado (gesto + cajas + `mc.gridGen` + pieza en
+  vuelo) y `mcSelGuiaRepinta()` sólo rehace la geometría si la firma cambia.
+
+**Con UNA sola esquina marcada también** *(2026-08-28, dueño: «*cuando se hace una seleccion solamente con un
+click ya se puede hacer shift o control rueda, sin esperar al segundo, pero eso no muestra los -+ y
+deberia*»)*. La rueda ya confirmaba sola la caja a medio marcar; la guía no lo sabía y se quedaba muda justo
+cuando más falta hace. `mcSelGuiaFantasma()` fabrica la **caja fantasma** que la rueda va a confirmar
+—`mc.selA` contra la celda apuntada— y `mcSelGuiaCeldasFantasma()` la recorre como **una caja más**, con su
+propio `ci` (`= mc.selCajas.length`), que es como REQ-SEL1 indexa las filas. ⚠️ La caja fantasma se invalida
+por **sello de estado** (`mcSelGuiaSelloPre`: `pasteActive|tool|selA|selBox|nº cajas|gridGen`), no sólo por
+frame: a 1,4 fps del navegador de pruebas pasan varias órdenes entre frame y frame y la caché serviría una
+caja vieja. Tope aparte: `MC_SELGUIA_TOPE_PRE` (200 000 celdas), porque el fantasma se recorre entero.
+
+Nació como snippets (`sel-guia-extrusion`, `sel-guia-preseleccion`) y bajó con
+`herramientas/parche_app_sel_guia_extrusion.py` y `parche_app_sel_guia_preseleccion.py`. Guardián: el
+**tramo I** de
+`tests/test_extru1_seleccion.js` (promete las cimas, gira la rueda y exige **exactamente** esas celdas).
+
+### Pegar hereda el agarre de lo copiado (`clipboard.ancla`)
+
+El agarre elegido con Ctrl+apuntar (`mc.selPivote`, REQ-SEL1) decía por dónde giraba la selección, pero al
+copiar se perdía: el pegado volvía a agarrar por su esquina y había que recolocar a ojo lo que ya estaba
+colocado. Ahora `mcAnclaDeCopia()` lo traduce a coordenadas **relativas al recorte** al copiar/cortar y lo
+guarda en `clipboard.ancla`; el fantasma de pegado y el pegado real agarran por ahí.
+
+⚠️ Va **en coordenadas del recorte, no del mundo**: si cae fuera de sus dimensiones (`mcClipboardDims`) se
+devuelve `null` y se agarra por la esquina, como antes. Y al extruir, `mcSelGuiaNormaliza()` lo **arrastra
+con la caja** (`clipboard.ancla = a.slice()`) o el agarre se quedaría donde ya no hay nada.
+
+### Alt+rueda ESCALA la pieza en vuelo (×2 / ÷2)
+
+*(2026-08-28, dueño: «*si en el mapa hago control+c para copiarme unos bloques y luego hago control+v,
+empieza el modo preview, me gustaria que alt+rueda sirva para escalar x2 (rueda arriba) y dividir (rueda
+abajo) el objeto*» · «*si puede tener alguna previsualizacion cuando se pulse alt que indique que se va
+modificar su tamaño como hacen shift y control al dejarse pulsados*»)*
+
+Con la pieza **en vuelo** (Ctrl+V), **Alt + rueda** la escala: arriba **×2**, abajo **÷2**
+(`mcPasteEscala`). Se escala **el portapapeles**, no el mundo: ×2 convierte cada celda en las 8 de su
+cubo; ÷2 funde cada cubo de 8 en una, y se queda el material **más repetido** de las ocho — elegir «la
+primera» sería más corto, pero haría que el resultado dependiera del orden en que se copió, que no es una
+propiedad de la pieza. El **agarre** (`mc.pasteAnchor`, en ejes de pieza) se escala con ella o la pieza
+saltaría de sitio justo al crecer, y `MC_PASTE_ESC_TOPE` (40 000 bloques) corta el ×2 antes de que una
+pieza mediana se vaya a millones.
+
+**La promesa de Alt** (`mcPasteEscGuia`) va con el mismo idioma que la guía ✚/▬ y con sus dos colores,
+pero **en cajas**: Shift y Ctrl tocan una capa y prometen celda a celda; Alt cambia la pieza entera. En
+**verde** la caja que dejaría la rueda arriba y en **rojo** la de la rueda abajo, calculadas rehaciendo la
+cuenta de `mcPasteOrigen` con las dimensiones y el agarre ya escalados — ⛔ **una promesa no puede escalar
+el portapapeles para preguntar**.
+
+⚠️ **La caja del ÷2 cae DENTRO de la pieza, y la capa UI se dibuja CON el mundo** (BUG-VOXUI1: el
+translúcido no escribe z) ⇒ enterrada ahí no se ve **ni una arista** — la primera versión plantaba los
+voxeles y la sonda medía **cero** pixeles rojos en la foto. Sacarla «un pelo» tampoco vale: no está un
+pelo dentro, sino media pieza. Se pinta donde sí hay superficie que mirar: su **sombra ortogonal
+estampada en las seis caras** de la pieza, mordiendo la piel como los ▬. Por eso el guardián cuenta
+**pixeles** (`readPixels`, como `test_luz_global.js`) y no voxeles puestos.
+
+En el motor el gesto es **uno más de la rueda del canvas** (`esc`, junto a `pega`/`extru`/`extruF`): entra
+en el mismo acumulador `mc._ruedaAcum` con el mismo `mc.ruedaUmbral`, y **manda sobre la rosca de
+herramientas** —Alt+rueda giraba la herramienta en mano (REQ-TOOL6)— sin pelearse con ella. Alt se anota
+en los **mismos** oyentes de teclado que `mc.selGuiaModo` (`mc._escAlt`), que ya resuelven el caso feo de
+perder el foco con la tecla pulsada.
+
+Nació como snippet (`data/snippets/pegar-escala.json`, Ley de Oro), medido con
+`tests/probe_pegar_escala.js` (ida y vuelta ×2→÷2 devuelve **la misma pieza**, el agarre viaja, la rosca
+no se lo lleva y la guía **se ve**), y bajó al motor con `herramientas/parche_app_pegar_escala.py`. El
+snippet sigue publicado y **se aparta solo** al ver `mcPasteEscala` en `app.js` — si no, habría **dos**
+oyentes de `wheel` contando el mismo gesto.
+
+### El fantasma de estructura SE PIDE, NO SE IMPONE (`mc.previewMudo`)
+
+*(2026-08-28, dueño: «*cuando cambio de herramienta de seleccion a pico, si el pico tiene una estructura no
+quiero que salga el preview hasta que de al boton de la ranura; si sigo dando botones de ranura saldran los
+previews, pero si solamente cambio esa tool no tiene que salir*» · «*desde cualquier herramienta a pico me
+refiero*», pico = construir)*
+
+**Cambiar de herramienta y elegir qué colocar son DOS decisiones**, y el motor las trataba como una: la
+ranura activa se queda como estaba al irse a Seleccionar, así que al volver al pico aparecía media habitación
+translúcida delante de la cara sin que nadie la hubiese pedido. El pestillo `mc.previewMudo` las separa:
+
+| gesto | qué hace |
+|---|---|
+| cambiar de herramienta (`mcSetPlayerTool`) | **echa** el pestillo y tira al momento la malla que hubiera |
+| pulsar una ranura (`mcSelectSlot`) | lo **quita** — la que sea, **incluso la misma** |
+| reafirmar la herramienta que ya hay | **nada**: sólo cuenta si `mc.tool` cambia de verdad |
+
+- **Callan LAS DOS PIEZAS o ninguna**: la **malla** translúcida (`mc.preview`, la construye `mcUpdatePreview`)
+  y la **caja de huella** verde (`structLines`, la dibuja `mcDrawOverlays`). La huella **no depende de la
+  malla** —se calcula desde `mc.slotStruct[mc.sel]` y el rayo—, así que callar sólo una deja el contorno
+  flotando: no arregla nada.
+- **`mcSelectSlot` es la puerta ÚNICA** por la que pasa «he pulsado una ranura», venga de la tecla 1-9, del
+  clic en la hotbar o del selector de bloques (`mcAssignSlot`). Por eso el pestillo se levanta ahí y no en un
+  `mc.sel` que cambie solo; y pulsar la MISMA ranura cuenta, porque el jugador está diciendo «ésta, la de
+  ahora».
+- ⚠️ **Sólo si la herramienta CAMBIA**: `mcSetPlayerTool` se llama también para reafirmar la que ya hay (la
+  rueda de herramientas, la consola, un snippet). Callar el fantasma que el jugador acaba de pedir, porque
+  algo reafirmó la herramienta que ya tenía, sería el mismo fallo al revés.
+- ⛔ **No se tocan** el fantasma de **bloque suelto** (`game.ghostAlpha`) ni el de las **notas**: son otra cosa
+  y el gesto de colocar nota ya es explícito (por eso `mcPreviewCallada()` mira `!mc.notePlacing`).
+- El pestillo **no pisa `game.structGhostAlpha`**: el ajuste del dueño se lee tal cual, el pestillo es una
+  condición aparte en las dos puertas.
+
+Nació como snippet (`data/snippets/preview-tras-ranura.json`, Ley de Oro), validado con
+`tests/probe_preview_ranura.js`, y bajó con `herramientas/parche_app_preview_tras_ranura.py`
+(`mcPreviewCallada` / `mcPreviewCalla` / `mcPreviewHabla`). El snippet **se aparta solo** al ver
+`mcPreviewCallada` en `app.js`. Guardián: `tests/test_preview_ranura.js`.
 
 ## La selección son N cajas, y giran las 24 posturas (REQ-SEL1)
 

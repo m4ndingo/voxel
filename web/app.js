@@ -4349,12 +4349,40 @@ async function snipReload(){
   catch(e){ list.innerHTML='<p class="snip-empty">No se pudo cargar.</p>'; return; }
   renderSnipList();
 }
+// ── 📌 REQ-SNP-PIN · CHINCHETAS: fijar snippets arriba de la lista ─────────────────────────────
+// «en el editor de codigo quiero poder "pinear" scripts para que queden arriba (en plan chincheta)»
+// (orden del dueño, 2026-08-28). El listado llega ordenado por `savedAt` desde el servidor, asi que lo
+// que uno usa cada dia se hunde solo en cuanto se guarda cualquier otra cosa.
+//
+// EL ESTADO VIVE EN `localStorage`, NO en el .json del snippet. Es una preferencia de VISTA, de la
+// misma familia que `vf_snipAlto` y `vf_snipDiv` (aqui arriba, mismo panel). Y ademas guardarlo en el
+// servidor seria un `POST /api/snippets`, que reescribe el fichero entero y le pone un `savedAt`
+// nuevo — que es justo la clave por la que el servidor ORDENA la lista: clavar una chincheta
+// reordenaria la lista sola. Motivo largo en herramientas/parche_app_snip_chincheta.py.
+const SNIP_PIN_LS='vf_snipPin';
+let snipPins=(()=>{ try{ const v=JSON.parse(localStorage.getItem(SNIP_PIN_LS)||'[]');
+  return Array.isArray(v) ? v.filter(x=>typeof x==='string') : []; }catch(e){ return []; } })();
+function snipEsPin(id){ return snipPins.indexOf(id)>=0; }
+// ⛔ Ordena una COPIA. `snips` es la lista completa que consulta el guardado para avisar de un id
+// repetido, y `snipVista` trae el orden de relevancia del buscador (las llamadas antes que las
+// menciones, server.py); ninguna de las dos se puede pisar. `sort` es estable ⇒ dentro de cada grupo
+// se respeta tal cual el orden que vino del servidor: la chincheta solo asciende, no baraja.
+function snipOrdenaPins(datos){
+  if(!snipPins.length) return datos;
+  return datos.slice().sort((a,b)=>(snipEsPin(a.id)?0:1)-(snipEsPin(b.id)?0:1));
+}
+function snipTogglePin(id){
+  const i=snipPins.indexOf(id);
+  if(i>=0) snipPins.splice(i,1); else snipPins.push(id);
+  try{ localStorage.setItem(SNIP_PIN_LS, JSON.stringify(snipPins)); }catch(e){}
+  renderSnipList();
+}
 function renderSnipList(){
   const list=$('#snip-list'); list.innerHTML='';
   // La lista pinta `snipVista` cuando hay una búsqueda o unos usos en marcha, y `snips` (todos) si no.
   // `snips` NO se pisa nunca con el resultado: es la lista completa que consulta el guardado para
   // avisar de un id repetido, y perderla convertía cada búsqueda en un aviso de colisión de menos.
-  const datos = snipVista || snips;
+  const datos = snipOrdenaPins(snipVista || snips);   // 📌 REQ-SNP-PIN · los fijados, arriba
   if(!datos.length){
     list.innerHTML='<p class="snip-empty">'+(snipVista
       ? (snipModo && snipModo.tipo==='usos' ? 'Ningún snippet llama a «'+snipModo.id+'».' : 'Nada con ese texto.')
@@ -4378,6 +4406,20 @@ function renderSnipList(){
             : s.tipo==='llamada' ? 'Lo llama con game.snippet(…)' : '';
       b.appendChild(l);
     }
+    // 📌 REQ-SNP-PIN · la chincheta va DENTRO de la ficha, que ya es un <button>. Un <button>
+    // anidado NO es HTML valido (el parser lo saca fuera del padre), asi que es un <span role=button>
+    // con su tecla. Y `stopPropagation`, o clavarla abriria ademas el snippet.
+    b.dataset.snip=s.id;
+    const fijado=snipEsPin(s.id);
+    const pin=document.createElement('span');
+    pin.className='snip-pin'+(fijado?' is-on':'');
+    pin.setAttribute('role','button'); pin.tabIndex=0;
+    pin.setAttribute('aria-pressed', fijado?'true':'false');
+    pin.textContent='📌';
+    pin.title=fijado?'Quitar la chincheta':'Fijar arriba con una chincheta';
+    pin.onclick=(e)=>{ e.stopPropagation(); snipTogglePin(s.id); };
+    pin.onkeydown=(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); e.stopPropagation(); snipTogglePin(s.id); } };
+    b.appendChild(pin);
     b.onclick=()=>snipLoad(s.id);
     list.appendChild(b);
   }
@@ -7565,6 +7607,7 @@ const mc={
   rayFijo:null,                   // rayo de apuntado CONGELADO (game.rayoFijo()): desde el ojo el rayo se ve como un punto
   ovbo:null,                      // VBO reutilizable para overlays (fantasma de colocación, marcador «demasiado lejos», rayos-X)
   ghostAlpha:0,                   // transparencia del fantasma de bloque suelto —verde (colocable) y ámbar («demasiado lejos»)— (game.ghostAlpha, 0..1; 0=invisible)
+  previewMudo:false,              // pestillo del fantasma de estructura: cambiar de herramienta lo echa, pulsar una ranura lo quita (ver mcPreviewCalla)
   structGhostAlpha:1,             // transparencia de la vista-previa de estructuras/habitaciones —caja de huella + malla renderizada— (game.structGhostAlpha, 0..1)
   structBias:0,                   // sesgo de profundidad de las estructuras: negativo = un pelo hacia la cámara, así su cara GANA el empate contra el terreno pegado (game.structBias; 0 = sin sesgo, lo resuelve structCull)
   structCull:true,                // culling de caras traseras en las estructuras: rompe el empate entre DOS bloques estampados vecinos, que el sesgo no puede romper (game.structCull)
@@ -7846,7 +7889,42 @@ function mcTopologiaDeEdiciones(edits){
   for(const e of edits) if(mcCambiaTopologia(e.before, e.after)){ mc.gridGen = (mc.gridGen|0) + 1; return true; }
   return false;
 }
+// REQ-SETBLOCK1 · «esa no es la forma buena de crear bloques» (orden del dueño, 2026-08-28).
+// Solo le habla a quien llama a `mcSetBlock` DIRECTAMENTE desde un snippet. Los 25 llamadores internos
+// de app.js son legitimos —`mcSetVoxel` el primero, que es precisamente la forma correcta—, asi que
+// avisarles seria ruido y el aviso se aprenderia a ignorar.
+const MC_SB_SONDEOS=30;          // pilas que se mira por snippet antes de rendirse (una pila es cara)
+const mcSBVistos=new Map();      // nombre de snippet → sondeos gastados, o 'ya' si ya se le dijo
+function mcAvisaPuertaBaja(){
+  const s=mc._snippetActual;
+  const v=mcSBVistos.get(s);
+  if(v==='ya') return;
+  const n=(v|0)+1;
+  if(n>MC_SB_SONDEOS){ mcSBVistos.set(s,'ya'); return; }   // no lo usa a pelo: dejar de mirar
+  mcSBVistos.set(s,n);
+  let pila='';
+  try{ pila=new Error().stack||''; }catch(e){ return; }
+  // Si `mcSetVoxel` esta en la pila, se uso la puerta buena y da igual lo que haya de por medio: en un
+  // mundo con redstone hay un envoltorio SUYO (de un snippet) entre medias, y sin esto el aviso le caia
+  // encima a quien lo estaba haciendo bien. Se mira `mcSetVoxel` y no `setVoxel` a secas para no
+  // callarse con cualquier `setVoxelLoQueSea` de un snippet.
+  if(pila.indexOf('mcSetVoxel')>=0) return;
+  // Descartado eso: [0]='Error' · [1]=este aviso · [2]=mcSetBlock · [3]=QUIEN LO LLAMO.
+  const quien=(pila.split('\n')[3])||'';
+  if(quien.indexOf('vf-snippet/')<0) return;
+  mcSBVistos.set(s,'ya');
+  console.warn('⚠️ «'+s+'» usa mcSetBlock(x,y,z,id) — esa NO es la forma buena de poner bloques.\n'
+    +'   Usa  setVoxel(x, y, z, "nombre-del-material")  y olvidate del resto.\n'
+    +'   mcSetBlock es la puerta de abajo y pide un INDICE NUMERICO de la paleta de ESTE mundo:\n'
+    +'     · un indice que no existe NO falla: pinta aire (la construccion sale a medias, sin avisar),\n'
+    +'     · se salta la carga automatica de la textura que falte (eso solo lo hace setVoxel, que pide\n'
+    +'       el material por NOMBRE), asi que revienta en un mapa cuya paleta aun no lo tenga,\n'
+    +'     · y no re-malla: la celda se apunta en mcDirty, que es la cola de GUARDADO, no la de mallado,\n'
+    +'       asi que lo construido puede quedarse INVISIBLE aunque este de verdad en la rejilla.\n'
+    +'   '+quien.trim());
+}
 function mcSetBlock(x,y,z,id){
+  if(mc._snippetActual) mcAvisaPuertaBaja();   // REQ-SETBLOCK1 (fuera de un snippet no cuesta nada)
   if(mcInside(x,y,z)){
     const oldId = mc.grid[mcIdx(x,y,z)];
     // Una escritura DE VERDAD se queda la celda: si tenía nieve volátil encima, deja de ser volátil
@@ -9714,7 +9792,24 @@ async function mcAltaVariante(vk){
   mcTablaFina();                                                   // la tabla que leen colisión y mcTapaCara
   return id;
 }
-async function mcAddBlock(key, name){
+// REQ-ORI1 · LAS ALTAS DE MATERIAL VAN DE UNA EN UNA. Dos a la vez se pisan de tres maneras, y las tres
+// se ven igual desde fuera: la pieza girada no se dibuja hasta recargar. Colocar recta + girar con R +
+// colocar lanza tres altas casi a la vez (cada girada da de alta antes su base, ver game.addMaterial), y
+// como mcBuildPaletteImpl vacia mc.blockKey mientras hornea: (1) la guarda «¿ya esta?» de aqui abajo
+// miente y la base entra duplicada; (2) mcAltaVariante no encuentra la base y la variante renuncia a su
+// camino rapido; (3) cada hornada termina con su propia tabla en mc.finoRejilla y gana la ultima, que
+// puede ser mas corta que la paleta → los ids girados se caen fuera y se quedan sin geometria fina.
+// La cola es de una sola posicion y NO puede envolver solo a mcBuildPalette: tiene que abarcar tambien
+// el mirar-si-esta y el mc.blocks.push, que es la parte que se pisa.
+let mcAltaCola=Promise.resolve();
+function mcAddBlock(key, name){
+  // El .catch de la espera es para que un alta que reviente no atasque la fila para siempre; el de la
+  // cola, para que el siguiente no herede ese fallo. Quien llamo si recibe el error, sin tocar.
+  const mio=mcAltaCola.catch(()=>{}).then(()=>mcAddBlockImpl(key, name));
+  mcAltaCola=mio.catch(()=>{});
+  return mio;
+}
+async function mcAddBlockImpl(key, name){
   const ex=mc.blockKey.indexOf(key); if(ex>0) return ex;                        // ya en la paleta
   const rapido=await mcAltaVariante(key); if(rapido>0) return rapido;           // variante girada: sin re-hornear ni re-mallar
   mc.blocks.push({name:name||key, key});
@@ -14552,6 +14647,27 @@ async function mcRoomNeedsAtlas(sk){
   }catch(e){}
   return false;
 }
+// El fantasma de estructura SE PIDE, NO SE IMPONE (2026-08-28, orden del dueño). Cambiar de herramienta y
+// elegir qué colocar son DOS decisiones: la ranura activa se queda como estaba al irse a Seleccionar, así
+// que al volver al pico aparecía media habitación translúcida delante de la cara sin que nadie la pidiera.
+// El pestillo `mc.previewMudo` las separa: cambiar de herramienta lo echa (mcSetPlayerTool), pulsar una
+// ranura lo quita (mcSelectSlot) —la que sea, incluso la MISMA: el jugador está diciendo «ésta, la de ahora».
+// Callan LAS DOS PIEZAS del fantasma de estructura: la malla translúcida (mcUpdatePreview) y la caja de
+// huella verde (mcDrawOverlays). Callar sólo una deja el contorno flotando y no arregla nada.
+// ⛔ El fantasma de BLOQUE SUELTO (mc.ghostAlpha) y el de las NOTAS no se tocan: son otra cosa.
+function mcPreviewCallada(){   // ¿hay ahora mismo un fantasma de estructura callado por el pestillo?
+  // Colocando notas NO: ése es otro fantasma y su gesto ya es explícito (nadie entra en modo nota sin querer).
+  return !!mc.previewMudo && !mc.notePlacing && !!(mc.slotStruct && mc.slotStruct[mc.sel]);
+}
+function mcPreviewCalla(){
+  if(mc.previewMudo) return;
+  mc.previewMudo = true;
+  // La malla ya construida se tira AHORA: si no, el fantasma anterior se quedaría colgado hasta que algo
+  // más lo invalidara, y el jugador vería justo lo que ha pedido no ver.
+  if(mc.preview||mc.previewKey||mc.previewStructKey) mcClearPreview();
+}
+function mcPreviewHabla(){ mc.previewMudo = false; }
+
 // Mantiene mc.preview: mientras se apunta con una ranura de estructura, construye (o reubica) la
 // malla real de la habitación en la celda apuntada + giro al jugador. Sólo re-malla si cambió el objetivo/giro
 // (memo) → no revienta fps al mirar quieto; al salir del foco se limpia. Asíncrona (no bloquea el frame).
@@ -14560,7 +14676,7 @@ async function mcUpdatePreview(){
   const cfg = mcCartelCfg();
   const sk = isNotePlace ? (cfg.palo ? MC_NOTE_SIGN : MC_NOTE_SIGN_PLANO) : mc.slotStruct[mc.sel];
   // `!mc._guardada` (REQ-TOOL5): con la herramienta guardada no hay nada que colocar, así que tampoco su fantasma
-  const on = mc.active && !mc._guardada && (isNotePlace || (!mcToolPasiva() && sk)) && mcMandoActivo() && mc.structGhostAlpha>0;   // REQ-MOV1 · «manda» ya no es solo el pointer-lock: en táctil mandan los botones
+  const on = mc.active && !mc._guardada && (isNotePlace || (!mcToolPasiva() && sk)) && mcMandoActivo() && mc.structGhostAlpha>0 && !mcPreviewCallada();   // REQ-MOV1 · «manda» ya no es solo el pointer-lock: en táctil mandan los botones
   if(!on){ if(mc.preview||mc.previewKey||mc.previewStructKey) mcClearPreview(); return; }
   const hit=mcRaycast(mcReach(), true); if(!hit){ if(mc.preview) mcClearPreview(); return; }   // el fantasma se ancla también a caras de estructura (lo que ves = lo que colocas)
   const isPaint = !isNotePlace && (mc.tool === 'paint');
@@ -15389,6 +15505,11 @@ function mcDrawOverlays(pj, view){
     mcPushBoxTris(notes, x+0.34,y+1.16,z+0.44, x+0.66,y+1.5,z+0.5, hoja[0],hoja[1],hoja[2]);   // hoja del post-it
     mcPushBoxTris(notes, x+0.47,y+1.0,z+0.47,  x+0.53,y+1.18,z+0.53, 0.55,0.4,0.12); // «pincho» que lo clava al bloque
   }
+  // REQ-EXTRU5 · la guía de extrusión (✚/▬) se refresca aquí, donde ya se está armando el dibujo de la
+  // selección: es una vez por frame y con el estado del frame. No pinta en `selLines` —va por la capa
+  // `game.voxelesUI`, que se dibuja CON el mundo y por tanto la tapan los bloques de delante, que es lo
+  // que se quiere: la marca de la cara de atrás no debe verse.
+  mcSelGuiaRepinta();
   // 4) Herramienta Seleccionar: caja CIAN viva de la selección confirmada + previa ámbar con corchetes y rejilla
   const selLines=[];
   const selVox=[];   // los corchetes de esta herramienta van en VOXELES (triángulos), no en líneas
@@ -15609,7 +15730,7 @@ function mcDrawOverlays(pj, view){
   }
 
   const showGhost=lines.length && mc.ghostAlpha>0;
-  const showStruct=structLines.length && mc.structGhostAlpha>0;
+  const showStruct=structLines.length && mc.structGhostAlpha>0 && !mcPreviewCallada();   // el pestillo calla la caja de huella igual que la malla: las dos piezas o ninguna
   // La capa game.voxelesUI solo cae aquí si se pidió `encima` (ver mcDrawVoxUI): por defecto se dibuja con el
   // mundo, para que el agua y el cristal la tapen en vez de quedar ella pintada encima.
   const voxUI=(mc.voxUI && mc.voxUIAlfa>0 && mc.voxUIEncima) ? mcVoxUIGeom() : null;   // (geometría cacheada)
@@ -16202,6 +16323,20 @@ async function mcUndo(){ if(mc.histBusy) return; if(!mc.hist.length){ toast('Nad
 async function mcRedo(){ if(mc.histBusy) return; if(!mc.histRedo.length){ toast('Nada que rehacer'); return; }
   mc.histBusy=true; const en=mc.histRedo.pop();
   try{ await mcApplyHist(en, true); mc.hist.push(en); toast('Rehecho'); mcRevealHotbar(); } finally{ mc.histBusy=false; } }
+// REQ-UNDO1b · Lo que `mcBreak` haya devuelto. Sin `mundo-autoarranque` cargado devuelve undefined y
+// esto no hace nada: un roto normal sigue siendo su propia entrada de historial, como siempre.
+// Con el snippet cargado devuelve la promesa del `alRomper`, y entonces el roto queda «abierto» hasta
+// que la construccion acabe, para que los dos sean UNA sola entrada y una sola `z`.
+function mcTrasRomper(p){
+  const u=mc.hist[mc.hist.length-1];
+  mcRotoPend=(u && u.t==='b') ? u : null;
+  if(!(p && typeof p.then==='function')){ mcRotoPend=null; return; }   // nadie construyo nada
+  mcRompeEnCurso=true;
+  // `fin` corre TAMBIEN si el alRomper revienta: un snippet invitado que lance no puede dejar el
+  // historial bloqueado para siempre (seria peor que el bug que esto arregla).
+  const fin=()=>{ mcRompeEnCurso=false; mcRotoPend=null; mcCierraLote(); };
+  Promise.resolve(p).then(fin, fin);
+}
 function mcBreak(){
   // Marcha fina desde el ojo: lo primero que toca gana. Una estructura se retira ENTERA; el terreno,
   // el bloque golpeado. Apuntar por un vano/ventana rompe el terreno de detrás (no hay voxel fino en medio).
@@ -16332,7 +16467,10 @@ function mcPonEnRejilla(x,y,z,key){
   // Un clic no es un script: ni el volcado diferido ni el resumen «N bloques colocados» 80 ms después.
   // Se cambia el volcado de setVoxel por el del bloque normal (mcRemeshAround). Si un script tenía escrituras
   // a medio volcar, mandan ellas: mcSetVoxel ya metió esta celda en mcBuildBox, así que su flush nos incluye.
-  if(!pendientes && !mc.batching){ clearTimeout(mcBuildT); mcBuildT=0; mcBuildN=0; mcBuildBox=null; mcMat2id={};
+  // REQ-UNDO1: aqui NO llega a correr `mcFlushBuild`, asi que el lote hay que soltarlo a mano o se
+  // queda abierto y se cuela en la construccion siguiente. El clic ya lleva su propio `mcPushHist`.
+  if(!pendientes && !mc.batching){ mcOlvidaLote();
+    clearTimeout(mcBuildT); mcBuildT=0; mcBuildN=0; mcBuildBox=null; mcMat2id={};
     mcRemeshAround(x,z); mcScheduleSave(); }
   return puesto;
 }
@@ -16452,7 +16590,7 @@ function mcDoAction(btn, shift){
     else { if(btn===0) mcBoxClick(); else if(btn===2) mcBoxClear(); }               // Pasos 1,2,3: izq define base/altura, dcho cancela
     mcRevealHotbar(); return;
   }
-  if(btn===0) mcBreak(); else if(btn===2) mcUseRight(); mcRevealHotbar();   // dibujar/romper trae la hotbar de vuelta
+  if(btn===0) mcTrasRomper(mcBreak()); else if(btn===2) mcUseRight(); mcRevealHotbar();   // dibujar/romper trae la hotbar de vuelta
 }
 // ── Herramienta Volumen (tool='box') ────────────────────────────────────────────────────────────
 // Define un conjunto/caja de bloques:
@@ -16765,8 +16903,14 @@ function mcSelectFillPieza(sk, quien, soloSolidos){
   // (mcPonEnRejilla), que es el único que sabe de piezas a medio cargar y de dar de alta la clave en la
   // paleta. Esa celda ya queda puesta; las demás las reparte mcSelectFillId con el id resuelto, y entra
   // en su mismo gesto 'bb' (histLock) para que un solo Ctrl+Z lo deshaga todo.
-  let p=null; mcSelForEach((x,y,z,before)=>{ if(!p) p=[x,y,z,before]; });
-  if(!p){ toast('Nada que reemplazar'); return true; }
+  // La semilla se busca con el MISMO reparto que hará el reparto de después (mcSelectFillId): sin
+  // Shift el gesto rellena TAMBIÉN EL AIRE, así que vale cualquier celda de la caja. Buscarla sólo
+  // entre los sólidos dejaba la selección vacía sin por dónde empezar y salía por «Nada que
+  // reemplazar» teniendo aire de sobra que rellenar (dueño, 2026-08-29). Con Shift no: «sólo
+  // sólidos» y no hay ninguno es que de verdad no hay nada que reemplazar.
+  const semilla = soloSolidos ? mcSelForEach : mcSelForEachConAire;
+  let p=null; semilla((x,y,z,before)=>{ if(!p) p=[x,y,z,before]; });
+  if(!p){ toast(soloSolidos?'Nada que reemplazar':'Nada que rellenar'); return true; }
   const lock=mc.histLock;
   let puesto;
   mc.histLock=true;
@@ -16847,6 +16991,37 @@ function mcSelForEach(fn){
   }
 }
 function mcSelCount(){ let n=0; mcSelForEach(()=>n++); return n; }
+// REQ-EXTRU3 · La caja de Seleccionar VACÍA también se mueve (dueño, 2026-08-28: «*no importa si no
+// tiene bloques, la seleccion ha de moverse igualmente*»). La marcas en el aire, y sin esto el gesto se
+// quedaba en un aviso: ni extruía —no hay de qué— ni bajaba el marco, así que para llevarla al suelo
+// había que volver a marcar las dos esquinas.
+// SE TRASLADA, NO SE ESTIRA. Con bloques dentro, mcSelExtruir mueve la caja por su borde ACTIVO (el de
+// arriba, el que da la cara) porque ahí acaba de aparecer o desaparecer una capa: el marco enseña dónde
+// va la muesca siguiente. Vacía no aparece ni desaparece nada, así que encoger un borde no significaría
+// nada — y una caja vacía de alto 3 se quedaría quieta dos muescas antes de empezar a bajar. Viaja
+// ENTERA, conservando la forma que costó marcar, hasta meterse en el terreno; en cuanto pilla un bloque
+// vuelve a mandar la extrusión de siempre.
+// El tope del mundo se mira sobre el CONJUNTO de cajas (REQ-SEL1): recortar caja a caja las deformaría
+// y les cambiaría las distancias entre ellas, que es justo lo que una traslación no hace. O se mueven
+// todas o no se mueve ninguna.
+// NO HAY DESHACER de este viaje: Ctrl+Z restaura la caja sólo si va pegada a una edición
+// (`mc._selCajasBeforeEdit`, que consume mcPushHist), y aquí no se edita ni un bloque. Por eso tampoco
+// se toca esa variable: dejarla puesta pegaría este viaje a la SIGUIENTE edición, y el deshacer
+// teletransportaría el marco.
+function mcSelMueveVacia(eje, paso, adonde, gesto){
+  const cajas=mc.selCajas; if(!cajas.length) return false;
+  const lim = eje===0 ? mc.dim.x : (eje===1 ? mc.dim.y : mc.dim.z);
+  let min=Infinity, max=-Infinity;
+  for(const s of cajas){ min=Math.min(min,s.a[eje],s.b[eje]); max=Math.max(max,s.a[eje],s.b[eje]); }
+  if(paso>0 ? max+paso>lim-1 : min+paso<0){ toast('La selección toca el borde del mundo: no cabe más '+adonde); return false; }
+  for(const s of cajas){ s.a[eje]+=paso; s.b[eje]+=paso; }
+  // El AGARRE del giro (REQ-SEL1) viaja con la caja: es una celda de mundo elegida DENTRO de la
+  // selección, y si se queda atrás el motor lo da por fuera (mcSelCajaDe(...)<0) y rotar pasaría a
+  // pivotar por la esquina mínima sin avisar.
+  if(mc.selPivote) mc.selPivote[eje]+=paso;
+  toast('Selección vacía — movida '+adonde+' (sin bloques que '+gesto+')');
+  return true;
+}
 // REQ-EXTRU1 · Ctrl+rueda con una caja confirmada: la selección SUBE construyendo o BAJA cavando
 // (nota del dueño en /map/bugfinder, 56,14,71: «*seleccionar, y una vez seleccionado, usar shift+wheel
 // up o down, para estruir hacia arriba o hacia abajo (hacia abajo cavaria)*»).
@@ -16863,6 +17038,7 @@ function mcSelCount(){ let n=0; mcSelForEach(()=>n++); return n; }
 // siguiente ve así lo recién puesto o el terreno que acaba de quedar dentro, sin volver a marcar esquinas.
 function mcSelExtruir(dir){
   if(mc.tool!=='select' || !mc.selBox || !dir) return false;
+  if(mc.selOpuesta) return mcSelExtruirAbajo(dir);        // REQ-EXTRU4 · clic central: cara de abajo
   const arriba = dir>0;
   // Una sola pasada por la selección (la misma que cuenta y copia), quedándose con la cima de cada columna.
   // La columna es (caja, x, z) y NO (x, z): dos cajas pueden caer sobre el mismo sitio a distinta altura
@@ -16872,7 +17048,9 @@ function mcSelExtruir(dir){
     const k=ci+':'+x+','+z, v=col.get(k);
     if(!v || y>v.y) col.set(k,{x,y,z,id});
   });
-  if(!col.size){ toast('La selección no tiene bloques: nada que '+(arriba?'extruir':'cavar')); return false; }
+  // Caja vacía: no hay nada que extruir, pero se mueve igual (REQ-EXTRU3). ⚠️ No confundir con la
+  // guarda de `!edits.length` de más abajo, que SÍ tiene que dejarla quieta.
+  if(!col.size) return mcSelMueveVacia(1, arriba?1:-1, arriba?'arriba':'abajo', arriba?'extruir':'cavar');
   const edits=[];
   for(const c of col.values()){
     if(arriba){
@@ -16932,6 +17110,7 @@ function mcEjeMirada(){
 }
 function mcSelExtruirFrente(dir){
   if(mc.tool!=='select' || !mc.selBox || !dir) return false;
+  if(mc.selOpuesta) return mcSelExtruirFondo(dir);        // REQ-EXTRU4 · clic central: cara del fondo
   const dentro = dir>0;                                   // rueda arriba = hundir · rueda abajo = traer
   const m = mcEjeMirada(), eje = m.eje, sN = m.sN;
   const lim = eje===0 ? mc.dim.x : mc.dim.z;
@@ -16945,7 +17124,10 @@ function mcSelExtruirFrente(dir){
     const k = ci+':'+y+','+(eje===0?z:x), v=fila.get(k);
     if(!v || (sN>0 ? p<v.p : p>v.p)) fila.set(k,{x,y,z,p,id});   // «cerca» = el menor si se mira a +, el mayor si a −
   });
-  if(!fila.size){ toast('La selección no tiene bloques: nada que '+(dentro?'hundir':'traer')); return false; }
+  // Caja vacía: se mueve igual (REQ-EXTRU3), por el eje que se mira y en el sentido del gesto —
+  // arriba se aleja (+sN), abajo se acerca. Misma advertencia que en mcSelExtruir: la guarda de
+  // `!edits.length` de más abajo es otra cosa y no se toca.
+  if(!fila.size) return mcSelMueveVacia(eje, (dentro?1:-1)*sN, dentro?'hacia dentro':'hacia ti', dentro?'hundir':'traer');
   const edits=[];
   for(const c of fila.values()){
     if(dentro){
@@ -16979,10 +17161,681 @@ function mcSelExtruirFrente(dir){
   if(!dentro) mcForceUnstick();                           // traer el muro puede dejar al jugador dentro
   return true;
 }
+// REQ-EXTRU4 · LA CARA OPUESTA (dueño, 2026-08-28) ────────────────────────────────────────────────
+// El motor trabaja SIEMPRE por una cara de la selección: la de ARRIBA con Ctrl, la que DA LA CARA al
+// jugador con Shift. Y por esa cara construye en un sentido de la rueda y come en el otro. El clic
+// CENTRAL cambia CUÁL ES ESA CARA: pasa a la de ABAJO y a la del FONDO.
+//
+//   normal          Ctrl  ↑ construye ENCIMA         · ↓ come por ARRIBA
+//                   Shift ↑ come por la CARA (hueco) · ↓ construye HACIA TI
+//   mc.selOpuesta   Ctrl  ↓ construye DEBAJO  ← patas de una pieza flotante
+//                   Shift ↑ construye ADELANTE ← tender un puente
+//
+// ⛔ NO ES «invertir la rueda». Ese fue el primer intento y el dueño lo rechazó: «*no se cambia la
+// direccion de la rueda, se cambia como se comporta la herramienta*». Dar la vuelta al signo deja
+// Shift↑ TRAYENDO bloques hacia el jugador, que es justo lo que no quería (quería seguir empujando
+// hacia adelante, pero rellenando).
+//
+// Las dos muescas que CONSTRUYEN (Ctrl↓ y Shift↑) son las que pidió; las dos que COMEN son su inversa,
+// y no son un adorno: sin ellas se rompe la regla del dueño del 2026-08-20 —«*un wup seguido de un wdown
+// debería dejar los bloques iguales que como estaban*»— dentro de este modo.
+//
+// El bloque nuevo se replica del que hay EN ESA CARA (`c.id`), no del de la mano: «*replicando los
+// seleccionados*». Un muro de varios materiales se prolonga entero, cada columna con el suyo.
+//
+// La caja se estira por esa misma cara, igual que el motor hace por la suya: al construir crece una
+// celda, al comer encoge una, y con grosor 1 se desplaza entera. Así la muesca siguiente ve lo recién
+// puesto sin volver a marcar esquinas — que es lo que hace que las patas salgan de una tacada.
+
+// Espejo de `mcSelExtruir`: donde aquél se queda con la CIMA de cada columna, éste con el SUELO.
+// La columna es (caja, x, z) y NO (x, z): dos cajas pueden caer sobre el mismo sitio a distinta altura
+// —una en el tejado y otra en el sótano— y son dos suelos, no uno (REQ-SEL1).
+function mcSelExtruirAbajo(dir){
+  const construye = dir<0;                                // rueda ABAJO construye: es la petición
+  const col=new Map();
+  mcSelForEach((x,y,z,id,ci)=>{
+    const k=ci+':'+x+','+z, v=col.get(k);
+    if(!v || y<v.y) col.set(k,{x,y,z,id});                 // `<`: el más BAJO (mcSelExtruir usa `>`)
+  });
+  // Caja vacía: la mueve el motor (REQ-EXTRU3) y en el sentido de siempre — la rueda no cambia de signo.
+  if(!col.size) return mcSelMueveVacia(1, dir>0?1:-1, dir>0?'arriba':'abajo', dir>0?'quitar':'construir');
+  const edits=[];
+  for(const c of col.values()){
+    if(construye){
+      const y=c.y-1;
+      if(!mcInside(c.x,y,c.z)) continue;                   // suelo del mundo
+      const before=mc.grid[mcIdx(c.x,y,c.z)];
+      mcSetBlock(c.x,y,c.z,c.id);                          // mcSetBlock y no mc.grid[..]=: es un cambio
+      edits.push({x:c.x,y,z:c.z,before,after:c.id});       // de TOPOLOGÍA y tiene que re-iluminar
+    } else {
+      mcSetBlock(c.x,c.y,c.z,0);
+      edits.push({x:c.x,y:c.y,z:c.z,before:c.id,after:0});
+    }
+  }
+  // Si NINGUNA columna pudo escribir no ha pasado nada, y la caja tampoco se mueve: moverla sería mentir.
+  if(!edits.length){ toast(construye?'No cabe nada más abajo':'Nada que quitar por abajo'); return false; }
+  mc._selCajasBeforeEdit = mc.selCajas.map(s=>({ a:s.a.slice(), b:s.b.slice() }));
+  for(const s of mc.selCajas){
+    const y0=Math.min(s.a[1],s.b[1]), y1=Math.max(s.a[1],s.b[1]);
+    const baja = (s.a[1]<=s.b[1]) ? s.a : s.b;             // la esquina que sujeta el SUELO de la caja
+    const alta = (baja===s.a) ? s.b : s.a;
+    if(construye) baja[1]=Math.max(0, y0-1);               // crece una celda hacia abajo
+    else { const ny=Math.min(mc.dim.y-1, y0+1); baja[1]=ny; if(y1<ny) alta[1]=ny; }
+  }                                                        // alto 1 ⇒ la caja entera sube y sigue comiendo
+  mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
+  toast((construye?'Patas — ':'Quitado por abajo — ')+edits.length+' bloque(s)');
+  if(construye) mcForceUnstick();                          // construir bajo los pies puede dejarte dentro
+  return true;
+}
+// Espejo de `mcSelExtruirFrente`: donde aquél se queda con el bloque que DA LA CARA, éste con el del
+// FONDO, y en vez de comérselo pone uno más allá. El eje se recalcula EN CADA MUESCA, como el motor: te
+// giras y el puente se gira contigo.
+function mcSelExtruirFondo(dir){
+  const construye = dir>0;                                 // rueda ARRIBA construye hacia adelante
+  const m = mcEjeMirada(), eje = m.eje, sN = m.sN;         // `sN` apunta AL FRENTE (alejándose)
+  const lim = eje===0 ? mc.dim.x : mc.dim.z;
+  const fila=new Map();
+  mcSelForEach((x,y,z,id,ci)=>{
+    const p = eje===0 ? x : z;
+    const k=ci+':'+y+','+(eje===0?z:x), v=fila.get(k);
+    if(!v || (sN>0 ? p>v.p : p<v.p)) fila.set(k,{x,y,z,p,id});   // el del FONDO (el motor coge el de cerca)
+  });
+  if(!fila.size) return mcSelMueveVacia(eje, (dir>0?1:-1)*sN, dir>0?'hacia dentro':'hacia ti', dir>0?'construir':'quitar');
+  const edits=[];
+  for(const c of fila.values()){
+    if(construye){
+      const x=c.x+(eje===0?sN:0), z=c.z+(eje===2?sN:0);    // una celda MÁS ALLÁ del fondo
+      if(!mcInside(x,c.y,z)) continue;                     // borde del mundo
+      const before=mc.grid[mcIdx(x,c.y,z)];
+      mcSetBlock(x,c.y,z,c.id);                            // con SU material: un muro de varios va entero
+      edits.push({x,y:c.y,z,before,after:c.id});
+    } else {
+      mcSetBlock(c.x,c.y,c.z,0);
+      edits.push({x:c.x,y:c.y,z:c.z,before:c.id,after:0});
+    }
+  }
+  if(!edits.length){ toast(construye?'No cabe nada más adelante':'Nada que quitar por el fondo'); return false; }
+  mc._selCajasBeforeEdit = mc.selCajas.map(s=>({ a:s.a.slice(), b:s.b.slice() }));
+  for(const s of mc.selCajas){
+    const p0=Math.min(s.a[eje],s.b[eje]), p1=Math.max(s.a[eje],s.b[eje]);
+    const cerca = ((sN>0)===(s.a[eje]<=s.b[eje])) ? s.a : s.b;   // la esquina que da la cara
+    const lejos = (cerca===s.a) ? s.b : s.a;
+    if(construye) lejos[eje] = sN>0 ? Math.min(lim-1,p1+1) : Math.max(0,p0-1);
+    else { const np = sN>0 ? Math.max(0,p1-1) : Math.min(lim-1,p0+1);
+           lejos[eje]=np; if(sN>0 ? p0>np : p1<np) cerca[eje]=np; }   // grosor 1 ⇒ retrocede entera
+  }
+  mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave();
+  toast((construye?'Puente — ':'Quitado por el fondo — ')+edits.length+' bloque(s) · eje '+m.nombre);
+  if(construye) mcForceUnstick();
+  return true;
+}
+// El conmutador. Vive en `mc.selOpuesta` (no se persiste: al recargar se vuelve a lo normal, que un modo
+// escondido que sobrevive a la recarga es indistinguible de un motor roto).
+// ⚠️ El clic central lo comparte con REDSTONE (`redstone/redstone-piezas.js`, conmuta palancas), que
+// escucha en `window` en CAPTURA y llega antes. Por eso esto sólo mira con la herramienta Seleccionar;
+// aun así, clic central apuntando a una palanca conmuta la palanca TAMBIÉN.
+function mcSelConmutaCaraOpuesta(){
+  mc.selOpuesta = !mc.selOpuesta;
+  toast(mc.selOpuesta ? 'CARA OPUESTA · Ctrl↓ pone patas debajo · Shift↑ tiende puente hacia adelante'
+                      : 'Normal · Ctrl↑ construye encima · Shift↑ hace hueco', 4);
+  return mc.selOpuesta;
+}
+// REQ-EXTRU5 · LA GUÍA: al dejar pulsado Shift o Ctrl con Seleccionar, la selección enseña POR DÓNDE va
+// a crecer (✚ verde, la celda que la rueda llenaría) y POR DÓNDE a encoger (▬ rojo, pegado a la piel del
+// bloque que la rueda se comería). Orden del dueño (2026-08-28): «*saber visualmente hacia donde se crece
+// o encoge la pieza con shift y control presionados […] al igual que hacen los brackets*».
+//
+// Se pintan LOS DOS A LA VEZ porque la rueda gira en los dos sentidos, y se pinta LA SILUETA —marca a
+// marca, el bloque que da la cara de cada columna/fila, igual que recorre el extrusor— y no una capa
+// plana: sobre una pared irregular, una plancha mentiría.
+//
+// LA REGLA ES UNA SOLA, y por eso esto no repite los cuatro extrusores. Los cuatro hacen lo mismo con
+// distinta cara: se quedan con el bloque más lejano de cada fila EN EL SENTIDO DE TRABAJO `out`, se lo
+// comen, o ponen uno en `cara + out`. De ahí sale toda la tabla:
+//
+//        gesto            cara de trabajo   out         suma con   resta con   extrusor
+//   Ctrl normal           la CIMA           +Y          rueda ↑    rueda ↓     mcSelExtruir
+//   Ctrl cara opuesta     el SUELO          −Y          rueda ↓    rueda ↑     mcSelExtruirAbajo
+//   Shift normal          la que TE MIRA    −sN (a ti)  rueda ↓    rueda ↑     mcSelExtruirFrente
+//   Shift cara opuesta    el FONDO          +sN         rueda ↑    rueda ↓     mcSelExtruirFondo
+//
+// ⚠️ Ojo con los dos Shift: ahí «suma» es la rueda ABAJO (traer hacia ti). No es un despiste copiando
+// Ctrl — son los sentidos INVERSOS a posta desde REQ-EXTRU2. Y Ctrl gana a Shift si se pulsan los dos,
+// que es lo que hace la rueda más abajo (`extru = e.ctrlKey && …` se mira primero).
+//
+// La celda verde se salta si cae fuera del mundo, que es exactamente lo que hace el extrusor con su
+// `continue`: si ahí no va a poner nada, prometerlo sería mentir.
+const MC_SELGUIA_FINOS = 16;      // voxeles finos por bloque (MC_VOX = 1/16 de unidad de mundo)
+const MC_SELGUIA_GROSOR = 5;      // lado del cubo de cada trazo, en finos: a 5 los trazos se tocan y sueldan
+// ⚠️ UN VOXEL DE LA CAPA UI NO ESTÁ CENTRADO EN SU COORDENADA: `mcVoxUIGeom` planta el cubo con la
+// ESQUINA en `q*paso` y lo hace crecer `grosor` finos hacia +. Por eso los trazos van en ESQUINAS
+// medidas desde la esquina del bloque, y no como ±5 alrededor del centro (8): eso fue el primer intento
+// y salía corrido 2,5 finos —lo vio el dueño de un vistazo: «*aunque no esta bien centrado del todo*»—.
+// Con grosor 5, un glifo centrado son tres trazos en 0, 5 y 10: ocupa 0..15 de los 16 de la celda.
+const MC_SELGUIA_MAS   = [[5,5],[0,5],[10,5],[5,0],[5,10]];
+const MC_SELGUIA_MENOS = [[0,5],[5,5],[10,5]];
+const MC_SELGUIA_PUNTO = [[5,5]];
+const MC_SELGUIA_DACENTRO = (MC_SELGUIA_FINOS - MC_SELGUIA_GROSOR - 1) >> 1;   // 5 · ✚ centrado en la celda ganada
+const MC_SELGUIA_DAPIEL   = MC_SELGUIA_FINOS - 3;                              // 13 · ▬ mordiendo la piel: 3 dentro, 2 fuera
+const MC_SELGUIA_GRUPOS = ['sel-guia-mas', 'sel-guia-menos', 'sel-guia-mueve'];
+const MC_SELGUIA_VERDE = '#2fe36a', MC_SELGUIA_ROJO = '#ff3b30', MC_SELGUIA_CIAN = '#35d6ff';
+const MC_SELGUIA_TOPE_GLIFO = 220;   // más caras que esto ⇒ un punto por celda en vez del glifo (legible igual, y barato)
+const MC_SELGUIA_TOPE_VOX = 4000;    // tope duro: por encima se dibuja una de cada N celdas
+
+function mcSelGuiaGesto(modo){
+  const op = !!mc.selOpuesta;
+  if(modo === 'ctrl') return { eje:1, out:op?-1:1, nombre:op?'−Y (suelo)':'+Y (cima)',
+                               ruedaMas:op?'abajo':'arriba', ruedaMenos:op?'arriba':'abajo' };
+  const m = mcEjeMirada(), out = op ? m.sN : -m.sN;
+  return { eje:m.eje, out, nombre:(out>0?'+':'−')+'XYZ'[m.eje]+(op?' (fondo)':' (hacia ti)'),
+           ruedaMas:op?'arriba':'abajo', ruedaMenos:op?'abajo':'arriba', mirada:m.nombre };
+}
+
+// La cara de trabajo: por cada fila, el bloque más lejano en el sentido `out`. La fila es (caja, las
+// otras dos coordenadas) y NO sólo las coordenadas: dos cajas pueden caer sobre la misma fila a
+// distinta profundidad y son dos caras, no una — el mismo motivo por el que los extrusores meten `ci`
+// en la clave (REQ-SEL1).
+// PEGANDO (Ctrl+V) el gesto NO va sobre la selección sino sobre EL CÚMULO EN VUELO, y en el sitio donde
+// caería ahora mismo. Dueño (2026-08-28): «*pegando sí hay extrusión que predecir, pero donde se está
+// pegando la pieza, no de donde se copió*». `mcPasteOrigen` es el ÚNICO que sabe dónde cae (agarre +
+// postura), así que se le pregunta a él en vez de rehacer la cuenta; si él no lo sabe —nada a la vista—,
+// no hay nada que prometer. La caché dura UN frame: con la tecla pulsada esto se pregunta dos veces por
+// frame (la firma y el cálculo) y serían dos rayos por uno.
+function mcSelGuiaPiezaEnVuelo(){
+  if(mc._selGuiaVuelo) return mc._selGuiaVuelo.v;
+  let v = null;
+  if(mc.pasteActive && clipboard && clipboard.cells && clipboard.cells.length)
+    v = mcPasteOrigen(mcRaycast(mcReach(), true)) || null;
+  mc._selGuiaVuelo = { v };
+  return v;
+}
+
+// Las celdas del gesto, en coordenadas de MUNDO. Ojo al remapeo del portapapeles, que es el del editor:
+// pieza-X = `dx`, pieza-Y (altura) = `dz`, pieza-Z (profundidad) = `dy`, igual que en `mcClipboardDims`.
+// ⛔ PEGANDO NO HAY RESPALDO: si el cúmulo no tiene dónde caer, no se marca NADA. Caer aquí en la
+// selección sería el bug de origen otra vez, disfrazado de «por si acaso».
+function mcSelGuiaCeldas(cb){
+  if(mc.pasteActive){
+    const org = mcSelGuiaPiezaEnVuelo();
+    if(!org) return null;
+    for(const cel of clipboard.cells){
+      const q = org.mueve(cel.dx, cel.dz, cel.dy);
+      cb(org.ox+q[0], org.oy+q[1], org.oz+q[2], 0);
+    }
+    return org;
+  }
+  mcSelForEach((x,y,z,id,ci)=>cb(x,y,z,ci));
+  // …y la fantasma detrás, como una caja más. `ci` propio (el siguiente a las de verdad) porque va en la
+  // clave de cada fila: dos cajas pueden compartir fila a distinta profundidad y son dos caras, no una
+  // (REQ-SEL1). Con Shift+clic (`mc.selSuma`) la rueda la AÑADE a las que ya hay ⇒ se dibujan todas.
+  const f = mcSelGuiaFantasma();
+  if(f) mcSelGuiaCeldasFantasma(f, cb, mc.selCajas.length);
+  return null;
+}
+
+function mcSelGuiaCalcula(modo){
+  const g = mcSelGuiaGesto(modo), eje = g.eje, out = g.out;
+  const cara = new Map();
+  const vuelo = mcSelGuiaCeldas((x,y,z,ci)=>{
+    const p = eje===0 ? x : (eje===1 ? y : z);
+    const k = ci+':'+(eje===0 ? y+','+z : (eje===1 ? x+','+z : x+','+y));
+    const v = cara.get(k);
+    if(!v || (out>0 ? p>v.p : p<v.p)) cara.set(k, {x,y,z,p});
+  });
+  const mas=[], menos=[];
+  for(const c of cara.values()){
+    menos.push([c.x, c.y, c.z]);
+    const x = c.x+(eje===0?out:0), y = c.y+(eje===1?out:0), z = c.z+(eje===2?out:0);
+    if(mcInside(x,y,z)) mas.push([x,y,z]);       // fuera del mundo el extrusor hace `continue`: no se promete
+  }
+  return { modo, eje, out, cara:g, mas, menos, vacia:cara.size===0, pegando:!!vuelo };
+}
+
+// ── la ACCIÓN sobre la pieza en vuelo (REQ-EXTRU5) ────────────────────────────────────────────────
+// El cúmulo se guarda SIN ROTAR y el gesto viene en ejes de MUNDO ⇒ primero se traduce el eje. `mueve`
+// es afín, así que el eje de la pieza que alimenta un eje de mundo sale probando un paso en cada uno
+// (tres restas, y sólo al girar la rueda): no hay tabla inversa en el motor y no merece la pena añadirla.
+function mcSelGuiaEjePieza(mueve, eje){
+  const o = mueve(0,0,0);
+  for(let k=0; k<3; k++){
+    const p=[0,0,0]; p[k]=1;
+    const q = mueve(p[0], p[1], p[2]);
+    if(q[eje] !== o[eje]) return { k, signo: q[eje] > o[eje] ? 1 : -1 };
+  }
+  return null;
+}
+
+// Engordar por el lado bajo deja celdas en −1, y tanto `mcClipboardDims` como el agarre cuentan desde 0.
+// Se recorre la pieza al origen Y EL AGARRE CON ELLA: el agarre es la celda que se clava en la mira, así
+// que moverlo igual es lo que mantiene la pieza quieta en la mano mientras le sale la capa nueva.
+function mcSelGuiaNormaliza(){
+  let mx=Infinity, my=Infinity, mz=Infinity;
+  for(const c of clipboard.cells){
+    if(c.dx<mx) mx=c.dx; if(c.dz<my) my=c.dz; if(c.dy<mz) mz=c.dy;
+  }
+  if(!isFinite(mx) || (mx===0 && my===0 && mz===0)) return;
+  for(const c of clipboard.cells){ c.dx-=mx; c.dz-=my; c.dy-=mz; }
+  const a = mc.pasteAnchor;                      // ejes de la pieza: [x, y(altura), z] = [dx, dz, dy]
+  if(a){ a[0]=Math.max(0,a[0]-mx); a[1]=Math.max(0,a[1]-my); a[2]=Math.max(0,a[2]-mz); }
+  if(a && clipboard.ancla) clipboard.ancla = a.slice();   // el agarre heredado se corre con la pieza
+}
+
+// LA MISMA REGLA QUE DIBUJA LA GUÍA, aplicada al portapapeles: por cada fila, la celda más lejana en el
+// sentido `out`. Engordar la copia un paso más allá (con su material); adelgazar se la come.
+function mcSelGuiaCreceEncoge(paso, modo){
+  if(!mc.pasteActive || !clipboard || !clipboard.cells || !clipboard.cells.length) return false;
+  const g = mcSelGuiaGesto(modo), dims = mcClipboardDims();
+  if(!g || !dims) return false;
+  const ep = mcSelGuiaEjePieza(mcOriMove(mcPasteOri(), dims.w, dims.h, dims.d), g.eje);
+  if(!ep) return false;
+  const k = ep.k, out = g.out * ep.signo;
+  const crece = (paso > 0) === (g.ruedaMas === 'arriba');
+  const filas = new Map();
+  for(const c of clipboard.cells){
+    const p = [c.dx, c.dz, c.dy], q = p[k];
+    const f = p[(k+1)%3] + ',' + p[(k+2)%3];
+    const v = filas.get(f);
+    if(!v || (out>0 ? q>v.q : q<v.q)) filas.set(f, {c, q, p});
+  }
+  if(!filas.size) return false;
+  if(crece){
+    for(const v of filas.values()){
+      const p = v.p.slice(); p[k] += out;
+      clipboard.cells.push(Object.assign({}, v.c, { dx:p[0], dz:p[1], dy:p[2] }));
+    }
+  } else {
+    const fuera = new Set();
+    for(const v of filas.values()) fuera.add(v.c);
+    if(fuera.size >= clipboard.cells.length){ toast('La pieza se quedaría sin un solo bloque'); return false; }
+    clipboard.cells = clipboard.cells.filter(c => !fuera.has(c));
+  }
+  mcSelGuiaNormaliza();
+  mc._selGuiaVuelo = null;                       // la pieza es otra: dónde cae hay que rehacerlo
+  mc._pasteCache = null;                         // la vista previa lleva la geometría dentro
+  mc.selGuiaFirma = null;                        // y repinta ya, sin esperar a que se mueva la mira
+  const d = mcClipboardDims();
+  toast('Pegar: la pieza '+(crece?'engorda':'adelgaza')+' por '+g.nombre+' · '+
+        clipboard.cells.length+' bloque(s), '+d.w+'×'+d.h+'×'+d.d, 3);
+  return true;
+}
+
+// `da` = esquina del trazo por el EJE DE TRABAJO, en finos desde la esquina de la celda (puede ser
+// negativa: el ▬ de una cara «hacia −» se planta un poco por fuera del bloque).
+function mcSelGuiaGlifo(cel, eje, da, trazos, color, grupo){
+  const F = MC_SELGUIA_FINOS, b = [cel[0]*F, cel[1]*F, cel[2]*F];
+  const uv = eje===0 ? [2,1] : (eje===1 ? [0,2] : [0,1]);
+  for(const t of trazos){
+    const p = [b[0], b[1], b[2]];
+    p[eje] += da; p[uv[0]] += t[0]; p[uv[1]] += t[1];
+    game.voxelesUI.pon(p[0], p[1], p[2], color, grupo);
+  }
+  return trazos.length;
+}
+
+// La cara «hacia −» es el espejo de la «hacia +»: si por arriba el ▬ va en 13..18, por abajo va en
+// −2..3. Así no hay dos números que ajustar a mano.
+function mcSelGuiaDaPiel(out){
+  return out>0 ? MC_SELGUIA_DAPIEL : (MC_SELGUIA_FINOS - MC_SELGUIA_DAPIEL - MC_SELGUIA_GROSOR);
+}
+
+function mcSelGuiaLimpia(){ for(const g of MC_SELGUIA_GRUPOS) game.voxelesUI.limpia(g); }
+
+function mcSelGuiaDibuja(m){
+  mcSelGuiaLimpia();
+  let n = 0;
+  if(m.vacia){
+    // Caja vacía: el extrusor no crea ni destruye, MUEVE la caja entera (REQ-EXTRU3, mcSelMueveVacia).
+    // Pintar verde/rojo sería falso, así que va un ▬ CIAN en la cara de trabajo: «esto se mueve».
+    for(const s of mc.selCajas){
+      const lo = [Math.min(s.a[0],s.b[0]), Math.min(s.a[1],s.b[1]), Math.min(s.a[2],s.b[2])];
+      const hi = [Math.max(s.a[0],s.b[0]), Math.max(s.a[1],s.b[1]), Math.max(s.a[2],s.b[2])];
+      const cel = [(lo[0]+hi[0])>>1, (lo[1]+hi[1])>>1, (lo[2]+hi[2])>>1];
+      cel[m.eje] = m.out>0 ? hi[m.eje] : lo[m.eje];
+      n += mcSelGuiaGlifo(cel, m.eje, mcSelGuiaDaPiel(m.out), MC_SELGUIA_MENOS, MC_SELGUIA_CIAN, MC_SELGUIA_GRUPOS[2]);
+    }
+    return n;
+  }
+  const total = m.mas.length + m.menos.length;
+  const completo = total <= MC_SELGUIA_TOPE_GLIFO;
+  const tMas = completo ? MC_SELGUIA_MAS : MC_SELGUIA_PUNTO;
+  const tMenos = completo ? MC_SELGUIA_MENOS : MC_SELGUIA_PUNTO;
+  const paso = Math.max(1, Math.ceil(total*(tMas.length+tMenos.length)/MC_SELGUIA_TOPE_VOX));
+  for(let i=0; i<m.mas.length; i+=paso)
+    n += mcSelGuiaGlifo(m.mas[i], m.eje, MC_SELGUIA_DACENTRO, tMas, MC_SELGUIA_VERDE, MC_SELGUIA_GRUPOS[0]);
+  for(let i=0; i<m.menos.length; i+=paso)
+    n += mcSelGuiaGlifo(m.menos[i], m.eje, mcSelGuiaDaPiel(m.out), tMenos, MC_SELGUIA_ROJO, MC_SELGUIA_GRUPOS[1]);
+  return n;
+}
+
+// Mismas condiciones de entrada que la rueda: Ctrl manda sobre Shift, y Shift sólo cuenta a secas.
+function mcSelGuiaModoDe(e){
+  if(e.ctrlKey) return 'ctrl';
+  if(e.shiftKey && !e.altKey && !e.metaKey) return 'shift';
+  return '';
+}
+
+// LA CAJA FANTASMA: la selección A MEDIO HACER, con UN SOLO CLIC. Dueño (2026-08-28): «*cuando se hace
+// una seleccion solamente con un click ya se puede hacer shift o control rueda, sin esperar al segundo,
+// pero eso no muestra los -+ y deberia*». Con un clic hay ESQUINA FIJADA (`mc.selA`) pero todavía no hay
+// CAJA (`mc.selBox`), y la rueda de más abajo ya sabe qué hacer con eso: auto-confirma tomando el bloque
+// apuntado como esquina B. La guía pedía caja hecha ⇒ el gesto salía a ciegas.
+// ⚠️ SALE DEL MISMO `mcRaycast()` QUE LA RUEDA, y con la misma condición `cell[1] >= 0`: si lo pintado y
+// lo que va a pasar no salen de la misma cuenta, la guía miente en cuanto una de las dos cambie.
+// La caché lleva SELLO además de durar un frame: por frame basta para el juego (la mira se mueve sola y
+// `mcSelGuiaRepinta` la tira al empezar), pero quien pregunte FUERA del frame vería la caja del frame
+// anterior — fijar la esquina y preguntar sin que pase un frame devolvía la selección de antes.
+// Una caja de un clic es pequeña por definición, pero el rayo puede dar lejísimos y salir media rejilla:
+// recorrerla entera cada frame congelaría el juego, así que pasado el tope no se promete nada (los topes
+// de glifos del dibujo van DESPUÉS de este, que es el del recorrido).
+const MC_SELGUIA_TOPE_PRE = 200000;
+
+function mcSelGuiaSelloPre(){
+  return (mc.pasteActive ? 1 : 0) + '|' + mc.tool + '|' + (mc.selA ? mc.selA.join(',') : '-') +
+         '|' + (mc.selBox ? 1 : 0) + '|' + mc.selCajas.length + '|' + (mc.gridGen|0);
+}
+
+function mcSelGuiaFantasma(){
+  const sello = mcSelGuiaSelloPre();
+  if(mc._selGuiaPre && mc._selGuiaPre.sello === sello) return mc._selGuiaPre.v;
+  let v = null;
+  if(!mc.pasteActive && mc.tool==='select' && mc.selA && !mc.selBox){
+    const near = mcRaycast();                                // el mismo rayo que la rueda de aquí abajo
+    const b = (near && near.cell[1] >= 0) ? near.cell.slice() : mc.selA.slice();
+    const a = mc.selA.slice();
+    const vol = (Math.abs(a[0]-b[0])+1) * (Math.abs(a[1]-b[1])+1) * (Math.abs(a[2]-b[2])+1);
+    if(vol <= MC_SELGUIA_TOPE_PRE) v = { a, b, vol };
+  }
+  mc._selGuiaPre = { sello, v };
+  return v;
+}
+
+// Sus celdas CON BLOQUE, igual que `mcSelForEach` hace con las cajas de verdad: el aire no da cara, y un
+// ✚ colgando de la nada prometería lo que el extrusor no va a hacer.
+function mcSelGuiaCeldasFantasma(f, cb, ci){
+  const x0=Math.min(f.a[0],f.b[0]), x1=Math.max(f.a[0],f.b[0]);
+  const y0=Math.min(f.a[1],f.b[1]), y1=Math.max(f.a[1],f.b[1]);
+  const z0=Math.min(f.a[2],f.b[2]), z1=Math.max(f.a[2],f.b[2]);
+  for(let x=x0; x<=x1; x++) for(let y=y0; y<=y1; y++) for(let z=z0; z<=z1; z++){
+    if(!mcInside(x,y,z)) continue;
+    if(!mc.grid[mcIdx(x,y,z)]) continue;
+    cb(x,y,z,ci);
+  }
+}
+
+// Hay TRES piezas que pueden llevar el gesto y NO se solapan: pegando manda el cúmulo en vuelo (y la
+// herramienta da igual, que se pega con cualquiera); si no, la caja de Seleccionar, y a falta de caja
+// hecha, la fantasma del primer clic.
+function mcSelGuiaHayPieza(){
+  return mc.pasteActive ? !!mcSelGuiaPiezaEnVuelo()          // sin sitio donde caer, sin promesa
+                        : !!((mc.tool==='select' && mc.selBox) || mcSelGuiaFantasma());
+}
+function mcSelGuiaToca(){
+  return !!(mc.selGuia !== false && mc.selGuiaModo && mc.active && mcSelGuiaHayPieza());
+}
+
+// NO se recalcula cada frame: sólo si cambia la FIRMA. Girar la cabeza cambia el eje de Shift (y por eso
+// la mirada entra en la firma); quieto, una selección grande no cuesta nada porque no se vuelve a mirar.
+function mcSelGuiaFirma(){
+  if(!mcSelGuiaToca()) return '';
+  let s = mc.selGuiaModo + '|' + (mc.selOpuesta?1:0) + '|' + (mc.gridGen|0);
+  if(mc.pasteActive){
+    // La pieza VUELA: su sitio cambia con la mira, así que la firma lleva dónde cae y cómo está puesta.
+    const o = mcSelGuiaPiezaEnVuelo();
+    if(!o) return '';
+    s += '|pega:'+o.ox+','+o.oy+','+o.oz+'/'+o.ori+'/'+clipboard.cells.length+
+         '/'+o.dims.w+','+o.dims.h+','+o.dims.d;
+  } else {
+    for(const c of mc.selCajas) s += '|' + c.a.join(',') + '/' + c.b.join(',');
+  }
+  const f = mcSelGuiaFantasma();          // la fantasma sigue a la MIRA: fuera de la firma se clavaría
+  if(f) s += '|pre:' + f.a.join(',') + '/' + f.b.join(',');
+  if(mc.selGuiaModo === 'shift') s += '|' + mcEjeMirada().nombre;
+  return s;
+}
+
+function mcSelGuiaRepinta(){
+  mc._selGuiaVuelo = null;                       // frame nuevo: el cúmulo ya no está donde estaba
+  mc._selGuiaPre = null;                         // …y la mira, que arrastra la caja fantasma
+  mcPasteEscGuia();                              // la caja de Alt (escalar la pieza en vuelo): otra firma, otros grupos
+  const f = mcSelGuiaFirma();
+  if(f === mc.selGuiaFirma) return;
+  mc.selGuiaFirma = f;
+  if(!f){ mcSelGuiaLimpia(); mc.selGuiaUltimo = null; return; }
+  mc.selGuiaUltimo = mcSelGuiaCalcula(mc.selGuiaModo);
+  mc.selGuiaUltimo.voxeles = mcSelGuiaDibuja(mc.selGuiaUltimo);
+}
+
+// ── ⤢ ALT+RUEDA ESCALA LA PIEZA EN VUELO (Ctrl+V) ────────────────────────────────────────────────
+// Dueño (2026-08-28): «*alt+rueda sirva para escalar x2 (rueda arriba) y dividir (rueda abajo) el
+// objeto*» · «*si puede tener alguna previsualizacion cuando se pulse alt que indique que se va
+// modificar su tamaño como hacen shift y control al dejarse pulsados*».
+//
+// QUÉ SE ESCALA: el portapapeles, no el mundo — `clipboard.cells` (offsets `dx`=x, `dz`=altura,
+// `dy`=fondo). ×2 = cada celda se convierte en las 8 de su cubo; ÷2 = cada cubo de 8 se convierte en
+// una celda, y el material que se queda es el MÁS REPETIDO de las ocho. Elegir «la primera» sería más
+// corto pero haría que el resultado dependiera del orden en que se copió, que no es una propiedad de
+// la pieza.
+const MC_PASTE_ESC_TOPE = 40000;   // bloques: por encima, el ×2 no se hace (una pieza mediana se va a millones)
+const MC_PASTE_ESC_GRUPOS = ['paste-esc-mas', 'paste-esc-menos'];
+const MC_PASTE_ESC_TOPE_VOX = 1800;  // voxeles de la promesa: pasado esto, las aristas salen punteadas
+const MC_PASTE_ESC_GROSOR = 4;       // lado del cubo de cada trazo, en finos
+const MC_PASTE_ESC_PIEL = 2;         // finos que la sombra se sale de la pieza para no quedar dentro
+
+function mcPasteEscHay(){
+  return !!(mc.active && mc.pasteActive && !mc.escaparate &&
+            clipboard && clipboard.cells && clipboard.cells.length);
+}
+
+// Dimensiones de la pieza al escalar por `f`: ×2 es el doble; ÷2 es el índice máximo partido, +1 (una
+// pieza de 5 de ancho ocupa 0..4 ⇒ 0..2 ⇒ 3), y nunca baja de 1.
+function mcPasteEscDim(n, f){ return f > 1 ? n * 2 : (((n - 1) >> 1) + 1); }
+function mcPasteEscTope0(v, n){ return Math.min(Math.max(v|0, 0), Math.max(0, n - 1)); }
+
+// De las 8 celdas que se funden en una, manda la del material más repetido (empate: la primera vista).
+function mcPasteEscManda(g){
+  if(g.length === 1) return g[0];
+  const cuenta = new Map();
+  let mejor = g[0], nMejor = 0;
+  for(let i = 0; i < g.length; i++){
+    const k = String(g[i].c), n = (cuenta.get(k) || 0) + 1;
+    cuenta.set(k, n);
+    if(n > nMejor){ nMejor = n; mejor = g[i]; }
+  }
+  return mejor;
+}
+
+function mcPasteEscala(f){
+  if(!mcPasteEscHay()) return false;
+  const cells = clipboard.cells, d = mcClipboardDims();
+  if(!d) return false;
+  let out;
+  if(f > 1){
+    if(cells.length * 8 > MC_PASTE_ESC_TOPE){
+      toast('×2 dejaría ' + (cells.length*8) + ' bloques: pasa del tope (' + MC_PASTE_ESC_TOPE + ')', 4);
+      return false;
+    }
+    out = [];
+    for(const c of cells)
+      for(let i=0;i<2;i++) for(let j=0;j<2;j++) for(let k=0;k<2;k++)
+        out.push(Object.assign({}, c, { dx:c.dx*2+i, dy:c.dy*2+j, dz:c.dz*2+k }));
+  } else {
+    if(d.w===1 && d.h===1 && d.d===1){ toast('Un solo bloque: ya no se puede dividir', 3); return false; }
+    const cubos = new Map();
+    for(const c of cells){
+      const cl = (c.dx>>1) + ',' + (c.dy>>1) + ',' + (c.dz>>1);
+      const g = cubos.get(cl);
+      if(g) g.push(c); else cubos.set(cl, [c]);
+    }
+    out = [];
+    cubos.forEach((g, cl) => {
+      const p = cl.split(',');
+      out.push(Object.assign({}, mcPasteEscManda(g), { dx:+p[0], dy:+p[1], dz:+p[2] }));
+    });
+  }
+  clipboard.cells = out;
+  // El agarre en ejes de pieza es [dx, dz, dy] (mcAnclaDeCopia): se escala como las celdas o dejaría de
+  // señalar el mismo punto de la pieza, y ésta saltaría de sitio justo al crecer.
+  const a = mc.pasteAnchor;
+  if(a){
+    const nd = { w:mcPasteEscDim(d.w,f), h:mcPasteEscDim(d.h,f), d:mcPasteEscDim(d.d,f) };
+    a[0] = mcPasteEscTope0(f>1 ? a[0]*2 : (a[0]>>1), nd.w);
+    a[1] = mcPasteEscTope0(f>1 ? a[1]*2 : (a[1]>>1), nd.h);
+    a[2] = mcPasteEscTope0(f>1 ? a[2]*2 : (a[2]>>1), nd.d);
+    if(clipboard.ancla) clipboard.ancla = a.slice();
+  }
+  mcSelGuiaNormaliza();          // deja la esquina mínima en 0 y arrastra el agarre con ella
+  mc._pasteCache = null;         // la geometría de la vista previa va dentro: hay que rehacerla
+  mc._selGuiaVuelo = null;       // …y la guía de Shift/Ctrl mide contra la pieza
+  mc.selGuiaFirma = null;
+  mc._escFirma = null;           // la promesa de Alt, también
+  const dd = mcClipboardDims();
+  toast('Pegar escala ' + (f>1 ? '×2' : '÷2') + ' · ' + clipboard.cells.length +
+        ' bloque(s) · ' + dd.w + '×' + dd.h + '×' + dd.d, 3);
+  return true;
+}
+
+// ── la promesa de Alt ────────────────────────────────────────────────────────────────────────────
+// Shift y Ctrl prometen celda a celda (✚ verde / ▬ rojo) porque tocan UNA capa. Alt cambia la pieza
+// entera, así que lo que se promete es la CAJA: en verde la que dejaría la rueda arriba (×2) y en rojo
+// la que dejaría la rueda abajo (÷2). Mismo verde y mismo rojo que la guía: es el mismo idioma.
+//
+// Dónde caería la pieza escalada: LA MISMA CUENTA que `mcPasteOrigen` (agarre + postura), con las
+// dimensiones y el agarre ya escalados. Se rehace aquí en vez de escalar el portapapeles para
+// preguntar: una promesa no puede modificar lo que se va a plantar.
+function mcPasteEscCaja(org, f){
+  const d = org.dims, ori = org.ori;
+  const w = mcPasteEscDim(d.w,f), h = mcPasteEscDim(d.h,f), p = mcPasteEscDim(d.d,f);
+  const r = mcOriDims(w, h, p, ori), mueve = mcOriMove(ori, w, h, p);
+  const a = mc.pasteAnchor || [0,0,0];
+  const q = mueve(mcPasteEscTope0(f>1 ? a[0]*2 : (a[0]>>1), w),
+                  mcPasteEscTope0(f>1 ? a[1]*2 : (a[1]>>1), h),
+                  mcPasteEscTope0(f>1 ? a[2]*2 : (a[2]>>1), p));
+  // `base` = la celda clavada en la mira: la que el motor ya calculó para la pieza sin escalar.
+  const base = [org.ox+org.anchor[0], org.oy+org.anchor[1], org.oz+org.anchor[2]];
+  const o = [base[0]-q[0], base[1]-q[1], base[2]-q[2]];
+  return { a:o, b:[o[0]+r[0]-1, o[1]+r[1]-1, o[2]+r[2]-1] };
+}
+
+// Caja de CELDAS → sus dos esquinas en voxeles FINOS.
+function mcPasteEscFinos(caja){
+  const F = MC_SELGUIA_FINOS;
+  return [[caja.a[0]*F, caja.a[1]*F, caja.a[2]*F],
+          [(caja.b[0]+1)*F-1, (caja.b[1]+1)*F-1, (caja.b[2]+1)*F-1]];
+}
+
+// Paso adaptativo: una caja grande se dibuja punteada en vez de tragarse la capa UI entera (la línea
+// seguida de un 64³ son 12 000 voxeles, y `mcDrawArr` sube la capa ENTERA a la GPU cada frame).
+// `porEje` = cuántos trazos paralelos lleva cada eje, que es lo que multiplica el gasto.
+function mcPasteEscPaso(p0, p1, porEje){
+  const largo = (p1[0]-p0[0]) + (p1[1]-p0[1]) + (p1[2]-p0[2]) + 3;
+  return Math.max(MC_PASTE_ESC_GROSOR, Math.ceil(largo*porEje/Math.max(1, MC_PASTE_ESC_TOPE_VOX)));
+}
+
+// Trazo punteado entre dos puntos finos que sólo difieren en `eje`.
+function mcPasteEscLinea(a, b, eje, paso, color, grupo){
+  const q = [a[0], a[1], a[2]];
+  let t = a[eje];
+  for(;;){
+    if(t > b[eje]) t = b[eje];
+    q[eje] = t;
+    game.voxelesUI.pon(q[0], q[1], q[2], color, grupo);
+    if(t >= b[eje]) return;
+    t += paso;
+  }
+}
+
+// Las 12 aristas de una caja.
+function mcPasteEscAristas(p0, p1, paso, color, grupo){
+  for(let eje = 0; eje < 3; eje++){
+    const u = (eje+1)%3, v = (eje+2)%3;
+    for(let iu = 0; iu < 2; iu++) for(let iv = 0; iv < 2; iv++){
+      const a = [0,0,0], b = [0,0,0];
+      a[eje] = p0[eje]; b[eje] = p1[eje];
+      a[u] = b[u] = iu ? p1[u] : p0[u];
+      a[v] = b[v] = iv ? p1[v] : p0[v];
+      mcPasteEscLinea(a, b, eje, paso, color, grupo);
+    }
+  }
+}
+
+// La caja del ÷2 va DENTRO de la pieza en vuelo, y la capa UI se dibuja CON el mundo (la tapa lo que
+// tenga delante) ⇒ enterrada ahí no se ve NI UNA arista: la sonda midió CERO pixeles rojos en la foto.
+// Sacarla «un pelo» tampoco vale, porque no está un pelo dentro sino media pieza. Así que su promesa se
+// pinta donde sí hay superficie que mirar: el rectángulo que va a ocupar, estampado en las SEIS caras de
+// la pieza —su sombra ortogonal— mordiendo la piel como los ▬ de Shift/Ctrl (`MC_SELGUIA_DAPIEL`, que
+// existe por este mismo motivo). Mires desde donde mires tienes una cara delante, y en ella el tamaño
+// que va a quedar.
+function mcPasteEscSombra(p0, p1, piel, paso, color, grupo){
+  for(let eje = 0; eje < 3; eje++){
+    const u = (eje+1)%3, v = (eje+2)%3;
+    for(let lado = 0; lado < 2; lado++){
+      const t = lado ? piel[1][eje]+MC_PASTE_ESC_PIEL : piel[0][eje]-MC_PASTE_ESC_PIEL;
+      for(let i = 0; i < 2; i++){
+        const a = [0,0,0], b = [0,0,0];              // los dos trazos en dirección u
+        a[eje] = b[eje] = t;
+        a[v] = b[v] = i ? p1[v] : p0[v];
+        a[u] = p0[u]; b[u] = p1[u];
+        mcPasteEscLinea(a, b, u, paso, color, grupo);
+        const c = [0,0,0], d = [0,0,0];              // y los dos en dirección v
+        c[eje] = d[eje] = t;
+        c[u] = d[u] = i ? p1[u] : p0[u];
+        c[v] = p0[v]; d[v] = p1[v];
+        mcPasteEscLinea(c, d, v, paso, color, grupo);
+      }
+    }
+  }
+}
+
+function mcPasteEscLimpia(){ for(const g of MC_PASTE_ESC_GRUPOS) game.voxelesUI.limpia(g); }
+
+// NO se redibuja cada frame: sólo si cambia la FIRMA, igual que `mcSelGuiaRepinta`. Quieto con Alt
+// pulsado esto no cuesta nada; la mira mueve la pieza y entonces sí se rehace.
+// Va con FIRMA Y GRUPOS PROPIOS, no dentro de la guía de Shift/Ctrl: son dos promesas distintas (una
+// habla de una capa, la otra de la pieza entera) y se encienden y apagan por separado.
+function mcPasteEscGuia(){
+  // `mcSelGuiaPiezaEnVuelo` es EL que sabe dónde cae la pieza (agarre + postura) y cachea su rayo por
+  // frame: preguntándole no hay un segundo rayo ni una segunda cuenta que pueda discrepar de la guía.
+  const org = (mc._escAlt && mcPasteEscHay()) ? mcSelGuiaPiezaEnVuelo() : null;
+  const d = org ? org.dims : null;
+  const firma = org ? (org.ox+','+org.oy+','+org.oz+'/'+org.ori+'/'+
+                       d.w+','+d.h+','+d.d+'/'+clipboard.cells.length) : '';
+  if(firma === mc._escFirma) return;
+  mc._escFirma = firma;
+  mcPasteEscLimpia();
+  if(!firma) return;
+  // Rueda arriba: la caja del ×2 cae POR FUERA de la pieza, se ve ella sola.
+  const mas = mcPasteEscFinos(mcPasteEscCaja(org, 2));
+  mcPasteEscAristas(mas[0], mas[1], mcPasteEscPaso(mas[0], mas[1], 4), MC_SELGUIA_VERDE, MC_PASTE_ESC_GRUPOS[0]);
+  // Rueda abajo: la caja del ÷2 va dentro ⇒ además de la caja, su sombra en las seis caras de la pieza.
+  const menos = mcPasteEscFinos(mcPasteEscCaja(org, 0.5));
+  const piel = mcPasteEscFinos({ a:[org.ox, org.oy, org.oz],
+                                 b:[org.ox+org.rw-1, org.oy+org.rh-1, org.oz+org.rd-1] });
+  const paso = mcPasteEscPaso(menos[0], menos[1], 12);      // 4 aristas + 8 trazos de sombra por eje
+  mcPasteEscAristas(menos[0], menos[1], paso, MC_SELGUIA_ROJO, MC_PASTE_ESC_GRUPOS[1]);
+  mcPasteEscSombra(menos[0], menos[1], piel, paso, MC_SELGUIA_ROJO, MC_PASTE_ESC_GRUPOS[1]);
+}
+
 // Ctrl+C: vuelca la caja seleccionada a `clipboard` (portapapeles global del editor). Cada bloque de mundo se
 // convierte en un voxel `tex:`+clave, y se REMAPEAN los ejes al convenio del editor (importa igual que estampar,
 // a la inversa): mundo-X→editor-X, mundo-Z(profundidad)→editor-Y, mundo-Y(altura)→editor-Z(capa). Así la pieza
 // queda derecha en la vista 3D. gx/gy = punto de agarre (centro) en el plano X/Y del editor.
+// El AGARRE elegido en Seleccionar (`mc.selPivote`, Ctrl + apuntar) y el del pegado (`mc.pasteAnchor`)
+// son EL MISMO PUNTO contado de dos maneras: uno es una celda de mundo absoluta y el otro va relativo a
+// la esquina mínima de la pieza, sin rotar, en los ejes que da `mcClipboardDims` (w=x, h=y, d=z). Aquí
+// se traduce al copiar, y se cuelga del PORTAPAPELES —que es lo que viaja—, no de `mc`: el editor
+// reasigna `clipboard` entero cuando copia por su lado, así que su copia nace sin agarre sin que haya
+// que limpiar nada. Fuera de la pieza no se hereda: un agarre que se quedó de otra selección dejaría el
+// cúmulo colgando de un punto que no señaló nadie, que es peor que pegar por la esquina.
+// ⛔ Se llama DESPUÉS de llenar `clipboard`: mide contra la pieza recién copiada, no contra la anterior.
+function mcAnclaDeCopia(minx, miny, minz){        // mins en MUNDO: x, y (altura), z
+  const p = mc.selPivote;
+  if(!p) return null;
+  const d = mcClipboardDims();
+  if(!d) return null;
+  const a = [p[0]-minx, p[1]-miny, p[2]-minz];
+  if(a[0]<0 || a[0]>=d.w || a[1]<0 || a[1]>=d.h || a[2]<0 || a[2]>=d.d) return null;
+  return a;
+}
 function mcCopySelection(){
   if(!mc.selBox){ toast(mc.tool==='select'?'Nada seleccionado (marca 2 esquinas)':'Usa la herramienta Seleccionar (e)'); return false; }
   let minx=Infinity,miny=Infinity,minz=Infinity, maxx=-Infinity,maxy=-Infinity; const raw=[];
@@ -16994,6 +17847,7 @@ function mcCopySelection(){
   if(!raw.length){ toast('Nada que copiar'); return false; }
   clipboard={ cells:raw.map(v=>({ dx:v.x-minx, dy:v.z-miny, dz:v.y-minz, c:'tex:'+v.key })),
               gx:Math.floor((maxx-minx)/2), gy:Math.floor((maxy-miny)/2) };
+  clipboard.ancla = mcAnclaDeCopia(minx, minz, miny);   // el agarre viaja con la pieza (mundo: x, y, z)
   toast(raw.length+' bloque(s) copiados — Ctrl+V para pegar en el editor');
   return true;
 }
@@ -17012,6 +17866,7 @@ function mcCutSelection(){
   if(!raw.length){ toast('Nada que cortar'); return false; }
   clipboard={ cells:raw.map(v=>({ dx:v.x-minx, dy:v.z-miny, dz:v.y-minz, c:'tex:'+v.key })),
               gx:Math.floor((maxx-minx)/2), gy:Math.floor((maxy-miny)/2) };
+  clipboard.ancla = mcAnclaDeCopia(minx, minz, miny);   // el agarre viaja con la pieza (mundo: x, y, z)
   if(edits.length){ mcRemeshEdiciones(edits); mcPushHist({t:'bb', edits}); mcScheduleSave(); }
   toast(raw.length+' bloque(s) cortados al portapapeles — Ctrl+V para pegar');
   return true;
@@ -17138,12 +17993,15 @@ function mcPasteWorld(){
   mc.pasteActive = true;
   mc.pasteCara = 0;
   mc.pasteGiro = 0;
-  mc.pasteAnchor = [0, 0, 0];       // agarre: esquina mínima, como se ha pegado siempre
+  // Agarre: el que se eligió al copiar si la pieza trae uno; si no, la esquina mínima, como siempre.
+  // `mcPasteOrigen` ya lo recorta contra (w,h,d), así que un agarre heredado nunca cae fuera de la pieza.
+  mc.pasteAnchor = (clipboard.ancla && clipboard.ancla.length===3) ? clipboard.ancla.slice() : [0, 0, 0];
   mc.pasteCtrlHeld = false;
   mc.pasteCtrlFreeze = null;
   mc.pasteAnchorHover = null;
   mc._pasteCache = null;
   toast('Pegar: mueve la mira para posicionar · Clic dcho planta (sigue cargado) · R cara, Shift+R giro · Clic izq suelta');
+  if(clipboard.ancla) toast('Se pega por el agarre elegido al copiar ['+mc.pasteAnchor.join(', ')+'] · Ctrl + apuntar lo cambia', 5);
 }
 
 async function mcPasteConfirm(){
@@ -19465,7 +20323,8 @@ function mcToolDe(key){
   const c=(mc.catalog||[]).find(x => x.key===key);
   return c ? c.herramienta : null;
 }
-function mcSelectSlot(){ [...$('#mc-hotbar').children].forEach((s,i)=>s.classList.toggle('is-active',i===mc.sel)); mcRevealHotbar(); }
+function mcSelectSlot(){ mcPreviewHabla();   // pulsar ranura = «esto es lo que quiero colocar»: devuelve el fantasma de estructura
+  [...$('#mc-hotbar').children].forEach((s,i)=>s.classList.toggle('is-active',i===mc.sel)); mcRevealHotbar(); }
 // La hotbar se OCULTA (se hunde abajo desvaneciéndose) tras correr bastante sin dibujar —«modo carrera»— y
 // REEMERGE desde abajo (transparente → su sitio) al detenerse y mover el ratón, al dibujar o al cambiar de ranura.
 function mcRevealHotbar(){ mc.hbTarget=1; mc.hbRunDist=0; }   // la trae de vuelta y reinicia la distancia de carrera
@@ -20440,6 +21299,49 @@ function mcResolveMat(material){
   mcMat2id[m]=id; return id;
 }
 let mcBuildT=0, mcBuildN=0, mcBuildBox=null;
+// --- REQ-UNDO1 · el lote de escrituras de script TAMBIEN va al historial -------------------------
+// `mcSetVoxel` no apuntaba nada, asi que una casa levantada por un snippet era invisible para `z`.
+// El lote de construccion que ya existe (mcBuildBox/mcBuildN) hace de GESTO: se abre con la primera
+// celda, absorbe las siguientes y se cierra en `mcFlushBuild` como UNA entrada {t:'bb'}.
+let mcLote=null, mcLoteCelda=null;
+// REQ-UNDO1b · el roto y lo que levanta son UN gesto, y se sabe por CAUSA y no por reloj: `mcBreak`
+// devuelve la promesa del `alRomper` que haya disparado (la pone el snippet `mundo-autoarranque`), asi
+// que aqui se sabe cuando termina la construccion de verdad.
+let mcRotoPend=null;        // entrada {t:'b'} del roto que aun puede absorberse en el lote
+let mcRompeEnCurso=false;   // la construccion sigue: NO cerrar el gesto todavia o saldria partido
+// Una celda escrita N veces es UNA entrada: el `before` de la PRIMERA y el `after` de la ULTIMA. Sin
+// esto, deshacer una celda repintada la dejaria en el estado intermedio.
+function mcApuntaLote(x,y,z,before,after){
+  if(mc.histLock) return;                       // deshacer/rehacer escriben: no se re-apuntan a si mismos
+  if(before===after) return;                    // sin cambio real
+  if(!mcLote){
+    mcLote=[]; mcLoteCelda=new Map();
+    // ¿venimos de romper un bloque con comportamiento? Entonces el roto y lo que se levanta son el
+    // MISMO gesto y una sola `z` tiene que deshacer los dos (orden del dueño, 2026-08-28).
+    // Se compara POR IDENTIDAD contra la cima: si algo empujo entremedias, ese roto ya no manda.
+    if(mcRotoPend && mc.hist[mc.hist.length-1]===mcRotoPend){
+      const u=mcRotoPend; mcRotoPend=null;
+      mc.hist.pop();
+      mcLote.push({x:u.x,y:u.y,z:u.z,before:u.before,after:u.after});
+      mcLoteCelda.set(u.x+','+u.y+','+u.z, mcLote[0]);
+    }
+  }
+  const k=x+','+y+','+z, e=mcLoteCelda.get(k);
+  if(e){ e.after=after; return; }
+  const n={x,y,z,before,after};
+  mcLoteCelda.set(k,n); mcLote.push(n);
+}
+function mcOlvidaLote(){ mcLote=null; mcLoteCelda=null; }
+// Se cierra cuando NO queda textura en vuelo: si se cerrara antes, las celdas que esperaban material
+// caerian en otra entrada y la casa necesitaria dos o tres `z`.
+function mcCierraLote(){
+  if(!mcLote) return;
+  if(mcRompeEnCurso) return;                    // el alRomper que lo causo aun no ha terminado
+  if(mcPendCarga.size) return;                  // aun llegan materiales: el gesto no ha terminado
+  const edits=mcLote.filter(e=>e.before!==e.after);
+  mcOlvidaLote();
+  if(edits.length) mcPushHist({t:'bb', edits});
+}
 // La CAJA en planta que abarca la ráfaga. Es lo que separa una explosión de TNT de un mcMeshAll por fotograma:
 // una onda de 1054 bloques cabe en 17×17 columnas, o sea 4 chunks, no los 1024 del mundo. Medido en 512×40×512,
 // el snippet de TNT pasó de 41,5 s (10 mcMeshAll = 35,8 s solo de mallado) a re-mallar únicamente su cráter.
@@ -20461,6 +21363,7 @@ function mcFlushBuild(){ mcBuildT=0;
   if(b && mcCajaCompensa(b)) mcRemeshAround(b.x0,b.z0,b.x1,b.z1);
   else mcMeshAll();
   if(mc.active) mcUnstick(); mcScheduleSave();
+  mcCierraLote();                               // REQ-UNDO1: la rafaga termina aqui ⇒ una entrada de historial
   toast('setVoxel: '+mcBuildN+' bloques colocados'); mcBuildN=0; mcMat2id={}; }
 // ---- Carga automática de la textura que falta -------------------------------------------------
 // El índice de assets sabe que 'flor_amarilla' es assets/flor-amarilla.vox.json ANTES de cargarla. Antes
@@ -20525,13 +21428,16 @@ function mcApuntaPendiente(x,y,z,key){
       if(k!==key) continue;
       mcPendCel.delete(c);
       const p=c.split(',');
-      mcSetBlock(+p[0],+p[1],+p[2], id); mcMarcaBuild(+p[0],+p[2]); n++;
+      const _lx=+p[0], _ly=+p[1], _lz=+p[2], _antesLote=mc.grid[mcIdx(_lx,_ly,_lz)];   // REQ-UNDO1
+      mcSetBlock(_lx,_ly,_lz, id); mcMarcaBuild(_lx,_lz); n++;
+      mcApuntaLote(_lx,_ly,_lz,_antesLote,id);  // REQ-UNDO1
     }
     if(!n) return;
     mcBuildN+=n;
     if(!mc.batching) mcFlushBuild();                 // dentro de un lote ya flusheará endBatch()
   }).catch(e=>{
     mcPendCarga.delete(key); mcOlvidaPendientes(key);
+    mcCierraLote();                             // REQ-UNDO1: si no, el gesto se queda abierto y se filtra al siguiente
     console.warn('setVoxel: no he podido cargar «'+key+'»', e);
     toast('No he podido cargar la textura de «'+key+'»');
   }));
@@ -20562,7 +21468,9 @@ function mcSetVoxel(x,y,z,material){
   if(id) mcAvisaSiFino(material, id);   // solo para lo que de verdad no cabe: la transparencia real
   if(mcQuitaPiezaEn(x,y,z) && !mc.batching){ clearTimeout(mcStampT); mcStampT=setTimeout(mcFlushStamp, 80); }
 
+  const _antesLote=mc.grid[mcIdx(x,y,z)];       // REQ-UNDO1
   mcSetBlock(x,y,z, id); mcBuildN++; mcMarcaBuild(x,z);
+  mcApuntaLote(x,y,z,_antesLote,id);            // REQ-UNDO1
   // En modo lote (beginBatch/endBatch) NO se re-malla por bloque; endBatch() dispara un único mcFlushBuild al cerrar.
   if(!mc.batching){ clearTimeout(mcBuildT); mcBuildT=setTimeout(mcFlushBuild, 80); }   // re-malla+guarda una vez al acabar la ráfaga
   return true;
@@ -21575,7 +22483,11 @@ try{ localStorage.removeItem('vf_mcTool'); }catch(e){}   // limpia lo que dejaro
 function mcSetPlayerTool(v, announce){    // centraliza mc.tool (setter de consola + atajos B/P); persiste
   // REQ-TOOL8 · un id registrado por snippet vale igual que las cinco del código; uno desconocido (o el de
   // una herramienta que ya no existe, p. ej. al recargar antes de que corra su snippet) cae en 'build'.
+  const toolAntes = mc.tool;
   v=(v==='box'||v==='paint'||v==='select'||v==='pick'||mcHerrDef(v))?v:'build'; mc.tool=v;
+  // ⚠️ SÓLO SI CAMBIA DE VERDAD: aquí se entra también para reafirmar la herramienta que ya hay (la rueda,
+  // la consola, un snippet). Callar el fantasma que el jugador acaba de pedir sería el mismo fallo al revés.
+  if(mc.tool !== toolAntes) mcPreviewCalla();
   mcGuardarTool(false);              // REQ-TOOL5: cambiar de herramienta estando guardada la SACA (el viaje de vuelta), nunca deja la mano vacía
   mcPintaSlotHerramienta();          // la ranura 10 se entera aquí, venga el cambio de P, de la galería o de consola
   mcSetCrosshair(mcMiraDe(v));
@@ -22709,7 +23621,7 @@ window.addEventListener('keyup',e=>{
       // El ratón ha señalado una celda de la caja rotada; se guarda en los ejes de la pieza para que
       // sobreviva a un giro posterior. Si el barrido no la encuentra (no debería), se deja el agarre viejo.
       const sin = mcPasteAnchorDesdeRotado(dims, mcPasteOri(), mc.pasteAnchorHover);
-      if(sin) mc.pasteAnchor = sin;
+      if(sin){ mc.pasteAnchor = sin; if(clipboard) clipboard.ancla = sin.slice(); }   // y se recuerda
     }
     mc.pasteCtrlFreeze = null;
     mc.pasteAnchorHover = null;
@@ -22731,6 +23643,67 @@ window.addEventListener('keyup',e=>{
     }
   }
 });
+
+// REQ-EXTRU5 · el modificador que mantiene abierta la guía de extrusión. Se lee de los MODIFICADORES DEL
+// EVENTO (`e.ctrlKey`, `e.shiftKey`), nunca de un contador de pulsaciones propio: si el navegador se
+// lleva el foco con Ctrl pulsado no llega el keyup y el contador se queda mintiendo para siempre.
+// ⛔ Y SÓLO de keydown/keyup. Se probó a refrescar también con `mousemove` —parecía gratis— y es una
+// trampa: hay `mousemove` DE CONFIANZA con movimiento (0,0) y sin los modificadores puestos, así que
+// apagaban la guía a media pulsación. Tampoco hacían falta: no hay forma de cambiar de modificador sin
+// un keydown o un keyup.
+// Van aparte de los handlers de arriba, y en CAPTURA, a posta: esos se van por sus `return` en cuanto
+// hay un selector/nota/código abierto, y aquí sólo se está anotando una tecla, sin tocar el evento.
+window.addEventListener('keydown', e=>{ mc.selGuiaModo = mcSelGuiaModoDe(e); mc._escAlt = !!e.altKey; }, true);
+window.addEventListener('keyup',   e=>{ mc.selGuiaModo = mcSelGuiaModoDe(e); mc._escAlt = !!e.altKey; }, true);
+// Perder el foco con la tecla pulsada es el caso feo: el keyup NUNCA llega. ⚠️ `focus`/`blur` NO
+// BURBUJEAN y aun así un oyente en CAPTURA sobre `window` los ve TODOS —enfocar el canvas, un input del
+// OSD…—, y eso apagaría la guía a media pulsación: por eso estos dos van SIN captura y comprobando que
+// el que va y viene es la VENTANA. Mismo criterio que `mc.selCtrlHeld` más arriba.
+const mcSelGuiaFoco = e=>{ if(!e.target || e.target===window || e.target===document){ mc.selGuiaModo=''; mc._escAlt=false; } };
+window.addEventListener('blur',  mcSelGuiaFoco);
+window.addEventListener('focus', mcSelGuiaFoco);
+
+// El mando. La guía va PUESTA de fábrica (es el gesto que pidió el dueño); `activa(false)` la apaga sin
+// tocar nada más, y `marcas(modo)` la calcula SIN pintar y sin tener la tecla pulsada — que es la puerta
+// para la consola y para la sonda `tests/probe_sel_guia.js`.
+game.selGuia = {
+  activa(v){
+    if(v===undefined) return mc.selGuia !== false;
+    mc.selGuia = !!v;
+    if(!mc.selGuia){ mc.selGuiaModo=''; mc.selGuiaFirma=null; mc.selGuiaUltimo=null; mcSelGuiaLimpia(); }
+    return mc.selGuia;
+  },
+  marcas(m){
+    const usa = m || mc.selGuiaModo;
+    if(!usa || !mcSelGuiaHayPieza()) return null;
+    return mcSelGuiaCalcula(usa==='ctrl' ? 'ctrl' : 'shift');
+  },
+  estado(){
+    const g = mc.selGuiaModo ? mcSelGuiaGesto(mc.selGuiaModo) : null, u = mc.selGuiaUltimo;
+    return { activa:(mc.selGuia!==false), modo:(mc.selGuiaModo||'(ninguno)'), dibujando:!!mc.selGuiaFirma,
+             caraOpuesta:!!mc.selOpuesta, herramienta:mc.tool, cajas:mc.selCajas.length, hayCaja:!!mc.selBox,
+           pegando:!!mc.pasteActive,                       // pegando el gesto va sobre la pieza en vuelo,
+           piezaBloques:(mc.pasteActive && clipboard && clipboard.cells) ? clipboard.cells.length : 0,
+           piezaCabe:mc.pasteActive ? !!mcSelGuiaPiezaEnVuelo() : null,      // no sobre la de origen
+             cara:g?g.nombre:null, sumaConRueda:g?g.ruedaMas:null, restaConRueda:g?g.ruedaMenos:null,
+             marcasMas:u?u.mas.length:0, marcasMenos:u?u.menos.length:0, cajaVacia:u?u.vacia:null,
+             voxelesPintados:u?(u.voxeles|0):0, grupos:MC_SELGUIA_GRUPOS,
+             ayuda:'Mantén Shift o Ctrl con Seleccionar y una caja hecha. ✚ verde = ahí pone · ▬ rojo = eso se come.' };
+  }
+};
+// El grosor y el material de los grupos sobreviven a `limpia()`, así que se ponen UNA vez: un ✚ son 5
+// voxeles gordos, no 625 finos (⛔ nunca apilar voxeles: `mcDrawArr` sube la capa entera cada frame).
+// `emite` es brillo GRATIS —no ilumina nada— para que la marca se lea en un sótano; `luz:0` para no
+// meter un foco en la escena, que sí costaría.
+for(const g of MC_SELGUIA_GRUPOS){
+  game.voxelesUI.grosor(g, MC_SELGUIA_GROSOR);
+  game.voxelesUI.material(g, { emite:true, luz:0 });
+}
+// Los de la caja de Alt van más finos (es una caja, no un glifo) pero con el mismo brillo gratis.
+for(const g of MC_PASTE_ESC_GRUPOS){
+  game.voxelesUI.grosor(g, MC_PASTE_ESC_GROSOR);
+  game.voxelesUI.material(g, { emite:true, luz:0 });
+}
 
 // --- F4b · controles táctiles: sin teclado no se puede andar por el Mundo ---
 // Una pantalla táctil no tiene ni pointer-lock ni WASD, así que desde un móvil el Mundo se veía pero
@@ -23480,7 +24453,9 @@ $('#mc-canvas').addEventListener('mousedown',e=>{
   // automático. Guardarse la herramienta fue suya entre REQ-TOOL5 y 2026-08-18; ahora eso es la ROSCA
   // (bajar hasta el peldaño «vacía», REQ-TOOL6), orden del dueño: «*el boton central vuelva a ser el de
   // activar botones / palancas / etc de redstone… la herramienta se mostrara y ocultara con la wheel*».
-  if(e.button===1){ e.preventDefault(); return; }
+  if(e.button===1){ e.preventDefault();
+    if(mc.tool==='select') mcSelConmutaCaraOpuesta();     // REQ-EXTRU4 · conmuta la cara de trabajo
+    return; }
   if(e.button!==0 && e.button!==2) return;
   mc.heldBtn=e.button; mc.actAt=performance.now();
   mcDoAction(e.button, e.shiftKey);
@@ -23512,24 +24487,35 @@ $('#mc-canvas').addEventListener('wheel',e=>{
     toast(n + ' bloque(s) — auto-selección · ' +
           (e.shiftKey && !e.ctrlKey ? 'Shift+rueda hunde/trae' : 'Ctrl+rueda extruye/cava'));
   }
-  const extru = e.ctrlKey && mc.tool==='select' && !!mc.selBox;
+  // REQ-EXTRU5 · PEGANDO (Ctrl+V) manda EL CÚMULO EN VUELO: Ctrl/⇧+rueda lo engordan o lo adelgazan por
+  // la cara que marca la guía, y ⛔ NO extruyen la caja de origen, que sigue viva y seleccionada aunque
+  // la pieza esté volando lejos. Dueño (2026-08-28): «*con desaparecer sigue funcionando control+rueda
+  // en la seleccion previa*». Manda sobre los dos extrusores: pegando no hay nada más que hacer con Ctrl.
+  const pega = !!mc.pasteActive && (e.ctrlKey || (e.shiftKey && !e.altKey && !e.metaKey));
+  const extru = !pega && e.ctrlKey && mc.tool==='select' && !!mc.selBox;
+  // ALT+rueda ESCALA la pieza en vuelo: arriba ×2, abajo ÷2 (dueño, 2026-08-28). Va aquí y no en un
+  // oyente aparte para entrar en el MISMO acumulador que los demás: media muesca no puede escalar, y
+  // cambiar de gesto lo vacía. Sin Ctrl ni Meta, así que no se pisa con `pega` (que los exige).
+  const esc = e.altKey && !e.ctrlKey && !e.metaKey && mcPasteEscHay();
   // REQ-EXTRU2 · el mismo trato para Shift, pero hundiendo/trayendo por el eje que se mira
   // (mcSelExtruirFrente). Sin Ctrl/Alt/Meta: Shift a secas. Shift+clic sigue siendo añadir caja
   // (REQ-SEL1) — son gestos distintos, no se pisan.
-  const extruF = e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && mc.tool==='select' && !!mc.selBox;
+  const extruF = !pega && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && mc.tool==='select' && !!mc.selBox;
   if(e.ctrlKey){ e.preventDefault(); if(mc.selCtrlHeld) mc.selCtrlUsado = true; }   // este Ctrl ya tiene dueño: al soltarlo no fija agarre
-  if(!extru && !extruF && !mc.ruedaTool) return;
+  if(!pega && !esc && !extru && !extruF && !mc.ruedaTool) return;
   e.preventDefault();
   // El acumulador es el mismo para los dos gestos, pero se vacía al cambiar de gesto: media muesca de
   // rosca a medias no puede acabar extruyendo (ni al revés).
-  const gesto = extru ? 'y' : (extruF ? 'frente' : 'rosca');
+  const gesto = esc ? 'esc' : (pega ? ('pega:'+(e.ctrlKey?'ctrl':'shift')) : (extru ? 'y' : (extruF ? 'frente' : 'rosca')));
   if(mc._ruedaExtru !== gesto){ mc._ruedaExtru = gesto; mc._ruedaAcum = 0; }
   mc._ruedaAcum = (mc._ruedaAcum || 0) + e.deltaY;
   const umbral = (isFinite(+mc.ruedaUmbral) && +mc.ruedaUmbral > 0) ? +mc.ruedaUmbral : 30;
   if(Math.abs(mc._ruedaAcum) < umbral) return;
   const paso = mc._ruedaAcum > 0 ? -1 : 1;   // deltaY > 0 = rosca hacia abajo = bajar en la escalera
   mc._ruedaAcum = 0;
-  if(extru) mcSelExtruir(paso); else if(extruF) mcSelExtruirFrente(paso); else mcRuedaHerramienta(paso);
+  if(esc) mcPasteEscala(paso > 0 ? 2 : 0.5);
+  else if(pega) mcSelGuiaCreceEncoge(paso, e.ctrlKey ? 'ctrl' : 'shift');
+  else if(extru) mcSelExtruir(paso); else if(extruF) mcSelExtruirFrente(paso); else mcRuedaHerramienta(paso);
 }, {passive:false});
 
 buildPalette();
