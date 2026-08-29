@@ -66,6 +66,17 @@ function ok(cond, msg, extra) {
     const posPrev = mc.pos.slice();
     const vistaPrev = mc.vistaFluido;
 
+    // Este guardián vigila el DISEÑO de MC_VISTA_FLUIDO (azul, niebla absoluta en bloques, suelo de
+    // tinte), no la estética que cada mundo se ponga encima. `vars-cfg` y `ambientes` mueven en vivo
+    // game.vistaAgua/game.cielo — legítimo, son tunables — así que aquí se vuelve a fábrica antes de
+    // medir. Sin esto el test no mide el motor, mide el snippet que tocara estar cargado ese día.
+    // game.niebla (REQ-ENV2) es la niebla atmosférica de FUERA del agua: si un ambiente la deja puesta,
+    // §1 ve [near,far] donde espera null y §2 compara contra una niebla que ya venía acercada.
+    game.vistaAgua('reset'); game.vistaLava('reset'); game.niebla('reset');
+    // MC_SKY dejó de ser constante cuando llegó game.cielo() (lo reescribe). Se lee EN VIVO en vez de
+    // clavarlo aquí: lo que se prueba es «fuera del agua, mcCieloEf ES MC_SKY», no un color concreto.
+    out.skyBase = Array.from(MC_SKY);
+
     // ── 1 · fuera del agua: el estado de siempre ────────────────────────────────────────────────
     mc.vistaFluido = null;
     const fuera = pantalla();
@@ -94,6 +105,7 @@ function ok(cond, msg, extra) {
     out.pasos.lava = lava;
     out.cieloLava = Array.from(mcCieloEf);
     out.tinteLava = mcFogMin();
+    out.fogLava = [mcFogNear(1000), mcFogFar(1000)];
 
     // ── 4 · un fluido que no existe no debe teñir nada ──────────────────────────────────────────
     mc.vistaFluido = 'NONE';
@@ -139,7 +151,7 @@ function ok(cond, msg, extra) {
   });
 
   console.log('\n§1 · fuera del agua: nada cambia');
-  ok(JSON.stringify(r.cieloFuera) === JSON.stringify([0.549, 0.776, 1]),
+  ok(JSON.stringify(r.cieloFuera) === JSON.stringify(r.skyBase),
     'el cielo sigue siendo MC_SKY', JSON.stringify(r.cieloFuera));
   ok(r.nieblaFuera === null, 'la niebla sigue siendo la de siempre (null)', String(r.nieblaFuera));
 
@@ -175,11 +187,17 @@ function ok(cond, msg, extra) {
   const l = r.pasos.lava;
   ok(l.r > l.b, 'y la pantalla tira a rojo', l.r.toFixed(1) + ' vs ' + l.b.toFixed(1));
   ok(JSON.stringify(r.cieloLava) !== JSON.stringify(r.cieloAgua), 'agua y lava no se confunden');
-  ok(r.tinteLava > r.tinteAgua, 'en lava se ve MUCHO menos que en agua, a propósito',
+  // Hasta 2026-08 aquí se exigía `tinteLava > tinteAgua` («en lava no se ve nada»). El dueño lo corrigió
+  // al pedir la fase: «*es como el agua pero cambia el color nada más*», y MC_VISTA_FLUIDO le hizo caso —
+  // mismo `far` y mismo suelo de tinte para los dos. Lo que SÍ los separa, además del color, es que en
+  // lava la rampa de niebla arranca antes (near -80 vs -30), y eso es lo que se vigila.
+  ok(r.fogLava[0] < r.fogAgua[0], 'en lava la rampa de niebla arranca antes que en agua',
+    'lava=' + r.fogLava[0] + ' agua=' + r.fogAgua[0]);
+  ok(r.tinteLava === r.tinteAgua, '…pero el suelo de tinte es el mismo: «como el agua, cambia el color»',
     'lava=' + r.tinteLava + ' agua=' + r.tinteAgua);
 
   console.log('\n§4 · un tipo desconocido no tiñe');
-  ok(JSON.stringify(r.cieloNone) === JSON.stringify([0.549, 0.776, 1]),
+  ok(JSON.stringify(r.cieloNone) === JSON.stringify(r.skyBase),
     'fluidType desconocido → cielo normal', JSON.stringify(r.cieloNone));
 
   console.log('\n§5 · tunables de consola (game.vistaAgua)');
@@ -235,6 +253,10 @@ function ok(cond, msg, extra) {
     const prevOjo = mc.grid[iOjo] | 0, prevPies = mc.grid[iPies] | 0;
 
     const mide = () => { mcRender(); return { f: mc.fluidoOjo, cielo: Array.from(mcCieloEf) }; };
+    // Igual que arriba: fábrica antes de medir, y MC_SKY en vivo. Este mapa es el del dueño y trae
+    // sus propios snippets de ambiente encima.
+    game.vistaAgua('reset'); game.vistaLava('reset'); game.niebla('reset');
+    out.skyBase = Array.from(MC_SKY);
 
     out.vacio = mide();
     if (porTipo.WATER) { mc.grid[iOjo] = porTipo.WATER.id; out.agua = mide(); mc.grid[iOjo] = prevOjo; }
@@ -266,7 +288,7 @@ function ok(cond, msg, extra) {
     ok(r5.soloPies.f === null, 'agua en los PIES pero no en el ojo: no tiñe (charco)', String(r5.soloPies.f));
   }
   ok(r5.trasQuitar.f === null, 'al vaciar la celda del ojo vuelve a null', String(r5.trasQuitar.f));
-  ok(JSON.stringify(r5.trasQuitar.cielo) === JSON.stringify([0.549, 0.776, 1]),
+  ok(JSON.stringify(r5.trasQuitar.cielo) === JSON.stringify(r5.skyBase),
     'y el cielo vuelve a MC_SKY', JSON.stringify(r5.trasQuitar.cielo));
   ok(errores2.length === 0, 'ningún error en la página de fluidos', errores2.slice(0, 3).join(' | '));
 

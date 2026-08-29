@@ -168,7 +168,7 @@ TEMAS_ISLA = [
     (re.compile(r'bug|error|fallo', re.I),
      {'jardin': C.mat('red_concrete'), 'muro': C.mat('ladrillo'), 'dy': 3, 'cimientos_roca': C.mat('obsidiana'), 'cimientos_tierra': C.mat('red_concrete')}),
     (re.compile(r'req|requerimiento|mejora|feature', re.I),
-     {'jardin': C.mat('yellow'), 'muro': C.mat('arenisca'), 'dy': 2, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.mat('yellow')}),
+     {'jardin': C.mat('yellow_concrete'), 'muro': C.mat('arenisca'), 'dy': 2, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.mat('yellow_concrete')}),
     (re.compile(r'backlog|ola', re.I),
      {'jardin': C.mat('musgo_adoquin'), 'muro': C.mat('madera'), 'dy': -1, 'cimientos_roca': C.SUELO_ROCA, 'cimientos_tierra': C.SUELO_TIERRA}),
     (re.compile(r'redstone', re.I),
