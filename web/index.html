@@ -595,6 +595,15 @@
       <button class="mc-tbtn accion poner" id="mc-tder" type="button" data-btn="2" title="Poner / usar (clic derecho)">▣</button>
       <button class="mc-tbtn accion redstone" id="mc-tmed" type="button" data-btn="1" title="Conmutar redstone (clic central)">⚡</button>
       <button class="mc-tbtn" id="mc-tjump" type="button" title="Saltar">⤒</button>
+      <!-- REQ-TACT1 · el gemelo del ⤒ mientras se vuela. Volando, subir es Espacio (= el ⤒) y bajar es
+           Shift, que en táctil NO EXISTE: sin esto se puede despegar y no aterrizar. Sale y se esconde
+           con `mc.volar`, no con el resto de los mandos, porque a pie no significa nada. -->
+      <button class="mc-tbtn" id="mc-tbajar" type="button" title="Bajar (volando)" hidden>⤓</button>
+      <!-- REQ-TACT1 · extruir/cavar la selección. En escritorio es Ctrl+rueda, y en tablet no hay rueda:
+           era lo único del Mundo sin ninguna puerta táctil. Salen SOLOS con una caja marcada (los pone
+           y los quita mcExtruBtn, un flanco por frame) para no robar sitio el resto del tiempo. -->
+      <button class="mc-tbtn extru" id="mc-textru-mas" type="button" title="Extruir la selección (Ctrl+rueda arriba)" hidden>＋</button>
+      <button class="mc-tbtn extru" id="mc-textru-menos" type="button" title="Cavar la selección (Ctrl+rueda abajo)" hidden>－</button>
       <!-- REQ-MOV1 · el ✕ era la ÚNICA salida en táctil (sin teclado no hay Esc) y ahora es un menú;
            salir sigue estando dentro, y sigue siendo la única. El menú vive aquí, no en la esquina,
            por lo de siempre: se enciende y se apaga con `#mc-touch` de un solo `hidden`. -->
@@ -605,9 +614,42 @@
         <!-- ⤢ y no ⛶ (U+26F6, el símbolo «de manual» para esto): ⛶ sale como CAJA en el navegador de
              pruebas —no hay fuente que lo dibuje— mientras que el resto de glifos de aquí sí están. -->
         <button type="button" id="mc-tfull">⤢ Pantalla completa</button>
+        <!-- REQ-TACT1 · SUBMENÚS, no lista plana (orden del dueño): con las nueve teclas del Mundo
+             seguidas, el panel no cabía en un móvil apaisado (~380 px útiles). Cada `data-sub` nombra
+             al panel hermano que abre.
+             ⚠️ Los de primer nivel son HIJOS DIRECTOS de #mc-tmenu-panel y `#mc-tsalir` es el último:
+             quien quiera añadir su propia entrada la mete ANTES del ✕ (así lo hace el multijugador,
+             que app.js no conoce). Mover el ✕ dentro de un submenú rompería ese contrato. -->
+        <button type="button" id="mc-tm-editar" data-sub="mc-tmenu-editar">✏️ Editar ›</button>
+        <button type="button" id="mc-tm-ver" data-sub="mc-tmenu-ver">👁 Ver ›</button>
+        <button type="button" id="mc-tm-captura" data-sub="mc-tmenu-captura">📷 Capturar ›</button>
+        <button type="button" id="mc-tcodigo">🧩 Código</button>
+        <button type="button" id="mc-tsalir" class="rojo">✕ Salir del Mundo</button>
+      </div>
+      <!-- Los submenús son panels HERMANOS y no hijos: comparten sitio y aspecto con el de primer
+           nivel (misma clase `.mc-tmenu-panel`, que además es la que los salva del recorte del OSD). -->
+      <div class="mc-tmenu-panel" id="mc-tmenu-editar" hidden>
+        <button type="button" class="volver">‹ Editar</button>
+        <!-- La única que NO cierra el menú: cambiar de herramienta es cíclico (la tecla E) y hay que
+             poder pulsarla dos veces seguidas. Su texto lo reescribe app.js con la herramienta viva. -->
+        <button type="button" id="mc-therr" class="viva">🛠 Herramienta</button>
+        <button type="button" id="mc-tdeshacer">↶ Deshacer</button>
+        <button type="button" id="mc-trehacer">↷ Rehacer</button>
+        <button type="button" id="mc-tgirar">⟳ Girar la selección</button>
+        <button type="button" id="mc-tcopiar">⧉ Copiar</button>
+        <button type="button" id="mc-tcortar">✂ Cortar</button>
+        <button type="button" id="mc-tpegar">📋 Pegar</button>
+        <button type="button" id="mc-tnota">📝 Nota</button>
+      </div>
+      <div class="mc-tmenu-panel" id="mc-tmenu-ver" hidden>
+        <button type="button" class="volver">‹ Ver</button>
+        <button type="button" id="mc-tvolar">🕊 Volar</button>
+        <button type="button" id="mc-txray">🩻 Rayos X</button>
+      </div>
+      <div class="mc-tmenu-panel" id="mc-tmenu-captura" hidden>
+        <button type="button" class="volver">‹ Capturar</button>
         <button type="button" id="mc-tfoto">📷 Sacar foto</button>
         <button type="button" id="mc-tvideo">🎬 Grabar vídeo</button>
-        <button type="button" id="mc-tsalir" class="rojo">✕ Salir del Mundo</button>
       </div>
     </div>
     <!-- Botón de desatasco (BUG-AG7). Sale SOLO cuando estás atascado de verdad, porque con

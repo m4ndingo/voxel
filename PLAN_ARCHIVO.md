@@ -389,6 +389,54 @@ Captura y transcripción → [`data/tickets/REQ-MOV1/contexto.md`](data/tickets/
 
 ---
 
+<a id="-req-tact1"></a>
+
+### ✅ REQ-TACT1 · El Mundo entero al alcance del dedo — ✅ resuelto 2026-08-29
+
+Continuación de [REQ-MOV1](#-req-mov1): aquel puso los mandos de MOVERSE, éste las **acciones que sólo
+tenía el teclado**. Dos encargos del dueño, el mismo día:
+
+1. El menú ☰ (elegidas de una lista de diez): **`Z`/`Shift+Z` deshacer-rehacer · `E` herramienta ·
+   `F` volar · `N` nota · `X` rayos X · `R` girar · `Ctrl+C/X/V` copiar-cortar-pegar · `Alt+C` snippets**.
+   ⛔ **NO** entraron los recortes (`K`) ni el tamaño del jugador (`B`) — decisión suya, no un olvido.
+   Con **submenús**, no lista plana, y **directo a `app.js`/`index.html`** (el ☰ ya es del motor), **pero**:
+   «*multi tendría que añadir su opción al menú al cargarse ya que **app.js no tiene porqué saber de
+   multi ni exponerlo***».
+2. «*en el móvil hacer clic en pantalla no debería realizar clic izquierdo ya que quieres moverte o
+   coger el foco y se activa la función de la herramienta y no debería, **para eso está el botón en
+   pantalla***».
+
+**Lo que se hizo** (`web/index.html`, `web/style.css`, `web/app.js`; detalle en
+[`docs/movil-y-tactil.md`](docs/movil-y-tactil.md); guardián `tests/probe_menu_tactil.js`, 46 ✓):
+
+- ☰ de **tres submenús** (`✏️ Editar`, `👁 Ver`, `📷 Capturar`) sobre panels **hermanos**, no hijos.
+  Las nueve teclas repartidas dentro; primer nivel de 6 filas para que quepa en un móvil apaisado.
+- **`⤓` bajar volando** (`#mc-tbajar`): volando la vertical es `Espacio − Shift` y **en táctil no hay
+  Shift** ⇒ se despegaba y no se aterrizaba. Sale y se esconde con `mc.volar`.
+- **`＋ / －` de extruir** (`#mc-textru-mas/-menos`): en escritorio es `Ctrl+rueda`, y en tablet no hay
+  rueda. Salen **solos** con una caja marcada.
+- **`mcRatonDeDedo()`**: un toque marca la hora, y el `click`/`mousedown` de compatibilidad que llega
+  detrás se ignora durante 700 ms.
+
+**Las cuatro decisiones que costaría caro deshacer:**
+
+- 🔒 **`#mc-tsalir` es el ÚLTIMO hijo directo de `#mc-tmenu-panel`** — ése es el **contrato de
+  inyección** que cumple la condición del dueño: quien quiera su entrada la mete *antes* del ✕
+  (`panel.insertBefore(b, panel.querySelector('#mc-tsalir'))`), y `app.js` no se entera de que existe.
+  Meter el ✕ dentro de un submenú rompería a todo el que se cuelgue ahí.
+- **Cada opción llama a la MISMA función que su tecla**, nunca a una versión propia: el reparto de qué
+  hace cada atajo sigue viviendo en el handler de teclas y aquí sólo se abre una segunda puerta. Si la
+  tecla cambia, el menú la sigue sin tocarse.
+- **El toque se distingue por TIEMPO, no apagando el ratón cuando `MC_TOUCH`**: un portátil con pantalla
+  táctil tiene las dos cosas a la vez, y ahí el ratón de verdad tiene que seguir picando.
+- **`mcExtruBtn()` va por FLANCO**, como `mcStuckShow`: se llama una vez por frame y sin cambio de
+  estado no toca el DOM (un `hidden=` por frame invalida el layout 60 veces por segundo para nada).
+
+**Lo que NO cubre**: `mcSelExtruirFrente` (`Shift+rueda`, extruir por la cara que miras) **sigue sin
+botón táctil**. No estaba en la lista y añadir un tercer botón al montón se decide viéndolo.
+
+---
+
 <a id="-req-glow5"></a>
 
 ### 🔴 REQ-GLOW5 · Un voxel de `game.voxelesUI` puede emitir luz — 🔴 abierto 2026-08-19
@@ -577,6 +625,7 @@ sin abrir apenas los ficheros, a propósito. La columna «decisiones» recoge lo
 | ~~[REQ-SEL4](#-req-sel4)~~ | ~~con selección, **`r` debe girar en horizontal y `R` en profundidad** (4×4 posturas)~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`: «así se puede con `r` abrir una ventana de bloques, o con `R` levantar una cornisa». Hermano de [BUG-SEL3](#-bug-sel3): el mismo giro, visto desde el mando |
 | ~~[REQ-ED3](#-req-ed3)~~ | ~~**guías de rejilla** en el editor 2D (líneas azul claro que parten la capa en 2×2, 4×4…), conmutables~~ | ✅ resuelto 2026-08-22 | pedido por el dueño como «tool que rote entre sin grid / ÷2 / ÷4». **Investigado**: el sitio es `drawEdit` (`app.js:565`), que ya pinta una rejilla por celda. Ojo con lo de «tool»: las del panel son de DIBUJO y elegirla te dejaría sin pincel — el precedente correcto es el interruptor de Caras (`vf_caras_marcar`), estado de VISTA que no viaja en el documento |
 | ~~[REQ-MOV1](#-req-mov1)~~ | ~~en el **móvil** el Mundo es inmanejable: sobran 📷/🎬, faltan los **3 botones del ratón**, pantalla completa, y el ✕ debe ser un **menú**~~ | ✅ resuelto 2026-08-22 | captura y palabras del dueño en [`data/tickets/REQ-MOV1/`](data/tickets/REQ-MOV1/contexto.md). Revierte el «a propósito NO hay botones de romper/poner» que estaba escrito en `app.js`. El central **no es duda**: es el de redstone. Ojo al `pointerLockElement`: pantalla completa lo suelta |
+| ~~[REQ-TACT1](#-req-tact1)~~ | ~~en táctil faltan las **acciones que sólo tenía el teclado** (deshacer, copiar, girar, volar, rayos X, nota, herramienta, código, bajar volando, extruir), y **un toque en la pantalla no debería ser un clic izquierdo**: activa la herramienta cuando sólo querías moverte~~ | ✅ resuelto 2026-08-29 | continúa REQ-MOV1. El ☰ pasa a **submenús** (9 filas no caben apaisadas). 🔒 **`#mc-tsalir` sigue siendo el último hijo directo de `#mc-tmenu-panel`**: ése es el contrato por el que el multijugador inyecta su `💬 Hablar` sin que `app.js` sepa que existe. El dedo se distingue **por tiempo** (`mcRatonDeDedo`), no apagando el ratón: un portátil táctil tiene los dos |
 | ~~[REQ-GLOW5](#-req-glow5)~~ | ~~poder decir desde un snippet que un **voxel de `game.voxelesUI` emite luz** (fuego, partículas)~~ | ✅ resuelto 2026-08-22 | mismo principio que BUG-GLOW4: se declara con el prefijo `*` del color, igual que en un dibujo. Se apoya en la luz dinámica ya existente |
 | ~~[REQ-GLOW10](#-req-glow10)~~ | ~~el brillo de los **emisivos debe adaptarse a la luz ambiente**: de noche brillan, de día no hace falta tanto~~ | ✅ resuelto 2026-08-22 | nota de `/map/bugfinder2`. Pide **dos tunables**: la adaptación y el brillo máximo. Redactado, sin investigar. **Desbloqueado**: [BUG-GLOW8](PLAN_ARCHIVO.md#-bug-glow8) cerró el 2026-08-20 y ya hay UNA sola ley de luz. 🔒 **bajo el candado** de la [Ley de la Luz](wiki/paginas/ley-de-la-luz.md) |
 | ~~[REQ-CIUDAD1](#-req-ciudad1)~~ | ~~**renderizar un `.md` como ciudad de voxels** (`/map/plan`) y **regenerar el `.md` desde el mapa**~~ | ✅ resuelto 2026-08-22 | pedido del dueño el 2026-08-20. Hecho y en verde: la vuelta es **byte a byte** con `--fidelidad=exacta` (`tests/test_ciudad_md.js`). Detalle en [`docs/ciudad-md.md`](docs/ciudad-md.md). Falta que lo mire y decida si el aspecto de la ciudad merece más presupuesto (todo lo estético es DERIVADO y no toca la ida y vuelta) |

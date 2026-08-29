@@ -768,6 +768,16 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
 #mc-tizq{right:calc(76px  + env(safe-area-inset-right,0px)); bottom:calc(148px + env(safe-area-inset-bottom,0px))}
 #mc-tder{right:calc(150px + env(safe-area-inset-right,0px)); bottom:calc(88px  + env(safe-area-inset-bottom,0px))}
 #mc-tmed{right:calc(150px + env(safe-area-inset-right,0px)); bottom:calc(162px + env(safe-area-inset-bottom,0px))}
+/* REQ-TACT1 · el ⤓ de bajar volando va en la MISMA fila que el ⤒ y a su izquierda, no debajo: abajo
+   está el borde y a la derecha la columna de acciones (#mc-tder ocupa 150..210). */
+#mc-tbajar{right:calc(216px + env(safe-area-inset-right,0px)); bottom:calc(62px + env(safe-area-inset-bottom,0px))}
+/* Los ＋/－ de extruir van al lado IZQUIERDO, sobre el joystick: la derecha ya está llena y esto se
+   pulsa mirando la caja marcada, con el pulgar que no está andando. */
+.mc-tbtn.extru{left:calc(16px + env(safe-area-inset-left,0px)); right:auto; width:56px; height:56px; font-size:24px;
+  background:rgba(70,110,170,.34); border-color:rgba(150,190,255,.5)}
+#mc-textru-mas{bottom:calc(250px + env(safe-area-inset-bottom,0px))}
+#mc-textru-menos{bottom:calc(188px + env(safe-area-inset-bottom,0px))}
+.mc-tbtn[hidden]{display:none}
 .mc-tbtn.romper{border-color:rgba(255,255,255,.42)}
 .mc-tbtn.poner{background:rgba(60,120,60,.34); border-color:rgba(120,200,120,.5)}
 .mc-tbtn.redstone{width:52px; height:52px; font-size:19px;
@@ -785,6 +795,10 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
   background:rgba(14,17,25,.92); border:1px solid rgba(255,255,255,.28);
   backdrop-filter:blur(3px); pointer-events:auto; touch-action:manipulation}
 .mc-tmenu-panel[hidden]{display:none}
+/* Con submenús (REQ-TACT1) el panel más largo son 9 filas: en un móvil apaisado no cabe entre el ☰ y
+   el borde de abajo, así que se le pone tope y rueda por dentro en vez de salirse por debajo. */
+.mc-tmenu-panel{max-height:calc(100% - 76px - env(safe-area-inset-top,0px)); overflow-y:auto}
+.mc-tmenu-panel button.volver{color:#9fd0ff; font-weight:600}
 /* 46px de alto: por debajo de eso un dedo falla, y aquí fallar puede ser salir del Mundo. */
 .mc-tmenu-panel button{display:block; width:100%; min-height:46px; text-align:left;
   padding:0 14px; border:0; border-radius:8px; background:transparent; color:#fff;
@@ -807,8 +821,14 @@ input[type=color]{width:34px; height:26px; padding:0; border:1px solid var(--lin
     top:calc(8px + env(safe-area-inset-top,0px)); right:calc(8px + env(safe-area-inset-right,0px))}
   /* Apaisado la pantalla es BAJA (~380 px útiles): el panel entero no cabe debajo del ☰ con las
      alturas de vertical, así que aquí se encoge en vez de salirse por abajo. */
-  .mc-tmenu-panel{top:calc(52px + env(safe-area-inset-top,0px)); right:calc(8px + env(safe-area-inset-right,0px))}
+  .mc-tmenu-panel{top:calc(52px + env(safe-area-inset-top,0px)); right:calc(8px + env(safe-area-inset-right,0px));
+    max-height:calc(100% - 62px - env(safe-area-inset-top,0px))}
   .mc-tmenu-panel button{min-height:40px; line-height:40px; font-size:14px}
+  #mc-tbajar{right:calc(198px + env(safe-area-inset-right,0px)); bottom:calc(18px + env(safe-area-inset-bottom,0px))}
+  /* Apaisado el joystick sube hasta los 110 px: los ＋/－ se apilan justo encima, más pequeños. */
+  .mc-tbtn.extru{left:calc(12px + env(safe-area-inset-left,0px)); width:46px; height:46px; font-size:20px}
+  #mc-textru-mas{bottom:calc(174px + env(safe-area-inset-bottom,0px))}
+  #mc-textru-menos{bottom:calc(122px + env(safe-area-inset-bottom,0px))}
 }
 /* (`.mc-actions`, la esquina con «🧩 Código» y «✕ Cerrar», se quitó en REQ-OSD1 · 2026-08-13.) */
 #snip-modal{z-index:50}

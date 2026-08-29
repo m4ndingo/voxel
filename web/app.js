@@ -21740,6 +21740,7 @@ function mcTick(now){
 
   if (typeof mcUpdatePreview === 'function') mcUpdatePreview();
   if (typeof mcUpdateHotbar === 'function') mcUpdateHotbar(dt);
+  if (typeof mcExtruBtn === 'function') mcExtruBtn();
   if (typeof mcSyncHeldToolStruct === 'function') mcSyncHeldToolStruct();
   if (typeof mcRender === 'function') mcRender();
   if (typeof mcUpdateNoteView === 'function') mcUpdateNoteView();
@@ -23420,7 +23421,8 @@ const MC_RESERVED=new Set([...MC_KEYS,'e','p','b','x','u','n','r','z','f','k','e
 // escondería el cursor y dejaría el menú inservible. Se trabaja aquí, en el 'click', y no en el
 // 'mousedown' de más abajo, porque aquel exige tener el puntero capturado — que es justo lo que no hay.
 $('#mc-canvas').addEventListener('click',e=>{
-  if(mc.escaparate){ mcEscaparatePulsa(e.clientX, e.clientY); return; }
+  if(mc.escaparate){ mcEscaparatePulsa(e.clientX, e.clientY); return; }   // el escaparate SÍ se pulsa con el dedo
+  if(mcRatonDeDedo()) return;   // un dedo no pide pointer-lock: en táctil los mandos son los de pantalla
   mcLockPointer();
 });
 // El cursor avisa de lo que es pulsable. Solo en escaparate: fuera, es un raycast por movimiento de
@@ -23726,6 +23728,21 @@ const MC_LOOK_BASE=0.006;      // rad/px del arrastre; el ratón usa 0.000625, q
 // zona muerta dejaría de coincidir. 0.39 reproduce los 46 px de siempre en el aro de 118.
 const MC_STICK_F=0.39;         // recorrido = ancho del aro × esto
 let mcLookSens=MC_LOOK_BASE, mcStickId=-1, mcLookId=-1, mcJumpId=-1, mcAccionId=-1, mcLookX=0, mcLookY=0;
+let mcBajaId=-1;   // REQ-TACT1 · el dedo que tiene pulsado el ⤓ de bajar volando
+
+// REQ-TACT1 · cuándo tocó la pantalla un DEDO por última vez. Encargo del dueño (2026-08-29): «*en el
+// móvil hacer clic en pantalla no debería realizar clic izquierdo ya que quieres moverte o coger el
+// foco y se activa la función de la herramienta, para eso está el botón en pantalla*».
+// El porqué: tras un toque el navegador emite además eventos de ratón DE COMPATIBILIDAD (`mousedown` y
+// `click`) que son indistinguibles de un ratón de verdad —no traen `pointerType`—. El primer toque
+// entraba por el `click`, pedía pointer-lock (Android lo concede en pantalla completa) y a partir de
+// ahí cada toque para girar la cámara pasaba el `pointerLockElement===mc.canvas` del `mousedown` y
+// picaba/ponía un bloque. Los botones ⛏/🧱 de la pantalla existen justo para eso.
+// Se resuelve por TIEMPO y no apagando el ratón cuando `MC_TOUCH`: un portátil con pantalla táctil
+// tiene las dos cosas a la vez y ahí el ratón de verdad tiene que seguir picando.
+let mcDedoAt=0;
+function mcDedoAhora(){ mcDedoAt=performance.now(); }
+function mcRatonDeDedo(){ return performance.now()-mcDedoAt < 700; }   // margen del `click` que cierra el toque
 try{ const s=parseFloat(localStorage.getItem('vf_mcTouchLook')); if(isFinite(s)&&s>0) mcLookSens=MC_LOOK_BASE*s; }catch(e){}
 // game.touchLook = múltiplo de la sensibilidad del arrastre (1 = normal), como game.mouseSpeed.
 Object.defineProperty(game,'touchLook',{ enumerable:true, get:()=>+(mcLookSens/MC_LOOK_BASE).toFixed(2),
@@ -23740,7 +23757,27 @@ Object.defineProperty(game,'touchControls',{ enumerable:true, get:()=>mcTouchOn,
            return mcTouchOn; } });
 
 function mcTouchShow(on){ const z=$('#mc-touch'); if(z) z.hidden=!(on && mcTouchOn); if(!on) mcStickSuelta();
-  if(!on){ const p=$('#mc-tmenu-panel'); if(p) p.hidden=true; }   // el menú no sobrevive a salir del Mundo
+  // El menú no sobrevive a salir del Mundo. Los submenús tampoco: son panels HERMANOS (REQ-TACT1), así
+  // que esconder sólo el de primer nivel dejaría el abierto flotando sobre el editor.
+  if(!on) document.querySelectorAll('.mc-tmenu-panel').forEach(p=>p.hidden=true);
+  if(!on) mcExtruBtn(true);   // …y los botones que salen solos, que si no vuelven puestos al reentrar
+}
+// REQ-TACT1 · los dos mandos que aparecen SOLOS: el ⤓ mientras vuelas y los ＋/－ mientras hay una caja
+// marcada. Se llama una vez por frame desde el bucle, así que va por FLANCO como mcStuckShow: sin cambio
+// de estado no se toca el DOM (un `hidden=` por frame invalida el layout 60 veces por segundo para nada).
+function mcExtruBtn(apaga){
+  const vuela = !apaga && !!mc.active && !!mc.volar;
+  const extru = !apaga && !!mc.active && mc.tool==='select' && !!mc.selBox;
+  if(vuela !== !!mc._btnVuela){
+    mc._btnVuela = vuela;
+    const b=$('#mc-tbajar'); if(b) b.hidden=!vuela;
+    if(!vuela && mcBajaId>=0) mcTouchSuelta(mcBajaId);   // dejar de volar con el dedo puesto no deja el Shift clavado
+  }
+  if(extru !== !!mc._btnExtru){
+    mc._btnExtru = extru;
+    const a=$('#mc-textru-mas'), b=$('#mc-textru-menos');
+    if(a) a.hidden=!extru; if(b) b.hidden=!extru;
+  }
 }
 // REQ-MOV1 · pantalla completa. Va sobre `documentElement` y no sobre el canvas: el Mundo es la MISMA
 // página que el editor (hotbar, mira, mandos y modales son hermanos del canvas), y poniendo el canvas a
@@ -23802,24 +23839,93 @@ function mcStickSuelta(){    // el pulgar levantado deja de andar: si no, te que
   // El menú ☰ (REQ-MOV1). Sustituye al ✕: sin teclado no hay Esc, así que de aquí cuelga la única
   // salida del Mundo que tiene el móvil, y por eso el panel se cierra solo tras cada opción menos esa.
   const menuBtn=$('#mc-tmenu'), menuPanel=$('#mc-tmenu-panel');
+  // REQ-TACT1 · los submenús. `mcTouchMenu` sigue siendo la única puerta: abrir el de primer nivel
+  // implica cerrar el que hubiera abierto, y cerrar el menú los cierra todos. Si esto se dejara a
+  // cada botón, bastaría una salida por otro camino (salir del Mundo, el OSD) para dejar un submenú
+  // flotando solo sobre el mapa, sin el ☰ debajo que lo cerrara.
+  const menuSubs=[...document.querySelectorAll('.mc-tmenu-panel')].filter(p=>p!==menuPanel);
+  function mcTouchSub(id){
+    menuSubs.forEach(p=>p.hidden = p.id!==id);
+    if(menuPanel) menuPanel.hidden = !!id;
+    mcTouchHerrTxt();   // la herramienta puede haber cambiado por teclado o por la rosca desde la última vez
+    if(menuBtn) menuBtn.setAttribute('aria-expanded', id?'true':(menuPanel&&!menuPanel.hidden?'true':'false'));
+  }
   function mcTouchMenu(abrir){
     if(!menuPanel) return;
-    const v = abrir===undefined ? menuPanel.hidden : !!abrir;
+    const abierto = !menuPanel.hidden || menuSubs.some(p=>!p.hidden);   // «abierto» incluye estar en un submenú
+    const v = abrir===undefined ? !abierto : !!abrir;
+    menuSubs.forEach(p=>p.hidden=true);
     menuPanel.hidden=!v; if(menuBtn) menuBtn.setAttribute('aria-expanded', v?'true':'false');
   }
   if(menuBtn) menuBtn.addEventListener('pointerup',e=>{ mcTouchMenu(); e.preventDefault(); });
   const menuOpc=(sel,fn)=>{ const el=$(sel); if(el) el.addEventListener('pointerup',e=>{ mcTouchMenu(false); fn(); e.preventDefault(); }); };
+  menuPanel && menuPanel.querySelectorAll('[data-sub]').forEach(b=>
+    b.addEventListener('pointerup',e=>{ mcTouchSub(b.dataset.sub); e.preventDefault(); }));
+  menuSubs.forEach(p=>p.querySelectorAll('button.volver').forEach(b=>
+    b.addEventListener('pointerup',e=>{ mcTouchMenu(true); e.preventDefault(); })));
   // La foto se dispara en pointerUP y no en down como el salto: un botón que dispara al tocarlo se
   // activa al rozarlo mientras se busca el pulgar, y esto escribe un fichero. Nada de estado que
   // soltar, así que mcTouchSuelta no tiene que saber de él.
   menuOpc('#mc-tfoto', ()=>{ if(mc.active) mcFoto(); });
   menuOpc('#mc-tvideo', ()=>{ if(mc.active) mcToggleGrabarVideo(); });
   menuOpc('#mc-tfull', ()=>mcPantallaCompleta());
+  // REQ-TACT1 · las nueve teclas que el Mundo sólo tenía en el teclado (encargo del dueño 2026-08-29:
+  // sin teclado no había manera de deshacer, copiar, girar, volar, ver rayos X ni poner una nota).
+  // ⚠️ Cada una llama a la MISMA función que su tecla, no a una versión propia: el reparto de qué hace
+  // cada atajo vive en el handler de teclas y aquí sólo se le abre una segunda puerta. Si un día la
+  // tecla cambia de comportamiento, este menú tiene que seguirla sin tocarse.
+  menuOpc('#mc-tdeshacer', ()=>{ if(mc.active) mcUndo(); });                    // z
+  menuOpc('#mc-trehacer',  ()=>{ if(mc.active) mcRedo(); });                    // Shift+Z
+  menuOpc('#mc-tcopiar',   ()=>{ if(mc.active) mcCopySelection(); });           // Ctrl+C
+  menuOpc('#mc-tcortar',   ()=>{ if(mc.active) mcCutSelection(); });            // Ctrl+X
+  menuOpc('#mc-tpegar',    ()=>{ if(mc.active) mcPasteWorld(); });              // Ctrl+V
+  // Girar sólo tiene sentido con una caja marcada, y la tecla R lo exige igual (mc.tool==='select' &&
+  // mc.selBox). Sin caja se avisa en vez de no hacer nada: un botón mudo parece roto.
+  menuOpc('#mc-tgirar', ()=>{
+    if(!mc.active) return;
+    if(mc.tool==='select' && mc.selBox) mcRotateSelBox('y'); else toast('Girar necesita una selección');
+  });
+  menuOpc('#mc-tnota', ()=>{                                                    // n
+    if(!mc.active) return;
+    if(mc.notePlacing){ mcCancelNotePlace(); return; }
+    const hit = mcRaycast(mcReach(), true);
+    const anchor = hit && (mcNoteAnchor(hit.cell) || (mc.notes && mc.notes[mcNoteKey(hit.cell)] ? hit.cell : null));
+    if(anchor) mcOpenNote(anchor); else mcStartNotePlace();
+  });
+  menuOpc('#mc-tvolar', ()=>{ if(mc.active) toast('Volar: '+(mcSetVolar(!mc.volar)?'ON':'OFF')); });   // f
+  menuOpc('#mc-txray',  ()=>{ if(mc.active){ mc.xray=!mc.xray; toast('Rayos-X: '+(mc.xray?'ON':'OFF')); } });  // x
+  // Alt+C. El pointer-lock se suelta antes por lo mismo que en la tecla: con el ratón capturado el
+  // panel de código sale y no se puede tocar.
+  menuOpc('#mc-tcodigo', ()=>{
+    if(!$('#snip-modal').hidden){ closeSnips(); return; }
+    if(document.pointerLockElement===mc.canvas) document.exitPointerLock();
+    openSnips();
+  });
+  // La herramienta (tecla e) es la ÚNICA que deja el menú abierto: es cíclica —construir → volumen →
+  // seleccionar— y cerrarlo obligaría a reabrirlo para dar el segundo paso. Su texto dice cuál llevas.
+  const herrBtn=$('#mc-therr');
+  function mcTouchHerrTxt(){ if(herrBtn) herrBtn.textContent = '🛠 ' + mcEtiquetaHerramienta(mc.tool); }
+  if(herrBtn) herrBtn.addEventListener('pointerup',e=>{ if(mc.active){ mcRotaHerramienta(false); mcTouchHerrTxt(); } e.preventDefault(); });
   // Desatasco (BUG-AG7). Va aquí con los demás mandos pero NO dentro de #mc-touch: en el escritorio
   // también hace falta. También en pointerup, por lo mismo que la foto. Lo esconde el propio mcUpdate
   // en cuanto quedas libre; no hace falta apagarlo a mano.
   const stuck=$('#mc-stuck');
   if(stuck) stuck.addEventListener('pointerup',e=>{ if(!mc.active) return; mcForceUnstick(); toast('Desatascado'); e.preventDefault(); });
+
+  // REQ-TACT1 · bajar volando. Es un botón de MANTENER, como el ⤒, y por eso baja la tecla en vez de
+  // tocar mc.vel: volando, la vertical sale de `k[' '] - k['shift']` (REQ-FLY1) y quien la integra es
+  // el mismo bucle. Poner aquí una velocidad a mano se pelearía con él cada frame.
+  const bajar=$('#mc-tbajar');
+  if(bajar) bajar.addEventListener('pointerdown',e=>{ if(!mc.active) return;
+    mcBajaId=e.pointerId; mc.keys['shift']=true; try{ bajar.setPointerCapture(e.pointerId); }catch(err){} e.preventDefault(); });
+
+  // REQ-TACT1 · los ＋/－ de extruir. `mcSelExtruir` es la MISMA que atiende Ctrl+rueda, con su mismo
+  // signo (+1 saca, −1 cava) y respetando `mc.selOpuesta`, que en táctil se conmuta con el botón del
+  // medio (#mc-tmed). En `pointerdown` y no en `up`: se usan a ráfagas para sacar una pared entera.
+  const extruMas=$('#mc-textru-mas'), extruMenos=$('#mc-textru-menos');
+  const extruPulsa=(el,paso)=>{ if(el) el.addEventListener('pointerdown',e=>{
+    if(mc.active && mc.tool==='select' && mc.selBox) mcSelExtruir(paso); e.preventDefault(); }); };
+  extruPulsa(extruMas, 1); extruPulsa(extruMenos, -1);
 
   const vClose=$('#vf-video-close'), vDiscard=$('#vf-video-discard');
   const vSave=$('#vf-video-save-server'), vDown=$('#vf-video-download');
@@ -23840,11 +23946,13 @@ function mcTouchSuelta(id){          // un dedo concreto, o TODOS si no se pasa 
   if(id===undefined || id===mcStickId) mcStickSuelta();
   if(id===undefined || id===mcLookId) mcLookId=-1;
   if(id===undefined || id===mcJumpId){ mcJumpId=-1; if(mc.keys) mc.keys[' ']=false; }
+  // REQ-TACT1 · el ⤓ de bajar, por lo mismo que el ⤒: un `up` perdido te deja hundiéndote sin parar.
+  if(id===undefined || id===mcBajaId){ mcBajaId=-1; if(mc.keys) mc.keys['shift']=false; }
   // REQ-MOV1 · y el botón de acción: soltarlo tiene que parar la picada en cadena. Un `up` perdido
   // aquí no te deja andando, te deja PICANDO solo — que en el Mundo sí escribe en mundo.json.
   if(id===undefined || id===mcAccionId){ mcAccionId=-1; mc.heldBtn=-1; }
 }
-addEventListener('pointerup',e=>mcTouchSuelta(e.pointerId),true);
+addEventListener('pointerup',e=>{ if(e.pointerType!=='mouse') mcDedoAhora(); mcTouchSuelta(e.pointerId); },true);
 addEventListener('pointercancel',e=>mcTouchSuelta(e.pointerId),true);
 addEventListener('blur',()=>mcTouchSuelta());
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) mcTouchSuelta(); });
@@ -23855,11 +23963,13 @@ document.addEventListener('visibilitychange',()=>{ if(document.hidden) mcTouchSu
 // poder volver a girar la cámara en toda la sesión; así, cualquier toque nuevo rearma el control.
 $('#mc-canvas').addEventListener('pointerdown',e=>{
   if(!mc.active || e.pointerType==='mouse') return;
+  mcDedoAhora();
   mcLookId=e.pointerId; mcLookX=e.clientX; mcLookY=e.clientY;
   try{ mc.canvas.setPointerCapture(e.pointerId); }catch(err){}
 });
 $('#mc-canvas').addEventListener('pointermove',e=>{
   if(e.pointerId!==mcLookId) return;
+  mcDedoAhora();   // un arrastre largo sigue siendo un dedo cuando llegue el `click` de compatibilidad
   const gs=mcLookSens/Math.sqrt(mc.scale);   // igual que el ratón: un gigante gira la cabezota despacio
   mc.yaw-=(e.clientX-mcLookX)*gs; mc.pitch-=(e.clientY-mcLookY)*gs;
   mc.pitch=Math.max(-1.55,Math.min(1.55,mc.pitch));
@@ -24447,6 +24557,7 @@ Object.defineProperty(game,'agentSaveMs',{ enumerable:true, get:()=>mcAgentSaveM
 // Mantener el botón repite la acción (mcTick, cada MC_ACT_MS) → construir/romper en fila arrastrando la mira.
 $('#mc-canvas').addEventListener('mousedown',e=>{
   if(!mc.active || document.pointerLockElement!==mc.canvas) return;
+  if(mcRatonDeDedo()) return;   // `mousedown` de compatibilidad de un toque: la herramienta va por los botones
   // El central ni rompe ni pone: en el Mundo es el de REDSTONE (conmuta palancas y botones), y eso vive en
   // `redstone/redstone-piezas.js`, que lo caza antes en fase de captura. Aquí solo se le corta el paso —sin
   // tocar mc.heldBtn, que mantenerlo pulsado no repite nada— y se le quita al navegador el desplazamiento

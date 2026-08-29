@@ -31,8 +31,50 @@ mantener en sincronía.
 | saltar | `#mc-tjump` | `mc.keys[' ']` en `pointerdown` |
 | ⛏ romper | `#mc-tizq` | botón **0** del ratón |
 | ▣ poner | `#mc-tder` | botón **2** |
-| ⚡ redstone | `#mc-tmed` | botón **1** |
-| ☰ menú | `#mc-tmenu` | pantalla completa · foto · vídeo · **salir** |
+| ⚡ redstone | `#mc-tmed` | botón **1** (y con Seleccionar, **conmuta la cara** de extruir) |
+| ☰ menú | `#mc-tmenu` | ver más abajo: pantalla completa · Editar › · Ver › · Capturar › · Código · **salir** |
+| ⤓ bajar | `#mc-tbajar` | `mc.keys['shift']`. **Sale solo mientras vuelas** |
+| ＋ / － | `#mc-textru-mas/-menos` | `mcSelExtruir(±1)`. **Salen solos con una caja marcada** |
+
+### Los que salen solos (REQ-TACT1)
+
+`mcExtruBtn()` corre **una vez por frame** desde el bucle y va **por flanco**, como `mcStuckShow`:
+sin cambio de estado no toca el DOM. Pone y quita dos cosas:
+
+- **`#mc-tbajar`** mientras `mc.volar`. Volando, subir es Espacio (= el ⤒) y bajar es **Shift, que en
+  táctil no existe**: sin este botón se despega y no se aterriza. Baja la **tecla**, no `mc.vel`: la
+  vertical del vuelo sale de `k[' '] − k['shift']` (REQ-FLY1) y la integra el bucle. Aterrizar con el
+  dedo puesto pasa por `mcTouchSuelta`, o el Shift se queda clavado.
+- **`#mc-textru-mas` / `#mc-textru-menos`** con `mc.tool==='select' && mc.selBox`. En escritorio
+  extruir es `Ctrl+rueda`, y **en tablet no hay rueda**: era lo único del Mundo sin puerta táctil.
+  Llaman a **`mcSelExtruir(±1)`**, la misma de la rueda y con su mismo signo, así que respetan
+  `mc.selOpuesta` — que se conmuta con el ⚡ (`#mc-tmed`).
+  ⚠️ La otra extrusión, la del **frente** (`Shift+rueda` → `mcSelExtruirFrente`), **sigue sin botón**.
+
+### El menú ☰ — submenús, y el contrato de inyección
+
+Con las teclas del Mundo metidas dentro, la lista plana no cabía en un móvil apaisado (~380 px), así
+que hay **cuatro panels hermanos** con la misma clase `.mc-tmenu-panel`: el de primer nivel
+(`#mc-tmenu-panel`) y `#mc-tmenu-editar` / `-ver` / `-captura`. Un botón con `data-sub` abre el suyo;
+uno con clase `volver`, vuelve.
+
+- ⚠️ **`mcTouchMenu` es la única puerta.** «Abierto» incluye estar dentro de un submenú, y cerrar
+  cierra **todos**. Si cada botón se gestionara solo, cualquier salida por otro camino (salir del
+  Mundo, el OSD) dejaría un submenú flotando sobre el mapa sin el ☰ debajo que lo cerrara.
+- ⚠️ Son **hermanos y no hijos** por dos motivos: la clase `.mc-tmenu-panel` es la que los salva del
+  recorte del OSD (`body.mc-osd-puesto.mc-osd-tactil .mc-touch > :not(.tmenu):not(.mc-tmenu-panel)`),
+  y el primer nivel tiene que seguir siendo una lista de **hijos directos**.
+- 🔒 **CONTRATO: `#mc-tsalir` es el último hijo directo de `#mc-tmenu-panel`.** Quien quiera añadir su
+  propia entrada la mete **antes** del ✕. Así lo hace el **multijugador** (`💬 Hablar`), del que
+  `app.js` no sabe nada ni tiene por qué: orden del dueño (2026-08-29) — el motor pone lo suyo en
+  `index.html`, y quien llega después se inyecta al cargarse. Meter el ✕ dentro de un submenú rompe
+  esto sin que nada falle a gritos. Guardián: `tests/probe_menu_tactil.js` §1.
+- Cada opción llama a **la misma función que su tecla** (`mcUndo`, `mcCopySelection`, `mcRotateSelBox`,
+  `mcSetVolar`, `openSnips`…), no a una versión propia: el reparto vive en el handler de teclas y aquí
+  solo se le abre una segunda puerta.
+- **`#mc-therr` (herramienta, tecla `e`) es la única que NO cierra el menú**: es cíclica y cerrarlo
+  obligaría a reabrirlo para dar el segundo paso. Su texto lo reescribe `mcTouchHerrTxt()`.
+- Fuera a propósito (el dueño los descartó): **`K` recortes** y **`B`/`Shift+B` tamaño del jugador**.
 
 **`MC_STICK_F` no es una constante de posición**: el recorrido del pomo se mide del ancho real del
 aro, así que encoger `.mc-stick` en el CSS encoge también su recorrido sin tocar el JS.
@@ -71,6 +113,32 @@ apagaba la otra media.
 
 ⚠️ **No vale para el `mousedown` del canvas.** Ahí el pointer-lock sigue siendo obligatorio a
 propósito: el primer clic solo captura el ratón, no rompe nada.
+
+## Un toque **no** es un clic izquierdo (REQ-TACT1)
+
+Dueño (2026-08-29): «*en el móvil hacer clic en pantalla no debería realizar clic izquierdo ya que
+quieres moverte o coger el foco y se activa la función de la herramienta y no debería, para eso está
+el botón en pantalla*».
+
+Tras un toque el navegador emite además eventos de ratón **de compatibilidad** (`mousedown`, `click`)
+que son **indistinguibles de un ratón de verdad**: no traen `pointerType`. El camino del fallo era:
+
+1. el `click` de compatibilidad del primer toque entraba en `mcLockPointer()`;
+2. Android **concede** el pointer-lock en pantalla completa;
+3. a partir de ahí cada toque para girar la cámara pasaba el `pointerLockElement===mc.canvas` del
+   `mousedown` y **picaba o ponía un bloque**.
+
+Se resuelve con una marca de tiempo, `mcDedoAhora()` / **`mcRatonDeDedo()`** (ventana de 700 ms,
+refrescada en el `pointerdown`/`pointermove` del canvas y en el `pointerup` de `window`). La consultan
+el `click` (no pide lock) y el `mousedown` (no dispara la herramienta).
+
+⚠️ **Por tiempo, y no apagando el ratón cuando `MC_TOUCH`**: un portátil con pantalla táctil tiene las
+dos cosas a la vez, y ahí el ratón de verdad tiene que seguir picando. Guardián:
+`tests/probe_menu_tactil.js` §7, que además comprueba **las dos mitades** — el dedo no pide lock, el
+ratón sí.
+
+⚠️ El **escaparate** sí se pulsa con el dedo (`mcEscaparatePulsa`, notas de la intro) y va **antes**
+de la guarda, en su propia rama del `click`.
 
 ## Pantalla completa
 
