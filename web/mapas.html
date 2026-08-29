@@ -59,6 +59,30 @@ h1 span{color:var(--muted);font-weight:400}
 .nota code{color:var(--accent);font-family:ui-monospace,Menlo,monospace}
 .nota a{color:var(--accent)}
 .aviso{border-left-color:var(--danger)}
+/* Menú del botón derecho sobre una tarjeta (duplicar / renombrar) y su diálogo de nombre. */
+.menu{position:fixed;z-index:20;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;
+      padding:4px;min-width:186px;box-shadow:0 10px 28px #0009}
+.menu .cab{color:var(--muted);font-size:11px;padding:5px 9px 6px;border-bottom:1px solid var(--line);
+      margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu button{display:block;width:100%;text-align:left;border:0;background:none;color:var(--ink);
+      padding:7px 9px;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit}
+.menu button:hover{background:var(--panel);color:var(--accent)}
+.menu button[disabled]{color:var(--muted);cursor:default}
+.menu button[disabled]:hover{background:none;color:var(--muted)}
+.velo{position:fixed;inset:0;z-index:30;background:#0009;display:flex;align-items:center;justify-content:center}
+.dlg{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;
+      width:min(400px,92vw);display:flex;flex-direction:column;gap:11px}
+.dlg h2{margin:0;font-size:15px;font-weight:600}
+.dlg p{margin:0;color:var(--muted);font-size:12.5px}
+.dlg input{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+      padding:8px 11px;border-radius:8px;font:inherit}
+.dlg .slug{color:var(--muted);font-size:11.5px;font-family:ui-monospace,Menlo,monospace;min-height:16px}
+.dlg .err{color:var(--danger);font-size:12px;min-height:16px}
+.dlg .botones{display:flex;gap:8px;justify-content:flex-end}
+.dlg .botones button{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+      padding:7px 14px;border-radius:8px;font:inherit;cursor:pointer}
+.dlg .ok{background:var(--accent);color:#1a1206;border:0;font-weight:600}
+.dlg .ok[disabled]{opacity:.45;cursor:default}
 @media(max-width:680px){ .grid{grid-template-columns:1fr;padding:0 14px} header{padding:18px 14px 6px}
   .barra{padding:0 14px} .orden{margin-left:0;width:100%} }
 </style>
@@ -110,7 +134,7 @@ function pinta() {
     lista.reduce((s, m) => s + m.estructuras, 0) + ' estructuras · ' +
     lista.reduce((s, m) => s + m.mb, 0).toFixed(1) + ' MB en disco';
   document.getElementById('grid').innerHTML = lista.map(m => `
-    <article class="card">
+    <article class="card" data-nombre="${esc(m.nombre)}">
       <div class="thumb">
         <img src="${m.thumb}" alt="vista cenital de ${esc(m.nombre)}" loading="lazy">
         <span class="badge ${m.nombre === 'default' ? 'def' : ''}">${m.nombre === 'default' ? 'por defecto' : esc(m.dim)}</span>
@@ -149,12 +173,121 @@ document.getElementById('orden').addEventListener('click', e => {
   pinta();
 });
 
-fetch('/api/mundos', { cache: 'no-store' })
-  .then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j.error || r.status)))
-  .then(d => { DATOS = d; pinta(); })
-  .catch(e => {
-    document.getElementById('resumen').textContent = 'No se pudo leer el listado.';
-    document.getElementById('grid').innerHTML =
-      '<div class="nota aviso">No se pudo leer <code>/api/mundos</code>: ' + esc(e) + '</div>';
+function carga() {
+  return fetch('/api/mundos', { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j.error || r.status)))
+    .then(d => { DATOS = d; pinta(); })
+    .catch(e => {
+      document.getElementById('resumen').textContent = 'No se pudo leer el listado.';
+      document.getElementById('grid').innerHTML =
+        '<div class="nota aviso">No se pudo leer <code>/api/mundos</code>: ' + esc(e) + '</div>';
+    });
+}
+carga();
+
+// ─────────────────────────────────────── duplicar y renombrar (menú del botón derecho)
+//
+// UN MUNDO SON DOS FICHEROS: `data/worlds/<slug>.json` (spawn, estructuras, notas) y su `.vox` hermano
+// (la rejilla, 21 MB). El servidor mueve el par bajo el mismo cerrojo que usan las escrituras; aquí
+// sólo se pide. Por eso no hay nada que copiar desde el navegador: dos peticiones y a releer el listado.
+//
+// El SLUG es lo que manda, no lo que se escribe: `/map/<nombre>` acota el nombre a [a-z0-9-] (así es
+// imposible salir de data/worlds/), de modo que «Mi Mundo!!» y «mi-mundo» son EL MISMO mundo. Se enseña
+// el slug bajo el campo mientras se escribe: descubrirlo después de aceptar es descubrirlo tarde.
+const slugDe = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+let menu = null, menuDesde = 0;
+function cierraMenu() { if (menu) { menu.remove(); menu = null; } }
+addEventListener('click', cierraMenu);
+// El menú va `position:fixed`, así que al desplazar la página se quedaría flotando sobre otra tarjeta:
+// se cierra. ⚠️ Con GRACIA: el desplazamiento que ya venía en marcha al pulsar (rueda con inercia, o el
+// `scrollIntoView` de un navegador de pruebas) suelta su evento DESPUÉS del `contextmenu` y cerraba el
+// menú en el mismo gesto que lo abría.
+addEventListener('scroll', () => { if (performance.now() - menuDesde > 150) cierraMenu(); }, true);
+addEventListener('keydown', e => { if (e.key === 'Escape') cierraMenu(); });
+
+document.getElementById('grid').addEventListener('contextmenu', e => {
+  const card = e.target.closest('.card'); if (!card) return;
+  e.preventDefault();
+  cierraMenu();
+  const nombre = card.dataset.nombre;
+  const esDefecto = nombre === 'default';
+  menu = document.createElement('div');
+  menu.className = 'menu';
+  menu.innerHTML = `<div class="cab">${esc(nombre)}</div>
+    <button data-a="abrir">Abrir</button>
+    <button data-a="duplicar">Duplicar…</button>
+    <button data-a="renombrar" ${esDefecto ? 'disabled title="«default» es el mundo de siempre: duplícalo y renombra la copia"' : ''}>Renombrar…</button>`;
+  // Se coloca ya medido: si se pega al borde derecho o abajo, se dobla hacia dentro en vez de salirse.
+  menu.style.left = menu.style.top = '0px';
+  document.body.appendChild(menu);
+  menuDesde = performance.now();
+  const r = menu.getBoundingClientRect();
+  menu.style.left = Math.min(e.clientX, innerWidth - r.width - 6) + 'px';
+  menu.style.top  = Math.min(e.clientY, innerHeight - r.height - 6) + 'px';
+  menu.addEventListener('click', ev => {
+    const b = ev.target.closest('button'); if (!b || b.disabled) return;
+    cierraMenu();
+    if (b.dataset.a === 'abrir') location.href = '/map/' + encodeURIComponent(nombre);
+    else dialogo(b.dataset.a, nombre);
   });
+});
+
+function dialogo(accion, origen) {
+  const duplica = accion === 'duplicar';
+  const velo = document.createElement('div');
+  velo.className = 'velo';
+  velo.innerHTML = `<div class="dlg" role="dialog" aria-modal="true">
+      <h2>${duplica ? 'Duplicar «' + esc(origen) + '»' : 'Renombrar «' + esc(origen) + '»'}</h2>
+      <p>${duplica ? 'Se copia el mundo entero —terreno, estructuras y notas— con otro nombre. El original no se toca.'
+                   : 'El mundo se muda de nombre: su URL <code>/map/…</code> cambia y la antigua deja de existir.'}</p>
+      <input id="dlg-n" value="${esc(duplica ? origen + '-copia' : origen)}" spellcheck="false" autocomplete="off">
+      <div class="slug" id="dlg-slug"></div>
+      <div class="err" id="dlg-err"></div>
+      <div class="botones">
+        <button id="dlg-no">Cancelar</button>
+        <button class="ok" id="dlg-si">${duplica ? 'Duplicar' : 'Renombrar'}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(velo);
+  const inp = velo.querySelector('#dlg-n'), sl = velo.querySelector('#dlg-slug'),
+        err = velo.querySelector('#dlg-err'), si = velo.querySelector('#dlg-si');
+  const cierra = () => { velo.remove(); removeEventListener('keydown', tecla); };
+  const tecla = e => { if (e.key === 'Escape') cierra(); };
+  addEventListener('keydown', tecla);
+  velo.addEventListener('click', e => { if (e.target === velo) cierra(); });
+  velo.querySelector('#dlg-no').addEventListener('click', cierra);
+
+  // Lo que impide aceptar se dice ANTES de aceptar. El servidor vuelve a comprobarlo todo (es él quien
+  // manda y quien ve el disco), pero enterarse aquí ahorra el viaje y explica mejor.
+  function revisa() {
+    const s = slugDe(inp.value);
+    sl.textContent = s ? 'se guardará como /map/' + s : '';
+    const motivo = !s ? 'Escribe un nombre con letras o números.'
+      : s === 'default' ? '«default» es el mundo de siempre: elige otro nombre.'
+      : s === origen ? (duplica ? 'La copia necesita un nombre distinto del original.' : 'Ya se llama así.')
+      : DATOS.some(m => m.nombre === s) ? 'Ya hay un mundo llamado «' + s + '».' : '';
+    err.textContent = motivo;
+    si.disabled = !!motivo;
+    return motivo ? null : s;
+  }
+  inp.addEventListener('input', revisa);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') si.click(); });
+  revisa();
+  inp.focus(); inp.select();
+
+  si.addEventListener('click', () => {
+    const s = revisa(); if (!s) return;
+    si.disabled = true; si.textContent = duplica ? 'Duplicando…' : 'Renombrando…';
+    fetch('/api/mundos/' + (duplica ? 'duplicar' : 'renombrar'),
+          { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ origen, nombre: s }) })
+      .then(r => r.json().then(j => r.ok ? j : Promise.reject(j.error || r.status)))
+      .then(() => { cierra(); return carga(); })
+      .catch(e => {
+        err.textContent = String(e);
+        si.disabled = false; si.textContent = duplica ? 'Duplicar' : 'Renombrar';
+      });
+  });
+}
 </script>

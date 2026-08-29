@@ -1055,6 +1055,16 @@ body.mc-escaparate .mc-modal{background:transparent}
 .snip-item.is-active{border-color:var(--accent-2); background:#182318}
 .snip-item b{display:block; font-size:13px; font-weight:600}
 .snip-item small{color:var(--muted); font-size:10px}
+/* 📌 REQ-SNP-PIN · chincheta para fijar un snippet arriba de la lista. Va ABSOLUTA en la esquina de la
+   ficha (de ahí el `position:relative` y el hueco a la derecha) para no robarle ancho al rótulo, y
+   apagada —gris y casi transparente— mientras no esté clavada: 80 fichas con 80 chinchetas encendidas
+   serían ruido puro y no se vería cuál está fijada de verdad. */
+.snip-item{position:relative; padding-right:26px}
+.snip-item .snip-pin{position:absolute; top:4px; right:4px; font-size:12px; line-height:1; padding:2px;
+  border-radius:4px; cursor:pointer; opacity:.22; filter:grayscale(1)}
+.snip-item:hover .snip-pin{opacity:.55}
+.snip-item .snip-pin.is-on{opacity:1; filter:none}
+.snip-item .snip-pin:focus-visible{outline:2px solid var(--accent); opacity:1}
 /* Buscar dentro del código + «quién usa esto» (REQ-SNP6). La línea encontrada va monoespaciada y
    RECORTADA a una línea: la ficha no puede crecer con el largo del código de otro. */
 .snip-search{width:100%; padding:7px 10px; border-radius:6px; border:1px solid var(--line);

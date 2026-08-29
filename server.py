@@ -129,8 +129,11 @@ def validar_alias(alias, aid, idx):
 # Nombre de mapa (de /map/<nombre> o ?map=) -> fichero de mundo persistente.
 # «default» (o vacío/ausente) = el mundo sagrado mundo.json; cualquier otro = data/worlds/<slug>.json.
 # El slug se acota a [a-z0-9-] (sin ../, sin barras) => imposible salir de data/worlds/.
+def world_slug(name):
+    return re.sub(r'[^a-z0-9]+', '-', (name or '').lower()).strip('-')
+
 def world_file_for(name):
-    s = re.sub(r'[^a-z0-9]+', '-', (name or '').lower()).strip('-')
+    s = world_slug(name)
     if not s or s == 'default':
         return WORLDFILE
     return os.path.join(WORLDS, s + '.json')
@@ -978,6 +981,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if fn.endswith('.png') and fn not in vivos:
                     to_trash(os.path.join(UI, fn))
             return self._send(200, {'ok': True, 'ranuras': len(d['ranuras']), 'png': len(crudos)})
+        if ruta_post in ('/api/mundos/duplicar', '/api/mundos/renombrar'):   # menú del botón derecho en /map/
+            # Un mundo son DOS ficheros (.json + .vox hermano): el par lo mueve `voxfmt`, que es quien
+            # sabe eso y quien tiene el cerrojo por ruta. Aquí sólo se decide QUIÉN puede y hacia dónde.
+            renombra = ruta_post.endswith('renombrar')
+            d = self._read()
+            if not isinstance(d, dict):
+                return self._send(400, {'error': 'faltan datos'})
+            org, dst = world_slug(d.get('origen')), world_slug(d.get('nombre'))
+            if not org:
+                return self._send(400, {'error': 'falta el mundo de origen'})
+            if not dst:
+                # `world_slug` se come todo lo que no sea [a-z0-9-]: un nombre en chino o sólo signos
+                # se queda en cadena vacía, que apuntaría a mundo.json. Se corta aquí, no allí.
+                return self._send(400, {'error': 'ese nombre no deja ninguna letra ni número utilizable'})
+            if dst == 'default':
+                return self._send(400, {'error': '«default» es el mundo de siempre: elige otro nombre'})
+            if renombra and org == 'default':
+                # data/mundo.json es el mundo sagrado y su ruta está escrita en medio repo (y en la URL
+                # /map/default). Duplicarlo sí; moverlo de sitio, no.
+                return self._send(400, {'error': 'el mundo «default» no se renombra — duplícalo y renombra la copia'})
+            if org == dst:
+                return self._send(400, {'error': 'ya se llama así'})
+            src_wf, dst_wf = world_file_for(org), world_file_for(dst)
+            ok, err = (voxfmt.mover if renombra else voxfmt.copiar)(src_wf, dst_wf)
+            if not ok:
+                return self._send(409, {'error': err})
+            if renombra:
+                # La miniatura se cachea POR NOMBRE (data/_thumbs/<slug>.json): la del nombre viejo ya
+                # no describe nada y reviviría si alguien vuelve a usar ese nombre.
+                try: os.remove(os.path.join(BASE, 'data', '_thumbs', org + '.json'))
+                except OSError: pass
+            return self._send(200, {'ok': True, 'nombre': dst, 'ruta': '/map/' + dst})
         if ruta_post == '/api/mundo/edits':                       # poner/quitar bloques: seek + 2 bytes por celda
             # Este es el camino que arregla la congelación. NO se lee ni se reescribe el mundo entero:
             # el cuerpo son las celdas que han cambiado, [[x,y,z,'asset:assets/roca.vox.json'], ...],

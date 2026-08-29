@@ -27,6 +27,7 @@ import array
 import gzip
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -353,6 +354,67 @@ def guardar_cabecera(wf, parcial, atomic_dump, to_trash):
         to_trash(wf, move=False)
         atomic_dump(cab, wf)
         return True
+
+
+# ------------------------------------------------------- mover/copiar un mundo entero
+
+# UN MUNDO SON DOS FICHEROS. Copiarlo o renombrarlo desde fuera mirando solo el .json deja el .vox
+# huerfano y el mundo nuevo sale VACIO (o, peor, el viejo se queda sin rejilla). Por eso el par lo
+# maneja este modulo, que es quien sabe que el .vox es hermano del .json, y bajo el MISMO cerrojo por
+# ruta que usan las escrituras: el servidor es ThreadingMixIn y alguien puede estar poniendo bloques
+# en el mundo de origen justo ahora.
+#
+# El .json va SIEMPRE detras del .vox: si algo revienta a medias, lo que queda en el destino es un
+# .vox suelto sin cabecera, que el listado ignora, en vez de un mundo que dice tener rejilla y no la
+# tiene. Y por eso mismo, si el .json falla, se retira el .vox ya escrito.
+
+def _limpia(rutas):
+    for r in rutas:
+        try: os.remove(r)
+        except OSError: pass
+
+
+def copiar(src_wf, dst_wf):
+    """Duplica el par (.json + .vox) de src a dst. (True, None) o (False, motivo)."""
+    if os.path.exists(dst_wf):
+        return False, 'ya existe un mundo con ese nombre'
+    if not os.path.exists(src_wf):
+        return False, 'el mundo de origen no existe'
+    with _cerrojo(src_wf):
+        svp, dvp = vox_path(src_wf), vox_path(dst_wf)
+        hechos = []
+        try:
+            if os.path.exists(svp):
+                shutil.copy2(svp, dvp); hechos.append(dvp)
+            shutil.copy2(src_wf, dst_wf); hechos.append(dst_wf)
+        except OSError as e:
+            _limpia(hechos)                   # a medias no se deja: o el mundo entero o nada
+            return False, f'no se pudo copiar: {e}'
+    return True, None
+
+
+def mover(src_wf, dst_wf):
+    """Renombra el par (.json + .vox). (True, None) o (False, motivo)."""
+    if os.path.exists(dst_wf):
+        return False, 'ya existe un mundo con ese nombre'
+    if not os.path.exists(src_wf):
+        return False, 'el mundo de origen no existe'
+    with _cerrojo(src_wf):
+        svp, dvp = vox_path(src_wf), vox_path(dst_wf)
+        movido = None
+        try:
+            if os.path.exists(svp):
+                os.replace(svp, dvp); movido = (dvp, svp)
+            os.replace(src_wf, dst_wf)
+        except OSError as e:
+            if movido:
+                try: os.replace(*movido)      # el .vox vuelve a su sitio: el mundo viejo sigue entero
+                except OSError: pass
+            return False, f'no se pudo renombrar: {e}'
+        # El cerrojo y el respaldo van POR RUTA: el mundo ya no vive ahi, y dejar su marca de
+        # actividad haria que el primer guardado del nombre nuevo se saltara el respaldo.
+        _ultimo_toque.pop(svp, None)
+    return True, None
 
 
 # ------------------------------------------------------------------ gzip del .vox
