@@ -42,7 +42,7 @@ const ok = (nom, cond, extra) => {
   if (puesto) {
     const e = await p.evaluate(() => game.selAuto.estado());
     ok('y quedan envueltas las cuatro funciones del motor',
-      e.puesto === true && e.version === 'sel-auto-v1', 'version=' + e.version);
+      e.puesto === true && e.version === 'sel-auto-v2', 'version=' + e.version);
     ok('arranca SIN marca a mano (el clic central no se ha tocado)', e.aMano === false);
   }
 

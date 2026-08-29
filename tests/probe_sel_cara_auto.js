@@ -14,6 +14,7 @@
 //   §5 Shift · acantilado (aire al frente)  → cara del FONDO · §6 Shift · cornisa (aire hacia ti) → ENFRENTE
 //   §7 el cableado de verdad: la rueda construye hacia el aire aunque venga mal puesta de antes
 //   §8 el clic central sigue mandando: marca la selección a mano y el automático no la vuelve a tocar
+//   §10 con UN SOLO clic (caja fantasma, sin confirmar) también decide — el fallo que trajo la v2
 //   §9 off() devuelve las cuatro funciones al motor
 //
 // Se trabaja en /map/test, sobre celdas que la propia sonda vacía antes y DEVUELVE al final.
@@ -52,7 +53,8 @@ const ok = (nom, cond, extra) => {
       for (let y = Y - 4; y <= Y + 4; y++)
         for (let z = Z - 2; z <= Z + 2; z++)
           orig.push([x, y, z, mc.grid[mcIdx(x, y, z)]]);
-    window._selAuto = { X, Y, Z, id, orig };
+    // El §10 teletransporta el ojo para apuntar el rayo: se guarda dónde estaba el jugador.
+    window._selAuto = { X, Y, Z, id, orig, pos: mc.pos.slice(), yaw: mc.yaw, pitch: mc.pitch };
 
     const lock = mc.histLock; mc.histLock = true;
     const edits = [];
@@ -150,6 +152,47 @@ const ok = (nom, cond, extra) => {
   ok('…y el automático NO le da la vuelta', h.tras === h.traselClic,
      'central=' + h.traselClic + ' tras=' + h.tras);
 
+  console.log('\n§10 · con UN SOLO clic (caja FANTASMA, sin confirmar) — el fallo que trajo la v2');
+  // Dueño (2026-08-29): «*cuando no se confirma la seleccion con un segundo clic a veces no se eligen
+  // bien la dirección […] se esta eligiendo erroneamente hacia arriba cuando deberia de ser hacia
+  // abajo. Si se confirma la seleccion con el segundo clic si que se orienta bien*».
+  // Aquí no hay `mc.selBox`: sólo la esquina fijada del 1er clic. La fantasma es `mc.selA` → la celda
+  // que APUNTA EL RAYO, así que hay que apuntar de verdad: se planta el ojo a 2,5 bloques de la celda,
+  // en vertical y por el lado que está despejado, para que `mcRaycast()` caiga en ella y la fantasma
+  // salga de una sola celda. (Mirar al cielo NO vale: el rayo se va lejos y la fantasma sale enorme.)
+  const fant = (x, modo, desde, porArriba) => p.evaluate(([x, y, z, modo, desde, porArriba]) => {
+    mc.selBox = null; mc.selCajas = []; mc.selA = [x, y, z];
+    const ojo = y + (porArriba ? 2.5 : -2.5);
+    mc.pos = [x + 0.5, ojo - MC_EYE * mc.scale, z + 0.5];
+    mc.pitch = porArriba ? -Math.PI / 2 : Math.PI / 2;
+    mc._selGuiaPre = null;
+    game.selAuto.suelta();
+    mc.selOpuesta = desde;                          // como venga de antes: puede estar mal puesta
+    const f = mcSelGuiaFantasma();
+    const dice = game.selAuto.decide(modo);
+    mc.selGuiaModo = modo;
+    mcSelGuiaFirma();                               // lo que corre de verdad al pintar los ✚
+    return { hayFantasma: !!f, unaCelda: !!f && f.vol === 1, caja: f && (f.a + '>' + f.b),
+             dice, tras: mc.selOpuesta };
+  }, [x, Y, Z, modo, desde, porArriba]);
+
+  // El techo tiene roca encima: se apunta DESDE ABAJO, que es por donde está el aire.
+  const t = await fant(X + 4, 'ctrl', false, false);
+  ok('hay caja fantasma de una sola celda (el rayo apunta a la celda)', t.hayFantasma && t.unaCelda,
+     t.caja);
+  ok('sobre el TECHO decide la cara de ABAJO', t.dice === true, 'dice=' + t.dice);
+  ok('…y la guía la aplica sin segundo clic', t.tras === true, 'selOpuesta=' + t.tras);
+
+  const s = await fant(X, 'ctrl', true, true);      // suelo, y `mc.selOpuesta` viene MAL puesta de antes
+  ok('sobre el SUELO decide la cara de ARRIBA', s.dice === false, 'dice=' + s.dice);
+  ok('…y corrige la que venía mal puesta', s.tras === false, 'selOpuesta=' + s.tras);
+
+  const q = await fant(X + 8, 'ctrl', true, true);  // flotante: aire arriba y abajo
+  ok('con aire en los dos lados no prioriza ni sobre la fantasma', q.dice === null);
+  ok('…y no toca `mc.selOpuesta`', q.tras === true, 'selOpuesta=' + q.tras);
+
+  await p.evaluate(() => { mc.selA = null; mc.selGuiaModo = ''; mc.pitch = 0; mc._selGuiaPre = null; });
+
   console.log('\n§9 · off() devuelve las cuatro funciones al motor');
   const off = await p.evaluate(() => {
     const dicho = game.selAuto.off();
@@ -172,6 +215,7 @@ const ok = (nom, cond, extra) => {
     }
     mcRemeshEdiciones(edits); mc.histLock = lock;
     mc.selBox = null; mc.selCajas = []; mc.selOpuesta = false;
+    mc.pos = s.pos.slice(); mc.yaw = s.yaw; mc.pitch = s.pitch;   // el jugador, donde estaba
     mcScheduleSave();
   });
   await p.waitForTimeout(600);
