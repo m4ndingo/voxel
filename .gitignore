@@ -51,3 +51,8 @@ releases/
 # El cliente se publica con POST /api/snippets y aterriza en data/snippets/, que SÍ se versiona: sin
 # esta línea el snippet del multijugador se subiría a GitHub sin que nadie lo pidiera.
 data/snippets/multi-*.json
+# Y las piezas del multiverso que NO empiezan por `multi-` pero tienen que estar donde están para que
+# el motor las encuentre. El original de cada una vive en `multi/fuera/<misma ruta>`; las planta aquí
+# `python3 multi/sincroniza.py instala`.
+data/snippets/mundo-multiverse.json
+herramientas/parche_snp_relevo_multi.py
