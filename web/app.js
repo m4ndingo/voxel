@@ -17611,10 +17611,16 @@ function mcSelGuiaRepinta(){
 // modificar su tamaño como hacen shift y control al dejarse pulsados*».
 //
 // QUÉ SE ESCALA: el portapapeles, no el mundo — `clipboard.cells` (offsets `dx`=x, `dz`=altura,
-// `dy`=fondo). ×2 = cada celda se convierte en las 8 de su cubo; ÷2 = cada cubo de 8 se convierte en
-// una celda, y el material que se queda es el MÁS REPETIDO de las ocho. Elegir «la primera» sería más
-// corto pero haría que el resultado dependiera del orden en que se copió, que no es una propiedad de
-// la pieza.
+// `dy`=fondo). Intercambiar esos tres deforma la pieza sin dar ningún error: es el detalle que más
+// fácil se equivoca.
+//
+// NO SE ESCALA LO QUE HAY PUESTO: SE REMUESTREA DESDE EL ORIGINAL. La rueda mueve un `nivel` entero
+// (`mc._pegEsc`) y la pieza de cada nivel se calcula siempre desde la copia intacta ⇒ bajar y volver
+// a subir devuelve el original tal cual, no una reconstrucción. Las cuatro reglas caras, cada una con
+// su porqué donde se implementa: escalera con rejilla (`mcPasteEscARejilla`), reparto palindrómico
+// (`mcPasteEscTramos`), espejo propio de la pieza (`mcPasteEscPlano`) y rescate de lo fino
+// (`mcPasteEscGrosores`). Todo esto nació y se validó en caliente como el snippet `pegar-escala`
+// (LEY DE ORO) antes de bajar aquí.
 const MC_PASTE_ESC_TOPE = 40000;   // bloques: por encima, el ×2 no se hace (una pieza mediana se va a millones)
 const MC_PASTE_ESC_GRUPOS = ['paste-esc-mas', 'paste-esc-menos'];
 const MC_PASTE_ESC_TOPE_VOX = 1800;  // voxeles de la promesa: pasado esto, las aristas salen punteadas
@@ -17626,71 +17632,353 @@ function mcPasteEscHay(){
             clipboard && clipboard.cells && clipboard.cells.length);
 }
 
-// Dimensiones de la pieza al escalar por `f`: ×2 es el doble; ÷2 es el índice máximo partido, +1 (una
+// Dimensiones de la pieza al escalar por `f`: ×2 es el doble; ÷2 el índice máximo partido, +1 (una
 // pieza de 5 de ancho ocupa 0..4 ⇒ 0..2 ⇒ 3), y nunca baja de 1.
-function mcPasteEscDim(n, f){ return f > 1 ? n * 2 : (((n - 1) >> 1) + 1); }
+function mcPasteEscDim(n, f){ return Math.max(1, Math.round(f > 1 ? n * 2 : n / 2)); }
 function mcPasteEscTope0(v, n){ return Math.min(Math.max(v|0, 0), Math.max(0, n - 1)); }
 
-// De las 8 celdas que se funden en una, manda la del material más repetido (empate: la primera vista).
-function mcPasteEscManda(g){
-  if(g.length === 1) return g[0];
-  const cuenta = new Map();
-  let mejor = g[0], nMejor = 0;
-  for(let i = 0; i < g.length; i++){
-    const k = String(g[i].c), n = (cuenta.get(k) || 0) + 1;
-    cuenta.set(k, n);
-    if(n > nMejor){ nMejor = n; mejor = g[i]; }
+const MC_PASTE_ESC_REJILLA = 8;   // el primer escalón salta a un múltiplo de esto
+const MC_PASTE_ESC_RELLENO = 0.5; // cuánto tiene que ocupar un trozo para que la celda nazca al reducir
+const MC_PASTE_ESC_FINO = 2;      // grosor por debajo del cual una pieza no admite adelgazarse más
+
+function mcPasteEscRejilla(){ return mc._pegEscRejilla > 0 ? mc._pegEscRejilla|0 : MC_PASTE_ESC_REJILLA; }
+function mcPasteEscRelleno(){ return mc._pegEscRelleno > 0 ? +mc._pegEscRelleno : MC_PASTE_ESC_RELLENO; }
+
+// ── el original intacto ──────────────────────────────────────────────────────────────────────────
+// Se guarda en `mc` (nunca en un closure: así se puede mirar desde la consola). `ref` es la IDENTIDAD
+// del array que dejamos puesto la última vez: si se copia otra cosa (Ctrl+C planta un array nuevo),
+// deja de coincidir y volvemos a fotografiar.
+function mcPasteEscReg(){
+  if(!clipboard || !clipboard.cells || !clipboard.cells.length) return null;
+  let r = mc._pegEsc;
+  if(!r || r.ref !== clipboard.cells){
+    const d = mcClipboardDims();
+    if(!d) return null;
+    const a = mc.pasteAnchor;
+    r = mc._pegEsc = {
+      ref: clipboard.cells,
+      cells: clipboard.cells.map(c => Object.assign({}, c)),   // la copia que no se toca nunca
+      dims: { w:d.w, h:d.h, d:d.d },
+      ancla: a ? [a[0], a[1], a[2]] : null,
+      anclaVista: a ? [a[0], a[1], a[2]] : null,               // lo último que escribimos nosotros
+      nivel: 0
+    };
   }
-  return mejor;
+  return r;
 }
 
-function mcPasteEscala(f){
-  if(!mcPasteEscHay()) return false;
-  const cells = clipboard.cells, d = mcClipboardDims();
-  if(!d) return false;
-  let out;
-  if(f > 1){
-    if(cells.length * 8 > MC_PASTE_ESC_TOPE){
-      toast('×2 dejaría ' + (cells.length*8) + ' bloques: pasa del tope (' + MC_PASTE_ESC_TOPE + ')', 4);
-      return false;
-    }
-    out = [];
-    for(const c of cells)
-      for(let i=0;i<2;i++) for(let j=0;j<2;j++) for(let k=0;k<2;k++)
-        out.push(Object.assign({}, c, { dx:c.dx*2+i, dy:c.dy*2+j, dz:c.dz*2+k }));
-  } else {
-    if(d.w===1 && d.h===1 && d.d===1){ toast('Un solo bloque: ya no se puede dividir', 3); return false; }
-    const cubos = new Map();
+// Si se ha reclavado el agarre (Ctrl) estando la pieza escalada, el agarre que manda es ese: se
+// retroproyecta a coordenadas del original para que los siguientes escalones lo respeten.
+function mcPasteEscSincro(r){
+  const a = mc.pasteAnchor;
+  if(!a || !r.anclaVista || !r.ancla) return;
+  if(a[0] === r.anclaVista[0] && a[1] === r.anclaVista[1] && a[2] === r.anclaVista[2]) return;
+  const cur = mcClipboardDims();
+  if(!cur) return;
+  r.ancla = [Math.round(a[0] * r.dims.w / cur.w),
+             Math.round(a[1] * r.dims.h / cur.h),
+             Math.round(a[2] * r.dims.d / cur.d)];
+}
+
+// ── la escalera ──────────────────────────────────────────────────────────────────────────────────
+// Dueño (2026-08-30): «*multiplos de 16 en cualquier direccion son deseables*». El primer escalón no
+// es ×2/÷2 sino un salto a la rejilla: 20³ baja a 16³ (no a 10³) y de ahí a 8³. A partir de ahí, ×2/÷2.
+//
+// Si la pieza no es cúbica NO se cuadra cada eje por su lado (eso la deformaría): se mira cuánto
+// tendría que moverse cada eje para caer en un múltiplo, se fija el que MENOS se mueve y los otros dos
+// lo siguen en proporción. Ejemplo del dueño, 20×50×10 hacia arriba: las metas serían 24, 56 y 16, o
+// sea saltos de 4, 6 y 6 ⇒ manda el ancho: 24 × round(50·1,2) × round(10·1,2) = 24×60×12.
+//
+// Un eje que YA está en la rejilla no compite (su salto sería 0 y ganaría sin mover nada); si TODOS lo
+// están, no hay nada que cuadrar y el escalón es el ×2/÷2 de siempre.
+function mcPasteEscARejilla(d, dir){
+  const G = mcPasteEscRejilla(), v = [d.w, d.h, d.d];
+  let eje = -1, salto = Infinity, meta = 0;
+  for(let i = 0; i < 3; i++){
+    if(v[i] % G === 0) continue;
+    const m = dir > 0 ? Math.ceil(v[i]/G)*G : Math.floor(v[i]/G)*G;
+    if(m < 1) continue;                          // bajar hasta 0 no es escalar, es borrar
+    // La rejilla AJUSTA el escalón, no lo sustituye por uno mayor: si cuadrar costase más que el
+    // ×2/÷2 de siempre, no cuadra. Sin esto, una pieza de 2×1×1 daba un salto a 8×4×4 (×4).
+    const f = m / v[i];
+    if(f > 2 || f < 0.5) continue;
+    const s = Math.abs(m - v[i]);
+    if(s < salto){ salto = s; eje = i; meta = m; }
+  }
+  const g = dir > 0 ? 2 : 0.5;
+  if(eje < 0) return { w:mcPasteEscDim(d.w,g), h:mcPasteEscDim(d.h,g), d:mcPasteEscDim(d.d,g) };
+  const f = meta / v[eje];
+  const r = [Math.max(1, Math.round(v[0]*f)), Math.max(1, Math.round(v[1]*f)), Math.max(1, Math.round(v[2]*f))];
+  r[eje] = meta;                                 // el eje elegido, exacto y sin redondeo
+  return { w:r[0], h:r[1], d:r[2] };
+}
+
+// Dimensiones del nivel `n` SIEMPRE contadas desde el original: por eso ir y volver es exacto.
+function mcPasteEscMeta(orig, n){
+  if(n === 0) return { w:orig.w, h:orig.h, d:orig.d };
+  const base = mcPasteEscARejilla(orig, n > 0 ? 1 : -1), k = Math.abs(n) - 1;
+  if(k === 0) return base;
+  const f = n > 0 ? Math.pow(2, k) : Math.pow(0.5, k);
+  return { w:Math.max(1, Math.round(base.w*f)), h:Math.max(1, Math.round(base.h*f)),
+           d:Math.max(1, Math.round(base.d*f)) };
+}
+
+// ── remuestreo ───────────────────────────────────────────────────────────────────────────────────
+// LA SIMETRÍA ES EL REQUISITO, no un efecto secundario (dueño, 2026-08-30: «*una figura simetrica sale
+// asimetrica, deberia respetarse la simetria en figuras simetricas*»).
+//
+// Reparte `A` casillas en `B` tramos con la simetría GARANTIZADA POR CONSTRUCCIÓN: se calcula sólo la
+// mitad izquierda y la derecha es su espejo. No se confía en ningún redondeo «simétrico», porque
+// ninguno lo es del todo: con A impar el borde central caería en A/2, que no es entero, y ahí es justo
+// donde se rompía la simetría.
+//
+// Con B par y A impar NO EXISTE ningún reparto palindrómico (la suma de un palíndromo de B par es par,
+// y A es impar). En ese caso los dos tramos centrales COMPARTEN una casilla: se prefiere que se solapen
+// antes que dejar hueco, porque un hueco se comería la capa central de la pieza.
+function mcPasteEscTramos(A, B){
+  const r = new Array(B), mitad = Math.floor(B/2), b = t => Math.floor(t*A/B);
+  for(let t = 0; t < mitad; t++){
+    let lo = b(t), hi = b(t+1) - 1;
+    if(B % 2 === 0 && t === mitad-1) hi = Math.ceil(A/2) - 1;   // el último llega al centro
+    if(hi < lo) hi = lo;
+    r[t] = [lo, hi];
+    r[B-1-t] = [A-1-hi, A-1-lo];                                // el espejo, sin más cuentas
+  }
+  if(B % 2 === 1){                              // el tramo central se refleja sobre sí mismo
+    const lo = b(mitad);
+    r[mitad] = [Math.min(lo, A-1-lo), Math.max(lo, A-1-lo)];
+  }
+  return r;
+}
+
+// Para cada celda de DESTINO, qué tramo del ORIGEN le toca. Se mira así —de destino a origen— y no al
+// revés: hacia adelante una celda origen pinta todos los destinos que roza, lo que ENGORDA la pieza y
+// le tapa los huecos.
+function mcPasteEscRangos(O, N){
+  if(N >= O){
+    // Ampliar: cada origen se reparte en un tramo de destinos ⇒ cada destino tiene UN origen, así que
+    // ampliar es COPIAR. Se invierte el reparto; si dos orígenes se disputasen un destino manda el
+    // menor, para que la elección no dependa del recorrido.
+    const g = mcPasteEscTramos(N, O), r = new Array(N);
+    for(let s = 0; s < O; s++)
+      for(let t = g[s][0]; t <= g[s][1]; t++)
+        if(t >= 0 && t < N && !r[t]) r[t] = [s, s];
+    for(let t = 0; t < N; t++) if(!r[t]){ const s = Math.min(O-1, Math.floor(t*O/N)); r[t] = [s, s]; }
+    return r;
+  }
+  return mcPasteEscTramos(O, N);                 // reducir: cada destino recoge un tramo de orígenes
+}
+
+// ── piezas FINAS: lo que la mayoría no puede conservar ───────────────────────────────────────────
+// Dueño (2026-08-30), sobre un castillo escalado dos veces: «*sigo viendo huecos*» · «*las murallas se
+// construyen con bloques que no eran los orginales*». Medido en esa pieza: el 87,7 % de sus bloques
+// está en paredes de grosor 1 o 2. Una pared de 1 bloque nunca llega a la mayoría al reducir a la mitad
+// (4 de 8 en el mejor caso, 2 de 8 en un pilar de esquina) ⇒ la mayoría la BORRA, y con ella la torre,
+// dejando el tejado flotando. Regla: lo macizo se promedia; lo fino no se puede adelgazar más y VIVE.
+//
+// Grosor de la pieza en cada voxel = longitud del tramo continuo más corto de los 3 ejes.
+function mcPasteEscGrosores(cells){
+  const g = new Map(), k = c => (c.dx|0) + ',' + (c.dz|0) + ',' + (c.dy|0);
+  for(const c of cells) g.set(k(c), Infinity);
+  // Un barrido por eje: se agrupan las celdas en líneas y se mide cada tramo continuo de una vez.
+  for(const eje of [0,1,2]){
+    const lineas = new Map();
     for(const c of cells){
-      const cl = (c.dx>>1) + ',' + (c.dy>>1) + ',' + (c.dz>>1);
-      const g = cubos.get(cl);
-      if(g) g.push(c); else cubos.set(cl, [c]);
+      const p = [c.dx|0, c.dz|0, c.dy|0];
+      const linea = eje === 0 ? p[1]+','+p[2] : eje === 1 ? p[0]+','+p[2] : p[0]+','+p[1];
+      let L = lineas.get(linea);
+      if(!L) lineas.set(linea, L = []);
+      L.push([p[eje], k(c)]);
     }
-    out = [];
-    cubos.forEach((g, cl) => {
-      const p = cl.split(',');
-      out.push(Object.assign({}, mcPasteEscManda(g), { dx:+p[0], dy:+p[1], dz:+p[2] }));
+    lineas.forEach(L => {
+      L.sort((a, b) => a[0] - b[0]);
+      let i = 0;
+      while(i < L.length){
+        let j = i;
+        while(j+1 < L.length && L[j+1][0] === L[j][0]+1) j++;
+        const largo = j - i + 1;
+        for(let t = i; t <= j; t++) if(largo < g.get(L[t][1])) g.set(L[t][1], largo);
+        i = j + 1;
+      }
     });
   }
+  return g;
+}
+
+// ── el eje de simetría de la PIEZA, que no tiene por qué ser el de su caja ───────────────────────
+// Dueño (2026-08-30), tras copiar un castillo con un trozo de suelo: la caja crece por los lados y el
+// castillo deja de estar centrado en ella. Reflejar sobre el centro de la CAJA deja entonces cada torre
+// en una fase de muestreo distinta: anchuras y adornos distintos («*la torre de la izqiuerda tiene
+// diferente anchura que la torre de la derecha*»). Medido en ese caso real: el centro de la caja casa
+// un 45 %, y el espejo desplazado una celda casa un 97 %. Así que el espejo se BUSCA.
+// `s` define el reflejo `x ↔ s - x`; `s = O-1` es el centro de la caja.
+const MC_PASTE_ESC_PLANO_K = 8;        // cuánto se busca a cada lado
+const MC_PASTE_ESC_PLANO_MIN = 0.9;    // por debajo no hay tal simetría y se deja el centro de la caja
+const MC_PASTE_ESC_PLANO_CUBRE = 0.6;  // y el espejo tiene que abarcar esto de la pieza, o no dice nada
+const MC_PASTE_ESC_PLANO_MUESTRA = 4000;
+
+function mcPasteEscPlano(cells, o, eje){
+  const O = [o.w, o.h, o.d][eje], base = O - 1;
+  const idx = new Map();
+  for(const c of cells) idx.set(c.dx + ',' + c.dz + ',' + c.dy, String(c.c));
+  // en piezas grandes se puntúa con una muestra regular: sólo hay que ELEGIR entre 17 candidatos, no
+  // medir con precisión, y así esto no se nota al girar la rueda
+  const salto = Math.max(1, Math.ceil(cells.length / MC_PASTE_ESC_PLANO_MUESTRA));
+  let n = 0;
+  for(let i = 0; i < cells.length; i += salto) n++;
+  // Se puntúa SÓLO con las celdas cuyo reflejo cae dentro de la caja. Un trozo de suelo que sobra por
+  // un lado no tiene con qué compararse: contarlo como fallo hundía la nota del espejo bueno por debajo
+  // del mínimo y devolvía el centro de la caja, que es justo lo que descuadra las torres. `dentro`
+  // impide lo contrario: un espejo pegado al borde que acierta mucho porque mide poquísimo.
+  let mejor = base, mejorNota = -1;
+  for(let k = 0; k <= MC_PASTE_ESC_PLANO_K; k++){
+    for(const s of (k ? [base-k, base+k] : [base])){
+      let ok = 0, dentro = 0;
+      for(let i = 0; i < cells.length; i += salto){
+        const c = cells[i], q = [c.dx, c.dz, c.dy], r = s - q[eje];
+        if(r < 0 || r >= O) continue;
+        dentro++;
+        q[eje] = r;
+        if(idx.get(q[0] + ',' + q[1] + ',' + q[2]) === String(c.c)) ok++;
+      }
+      if(dentro < n * MC_PASTE_ESC_PLANO_CUBRE) continue;
+      const nota = ok / dentro;
+      if(nota > mejorNota){ mejorNota = nota; mejor = s; }   // a empate gana el más centrado
+    }
+  }
+  return mejorNota >= MC_PASTE_ESC_PLANO_MIN ? mejor : base;
+}
+
+// Tramos de un eje alineados al espejo de la pieza. El truco: se ENSANCHA el recorrido hasta que quede
+// centrado en el espejo (lo que sobra por un lado está vacío y se recorta solo al final), y sobre ese
+// recorrido ya centrado valen los tramos palindrómicos de siempre.
+function mcPasteEscEje(O, N, s){
+  if(s === O - 1) return { r:mcPasteEscRangos(O, N), n:N };
+  const lo = Math.min(0, s - (O-1)), hi = Math.max(O-1, s), L = hi - lo + 1;
+  const n = Math.max(1, Math.round(N * L / O));  // misma escala, recorrido más largo
+  return { r:mcPasteEscRangos(L, n).map(p => [p[0]+lo, p[1]+lo]), n:n };
+}
+
+// El remuestreo: para cada celda de destino se recoge su trozo de original y se decide si nace y con
+// qué material.
+function mcPasteEscMuestra(cells, o, n, planos, finos){
+  const idx = new Map();
+  for(const c of cells) idx.set((c.dx|0) + ',' + (c.dz|0) + ',' + (c.dy|0), c);
+  const X = mcPasteEscEje(o.w, n.w, planos[0]), Y = mcPasteEscEje(o.h, n.h, planos[1]),
+        Z = mcPasteEscEje(o.d, n.d, planos[2]);
+  const umbral = mcPasteEscRelleno(), out = [];
+  for(let x = 0; x < X.n; x++){
+    const ex = X.r[x], ax = Math.max(0, ex[0]), bx = Math.min(o.w-1, ex[1]);
+    if(bx < ax) continue;                        // ese tramo cae entero en el ensanche vacío
+    for(let y = 0; y < Y.n; y++){
+      const ey = Y.r[y], ay = Math.max(0, ey[0]), by = Math.min(o.h-1, ey[1]);
+      if(by < ay) continue;
+      for(let z = 0; z < Z.n; z++){
+        const ez = Z.r[z], az = Math.max(0, ez[0]), bz = Math.min(o.d-1, ez[1]);
+        if(bz < az) continue;
+        const caja = (bx-ax+1) * (by-ay+1) * (bz-az+1);
+        let hay = 0, finas = 0;
+        const cuenta = new Map(), cuentaFina = new Map();
+        for(let a = ax; a <= bx; a++)
+          for(let b = ay; b <= by; b++)
+            for(let d = az; d <= bz; d++){
+              const kk = a + ',' + b + ',' + d, c = idx.get(kk);
+              if(!c) continue;
+              hay++;
+              // Distancia al centro del trozo en medios bloques: ENTERA, para que el desempate salga
+              // idéntico en la celda y en su espejo (con decimales, no lo garantiza).
+              const px = 2*a - (ax+bx), py = 2*b - (ay+by), pz = 2*d - (az+bz);
+              const dist = px*px + py*py + pz*pz, k = String(c.c);
+              const apunta = m => {
+                const e = m.get(k);
+                if(e){ e.n++; e.dist += dist; } else m.set(k, { n:1, dist:dist, c:c });
+              };
+              apunta(cuenta);
+              if(finos.get(kk) <= MC_PASTE_ESC_FINO){ finas++; apunta(cuentaFina); }
+            }
+        if(!hay) continue;
+        // Lo macizo, por MAYORÍA: si el trozo está más vacío que lleno, la celda no nace y el hueco
+        // sigue siendo hueco. Lo FINO no: una pared de 1 bloque no admite adelgazarse, así que basta
+        // con que asome por el trozo para que la celda nazca. Al ampliar, la caja es 1 ⇒ copia exacta.
+        const macizo = hay >= caja * umbral;
+        if(!macizo && !finas) continue;
+        // Si la celda nace sólo por la pieza fina, el material lo pone la pieza fina: la muralla se
+        // rehace con los bloques de la muralla, no con los del relleno que la rodea.
+        const urna = macizo ? cuenta : cuentaFina;
+        // Gana el material más repetido; a empate, el que esté más centrado en el trozo (es el que se
+        // ve); a empate también, la clave menor. Ningún desempate depende del orden en que se copió, o
+        // la mitad izquierda y la derecha elegirían materiales distintos.
+        let mejor = null, mk = null;
+        urna.forEach((e, k) => {
+          if(!mejor || e.n > mejor.n ||
+             (e.n === mejor.n && (e.dist < mejor.dist || (e.dist === mejor.dist && k < mk)))){ mejor = e; mk = k; }
+        });
+        out.push(Object.assign({}, mejor.c, { dx:x, dz:y, dy:z }));
+      }
+    }
+  }
+  return out;
+}
+
+function mcPasteEscVol(d){ return d.w * d.h * d.d; }
+
+// ── el escalón ───────────────────────────────────────────────────────────────────────────────────
+// Dueño (2026-08-30): «*cada vez que se hace el escalado se pierde el original*» · «*lo que esta
+// copiado no deberia estropearse*». Por eso el portapapeles ORIGINAL se guarda aparte y JAMÁS se toca:
+// lo que se escala es siempre una copia remuestreada DESDE EL ORIGINAL, y el estado es un `nivel`
+// entero. Volver al nivel 0 devuelve las celdas originales tal cual, no una reconstrucción.
+function mcPasteEscala(f){
+  if(!mcPasteEscHay()) return false;
+  const r = mcPasteEscReg();
+  if(!r) return false;
+  mcPasteEscSincro(r);
+
+  const nv = r.nivel + (f > 1 ? 1 : -1);
+  const meta = mcPasteEscMeta(r.dims, nv);
+  if(meta.w < 1 || meta.h < 1 || meta.d < 1){ toast('Ya no se puede dividir más', 3); return false; }
+  if(nv !== 0 && meta.w === r.dims.w && meta.h === r.dims.h && meta.d === r.dims.d && nv * r.nivel <= 0){
+    toast('Ese escalón no cambia el tamaño', 3);   // pieza de 1×1×1, por ejemplo
+    return false;
+  }
+  const est = Math.round(r.cells.length * mcPasteEscVol(meta) / mcPasteEscVol(r.dims));
+  if(est > MC_PASTE_ESC_TOPE){
+    toast('Ese escalado dejaría ~' + est + ' bloques: pasa del tope (' + MC_PASTE_ESC_TOPE + ')', 4);
+    return false;
+  }
+
+  if(!r.planos) r.planos = [mcPasteEscPlano(r.cells, r.dims, 0),
+                            mcPasteEscPlano(r.cells, r.dims, 1),
+                            mcPasteEscPlano(r.cells, r.dims, 2)];
+  if(!r.finos) r.finos = mcPasteEscGrosores(r.cells);
+  // Nivel 0 = las celdas originales tal cual. NO se reconstruyen: se devuelven. Ahí está la cura.
+  const out = nv === 0 ? r.cells.map(c => Object.assign({}, c))
+                       : mcPasteEscMuestra(r.cells, r.dims, meta, r.planos, r.finos);
+  if(!out.length){ toast('Ese escalado no dejaría ningún bloque', 3); return false; }
+
   clipboard.cells = out;
-  // El agarre en ejes de pieza es [dx, dz, dy] (mcAnclaDeCopia): se escala como las celdas o dejaría de
-  // señalar el mismo punto de la pieza, y ésta saltaría de sitio justo al crecer.
-  const a = mc.pasteAnchor;
-  if(a){
-    const nd = { w:mcPasteEscDim(d.w,f), h:mcPasteEscDim(d.h,f), d:mcPasteEscDim(d.d,f) };
-    a[0] = mcPasteEscTope0(f>1 ? a[0]*2 : (a[0]>>1), nd.w);
-    a[1] = mcPasteEscTope0(f>1 ? a[1]*2 : (a[1]>>1), nd.h);
-    a[2] = mcPasteEscTope0(f>1 ? a[2]*2 : (a[2]>>1), nd.d);
+  r.ref = out;
+  r.nivel = nv;
+
+  // El agarre en ejes de pieza es [dx, dz, dy] (mcAnclaDeCopia) y se recalcula DESDE EL ORIGINAL, igual
+  // que las celdas: acumular escalones sobre el agarre ya escalado lo iría desplazando.
+  const dd = mcClipboardDims(), a = mc.pasteAnchor;
+  if(a && r.ancla && dd){
+    a[0] = mcPasteEscTope0(Math.round(r.ancla[0] * dd.w / r.dims.w), dd.w);
+    a[1] = mcPasteEscTope0(Math.round(r.ancla[1] * dd.h / r.dims.h), dd.h);
+    a[2] = mcPasteEscTope0(Math.round(r.ancla[2] * dd.d / r.dims.d), dd.d);
+    r.anclaVista = [a[0], a[1], a[2]];
     if(clipboard.ancla) clipboard.ancla = a.slice();
   }
-  mcSelGuiaNormaliza();          // deja la esquina mínima en 0 y arrastra el agarre con ella
-  mc._pasteCache = null;         // la geometría de la vista previa va dentro: hay que rehacerla
-  mc._selGuiaVuelo = null;       // …y la guía de Shift/Ctrl mide contra la pieza
+
+  mcSelGuiaNormaliza();
+  mc._pasteCache = null;
+  mc._selGuiaVuelo = null;
   mc.selGuiaFirma = null;
-  mc._escFirma = null;           // la promesa de Alt, también
-  const dd = mcClipboardDims();
-  toast('Pegar escala ' + (f>1 ? '×2' : '÷2') + ' · ' + clipboard.cells.length +
-        ' bloque(s) · ' + dd.w + '×' + dd.h + '×' + dd.d, 3);
+  mc._escFirma = null;
+
+  const df = mcClipboardDims();
+  toast('Escala · nivel ' + (nv > 0 ? '+' + nv : nv) + ' · ' + df.w + '×' + df.h + '×' + df.d +
+        ' · ' + clipboard.cells.length + ' bloque(s)' + (nv === 0 ? ' · ORIGINAL' : ''), 3);
   return true;
 }
 
@@ -17701,19 +17989,22 @@ function mcPasteEscala(f){
 //
 // Dónde caería la pieza escalada: LA MISMA CUENTA que `mcPasteOrigen` (agarre + postura), con las
 // dimensiones y el agarre ya escalados. Se rehace aquí en vez de escalar el portapapeles para
-// preguntar: una promesa no puede modificar lo que se va a plantar.
+// preguntar: una promesa no puede modificar lo que se va a plantar. Y las dimensiones las da la
+// ESCALERA, no un ×2 pelado, o la caja prometida no sería la que luego sale.
 function mcPasteEscCaja(org, f){
-  const d = org.dims, ori = org.ori;
-  const w = mcPasteEscDim(d.w,f), h = mcPasteEscDim(d.h,f), p = mcPasteEscDim(d.d,f);
-  const r = mcOriDims(w, h, p, ori), mueve = mcOriMove(ori, w, h, p);
-  const a = mc.pasteAnchor || [0,0,0];
-  const q = mueve(mcPasteEscTope0(f>1 ? a[0]*2 : (a[0]>>1), w),
-                  mcPasteEscTope0(f>1 ? a[1]*2 : (a[1]>>1), h),
-                  mcPasteEscTope0(f>1 ? a[2]*2 : (a[2]>>1), p));
+  const r = mcPasteEscReg();
+  const meta = r ? mcPasteEscMeta(r.dims, r.nivel + (f > 1 ? 1 : -1))
+                 : mcPasteEscMeta(org.dims, f > 1 ? 1 : -1);
+  const w = meta.w, h = meta.h, p = meta.d;
+  const rr = mcOriDims(w, h, p, org.ori), mueve = mcOriMove(org.ori, w, h, p);
+  const a = mc.pasteAnchor || [0,0,0], cur = org.dims;
+  const q = mueve(mcPasteEscTope0(Math.round(a[0] * w / cur.w), w),
+                  mcPasteEscTope0(Math.round(a[1] * h / cur.h), h),
+                  mcPasteEscTope0(Math.round(a[2] * p / cur.d), p));
   // `base` = la celda clavada en la mira: la que el motor ya calculó para la pieza sin escalar.
   const base = [org.ox+org.anchor[0], org.oy+org.anchor[1], org.oz+org.anchor[2]];
   const o = [base[0]-q[0], base[1]-q[1], base[2]-q[2]];
-  return { a:o, b:[o[0]+r[0]-1, o[1]+r[1]-1, o[2]+r[2]-1] };
+  return { a:o, b:[o[0]+rr[0]-1, o[1]+rr[1]-1, o[2]+rr[2]-1] };
 }
 
 // Caja de CELDAS → sus dos esquinas en voxeles FINOS.

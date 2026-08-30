@@ -756,13 +756,17 @@ empieza el modo preview, me gustaria que alt+rueda sirva para escalar x2 (rueda 
 abajo) el objeto*» · «*si puede tener alguna previsualizacion cuando se pulse alt que indique que se va
 modificar su tamaño como hacen shift y control al dejarse pulsados*»)*
 
-Con la pieza **en vuelo** (Ctrl+V), **Alt + rueda** la escala: arriba **×2**, abajo **÷2**
-(`mcPasteEscala`). Se escala **el portapapeles**, no el mundo: ×2 convierte cada celda en las 8 de su
-cubo; ÷2 funde cada cubo de 8 en una, y se queda el material **más repetido** de las ocho — elegir «la
-primera» sería más corto, pero haría que el resultado dependiera del orden en que se copió, que no es una
-propiedad de la pieza. El **agarre** (`mc.pasteAnchor`, en ejes de pieza) se escala con ella o la pieza
-saltaría de sitio justo al crecer, y `MC_PASTE_ESC_TOPE` (40 000 bloques) corta el ×2 antes de que una
-pieza mediana se vaya a millones.
+Con la pieza **en vuelo** (Ctrl+V), **Alt + rueda** la escala: arriba más grande, abajo más pequeña
+(`mcPasteEscala`). Se escala **el portapapeles**, no el mundo. El **agarre** (`mc.pasteAnchor`, en ejes
+de pieza) se escala con ella o la pieza saltaría de sitio justo al crecer, y `MC_PASTE_ESC_TOPE`
+(40 000 bloques) corta el ×2 antes de que una pieza mediana se vaya a millones.
+
+⛔ **NO SE ESCALA LO QUE HAY PUESTO: SE REMUESTREA DESDE EL ORIGINAL.** La rueda mueve un **`nivel`
+entero** y la pieza de cada nivel se calcula siempre desde la copia intacta (`mc._pegEsc`, guardada en
+`mc` y **nunca** en un closure) ⇒ bajar y volver a subir devuelve el original **byte a byte**, no una
+reconstrucción. La versión de 2026-08-28 hacía `clipboard.cells = out` y perdía la pieza en el primer
+giro: **cuatro reglas** se ganaron a base de fotos del dueño y ninguna es opcional, todas en el bloque
+`mcPasteEsc*` de `app.js` con su porqué al lado. Ver [las cuatro reglas](#las-cuatro-reglas-del-escalado).
 
 **La promesa de Alt** (`mcPasteEscGuia`) va con el mismo idioma que la guía ✚/▬ y con sus dos colores,
 pero **en cajas**: Shift y Ctrl tocan una capa y prometen celda a celda; Alt cambia la pieza entera. En
@@ -784,10 +788,47 @@ en los **mismos** oyentes de teclado que `mc.selGuiaModo` (`mc._escAlt`), que ya
 perder el foco con la tecla pulsada.
 
 Nació como snippet (`data/snippets/pegar-escala.json`, Ley de Oro), medido con
-`tests/probe_pegar_escala.js` (ida y vuelta ×2→÷2 devuelve **la misma pieza**, el agarre viaja, la rosca
-no se lo lleva y la guía **se ve**), y bajó al motor con `herramientas/parche_app_pegar_escala.py`. El
-snippet sigue publicado y **se aparta solo** al ver `mcPasteEscala` en `app.js` — si no, habría **dos**
-oyentes de `wheel` contando el mismo gesto.
+`tests/probe_pegar_escala.js` (el agarre viaja, la rosca no se lo lleva y la guía **se ve**), y bajó al
+motor con `herramientas/parche_app_pegar_escala.py`. El remuestreo bajó después, el **2026-08-30**. El
+snippet queda publicado pero **VACÍO a propósito**: si volviera a envolver el motor habría **dos copias
+vivas** de la misma lógica y ganaría la congelada. Sus mandos (`game.pegarEscala.rejilla()` /
+`.relleno()` / `.estado()`) siguen valiendo porque ahora escriben el estado que lee el motor.
+
+<a id="las-cuatro-reglas-del-escalado"></a>
+### Las cuatro reglas del escalado (ninguna es opcional)
+
+Guardián: **`tests/test_pegar_escala.js`**, que extrae las funciones **verbatim por texto** de `app.js`
+(mismo truco que `test_rayo_apuntado.js`) ⇒ mide el motor, no una copia. Renombrar o mover el bloque
+`mcPasteEsc*` lo revienta con un `ReferenceError`, y eso es **deliberado**.
+
+1. **Escalera con rejilla** (`mcPasteEscARejilla`). *«Múltiplos de 16 en cualquier dirección son
+   deseables»*. El primer escalón salta a la rejilla (por defecto **8**): 20³ baja a **16³**, no a 10³;
+   de ahí en adelante, ×2/÷2. Si la pieza no es cúbica **no se cuadra cada eje por su lado** (la
+   deformaría): se fija el eje que **menos** se mueve y los otros dos lo siguen en proporción — 20×50×10
+   sube a 24×60×12. Y la rejilla **ajusta** el escalón, nunca lo sustituye por uno mayor (`f` fuera de
+   `[0.5, 2]` ⇒ ×2/÷2 pelado): sin ese tope, 2×1×1 saltaba a 8×4×4.
+2. **Reparto palindrómico** (`mcPasteEscTramos`). La simetría es **el requisito**, no un efecto
+   secundario. Se calcula **sólo la mitad izquierda** y la derecha es su espejo: ningún redondeo
+   «simétrico» lo es del todo. Con `B` par y `A` impar **no existe** reparto palindrómico (la suma de un
+   palíndromo de longitud par es par), así que los dos tramos centrales **comparten** una casilla — se
+   prefiere solapar antes que dejar hueco, que se comería la capa central.
+3. **El espejo es el de la PIEZA, no el de su caja** (`mcPasteEscPlano`). Copiar un castillo *«y parte
+   del suelo»* descentra la pieza dentro de su caja; reflejar sobre el centro de la caja deja cada torre
+   en una **fase de muestreo distinta** (anchuras y adornos distintos). Se busca el espejo ±8. Sólo
+   puntúan las celdas **cuyo reflejo cae dentro**: contar como fallo el suelo que sobra por un lado
+   hundía la nota del espejo bueno (45 % contra 97 % en el caso real). `PLANO_CUBRE` impide lo
+   contrario: un espejo pegado al borde que acierta mucho porque mide poquísimo.
+4. **Lo fino sobrevive** (`mcPasteEscGrosores`). Medido en el castillo del dueño: **el 87,7 % de sus
+   bloques está en paredes de grosor 1 ó 2**. Una pared de 1 bloque **nunca** llega a la mayoría al
+   reducir a la mitad (4 de 8 en el mejor caso, **2 de 8** en un pilar de esquina) ⇒ por mayoría pura se
+   **borraba la torre y el tejado quedaba flotando**. Lo macizo se promedia; lo fino basta con que asome.
+   Y si la celda nace **sólo** por la pieza fina, el material lo pone la pieza fina: *«las murallas se
+   construyen con bloques que no eran los originales»* era eso, más un desempate que se iba siempre al
+   **id de bloque menor**. Ahora empata por **centralidad** (distancia entera en medios bloques, para que
+   la celda y su espejo elijan igual).
+
+Medido antes/después sobre ese castillo, dos muescas abajo: **8×6×9 y 92 bloques con 4 materiales
+(48 % de desvío)** pasó a **8×9×9 y 202 bloques con 13 materiales (29 %)**, sin trozos sueltos.
 
 ### El fantasma de estructura SE PIDE, NO SE IMPONE (`mc.previewMudo`)
 
@@ -912,3 +953,22 @@ Dos detalles que parecen de adorno y no lo son:
 La miniatura (`mcDibujaRecorte`) es la silueta de frente con el color representativo de cada material
 (`texRepr`), pintada de atrás hacia delante y oscureciendo con la profundidad. No se malla nada ni se
 pide un dibujo por red: un recorte no es una pieza del catálogo, es una caja de bloques del mundo.
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+(Minimización de `CLAUDE.md` pedida por el dueño; arriba queda la regla y el enlace.)
+
+- `setVoxel` vs `game.stamp`: 200 hojas = **60 ms / 0 draw calls** por rejilla vs **385 ms / 200 draw
+  calls** estampadas. Bosque → `setVoxel`.
+- **Id sin namespace no identifica nada**: `hab:cable` ≡ `asset:assets/cable.vox.json` (mismo dibujo, otra
+  puerta). ⛔ **ninguna tabla del motor lleva claves `hab:` a mano** (BUG-RS23, BUG-FLUID3) → usar
+  `mcNombreMat`/`mcClaveDeNombre`. Atar pieza↔motor: **lo declara el dibujo** en su `meta` y el motor lo
+  deriva del catálogo (REQ-TOOL1).
+- **24 posturas se DERIVAN**: giro **en la clave** (`flor@7`), decodificar con `mcOriNorm`/`mcOriParts`,
+  ⛔ nada de `(rot|0)&15` (BUG-RS7, BUG-RS8, BUG-ROT2).
+- ⛔ **`mcSolid` no se parchea nunca** (lo comparten mallado + rayo + romper/poner); las demás preguntas →
+  arrays propios (`mcSolidWalk`, `mcTapaCara`, `mc.finoRejilla`, `mc.traspasaLuz`, `mc.sinSombra`).
+- ! `mcFineBoxHit`, `mcAimBoxHit`, `mcTerrenoChoca` se extraen **VERBATIM por texto** desde
+  `test_rayo_apuntado.js` ⇒ refactorizarlas revienta el test con `ReferenceError`.
