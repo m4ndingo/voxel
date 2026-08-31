@@ -153,3 +153,11 @@ comprueba igualdad byte a byte sobre `PLAN.md` y sobre un fixture adversario (li
 valla de código con `#`, CRLF, sin `\n` final, línea de 5000, par suplente justo en el corte, línea en
 blanco inicial), más el esquema de encabezados en `esqueleto`, la cabecera, que toda clave de paleta
 exista en `assets/index.json` y las tres invariantes de las notas.
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+Cada rasgo es **PORTADOR** (suelo `y=GH` + notas; la vuelta los lee) o **DERIVADO** (el resto; los
+ignora). ⛔ Derivado **jamás** en `y=GH` ni en nota: el `.md` regenerado sale corrupto **sin que nada
+falle a gritos**. Guardián `test_ciudad_md.js`.

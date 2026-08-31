@@ -154,3 +154,16 @@ REQ-LUZ2 rehecho con este modelo, sin una línea de `app.js`. Cuatro envolturas
 `on`/`off`/`tras`/`estado()`, y la cabecera del fichero explica la medida que lo motivó, el artículo de
 la [Ley de la Luz](../wiki/paginas/ley-de-la-luz.md) que se infringía y los tres riesgos que introduce.
 Léelo como plantilla.
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+(Minimización de `CLAUDE.md` pedida por el dueño; arriba queda la ley y el enlace.)
+
+⛔ **`app.js` NO se modifica hasta que el cambio esté validado antes por parcheo en caliente.** Nace
+**aislado** en un snippet `data/snippets/<id>.json` (JS **dentro** de `code`, ⛔ jamás un `.js` suelto)
+que envuelve funciones del motor en memoria guardando el original (`fn._orig`; `app.js` es script clásico
+sin IIFE ⇒ `window.mcX` es reasignable e intercepta sus llamadas internas), y se manda con
+**`game.<modulo>.on()/off()`** — `off()` devuelve el motor **byte a byte**: ése es el A/B y el circuit
+breaker. Solo tras demostrar estabilidad se gradúa, y **lo mínimo**. Plantilla: `luz-quietas.json`.

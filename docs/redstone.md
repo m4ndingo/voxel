@@ -470,3 +470,15 @@ pagaron caras:
   de la de arriba salía flotando a media altura. ⚠️ **La pérdida tiene que ser 1**: con `perdida: 0`
   las dos hojas se sostienen la una a la otra —sin gradiente ninguna baja nunca— y la puerta **no se
   cierra** al soltar la placa. Lo cazó «se cierra sola al soltarse la placa» en el montador.
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+(Minimización de `CLAUDE.md` pedida por el dueño; arriba queda la regla y el enlace.)
+
+- Tocas un fuente de `redstone/` → **re-publícalo** o el mundo sigue con el snippet viejo.
+- **Pieza ≤ 16³**: más de una celda y `mcCabeEnRejilla` la manda a `mc.structures`, donde no tiene celda,
+  ni vecinos, ni señal (BUG-RS6, la puerta muda).
+- `define('apagada', {encendida:'X'})` **registra TAMBIÉN `X`**, o la lámpara se enciende una vez y no
+  vuelve jamás. Todo con **`precargar:false`**.

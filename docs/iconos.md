@@ -179,3 +179,11 @@ node tests/test_images_consumo.js   # sin publicar el editor no cambia; publican
 ```
 
 Los dos **restauran `data/ui/` a como estaba** al terminar: el dueño puede tener iconos publicados.
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+Iconos (`/images`): la verdad es el **DIBUJO + `data/ui/ranuras.json``; los `data/ui/<ranura>-<px>.png`
+son **derivados, ⛔ no se editan a mano nunca**. **Rasteriza el navegador**; `server.py` solo valida y
+escribe. Sin publicar, todo se ve como antes.

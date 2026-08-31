@@ -893,3 +893,21 @@ extra pausados** (`autostart:false` + `pause()`), porque `mcAgentsTick` salta lo
 `vbo && count`. Especificación de comportamiento: **[`REGLAS_AGENTES.md`](REGLAS_AGENTES.md)**
 (bajó de la raíz el 2026-08-13; `PLAN.md`, `tests/test_informe.js` y los snippets lo citan por
 nombre y sección —«REGLAS_AGENTES.md §21»—, no por ruta, así que esas citas siguen valiendo).
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+(Minimización de `CLAUDE.md` pedida por el dueño; arriba queda la regla y el enlace.)
+
+### Mínimo antes de leer el resto de este fichero
+
+- **2 sistemas, no sinónimos**: `mc.agents` (NPC-cubo 1×1×1, `game.defineAgent`) vs `game.esqueletos`
+  (rigs articulados de estructuras finas). Zombie = lo 2º ⇒ **no** sale en `npcs[]` del diagnóstico de
+  atasco sino en `piezas[]`. Y `game.agentes` ≠ `game.esqueletos`: los 1os = **documentos guardados**
+  (`data/agentes/<id>.json`, ahí se edita el bicho), los 2os = lo **vivo en este mundo**. Guardar no
+  planta; plantar no guarda.
+- Toda operación sobre instancias de un rig empieza por **`readquirir(rig)`**: `mcRestampAll` **sustituye
+  cada objeto** de `mc.structures` ⇒ trabajar por referencia falla **en silencio** (BUG-AG3).
+- Piezas de rig = `efimera` (fuera de `mundo.json` y del deshacer); **`crearEsqueleto` las rehace campo a
+  campo** ⇒ todo campo nuevo hay que traerlo ahí **explícitamente**.

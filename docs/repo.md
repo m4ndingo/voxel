@@ -67,3 +67,44 @@ El runner incluye comprobación *pre-flight* automática del servidor `:8500` y 
    (leen `data/…`, `assets/…` relativos al cwd). ! test que entre por `/` → **`?noauto=1`**, o el
    autoarranque del dueño lo lleva a otro mapa y falla con un error que no se parece a la causa. Clon
    nuevo: `npm i && npx playwright install chromium` (clavado 1.47.2; 1.48+ pide Node 20).
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+El dueño: «*hay que minimizar `/root/voxel/CLAUDE.md` ya que se inyecta en cada mensaje, que esté
+indexado el contenido y que lo escrito de forma humana sea telegráficamente, cada palabra cuesta
+tokens*». Nada se borró: el detalle bajó aquí y arriba quedó la regla más el enlace.
+
+### Mapa del repo — cómo NO navegar a ciegas
+
+- Poner bloque: `setVoxel` · `mcSetVoxel` · `mcSetBlock` · `mcCabeEnRejilla` · `mcPlace` ·
+  `mcResolveMat`/`mcMatKey`. **Sin línea a propósito** (envejecen → sitio equivocado).
+- Nombre corto de asset ← **`assets/index.json`**, ⛔ NUNCA de un `*.vox.json` (taberna = 283 k tokens >
+  ventana). **Vetados al `Read`** (`.claude/settings.json`): `data/worlds/*.vox`, `data/mundo.vox`,
+  `data/fotos/*.png`, los 3 assets grandes. Foto que te pasen por número → **`data/fotos/mini/<id>.png`**
+  (800 px, ésa SÍ se lee; la escribe el navegador al sacarla, atrasadas con `herramientas/fotos_mini.py`).
+- **Raíz mínima** (2026-08-13): `server.py`, `correr_tests.js`, `package.json`, `.md`. SITIO → **`web/`**
+  (`.html`, `app.js`, `.css`); resto → `servidor/`, `herramientas/`, `performance/`, `docs/historico/`.
+  Todo se lanza **desde la raíz** ⇒ su `__file__`/`__dirname` lleva `..`.
+  **URL invariantes**: `Handler.translate_path` elige carpeta por el **1er tramo** (`assets`, `data`,
+  `wiki`, `images` ← repo; resto ← `web/`) ⇒ `/server.py`, `/PLAN.md` ya no se sirven por HTTP. Carpeta
+  nueva que pida el navegador → **a `RAIZ_URL` o 404**. Guardián `tests/test_sitio_raiz.js`.
+
+### Tickets sin releer `PLAN.md` (27 KB)
+
+- Abiertos → **solo** el índice `PLAN.md:32` (14 líneas). ⛔ nada de `grep` al fichero entero.
+- Uno concreto → su sección por el ancla `(#id)`. Contexto + capturas del dueño →
+  **`data/tickets/<ID>/contexto.md`** (ésa es la puerta); los `*.png`, **uno a uno**.
+- **2 ficheros**: `PLAN.md` = **solo abierto/pendiente** (2026-08-18: índice de cerrados y bitácora
+  fuera); `PLAN_ARCHIVO.md` (900 KB) = todo lo cerrado, ⛔ no abrirlo entero. Cada sección
+  necesita `<a id="-req-osd13"></a>` **explícito** antes del `###` o el enlace no salta. Guardián
+  `tests/test_plan_enlaces.js`.
+
+### Convenciones (movidas verbatim desde CLAUDE.md el 2026-08-30)
+
+- Todo cambio de `state` acaba en `render()`. ! **`render()` no pinta: encola un rAF**; `setMode()` sí
+  pinta **síncrono**. Los 2 seguidos rasterizan el modelo **2 veces** ⇒ llama **solo** a `setMode()`.
+- Export: `{format:"voxelforge-1", size, meta, voxels:{...}}`. UI y comentarios: **español**.
+- **Capturas de ticket → disco, no al chat**: `data/tickets/<ID>/` + `contexto.md` (un ticket se resuelve
+  semanas después de abrirse). Las rescata `herramientas/guardar_imagenes_ticket.py`.

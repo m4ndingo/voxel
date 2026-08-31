@@ -1,7 +1,7 @@
 // @area: general
 // @necesita: node
 //
-// Guardián del tope de 15 KB de CLAUDE.md (encargo del dueño, 2026-08-13).
+// Guardián del tope de CLAUDE.md (encargo del dueño, 2026-08-13; 15 KB hasta el 2026-08-30, hoy 12 KB).
 //
 // CLAUDE.md se inyecta en el contexto ENTERO en CADA turno: cada byte se paga una y otra vez, en todas
 // las conversaciones, para siempre. Un fichero que crece «solo un párrafo» por ticket es la fuga de
@@ -16,7 +16,11 @@ const fs = require('fs');
 const path = require('path');
 
 const RAIZ = path.join(__dirname, '..');
-const TOPE = 15 * 1024;
+// 12 KB desde el 2026-08-30. Estaba en 15 y el fichero vivía rozándolo (15 319 B = 99,8 % del tope). El
+// dueño: «*hay que minimizar CLAUDE.md ya que se inyecta en cada mensaje, que esté indexado el contenido
+// y que lo escrito de forma humana sea telegráficamente, cada palabra cuesta tokens*». Se podó bajando el
+// detalle VERBATIM a `docs/` y se baja el tope detrás, que si no los 3 KB liberados se rellenan solos.
+const TOPE = 12 * 1024;
 
 let ok = 0, fallos = 0;
 const check = (c, m) => c ? (ok++, console.log('  ok  ' + m)) : (fallos++, console.log('  FALLO  ' + m));

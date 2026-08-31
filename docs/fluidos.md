@@ -326,3 +326,16 @@ que paga la mano: cada pieza sumergida es un draw call y una línea de `mundo.js
 
 Medido con un charco de 9×9 y 1 de hondo sembrado con 6 `setVoxel`: **6 celdas de agua perdidas antes, 0
 ahora** (y 6 piezas estampadas en su sitio).
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+(Minimización de `CLAUDE.md` pedida por el dueño; arriba queda la regla y el enlace.)
+
+**Fuera del agua no cambia absolutamente nada** (condición del dueño, 1er test de los guardianes).
+! `mcCaidaPaso(vy, dt, x, y, z, nadando, mira)` = **LA** pieza de arquitectura: `app.js` ofrece el paso de
+caída, lo llama quien tenga cuerpo (jugador + los **2** integradores del snippet). ¿Un 4º sitio que
+integre velocidad vertical? **llámala**. ¿La envuelves? **todos** los argumentos (comerse el 6º apaga el
+nadar, el 7º la mirada, **sin fallar nada**). ! `test_hundirse.js` y `test_nadar.js` están **en rojo a
+propósito** desde que el dueño retuneó las constantes = **BUG-FLUID5**, no regresión.

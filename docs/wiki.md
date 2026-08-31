@@ -29,3 +29,12 @@ casa). Se edita y se recarga.
   `tests/test_wiki.js` comprueba símbolo a símbolo que cada uno sigue existiendo en `app.js`.
 - El cuerpo del texto **no** va con `--font-game`: Pixeloid solo es nítida en múltiplos de 9 px y un
   párrafo largo con ella se paga en tiempo de lectura. La fuente del juego se queda en los rótulos.
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+Wiki (`/wiki`) = manual de producto del dueño. ⛔ **NO se edita salvo que él lo pida.** Tu cambio la
+desfasa → 1 línea en [`../wiki/PENDIENTE.md`](../wiki/PENDIENTE.md) y sigues. En `api.json`, `fuente`
+lleva el **SÍMBOLO, nunca el número de línea**; `tests/test_wiki.js` comprueba que cada símbolo sigue
+existiendo.

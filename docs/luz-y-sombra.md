@@ -637,3 +637,15 @@ borra). Lo que queda arriba es el candado + el enlace.
 - **Difusión ≠ siembra**: `mcTablaLuz()` = por dónde se propaga; `mcTablaCielo()` = hasta dónde baja la
   columna de cielo (`luz:'pasa'` **no** la abre). **Cambiarlas invalida las mallas cacheadas** aunque no
   se mueva un voxel: entran en la firma del chunk.
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+(Minimización de `CLAUDE.md` pedida por el dueño; arriba queda el candado y el enlace.)
+
+**2 sombras distintas**: **skylight** (`mc.light`, horneado) vs **sombra proyectada** (GPU).
+**2 bakes** de luz móvil: `mcDynBake` sólo **despacha** → `mcDynBakeLey` (defecto) / `mcDynBakeRC` (LUT,
+`game.luzLey.off()`).
+⛔ `interiorDark` **a 0 mata** la luz móvil (shade 0 y `dynLift` DIVIDE); lo horneado en el shade va a
+**`mcMeshSigSemilla`** o no refresca.
