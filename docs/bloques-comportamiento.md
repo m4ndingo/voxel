@@ -41,6 +41,38 @@ game.bloques.mirones();      // qué piezas están girando ahora y cuánto
 game.bloques.roce(0.08);        // lo que se sigue patinando UNA VEZ FUERA del bloque deslizante
 ```
 
+### `alRomper` y quien borra SIN pico — `game.bloques.avisoDeRotura(x,y,z)`
+
+`alRomper` (REQ-ROMPE1) lo dispara el envoltorio de **`mcBreak`**, y **el orden importa**: se mira
+**antes** de romper (mientras existen la clave y el giro) y se dispara **después** (con el bloque ya
+fuera de en medio). Pero **quien borra en masa no pasa por `mcBreak`**: la explosión de
+`explosion-tnt` escribe `setVoxel(x,y,z,0)` a pelo dentro de un `beginBatch/endBatch`, así que hasta
+`mundo-autoarranque` **v1.40** ningún `alRomper` se enteraba de esos borrados (REQ-TNT1, el dueño el
+2026-08-30).
+
+`dispararAlRomper`, `cfgDeClave` y la `tabla` son **privados** de este snippet, así que la puerta la
+abre **una sola primitiva**, y devuelve **una función**:
+
+```js
+const avisa = game.bloques.avisoDeRotura(x, y, z);   // ANTES de borrar; null si ahí no hay `alRomper`
+// … borrar como te dé la gana …
+if (avisa) avisa();                                   // DESPUÉS de borrar
+```
+
+⚠️ **Que devuelva una función y no una ficha es a propósito** («que sea lo más agnóstico que se pueda
+… no tiene por qué conocer los otros snippets, solamente enviarles el evento `alRomper`»). Quien borra
+no toca **ni una clave, ni un giro, ni el nombre de otro snippet**: pide el aviso y lo da. Todo el
+diff de `explosion-tnt` son 21 líneas y no nombra un solo material.
+
+⚠️ **Cadena.** `tnt` define `alRomper: () => game.snippet('explosion-tnt', …)`, o sea que esto
+**enciende la reacción en cadena** (que es lo que se espera). Termina sola porque cada dinamita se
+borra *antes* de que su aviso salga, así que ninguna se re-dispara a sí misma; lo que no tiene es tope
+de anchura. Si alguna vez se desboca, el tope va **en `mc`**, ⛔ nunca en un closure: cada explosión
+encadenada es una ejecución NUEVA del snippet y dos closures no se ven entre sí.
+
+Los dos parches: `herramientas/parche_snp_romper_en_masa.py` (la puerta) y
+`herramientas/parche_snp_tnt_alromper.py` (la explosión).
+
 Todo vive en el snippet **`data/snippets/mundo-autoarranque.json`** (el JSON *es* la fuente; se edita
 con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del diseño:
 
@@ -360,3 +392,21 @@ con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del d
     cargar, solo si reejecuto el snippet». Se recorre `mc.structures` entera cada frame, que al lado
     de lo que ya hay sale gratis: `mcRender` la recorre **cuatro veces por frame** solo para cullear.
 - Solo afecta al **jugador**; los agentes siguen con su `climb`/`drop`.
+
+---
+
+## Movido verbatim desde CLAUDE.md el 2026-08-30
+
+(Minimización de `CLAUDE.md` pedida por el dueño; arriba queda la regla y el enlace.)
+
+`game.bloques.define(clave, cfg)` cuelga del **MATERIAL**, nunca del voxel (1 script/voxel = 442 368
+closures en 96×48×96). Vive entero en `data/snippets/mundo-autoarranque.json`; `app.js` solo expone la
+capacidad. `game.bloques.info()` = descubridor de la clave EXACTA de lo que piso / tengo delante.
+
+- **2 autoarranques y el global corre en TODOS los mapas**: `mundo-autoarranque` + justo después
+  `mundo-<mapa>`. ! `arranque-<mapa>` es otra cosa: la **intro**, solo con `?intro=1`.
+- **1 sola costura** = envoltorio sobre `mcUpdate`; reejecutar **desenvuelve el anterior por
+  `mcUpdate._orig`** (apilar duplica la velocidad de trepado). **Si lo cambias → sube `VERSION`**. Estado
+  en `mc` (`mc._parkour`, `mc._deslizVel`…), ⛔ nunca en closure.
+- **El snippet se PARCHEA, no se reescribe** (dueño lo edita en vivo, **2 copias vivas**):
+  `parche_snp_*.py` idempotente, ancla única, **aborta si el ancla no aparece exactamente 1 vez**.
