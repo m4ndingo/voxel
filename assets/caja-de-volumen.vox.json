@@ -11,8 +11,7 @@
     "role": "Herramienta · volumen y caja multibloque",
     "icon": "📦",
     "description": "Herramienta para definir y plantar volúmenes, filas, columnas y cajas de bloques.",
-    "categoria": "herramienta",
-    "herramienta": "box"
+    "categoria": "herramienta"
   },
   "voxels": {
     "11,11,4": "*#ffffff",
@@ -79,6 +78,5 @@
       8
     ]
   ],
-  "savedAt": "2026-08-20T11:55:35",
-  "createdAt": "2026-08-16T11:10:00"
+  "id": "caja-de-volumen"
 }

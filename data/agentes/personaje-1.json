@@ -12,15 +12,7 @@
   "raiz": {
     "nombre": "torso",
     "pieza": "asset:assets/torso-de-personaje.vox.json",
-    "rot": 0,
-    "articula": {
-      "pivote": 1,
-      "base": 0,
-      "reposo": 0,
-      "amplitud": 90,
-      "fase": 90,
-      "eje": "x"
-    }
+    "rot": 0
   },
   "piezas": [
     {
@@ -106,23 +98,6 @@
         "fase": 180
       },
       "rot": 0
-    },
-    {
-      "nombre": "antorcha",
-      "pieza": "hab:antorcha",
-      "en": [
-        0.375,
-        0.5625,
-        -0.8125
-      ],
-      "articula": {
-        "pivote": 1,
-        "base": 0,
-        "reposo": 0,
-        "amplitud": -5,
-        "fase": 0,
-        "eje": "x"
-      }
     }
   ],
   "seguir": {
@@ -142,7 +117,7 @@
     "suavidad": 1
   },
   "id": "personaje-1",
-  "savedAt": "2026-08-08T09:24:16",
+  "savedAt": "2026-08-27T21:29:30",
   "empuje": {
     "fuerza": 16
   },
