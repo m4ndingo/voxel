@@ -219,6 +219,7 @@ def list_snips():
         except Exception:
             continue
         out.append({'id': fn[:-5], 'name': d.get('name', '(sin nombre)'),
+                    'categoria': d.get('categoria', '') or d.get('category', ''),
                     'lines': (d.get('code', '') or '').count('\n') + 1,
                     'savedAt': d.get('savedAt', ''),
                     'protegido': fn[:-5] in SNIPS_PROTEGIDOS})    # la UI esconde el botón; el DELETE lo corta el servidor
@@ -1058,6 +1059,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             sid = re.sub(r'[^A-Za-z0-9_-]+', '-', str(d.get('id') or '')).strip('-') or slugify(d.get('name'))
             rec = {'id': sid, 'name': d.get('name', '(sin nombre)'), 'code': d.get('code', ''),
                    'savedAt': now_iso()}
+            cat = str(d.get('categoria') if 'categoria' in d else (d.get('category') or '')).strip()
+            if cat:
+                rec['categoria'] = cat
             to_trash(self._snip_path(sid), move=False)           # respaldo de la versión anterior
             atomic_dump(rec, self._snip_path(sid))
             return self._send(200, {'id': sid, 'savedAt': rec['savedAt']})

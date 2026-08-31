@@ -1,0 +1,6 @@
+{
+  "id": "performance-test",
+  "name": "Performance Test",
+  "code": "game.perfAssert = 100;\ngame.perfVerbosity = 2;\ngame.perfContinuo = true;\n\ngame.perfDump.forzar() // Vuelca inmediatamente el acumulador del fotograma actual a la consola, sin tener que esperar a que ocurra una caída.\ngame.perfDump() // Re-imprime el último informe volcado y vuelve a armar el detector para cazar la siguiente caída de FPS.\ngame.perfDump.reset() // Limpia todos los contadores acumulados y re-arma.",
+  "savedAt": "2026-08-31T19:46:19"
+}

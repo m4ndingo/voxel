@@ -1629,7 +1629,9 @@
     "createdAt": "2026-08-19T11:41:32",
     "count": 87,
     "categoria": "herramienta",
-    "herramienta": "pick"
+    "herramienta": "pick",
+    "description": "",
+    "alias": "espada"
   },
   {
     "id": "pico-de-piedra",
@@ -2527,15 +2529,16 @@
       "z": 16
     },
     "file": "assets/tnt.vox.json",
-    "savedAt": "2026-08-31T16:08:02",
+    "savedAt": "2026-08-28T22:56:05",
     "createdAt": "2026-08-28T21:41:21",
-    "count": 4096
+    "count": 4096,
+    "description": "Bloque de dinamita TNT clásico estilo voxel."
   },
   {
-    "id": "castillo",
-    "name": "Castillo",
-    "role": "Asset · castillo",
-    "icon": "📦",
+    "id": "ballesta",
+    "name": "Ballesta",
+    "role": "Arma / Herramienta · ballesta de proyectiles",
+    "icon": "🏹",
     "type": "objeto",
     "group": "Objetos",
     "size": {
@@ -2543,15 +2546,17 @@
       "y": 16,
       "z": 16
     },
-    "file": "assets/castillo.vox.json",
-    "savedAt": "2026-08-31T19:21:22",
-    "createdAt": "2026-08-30T19:30:33",
-    "count": 905
+    "file": "assets/ballesta.vox.json",
+    "savedAt": "2026-08-31T18:13:52",
+    "createdAt": "2026-08-31T17:59:29",
+    "count": 94,
+    "categoria": "herramienta",
+    "herramienta": "crossbow"
   },
   {
     "id": "casita",
     "name": "Casita",
-    "role": "Asset · casita",
+    "role": "Asset · Casita",
     "icon": "📦",
     "type": "objeto",
     "group": "Objetos",
@@ -2561,9 +2566,26 @@
       "z": 16
     },
     "file": "assets/casita.vox.json",
-    "savedAt": "2026-08-31T19:21:28",
+    "savedAt": "2026-08-28T10:05:35",
     "createdAt": "2026-08-28T10:05:35",
     "count": 311,
     "categoria": "construccion"
+  },
+  {
+    "id": "castillo",
+    "name": "Castillo",
+    "role": "Asset · Castillo",
+    "icon": "📦",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/castillo.vox.json",
+    "savedAt": "2026-08-30T19:30:33",
+    "createdAt": "2026-08-30T19:30:33",
+    "count": 905
   }
 ]

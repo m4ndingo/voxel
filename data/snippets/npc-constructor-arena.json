@@ -2,5 +2,6 @@
   "id": "npc-constructor-arena",
   "name": "NPC Constructor (Arena sobre Rastro Rojo)",
   "code": "// NPC Constructor v6.0 (Declarativo OOP Standard + Carga Dinámica de Base)\n(async function() {\n  if (!game.defineStandardAgent) {\n    try {\n      var res = await fetch('/api/snippets/base-npc-skills');\n      var snip = await res.json();\n      if (snip && snip.code) (new Function(snip.code))();\n    } catch(e) { console.error('Error cargando base-npc-skills:', e); }\n  }\n\n  await game.addMaterial('red_concrete');\n  await game.addMaterial('sand');\n  await game.addMaterial('yellow');\n\n  game.defineStandardAgent({\n    id: 'constructor',\n    name: 'Constructor (Arena sobre Rojo)',\n    block: 'yellow',\n    buildBlock: 'sand',\n    triggerFloor: 'red_concrete',\n    margin: 1,\n    passengers: true,\n    tickMs: 200,\n    skills: {\n      caminataAzotea: true,\n      lookAheadPrevent: true,\n      construccionEnCapa: true,\n      saltoTactico: false\n    }\n  });\n})();\n",
-  "savedAt": "2026-08-31T18:55:45"
+  "savedAt": "2026-08-31T19:18:59",
+  "categoria": "Agentes / NPCs"
 }

@@ -4367,6 +4367,142 @@ function snipEsPin(id){ return snipPins.indexOf(id)>=0; }
 // repetido, y `snipVista` trae el orden de relevancia del buscador (las llamadas antes que las
 // menciones, server.py); ninguna de las dos se puede pisar. `sort` es estable ⇒ dentro de cada grupo
 // se respeta tal cual el orden que vino del servidor: la chincheta solo asciende, no baraja.
+// ── 🗂️ Categorías de snippets (Tabs & Context Menu) ──────────────────────────────
+let snipCatActiva = 'Sin Clasificar';
+let snipCurCat = '';
+
+function snipCatDe(s){
+  const c = s && (s.categoria || s.category);
+  return (c && typeof c === 'string' && c.trim()) || 'Sin Clasificar';
+}
+
+function snipListaCategorias(){
+  const set = new Set(['Autoarranque', 'Herramientas', 'Librería']);
+  for(const s of snips){
+    const c = snipCatDe(s);
+    if(c && c !== 'Sin Clasificar') set.add(c);
+  }
+  const alf = [...set].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  return ['Sin Clasificar', ...alf];
+}
+
+function snipPintaTabs(){
+  const cont = $('#snip-tabs');
+  if(!cont) return;
+  cont.innerHTML = '';
+
+  const cats = snipListaCategorias();
+  const conteos = {};
+  for(const c of cats) conteos[c] = 0;
+  for(const s of snips){
+    const c = snipCatDe(s);
+    conteos[c] = (conteos[c] || 0) + 1;
+  }
+
+  // 1º: Pestañas de categorías (1º Sin Clasificar, luego orden alfabético)
+  for(const c of cats){
+    const cnt = conteos[c] || 0;
+    if(cnt === 0) continue; // No mostrar tabs con 0 elementos
+    const btn = document.createElement('button');
+    const esActiva = snipCatActiva.toLowerCase() === c.toLowerCase();
+    btn.className = 'snip-tab' + (esActiva ? ' is-active' : '');
+    btn.innerHTML = c + ' <span class="tab-count">(' + cnt + ')</span>';
+    btn.onclick = () => { snipCatActiva = c; renderSnipList(); };
+    cont.appendChild(btn);
+  }
+
+  // Al final: Pestaña "Todas"
+  const bTodas = document.createElement('button');
+  bTodas.className = 'snip-tab' + (snipCatActiva === 'todas' ? ' is-active' : '');
+  bTodas.innerHTML = 'Todas <span class="tab-count">(' + snips.length + ')</span>';
+  bTodas.onclick = () => { snipCatActiva = 'todas'; renderSnipList(); };
+  cont.appendChild(bTodas);
+
+  // Si la pestaña activa se ha quedado sin elementos, volver a "Sin Clasificar"
+  if(snipCatActiva !== 'todas' && !conteos[snipCatActiva]){
+    snipCatActiva = (conteos['Sin Clasificar'] > 0) ? 'Sin Clasificar' : 'todas';
+  }
+}
+
+// ── Menú Contextual (Clic Derecho) ─────────────────────────────────────────────────────────────
+let snipCtxTarget = null;
+function snipCierraCtxMenu(){
+  const menu = $('#snip-ctxmenu');
+  if(menu) menu.hidden = true;
+  snipCtxTarget = null;
+}
+window.addEventListener('click', snipCierraCtxMenu);
+window.addEventListener('keydown', (e) => { if(e.key === 'Escape') snipCierraCtxMenu(); });
+
+function snipAbreCtxMenu(clientX, clientY, s){
+  const menu = $('#snip-ctxmenu');
+  if(!menu) return;
+  snipCtxTarget = s;
+  menu.innerHTML = '';
+
+  const catActual = snipCatDe(s);
+
+  const head = document.createElement('div');
+  head.className = 'snip-ctx-header';
+  head.textContent = 'Mover «' + (s.name || s.id) + '»';
+  menu.appendChild(head);
+
+  const cats = snipListaCategorias();
+  for(const c of cats){
+    const esActual = catActual.toLowerCase() === c.toLowerCase();
+    const it = document.createElement('button');
+    it.className = 'snip-ctx-item' + (esActual ? ' is-current' : '');
+    it.textContent = (esActual ? '✓ ' : '  ') + c;
+    it.onclick = (e) => {
+      e.stopPropagation();
+      snipCierraCtxMenu();
+      snipMueveCategoria(s.id, c);
+    };
+    menu.appendChild(it);
+  }
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'snip-ctx-item is-add';
+  addBtn.textContent = '➕ Nueva categoría…';
+  addBtn.onclick = (e) => {
+    e.stopPropagation();
+    snipCierraCtxMenu();
+    const nom = prompt('Nombre de la nueva categoría para «' + (s.name || s.id) + '»:');
+    if(nom && nom.trim()){
+      snipMueveCategoria(s.id, nom.trim());
+    }
+  };
+  menu.appendChild(addBtn);
+
+  menu.hidden = false;
+  const mw = menu.offsetWidth || 180, mh = menu.offsetHeight || 220;
+  const px = Math.min(clientX, window.innerWidth - mw - 10);
+  const py = Math.min(clientY, window.innerHeight - mh - 10);
+  menu.style.left = px + 'px';
+  menu.style.top = py + 'px';
+}
+
+async function snipMueveCategoria(id, nuevaCat){
+  const cleanCat = (nuevaCat === 'Sin Clasificar' || !nuevaCat) ? '' : nuevaCat.trim();
+  let d = null;
+  try{ d = await fetch('/api/snippets/' + encodeURIComponent(id), { cache: 'no-store' }).then(r => r.json()); }catch(e){}
+  if(!d || d.error){ toast('No se pudo leer el snippet'); return; }
+  d.categoria = cleanCat;
+  let r = null;
+  try{
+    r = await fetch('/api/snippets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(d)
+    }).then(x => x.json());
+  }catch(e){}
+  if(!r || !r.id){ toast('No se pudo guardar la categoría'); return; }
+  _mcSnippetCache.set(r.id, d);
+  if(snipCur === id) snipCurCat = cleanCat;
+  toast('📁 «' + id + '» movido a ' + (cleanCat || 'Sin Clasificar'));
+  await snipReload();
+}
+
 function snipOrdenaPins(datos){
   if(!snipPins.length) return datos;
   return datos.slice().sort((a,b)=>(snipEsPin(a.id)?0:1)-(snipEsPin(b.id)?0:1));
@@ -4378,26 +4514,25 @@ function snipTogglePin(id){
   renderSnipList();
 }
 function renderSnipList(){
+  snipPintaTabs();
   const list=$('#snip-list'); list.innerHTML='';
-  // La lista pinta `snipVista` cuando hay una búsqueda o unos usos en marcha, y `snips` (todos) si no.
-  // `snips` NO se pisa nunca con el resultado: es la lista completa que consulta el guardado para
-  // avisar de un id repetido, y perderla convertía cada búsqueda en un aviso de colisión de menos.
-  const datos = snipOrdenaPins(snipVista || snips);   // 📌 REQ-SNP-PIN · los fijados, arriba
+  let fuente = snipVista || snips;
+  if(!snipVista && snipCatActiva !== 'todas'){
+    fuente = fuente.filter(s => snipCatDe(s).toLowerCase() === snipCatActiva.toLowerCase());
+  }
+  const datos = snipOrdenaPins(fuente);
   if(!datos.length){
     list.innerHTML='<p class="snip-empty">'+(snipVista
       ? (snipModo && snipModo.tipo==='usos' ? 'Ningún snippet llama a «'+snipModo.id+'».' : 'Nada con ese texto.')
-      : 'Sin snippets. Crea uno con «+ Nuevo».')+'</p>';
+      : (snipCatActiva !== 'todas' ? 'No hay snippets en «' + snipCatActiva + '»' : 'Sin snippets. Crea uno con «+ Nuevo».'))+'</p>';
     return;
   }
   for(const s of datos){
     const b=document.createElement('button'); b.className='snip-item'+(s.id===snipCur?' is-active':'');
     b.innerHTML='<b></b><small></small>';
     b.querySelector('b').textContent=s.name||'(sin nombre)';
-    // El id va DELANTE de todo: es lo que se teclea en `game.snippet('…')` y lo que el mapa busca
-    // ('mundo-<mapa>'), y no coincide con el rótulo siempre que éste lleve algo que el slug se come.
-    b.querySelector('small').textContent=s.id+' · '+(s.lines||1)+' líneas · '+(s.savedAt||'').replace('T',' ').slice(0,16);
-    // La línea que casa, tal cual está en el código: sin ella hay que abrir los resultados uno a uno
-    // para ver cuál era el bueno. `textContent`, nunca HTML: aquí dentro va código de quien sea.
+    const catTxt = (snipCatActiva === 'todas' && s.categoria) ? (' · [' + s.categoria + ']') : '';
+    b.querySelector('small').textContent=s.id + catTxt + ' · '+(s.lines||1)+' líneas · '+(s.savedAt||'').replace('T',' ').slice(0,16);
     if(s.muestra || s.tipo){
       const l=document.createElement('em'); l.className='snip-hit'+(s.tipo==='mencion'?' es-mencion':'');
       l.textContent=(s.tipo==='mencion'?'≈ ':'')+(s.linea?'L'+s.linea+': ':'')+(s.muestra||'(en el rótulo)')
@@ -4406,9 +4541,6 @@ function renderSnipList(){
             : s.tipo==='llamada' ? 'Lo llama con game.snippet(…)' : '';
       b.appendChild(l);
     }
-    // 📌 REQ-SNP-PIN · la chincheta va DENTRO de la ficha, que ya es un <button>. Un <button>
-    // anidado NO es HTML valido (el parser lo saca fuera del padre), asi que es un <span role=button>
-    // con su tecla. Y `stopPropagation`, o clavarla abriria ademas el snippet.
     b.dataset.snip=s.id;
     const fijado=snipEsPin(s.id);
     const pin=document.createElement('span');
@@ -4421,12 +4553,16 @@ function renderSnipList(){
     pin.onkeydown=(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); e.stopPropagation(); snipTogglePin(s.id); } };
     b.appendChild(pin);
     b.onclick=()=>snipLoad(s.id);
+    b.oncontextmenu=(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      snipLoad(s.id);
+      snipAbreCtxMenu(e.clientX, e.clientY, s);
+    };
     list.appendChild(b);
   }
 }
 // ── Buscar dentro de los snippets y saber quién usa el abierto (REQ-SNP6) ────────────────────────
-// Las dos preguntas las contesta el servidor (`?q=` y `?usa=`), que es donde están los ficheros: el
-// listado no trae el código y bajárselo entero en cada tecla son ~1,5 MB. Aquí solo se pinta.
 let snipVista=null, snipModo=null, snipBuscaT=0, snipBuscaN=0;
 function snipModoCabecera(txt){
   const el=$('#snip-modo');
@@ -4436,9 +4572,6 @@ function snipModoCabecera(txt){
   el.querySelector('button').onclick=snipVerTodos;
 }
 function snipVerTodos(){ snipVista=null; snipModo=null; $('#snip-search').value=''; snipModoCabecera(''); renderSnipList(); }
-// Un `server.py` arrancado ANTES de que existiera esto ignora el `?q=` y contesta el listado ENTERO:
-// la búsqueda parecería decir que todos los snippets casan. Python no recarga el fichero solo, así que
-// se detecta por la forma de la respuesta (los resultados llevan `hits`) y se dice qué pasa.
 function snipServidorBusca(r){
   if(!r.length || r[0].hits!==undefined) return true;
   toast('Este servidor no tiene el buscador: reinícialo (python3 server.py 8500)');
@@ -4447,7 +4580,7 @@ function snipServidorBusca(r){
 async function snipBusca(txt){
   const q=String(txt||'').trim();
   if(q.length<2){ if(snipModo && snipModo.tipo==='busca') snipVerTodos(); return; }
-  const n=++snipBuscaN;                                  // la respuesta que llega tarde no pisa a la última
+  const n=++snipBuscaN;
   let r=null;
   try{ r=await fetch('/api/snippets?q='+encodeURIComponent(q),{cache:'no-store'}).then(x=>x.json()); }catch(e){}
   if(n!==snipBuscaN) return;
@@ -4457,9 +4590,6 @@ async function snipBusca(txt){
   snipModoCabecera(r.length+(r.length===1?' snippet dice':' snippets dicen')+' «'+q+'»');
   renderSnipList();
 }
-// El motor llama a ciertos snippets POR SU ID, sin que nadie los escriba en ningún código: buscar
-// referencias a 'mundo-badlands' y no encontrar ninguna no significa que no lo use nadie — lo lanza
-// app.js al entrar en /map/badlands. Esto es conocimiento del framework, no del servidor.
 function snipUsosDelMotor(id){
   if(id===MC_AUTOARRANQUE) return 'lo ejecuta el motor al entrar en CUALQUIER mapa';
   if(id===MC_EDITOR_AUTOARRANQUE) return 'lo ejecuta el motor al abrir el editor';
@@ -4487,18 +4617,16 @@ async function snipLoad(id){
   let d=null;
   try{ d=await fetch('/api/snippets/'+id,{cache:'no-store'}).then(r=>r.json()); }catch(e){}
   if(!d || d.error){ toast('No se pudo abrir el snippet'); return; }
-  snipCur=d.id; $('#snip-name').value=d.name||''; $('#snip-code').value=d.code||''; $('#snip-id').value=d.id||'';
-  // Los protegidos (el Mundo los ejecuta al entrar) se editan y se guardan, pero no se borran: se
-  // esconde el botón para no ofrecer algo que el servidor va a rechazar. La lista trae el flag.
+  snipCur=d.id; snipCurCat=d.categoria||d.category||'';
+  $('#snip-name').value=d.name||''; $('#snip-code').value=d.code||''; $('#snip-id').value=d.id||'';
   const meta=snips.find(s=>s.id===d.id);
   $('#snip-del').hidden=!!(meta && meta.protegido); renderSnipList(); snipCuentaUsos();
 }
 function snipNew(){
-  snipCur=null; $('#snip-name').value=''; $('#snip-code').value=SNIP_TEMPLATE; $('#snip-id').value='';
+  snipCur=null; snipCurCat=(snipCatActiva !== 'todas' && snipCatActiva !== 'Sin Clasificar') ? snipCatActiva : '';
+  $('#snip-name').value=''; $('#snip-code').value=SNIP_TEMPLATE; $('#snip-id').value='';
   snipPistaId(); $('#snip-del').hidden=true; renderSnipList(); snipCuentaUsos(); $('#snip-name').focus();
 }
-// «¿Le llama alguien?» se contesta SOLA al abrir el snippet, sin clicar: es la pregunta que se hace
-// antes de cambiarle el id o de borrarlo, y si hay que pedirla nadie la pide. El botón la detalla.
 async function snipCuentaUsos(){
   const b=$('#snip-usos'); if(!b) return;
   b.textContent='🔗 Usos'; b.classList.remove('tiene-usos');
@@ -4506,25 +4634,16 @@ async function snipCuentaUsos(){
   const id=snipCur;
   let r=null;
   try{ r=await fetch('/api/snippets?usa='+encodeURIComponent(id),{cache:'no-store'}).then(x=>x.json()); }catch(e){}
-  if(!r || snipCur!==id) return;                          // llegó tarde: ya hay otro snippet abierto
-  if(r.length && r[0].hits===undefined) return;           // servidor viejo: contestó el listado entero
+  if(!r || snipCur!==id) return;
+  if(r.length && r[0].hits===undefined) return;
   const motor=snipUsosDelMotor(id);
   b.textContent='🔗 Usos'+(r.length?' ('+r.length+')':(motor?' (motor)':' (0)'));
   if(r.length||motor) b.classList.add('tiene-usos');
   b.title=(r.length ? r.map(s=>(s.tipo==='mencion'?'≈ ':'→ ')+s.id).join('\n') : 'Ningún snippet lo llama')
          +(motor?'\n· '+motor:'');
 }
-// ── El id de un snippet (BUG-SNP5) ───────────────────────────────────────────────────────────────
-// El id NO es el nombre: es el fichero (`data/snippets/<id>.json`) y el argumento de `game.snippet()`.
-// El servidor lo deriva del rótulo con su slug (`[^a-z0-9]+`→`-`), así que «Mundo fornite_c2_island»
-// se guarda como 'mundo-fornite-c2-island' y el guión bajo desaparece **sin decirlo**: el editor no
-// enseñaba el id por ninguna parte (había que mirar las peticiones de red) y renombrar el snippet no
-// lo cambiaba, porque el POST manda el id de siempre. Ahora se ve, y se puede escribir a mano.
-// `snipIdSano` acota a lo que acepta la ruta del servidor (`^/api/snippets/([A-Za-z0-9_-]+)$`) — el
-// guión bajo SÍ cabe ahí, es el slug del rótulo el que se lo comía.
 function snipIdSano(v){ return String(v||'').trim().replace(/[^A-Za-z0-9_-]+/g,'-').replace(/^-+|-+$/g,''); }
 function snipSlugDe(n){ return String(n||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
-// Con el campo vacío, el id lo pone el servidor: se enseña cuál va a ser ANTES de guardar.
 function snipPistaId(){
   const el=$('#snip-id'); if(!el) return;
   el.placeholder = snipCur ? 'id…' : (snipSlugDe($('#snip-name').value) || 'id…');
@@ -4534,9 +4653,8 @@ async function snipSave(){
   const name=$('#snip-name').value.trim()||'Sin nombre', code=$('#snip-code').value;
   const idPedido=snipIdSano($('#snip-id').value);
   const body={ name, code };
+  if(snipCurCat) body.categoria = snipCurCat;
   if(idPedido) body.id=idPedido; else if(snipCur) body.id=snipCur;
-  // Cambiar el id es MOVER el snippet de fichero, no renombrarlo: quien lo llamara por el id viejo
-  // (`game.snippet('x')`, un mapa que busca 'mundo-<mapa>') deja de encontrarlo ⇒ se pregunta siempre.
   const mueve = snipCur && idPedido && idPedido!==snipCur;
   if(mueve && !confirm('¿Cambiar el id de «'+snipCur+'» a «'+idPedido+'»?\n\n'
       + 'El snippet pasa a otro fichero: quien lo llame por el id anterior (game.snippet(\''+snipCur+'\')) dejará de encontrarlo.\n'
@@ -4546,9 +4664,9 @@ async function snipSave(){
   let r=null;
   try{ r=await fetch('/api/snippets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()); }catch(e){}
   if(!r || !r.id){ toast('No se pudo guardar'); return; }
-  // El viejo se retira DESPUÉS de que el nuevo esté escrito, y solo si el servidor confirma el borrado:
-  // así un id protegido (o un DELETE que falle) deja las dos copias, nunca cero.
+  _mcSnippetCache.set(r.id, Object.assign({ id: r.id }, body));
   if(mueve && r.id!==snipCur){
+    _mcSnippetCache.delete(snipCur);
     let d=null; try{ d=await fetch('/api/snippets/'+encodeURIComponent(snipCur),{method:'DELETE'}); }catch(e){}
     if(!d || !d.ok) toast('Guardado como «'+r.id+'», pero «'+snipCur+'» sigue ahí');
   }
@@ -4559,7 +4677,8 @@ async function snipDelete(){
   if(!snipCur){ snipNew(); return; }
   if(!confirm('¿Borrar este snippet? (va a la papelera del servidor)')) return;
   let r=null;
-  try{ r=await fetch('/api/snippets/'+snipCur,{method:'DELETE'}); }catch(e){}
+  const aBorrar = snipCur;
+  try{ r=await fetch('/api/snippets/'+aBorrar,{method:'DELETE'}); }catch(e){}
   // Antes se decía «borrado» pasara lo que pasara: no se miraba la respuesta. Con snippets protegidos
   // (el Mundo ejecuta 'mundo-autoarranque' al entrar) eso anunciaría como hecho un borrado rechazado.
   if(!r || !r.ok){
@@ -4567,6 +4686,7 @@ async function snipDelete(){
     if(r){ try{ const d=await r.json(); if(d && d.error) msg=d.error; }catch(e){} }
     toast(msg); return;
   }
+  _mcSnippetCache.delete(aBorrar);
   toast('Snippet borrado'); snipCur=null; await snipReload();
   if(snips.length) snipLoad(snips[0].id); else snipNew();
 }
@@ -6062,84 +6182,23 @@ Object.defineProperty(game, 'showColor', { enumerable:false,
 // El motor va a 140 fps y pulsar un botón + observador lo tira a 30. Las cuatro pasadas de PERF-RS1
 // se hicieron con Playwright/SwiftShader (5-10× más lento que GPU real), así que la proporción de
 // fases medida ahí puede no ser la del dueño. Este profiler mide EN EL NAVEGADOR DEL DUEÑO:
-//   - Cuando `game.perfAssert > 0`, envuelve funciones caras del motor (según `perfVerbosity`).
-//   - Al final de cada `mcTick` calcula el fps del frame (1000/ms del frame, NO el promedio de
-//     500ms). Si cae por debajo del assert, vuelca la tabla acumulada al console.log y desarma.
-//   - `game.perfDump()` re-arma y re-vuelca. `game.perfDump.forzar()` vuelca ahora mismo, sin
-//     esperar a otra caída.
-//   - Con `perfAssert = 0` (defecto) el sistema está APAGADO: las envolturas se retiran y el motor
-//     corre exactamente igual que sin el profiler. Coste medible = 0.
+// ── REQ-PERF1 · Profiler condicional con volcado al caer los fps ────────────────────────────
 let _perfAssert = 0, _perfVerbosity = 1;
-const _perfState = { armed: true, frame: {}, lastDump: null, wrapping: false, origs: {} };
-function _perfNombres(v){
-  // Niveles como capas: cada uno amplía la instrumentación. Ver PLAN.md §REQ-PERF1.
-  // ⚠️ El frame en Chrome incluye: mcTick + otros callbacks rAF (procesarRemallar del snippet de
-  // redstone, agentes, fluidos) + composite + GPU. Como el profiler mide de rAF a rAF, TODO lo
-  // instrumentado en ese intervalo suma, aunque se ejecute fuera de mcTick.
-  // Los métodos con `.` son propiedades anidadas — se resuelven navegando desde window.
-  const N1 = ['mcTick','mcRender','mcUpdate','mcRemeshAround','mcMeshChunk','mcComputeBlockLight','mcRelightBox','mcRebakeStructsNear','mcBuildPalette','mcMeshAll','mcUpdatePreview','mcUpdateXrayLabels','mcRenderShadow'];
-  const N2 = N1.concat(['mcSetBlock','mcCollides','mcRaycast','mcAgentsTick','mcAgentsSmoothUpdate','mcRestampAll','mcBuildStructMesh','mcMeshChunkFino','mcRelightSkylight','mcComputeLight','mcRebakeStructs','mcUpdateHotbar','updateWorldMeters',
-    'mcStampStruct','mcAgentMesh','mcFreeStruct','mcCarryEfimera','mcUploadAtlas','mcAddBlock','mcResolveMat',
-    // Motor de redstone: métodos públicos. Capturan el tiempo del click y del drenado internos.
-    'game.redstone.encender','game.redstone.conmutar','game.redstone.tick','game.redstone.revisar','game.redstone.revisarCaja']);
-  const N3 = N2.concat(['mcResolveMat','mcPushHist','mcScheduleSave','mcDirty','mcGlowTocada','mcShadowDirty','mcSyncNoteSigns','mcNoteSignsDesfasados','mcGetFluidHeight','mcTapaCara','mcSolid','mcInside','mcIdx']);
-  return v>=3 ? N3 : v>=2 ? N2 : v>=1 ? N1 : [];
+const _perfState = { armed: true, frame: {}, lastDump: null, recording: false, preserveFrame: false, wrapping: false, origs: {} };
+
+function _perfRegistra(nombre, dt, extra) {
+  if (!_perfState.recording && _perfAssert <= 0) return;
+  const e = _perfState.frame[nombre] || (_perfState.frame[nombre] = { calls: 0, ms: 0, maxMs: 0 });
+  e.calls++;
+  e.ms += dt;
+  if (dt > e.maxMs) e.maxMs = dt;
+  if (extra) {
+    if (extra.bytes) e.bytes = (e.bytes || 0) + extra.bytes;
+    if (extra.vertices) e.vertices = (e.vertices || 0) + extra.vertices;
+  }
 }
-// Navega hasta el "propietario" y el nombre final desde un identificador tipo "game.redstone.tick".
-// Ejemplo: "game.redstone.tick" → { obj: window.game.redstone, key: 'tick', label: 'game.redstone.tick' }.
-function _perfResolver(nombre){
-  const parts = nombre.split('.');
-  let obj = window;
-  for(let i=0; i<parts.length-1; i++){ obj = obj && obj[parts[i]]; if(!obj) return null; }
-  const key = parts[parts.length-1];
-  return (obj && typeof obj[key] === 'function') ? { obj, key, label: nombre } : null;
-}
-function _perfWrap(nombre){
-  const r = _perfResolver(nombre); if(!r) return null;
-  const orig = r.obj[r.key];
-  if(orig._perf) return null;   // ya envuelto
-  const label = r.label;
-  const w = function(){
-    const t = performance.now();
-    const res = orig.apply(this, arguments);
-    const dt = performance.now() - t;
-    const e = _perfState.frame[label] || (_perfState.frame[label] = { calls:0, ms:0, maxMs:0 });
-    e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt;
-    return res;
-  };
-  w._perf = true;
-  w._orig = orig;
-  w._ref = r;
-  return w;
-}
+
 function _perfInstalar(){
-  // Restaurar todas primero (si perfVerbosity bajó, hay que desinstalar las que sobran).
-  for(const n in _perfState.origs){
-    const info = _perfState.origs[n];
-    if(info && info.obj && info.obj[info.key] && info.obj[info.key]._perf){
-      info.obj[info.key] = info.orig;
-    }
-  }
-  _perfState.origs = {};
-  _perfState.wrapping = false;
-  if(_perfAssert <= 0) return;
-  const nombres = _perfNombres(_perfVerbosity);
-  const noEncontradas = [];
-  for(const n of nombres){
-    const r = _perfResolver(n);
-    if(!r){ noEncontradas.push(n); continue; }
-    if(r.obj[r.key]._perf) continue;   // no re-envolver
-    const w = _perfWrap(n); if(!w) continue;
-    _perfState.origs[n] = { obj: r.obj, key: r.key, orig: r.obj[r.key] };
-    r.obj[r.key] = w;
-  }
-  _perfState.wrapping = nombres.length>0;
-  if(noEncontradas.length && !_perfState._avisadas){
-    _perfState._avisadas = true;
-    console.log('[perf] funciones no encontradas (no se instrumentan):', noEncontradas);
-  }
-  // Instrumentar WebGL: bufferData (subir a GPU) y drawArrays (pintar). Ayuda a ver si la caída de
-  // fps viene de saturar la GPU con muchos buffers/draws, cosa invisible en el resto del profiler.
   if(_perfVerbosity>=2 && mc.gl && !mc.gl.bufferData._perf){
     const gl = mc.gl;
     const _bd = gl.bufferData.bind(gl);
@@ -6149,16 +6208,14 @@ function _perfInstalar(){
       const r = _bd(target, data, usage);
       const dt = performance.now() - t;
       const bytes = (data && data.byteLength)|0;
-      const e = _perfState.frame['gl.bufferData'] || (_perfState.frame['gl.bufferData'] = { calls:0, ms:0, maxMs:0, bytes:0 });
-      e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt; e.bytes = (e.bytes|0) + bytes;
+      _perfRegistra('gl.bufferData', dt, { bytes });
       return r;
     };
     const wda = function(mode, first, count){
       const t = performance.now();
       const r = _da(mode, first, count);
       const dt = performance.now() - t;
-      const e = _perfState.frame['gl.drawArrays'] || (_perfState.frame['gl.drawArrays'] = { calls:0, ms:0, maxMs:0, vertices:0 });
-      e.calls++; e.ms += dt; if(dt>e.maxMs) e.maxMs = dt; e.vertices = (e.vertices|0) + (count|0);
+      _perfRegistra('gl.drawArrays', dt, { vertices: count | 0 });
       return r;
     };
     wbd._perf = true; wda._perf = true; wbd._orig = _bd; wda._orig = _da;
@@ -6166,57 +6223,128 @@ function _perfInstalar(){
     gl.drawArrays = wda;
     _perfState._glWrapped = { gl, bufferData: _bd, drawArrays: _da };
   } else if(_perfVerbosity<2 && _perfState._glWrapped){
-    // Desinstrumentar WebGL si bajó verbosidad.
     _perfState._glWrapped.gl.bufferData = _perfState._glWrapped.bufferData;
     _perfState._glWrapped.gl.drawArrays = _perfState._glWrapped.drawArrays;
     _perfState._glWrapped = null;
   }
 }
+
 function _perfComprobarFrame(fpsFrame){
   if(_perfAssert<=0 || !_perfState.armed) return;
   if(fpsFrame >= _perfAssert) return;
   _perfState.lastDump = { fpsFrame, umbral:_perfAssert, verbosity:_perfVerbosity,
     cuando:new Date().toISOString(), acc:JSON.parse(JSON.stringify(_perfState.frame)) };
-  // REQ-PERF1: modo continuo. Si perfContinuo=true, NO se desarma tras un dump → sigue disparando en
-  // cada frame lento. Útil para ver el patrón de un circuito activo. Con perfContinuo=false (defecto)
-  // dispara UNA vez y se rearma con game.perfDump().
   if(!(typeof game !== 'undefined' && game.perfContinuo)){
     _perfState.armed = false;
   }
   _perfImprimir(_perfState.lastDump);
 }
+
 function _perfImprimir(d){
-  if(!d){ console.log('[perf] sin datos — dispara al caer los fps por debajo de game.perfAssert, o llama game.perfDump.forzar()'); return; }
-  console.log('[perf] === CAÍDA DE FPS: ' + d.fpsFrame.toFixed(1) + ' fps  (umbral ' + d.umbral + ', verbosidad ' + d.verbosity + ')  ' + d.cuando + ' ===');
-  const entries = Object.entries(d.acc).sort((a,b)=>b[1].ms - a[1].ms);
-  if(!entries.length){ console.log('[perf]  (frame sin funciones instrumentadas — sube perfVerbosity)'); }
-  else {
-    console.log('[perf]  ' + 'funcion'.padEnd(28) + '  ' + 'llamadas'.padStart(8) + '  ' + 'ms total'.padStart(9) + '  ' + 'max ms/call'.padStart(11) + '  extra');
+  if(!d){
+    const msg = '[perf] sin datos — ejecuta game.perfDump() o game.perfDump.forzar() para medir';
+    console.log(msg);
+    return msg;
+  }
+  const lines = [
+    '[perf] === PERFIL DE RENDIMIENTO: ' + (typeof d.fpsFrame === 'number' ? d.fpsFrame.toFixed(1) + ' fps' : d.fpsFrame) + '  (umbral: ' + d.umbral + ', verbosidad: ' + d.verbosity + ')  ' + d.cuando + ' ==='
+  ];
+  const entries = Object.entries(d.acc || {}).sort((a,b)=>b[1].ms - a[1].ms);
+  if(!entries.length){
+    lines.push('[perf]  (sin llamadas capturadas en este intervalo)');
+  } else {
+    lines.push('[perf]  ' + 'funcion'.padEnd(28) + '  ' + 'llamadas'.padStart(8) + '  ' + 'ms total'.padStart(9) + '  ' + 'max ms/call'.padStart(11) + '  extra');
     for(const [n,e] of entries){
       let extra = '';
-      if(e.bytes!==undefined) extra = (e.bytes/1024).toFixed(1) + ' KB subidos';
-      else if(e.vertices!==undefined) extra = e.vertices + ' vertices';
-      console.log('[perf]  ' + n.padEnd(28) + '  ' + String(e.calls).padStart(8) + '  ' + e.ms.toFixed(2).padStart(9) + '  ' + e.maxMs.toFixed(2).padStart(11) + (extra ? '  ' + extra : ''));
+      if(e.bytes!==undefined && e.bytes>0) extra = (e.bytes/1024).toFixed(1) + ' KB subidos';
+      else if(e.vertices!==undefined && e.vertices>0) extra = e.vertices.toLocaleString('es') + ' vertices';
+      lines.push('[perf]  ' + n.padEnd(28) + '  ' + String(e.calls).padStart(8) + '  ' + e.ms.toFixed(2).padStart(9) + '  ' + e.maxMs.toFixed(2).padStart(11) + (extra ? '  ' + extra : ''));
     }
   }
-  console.log('[perf] === game.perfDump() re-arma; game.perfDump.reset() limpia; game.perfAssert=0 apaga ===');
+  lines.push('[perf] === game.perfDump() re-arma; game.perfDump.forzar() mide en vivo; game.perfAssert=0 apaga ===');
+  const txt = lines.join('\n');
+  console.log(txt);
+  return txt;
 }
+
 Object.defineProperty(game, 'perfAssert', { enumerable:true,
   get(){ return _perfAssert; },
-  set(v){ _perfAssert = Math.max(0, +v || 0); _perfInstalar(); _perfState.armed = true; _perfState.frame = {}; }
+  set(v){
+    _perfAssert = Math.max(0, +v || 0);
+    _perfInstalar();
+    _perfState.armed = true;
+    _perfState.frame = {};
+    if(_perfAssert > 0) console.log('[perf] Profiler armado: vigilando caídas por debajo de ' + _perfAssert + ' FPS (verbosidad ' + _perfVerbosity + ')');
+    else console.log('[perf] Profiler apagado (coste 0)');
+  }
 });
 Object.defineProperty(game, 'perfVerbosity', { enumerable:true,
   get(){ return _perfVerbosity; },
-  set(v){ _perfVerbosity = Math.max(0, Math.min(3, +v || 0)); if(_perfAssert>0) _perfInstalar(); }
+  set(v){
+    _perfVerbosity = Math.max(0, Math.min(3, +v || 0));
+    _perfInstalar();
+    console.log('[perf] Verbosidad fijada en ' + _perfVerbosity);
+  }
 });
-game.perfDump = function(){ _perfImprimir(_perfState.lastDump); _perfState.armed = true; };
-game.perfDump.reset = function(){ _perfState.frame = {}; _perfState.lastDump = null; _perfState.armed = true; };
-game.perfDump.forzar = function(){
-  const snap = { fpsFrame: mc.fps || 0, umbral: _perfAssert, verbosity: _perfVerbosity,
-    cuando: new Date().toISOString(), acc: JSON.parse(JSON.stringify(_perfState.frame)) };
-  _perfImprimir(snap);
+game.perfDump = function(){
+  if(!mc || !mc.active){
+    const msg = '[perf] 🌍 Abre el Mundo primero (pulsa 🌍) para poder medir el rendimiento del juego.';
+    console.warn(msg);
+    return msg;
+  }
+  if(_perfState.lastDump && _perfAssert > 0){
+    return _perfImprimir(_perfState.lastDump);
+  }
+  return game.perfDump.forzar(6);
+};
+game.perfDump.reset = function(){ _perfState.frame = {}; _perfState.lastDump = null; _perfState.armed = true; console.log('[perf] Contadores reseteados y profiler re-armado'); };
+game.perfDump.forzar = function(numFrames = 6){
+  if(!mc || !mc.active){
+    const msg = '[perf] 🌍 Abre el Mundo primero (pulsa 🌍) para poder medir el rendimiento del juego.';
+    console.warn(msg);
+    return Promise.resolve(msg);
+  }
+  const n = Math.max(1, +numFrames || 6);
+  _perfState.recording = true;
+  _perfState.preserveFrame = true;
   _perfState.frame = {};
-  _perfState.armed = true;
+  _perfInstalar();
+  console.log('[perf] ⏳ Midiendo rendimiento en vivo (' + n + ' fotogramas)...');
+  let cont = 0;
+  const acc = {};
+  
+  return new Promise((resolve) => {
+    const tickDump = () => {
+      for(const [k, v] of Object.entries(_perfState.frame)){
+        if(!acc[k]) acc[k] = { calls: 0, ms: 0, maxMs: 0, bytes: 0, vertices: 0 };
+        acc[k].calls += v.calls || 0;
+        acc[k].ms += v.ms || 0;
+        if((v.maxMs||0) > acc[k].maxMs) acc[k].maxMs = v.maxMs;
+        if(v.bytes) acc[k].bytes = (acc[k].bytes||0) + v.bytes;
+        if(v.vertices) acc[k].vertices = (acc[k].vertices||0) + v.vertices;
+      }
+      _perfState.frame = {};
+      cont++;
+      if(cont < n){
+        requestAnimationFrame(tickDump);
+      } else {
+        _perfState.recording = false;
+        _perfState.preserveFrame = false;
+        const fpsCalc = mc.fps || (1000 / Math.max(1, (acc['mcTick']?.ms || 16) / n));
+        const snap = {
+          fpsFrame: fpsCalc,
+          umbral: _perfAssert > 0 ? _perfAssert : 'forzado (en vivo, ' + n + ' frames)',
+          verbosity: _perfVerbosity,
+          cuando: new Date().toISOString(),
+          acc
+        };
+        _perfState.lastDump = snap;
+        const res = _perfImprimir(snap);
+        resolve(res);
+      }
+    };
+    requestAnimationFrame(tickDump);
+  });
 };
 
 // PERF-RS1: contadores del cache LRU de mcMeshChunk. game.cacheStats() imprime hits/misses y ratio.
@@ -8462,10 +8590,13 @@ game.volatiles = {
     for (var i = 0; i < DIRS.length; i++) {
       var nx = x + DIRS[i][0], ny = y + DIRS[i][1], nz = z + DIRS[i][2];
       if (dentro(nx, ny, nz)) {
-        queueTick(nx, ny, nz);
+        var nId = idEn(nx, ny, nz);
+        var nProps = getProps(nId, nx, ny, nz);
+        if (nId === 0 || nProps.isReplaceable || nProps.isFluid) {
+          queueTick(nx, ny, nz);
+        }
       }
     }
-    if (dentro(x, y, z)) queueTick(x, y, z);
   }
 
   function processCell(x, y, z) {
@@ -8606,28 +8737,84 @@ game.volatiles = {
     return didChange;
   }
 
+  var _lastFluidRemesh = 0;
+  var _lastFluidStep = 0;
+  var _fluidPendingBox = null;
+
+  function remeshChunks(bx0, bz0, bx1, bz1) {
+    if (typeof mcRemeshChunksOnly === 'function') {
+      mcRemeshChunksOnly(bx0, bz0, bx1, bz1);
+      return;
+    }
+    var ax0 = bx0 - 1, az0 = bz0 - 1, ax1 = bx1 + 1, az1 = bz1 + 1;
+    var ncx = Math.ceil(mc.dim.x / MC_CHUNK), ncz = Math.ceil(mc.dim.z / MC_CHUNK);
+    var cx0 = Math.max(0, Math.floor(ax0 / MC_CHUNK)), cx1 = Math.min(ncx - 1, Math.floor(ax1 / MC_CHUNK));
+    var cz0 = Math.max(0, Math.floor(az0 / MC_CHUNK)), cz1 = Math.min(ncz - 1, Math.floor(az1 / MC_CHUNK));
+    for (var nz = cz0; nz <= cz1; nz++) {
+      for (var nx = cx0; nx <= cx1; nx++) {
+        mcMeshChunk(nx, nz);
+      }
+    }
+  }
+
   function tick() {
-    if (inTick || !queue.size) return;
+    if (inTick || (!queue.size && !_fluidPendingBox)) return;
+    var now = performance.now();
+    // Cadencia natural de fluidos: procesar simulación cada ~100ms (10 ticks/segundo)
+    if (queue.size > 0 && now - _lastFluidStep < 90 && !_fluidPendingBox) return;
+
     inTick = true;
+    _lastFluidStep = now;
     var changed = false;
+    var fBox = null;
+    var processedCount = 0;
     try {
-      var snapshot = Array.from(queue.values());
-      queue.clear();
-      for (var i = 0; i < snapshot.length; i++) {
-        var p = snapshot[i];
-        if (processCell(p[0], p[1], p[2])) {
-          changed = true;
+      if (queue.size) {
+        var snapshot = Array.from(queue.values());
+        queue.clear();
+        var maxCells = Math.min(snapshot.length, 32);
+        var t0 = performance.now();
+        for (var i = 0; i < maxCells; i++) {
+          if (i >= 8 && (performance.now() - t0) > 1.2) {
+            break;
+          }
+          processedCount++;
+          var p = snapshot[i];
+          if (processCell(p[0], p[1], p[2])) {
+            changed = true;
+            if (!fBox) fBox = { x0: p[0], z0: p[2], x1: p[0], z1: p[2] };
+            else {
+              fBox.x0 = Math.min(fBox.x0, p[0]); fBox.z0 = Math.min(fBox.z0, p[2]);
+              fBox.x1 = Math.max(fBox.x1, p[0]); fBox.z1 = Math.max(fBox.z1, p[2]);
+            }
+          }
+        }
+        // Re-encolar el resto de celdas para los siguientes frames
+        for (var j = processedCount; j < snapshot.length; j++) {
+          var rem = snapshot[j];
+          queue.set(cl(rem[0], rem[1], rem[2]), rem);
         }
       }
     } finally {
       inTick = false;
-      if (changed || (typeof mcBuildBox !== 'undefined' && mcBuildBox)) {
-        if (typeof mcRemeshAround === 'function' && typeof mcBuildBox !== 'undefined' && mcBuildBox) {
-          var b = mcBuildBox;
-          mcBuildBox = null;
-          mcRemeshAround(b.x0, b.z0, b.x1, b.z1);
-        } else if (typeof mcMeshAll === 'function') {
-          mcMeshAll();
+      if (fBox) {
+        if (!_fluidPendingBox) _fluidPendingBox = { x0: fBox.x0, z0: fBox.z0, x1: fBox.x1, z1: fBox.z1 };
+        else {
+          _fluidPendingBox.x0 = Math.min(_fluidPendingBox.x0, fBox.x0);
+          _fluidPendingBox.z0 = Math.min(_fluidPendingBox.z0, fBox.z0);
+          _fluidPendingBox.x1 = Math.max(_fluidPendingBox.x1, fBox.x1);
+          _fluidPendingBox.z1 = Math.max(_fluidPendingBox.z1, fBox.z1);
+        }
+      }
+      var nowRemesh = performance.now();
+      if (_fluidPendingBox && (nowRemesh - _lastFluidRemesh >= 80 || queue.size === 0)) {
+        _lastFluidRemesh = nowRemesh;
+        var b = _fluidPendingBox;
+        _fluidPendingBox = null;
+        if (queue.size === 0) {
+          if (typeof mcRemeshAround === 'function') mcRemeshAround(b.x0, b.z0, b.x1, b.z1);
+        } else {
+          remeshChunks(b.x0, b.z0, b.x1, b.z1);
         }
       }
     }
@@ -8642,11 +8829,11 @@ game.volatiles = {
       var key = (mc.blockKey && mc.blockKey[newId]) || '';
       var lvl = parseLevel(key);
       fluidLevels.set(cl(x, y, z), lvl);
-      queueTick(x, y, z);
+      if (!(mc && mc.batching) && !inTick) queueTick(x, y, z);
     } else {
       fluidLevels.delete(cl(x, y, z));
     }
-    if (oldProps.isFluid || oldProps.isReplaceable !== newProps.isReplaceable) {
+    if (!(mc && mc.batching) && !inTick && (oldProps.isFluid || oldProps.isReplaceable !== newProps.isReplaceable)) {
       notifyNeighbors(x, y, z);
     }
   }
@@ -9292,11 +9479,13 @@ function mcPasteAnchorDesdeRotado(dims, ori, rot){
 }
 // La geometría depende de rot ⇒ se cachea por (srcKey, rot) en mc.structs[srcKey].meshRot[rot].
 async function mcStructGeom(srcKey, rot){
-  rot=mcOriNorm(rot);                   // una de las 24 posturas; mcOriMove la abre en los tres cuartos de vuelta
-  const cached=mc.structs[srcKey] && mc.structs[srcKey].meshRot;
+  const baseKey = (typeof mcClaveBase === 'function') ? mcClaveBase(srcKey) : String(srcKey).replace(/@\d+$/, '');
+  const keyOri = (typeof mcClaveOri === 'function') ? mcClaveOri(srcKey) : 0;
+  rot = mcOriNorm(rot || keyOri);
+  const cached = mc.structs[baseKey] && mc.structs[baseKey].meshRot;
   if(cached && cached[rot]) return cached[rot];
-  const doc=await getRoomData(srcKey);
-  const src=doc.voxels||{};
+  const doc = await getRoomData(baseKey);
+  const src = doc.voxels||{};
   // Máscara de caras del documento. Los índices de MC_FACES y los de CUBE_FACES (editor) coinciden uno a
   // uno —el swap de ejes ya está en la tabla, ver los comentarios «← asset +Z»—, así que el entero viaja
   // del editor al Mundo sin traducir. Lo único que hay que hacer aquí es girarlo con la pieza.
@@ -9575,7 +9764,10 @@ async function mcBuildStructAtlas(){
   const keys=new Set();
   const srcs=mc.structures.map(s=>s.key);
   if(mc.previewStructKey) srcs.push(mc.previewStructKey);   // la sala en vista-previa aún no está estampada: sus texturas también van al atlas
-  for(const key of srcs){
+  if(mc._heldToolKey) srcs.push(mc._heldToolKey);
+  if(typeof mcGetActiveToolAsset === 'function'){ const tk = mcGetActiveToolAsset(); if(tk) srcs.push(tk); }
+  for(const rawKey of srcs){
+    const key = (typeof mcClaveBase === 'function') ? mcClaveBase(rawKey) : String(rawKey).replace(/@\d+$/, '');
     let doc; try{ doc=await getRoomData(key); }catch(e){ continue; }
     const vox=doc.voxels||{};
     for(const k in vox){ const v=vox[k]; if(typeof v==='string' && v.slice(0,4)==='tex:') keys.add(v.slice(4)); }
@@ -9618,6 +9810,9 @@ async function mcBuildStructAtlas(){
     uvMap[key]=rects;
   }
   mc.structUV=uvMap; mc.structAtlas=cv; mcUploadStructAtlas();
+  if(mc.structs){
+    for(const k in mc.structs) if(mc.structs[k]) mc.structs[k].meshRot = {};
+  }
 }
 function mcUploadStructAtlas(){
   const gl=mc.gl; if(!gl || !mc.structAtlas) return;
@@ -13356,6 +13551,106 @@ function mcUpdate(dt){
     }
     mc.vel[1]=0;
   }
+  mcUpdatePolvo(dt);
+}
+// ── POLVO DE ROTURA CON COLOR PROMEDIO (Pico, Herramientas, TNT) ─────────────────────────────
+const _mcBlockColorCache = new Map();
+function mcColorPromedioDeBloque(id, s) {
+  if (s && s.doc && s.doc.palette && s.doc.palette.length) {
+    let rSum = 0, gSum = 0, bSum = 0, count = 0;
+    for (const hex of s.doc.palette) {
+      if (typeof hex === 'string' && hex.startsWith('#') && hex.length >= 7) {
+        rSum += parseInt(hex.slice(1, 3), 16);
+        gSum += parseInt(hex.slice(3, 5), 16);
+        bSum += parseInt(hex.slice(5, 7), 16);
+        count++;
+      }
+    }
+    if (count > 0) return [rSum / (count * 255), gSum / (count * 255), bSum / (count * 255)];
+  }
+  if (!id || id <= 0) return [0.75, 0.72, 0.68];
+  if (_mcBlockColorCache.has(id)) return _mcBlockColorCache.get(id);
+  let col = [0.75, 0.72, 0.68];
+  if (mc && mc.atlas && typeof mc.atlas.getContext === 'function') {
+    try {
+      const bi = id - 1;
+      const T = typeof MC_TILE !== 'undefined' ? MC_TILE : 16;
+      const ctx = mc.atlas.getContext('2d', { willReadFrequently: true });
+      if (ctx && bi >= 0) {
+        const img = ctx.getImageData(0, bi * T, 6 * T, T);
+        const d = img.data;
+        let r = 0, g = 0, b = 0, count = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const a = d[i + 3];
+          if (a > 32) {
+            r += d[i]; g += d[i + 1]; b += d[i + 2];
+            count++;
+          }
+        }
+        if (count > 0) col = [r / (count * 255), g / (count * 255), b / (count * 255)];
+      }
+    } catch (e) {}
+  }
+  _mcBlockColorCache.set(id, col);
+  return col;
+}
+
+const _mcPolvoParticulas = [];
+function mcEmitePolvoRotura(x, y, z, id, struct, count = 22, prob = 1.0) {
+  if (prob < 1.0 && Math.random() > prob) return;
+  if (!mc.active || (typeof game === 'undefined') || !game.voxelesUI) return;
+  const base = mcColorPromedioDeBloque(id, struct);
+  const clamp = v => Math.min(1, Math.max(0, v));
+  const variaciones = [
+    [clamp(base[0] * 1.15), clamp(base[1] * 1.15), clamp(base[2] * 1.15)],
+    [base[0], base[1], base[2]],
+    [clamp(base[0] * 0.88), clamp(base[1] * 0.88), clamp(base[2] * 0.88)],
+    [clamp(base[0] * 0.75), clamp(base[1] * 0.75), clamp(base[2] * 0.75)]
+  ];
+  const cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
+  const n = Math.min(count, 32);
+  for (let i = 0; i < n; i++) {
+    const t = Math.random() * Math.PI * 2, u = Math.random() * 2 - 1, r = Math.sqrt(1 - u * u);
+    const f = 3.2 * (0.35 + Math.random() * 0.9);
+    _mcPolvoParticulas.push({
+      x: cx + (Math.random() - 0.5) * 0.4,
+      y: cy + (Math.random() - 0.5) * 0.4,
+      z: cz + (Math.random() - 0.5) * 0.4,
+      vx: (Math.cos(t) * r + (Math.random() - 0.5) * 0.5) * f,
+      vy: (u * 0.6 + 0.4 + Math.random() * 0.4) * f,
+      vz: (Math.sin(t) * r + (Math.random() - 0.5) * 0.5) * f,
+      col: variaciones[(Math.random() * variaciones.length) | 0],
+      vuela: 0,
+      vidaMax: 0.6 + Math.random() * 0.25
+    });
+  }
+  while (_mcPolvoParticulas.length > 500) _mcPolvoParticulas.shift();
+}
+
+function mcUpdatePolvo(dt) {
+  if (!_mcPolvoParticulas.length) return;
+  const U = (typeof game !== 'undefined') && game.voxelesUI;
+  if (!U) return;
+  U.limpia('polvo_rotura');
+  const P = 16;
+  for (let i = _mcPolvoParticulas.length - 1; i >= 0; i--) {
+    const p = _mcPolvoParticulas[i];
+    p.vuela += dt;
+    if (p.vuela >= p.vidaMax) {
+      _mcPolvoParticulas.splice(i, 1);
+      continue;
+    }
+    p.vy -= 18 * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.z += p.vz * dt;
+    const bx = Math.floor(p.x), by = Math.floor(p.y), bz = Math.floor(p.z);
+    if (typeof mcInside === 'function' && mcInside(bx, by, bz) && mc.grid && mc.grid[mcIdx(bx, by, bz)] !== 0) {
+      _mcPolvoParticulas.splice(i, 1);
+      continue;
+    }
+    U.pon(Math.floor(p.x * P), Math.floor(p.y * P), Math.floor(p.z * P), p.col, 'polvo_rotura');
+  }
 }
 function mcViewMatrix(){
   const p=mc.pos, ex=p[0], ey=p[1]+MC_EYE*mc.scale, ez=p[2];   // ojo = pies + altura del ojo (escala con game.playerScale)
@@ -14079,9 +14374,32 @@ async function mcSyncHeldToolStruct(){
     try{
       let s = mcHeldToolCache.get(reqKey);
       if(!s){
+        const baseKey = (typeof mcClaveBase === 'function') ? mcClaveBase(reqKey) : String(reqKey).replace(/@\d+$/, '');
+        const keyOri = (typeof mcClaveOri === 'function') ? mcClaveOri(reqKey) : 0;
+        
+        let realBaseKey = baseKey;
+        if(typeof mcMatKey === 'function'){
+          const kMat = mcMatKey(baseKey, String(baseKey).toLowerCase());
+          if(kMat) realBaseKey = (typeof mcClaveBase === 'function') ? mcClaveBase(kMat) : kMat;
+        }
+        if(!realBaseKey.startsWith('asset:') && !realBaseKey.startsWith('hab:') && typeof mcAssetsRegistry !== 'undefined'){
+          const kLow = realBaseKey.toLowerCase();
+          if(mcAssetsRegistry[kLow]) realBaseKey = 'asset:' + mcAssetsRegistry[kLow];
+          else if(mcAssetsRegistry[kLow.replace(/[\s-]+/g, '_')]) realBaseKey = 'asset:' + mcAssetsRegistry[kLow.replace(/[\s-]+/g, '_')];
+          else if(mcAssetsRegistry[kLow.replace(/_/g, '-')]) realBaseKey = 'asset:' + mcAssetsRegistry[kLow.replace(/_/g, '-')];
+        }
+
         let doc = null;
-        try{ doc = await getRoomData(reqKey); }catch(e){}
-        const mesh = await mcBuildStructMesh(reqKey, 0, 0, 0, 0, 1.0, true);
+        try{ doc = await getRoomData(realBaseKey); }catch(e){}
+        if(typeof mcStructTexKeys === 'function'){
+          const tKeys = await mcStructTexKeys(realBaseKey);
+          const needsAtlas = mc.structTextures !== false && tKeys.some(k => !(mc.structUV && mc.structUV[k]));
+          if(needsAtlas){
+            await mcBuildStructAtlas();
+            if(mc.structs && mc.structs[realBaseKey]) mc.structs[realBaseKey].meshRot = {};
+          }
+        }
+        const mesh = await mcBuildStructMesh(realBaseKey, 0, 0, 0, keyOri, 1.0, true);
         const pvs = doc && doc.pivotes && doc.pivotes[0];
         const sz = (doc && doc.size) || {x:16, y:16, z:16};
         // El mesh aplica el swap de ejes de mcStructGeom:
@@ -16350,12 +16668,16 @@ function mcBreak(){
       // Una pieza efímera no es una edición del dueño: se va sin historial y sin guardar. Con
       // historial, un Ctrl+Z la resucitaría como estructura de verdad y la metería en el mundo.
       if(s && s.efimera){ mcRemoveStruct(s, true); toast('Pieza efímera retirada'); return; }
-      if(s){ mcPushHist({t:'s-', sp:{key:s.key,ox:s.ox,oy:s.oy,oz:s.oz,rot:s.rot|0}}); mcRemoveStruct(s); return; }
+      if(s){ mcEmitePolvoRotura(s.ox, s.oy, s.oz, 0, s, 22); mcPushHist({t:'s-', sp:{key:s.key,ox:s.ox,oy:s.oy,oz:s.oz,rot:s.rot|0}}); mcRemoveStruct(s); return; }
     }
     const bx=Math.floor(px), by=Math.floor(py), bz=Math.floor(pz);
     // Misma regla fina que el rayo de apuntar (BUG-RAY2): una celda que no llena su cubo —un cable en el
     // suelo, una alfombra— solo se rompe si el rayo cruza SU geometría, no toda su celda.
-    if(mcRejillaSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T)) && !mcIsCellReplaceable(bx,by,bz)){ const before=mc.grid[mcIdx(bx,by,bz)]; mcSetBlock(bx,by,bz,0); mcPushHist({t:'b',x:bx,y:by,z:bz,before,after:0}); mcRemeshAround(bx,bz); mcScheduleSave(); return; }
+    if(mcRejillaSolidAt(Math.floor(px*T),Math.floor(py*T),Math.floor(pz*T)) && !mcIsCellReplaceable(bx,by,bz)){
+      const before=mc.grid[mcIdx(bx,by,bz)];
+      mcEmitePolvoRotura(bx, by, bz, before, null, 22);
+      mcSetBlock(bx,by,bz,0); mcPushHist({t:'b',x:bx,y:by,z:bz,before,after:0}); mcRemeshAround(bx,bz); mcScheduleSave(); return;
+    }
   }
 }
 // Cuentagotas (REQ-PICK4): el material de lo apuntado va a la ranura activa. Es el «pick block» de
@@ -21566,7 +21888,18 @@ function mcResolveMat(material){
   if(m in mcMat2id) return mcMat2id[m];
   const mLow = m.toLowerCase();
   const key = mcMatKey(m, mLow);
-  let id = mc.blockKey.indexOf(key); if(id<1) id = mc.name2id[m] || mc.name2id[mLow] || -1;
+  let id = mc.blockKey.indexOf(key); if(id<1) id = mc.name2id[m] || mc.name2id[mLow] || (mc.name2id && mc.name2id[key]) || -1;
+
+  // Si trae sufijo de orientación (@ori) y no tiene variante propia en mc.blockKey, resolver con el material base
+  if(id<1 && (typeof mcClaveOri === 'function') && mcClaveOri(m)){
+    const baseM = mcClaveBase(m);
+    const idBase = mcResolveMat(baseM);
+    if(idBase > 0){
+      mcMat2id[m] = idBase;
+      return idBase;
+    }
+  }
+
   // Fallback de fluidos: solo para claves BASE (sin sufijo de nivel). Las variantes con nivel
   // (hab:agua-3, hab:lava-5) NO caen aquí: necesitan su propia entrada en mc.blockKey y setFluid
   // se encarga de registrarlas.
@@ -21737,6 +22070,7 @@ function mcApuntaPendiente(x,y,z,key){
 // en mc.structures y NO se va sola. Sin esto, repintar una celda apilaría piezas y setVoxel(x,y,z,0)
 // no borraría nada de lo estampado.
 function mcQuitaPiezaEn(x,y,z){
+  if(!mc.structures || !mc.structures.length) return 0;
   let n=0;
   for(let i=mc.structures.length-1;i>=0;i--){
     const s=mc.structures[i];
@@ -21760,6 +22094,7 @@ function mcSetVoxel(x,y,z,material){
   if(mcQuitaPiezaEn(x,y,z) && !mc.batching){ clearTimeout(mcStampT); mcStampT=setTimeout(mcFlushStamp, 80); }
 
   const _antesLote=mc.grid[mcIdx(x,y,z)];       // REQ-UNDO1
+  if(_antesLote>0 && id===0) mcEmitePolvoRotura(x, y, z, _antesLote, null, mc.batching ? 3 : 18, mc.batching ? 0.45 : 1.0);
   mcSetBlock(x,y,z, id); mcBuildN++; mcMarcaBuild(x,z);
   mcApuntaLote(x,y,z,_antesLote,id);            // REQ-UNDO1
   // En modo lote (beginBatch/endBatch) NO se re-malla por bloque; endBatch() dispara un único mcFlushBuild al cerrar.
@@ -21847,6 +22182,9 @@ function mcEndBatch(){
   mc.batching=false;
   clearTimeout(mcBuildT); mcBuildT=0;
   clearTimeout(mcStampT); mcStampT=0;
+  if(typeof game !== 'undefined' && game.fluidos && typeof game.fluidos.rebuild === 'function') {
+    game.fluidos.rebuild();
+  }
   if(mcBuildN>0) mcFlushBuild();                      // un único re-mallado + guardado de toda la ráfaga
   if(mcStampN>0) mcFlushStamp();                      // …y un único guardado de las piezas finas del lote
 }
@@ -21994,14 +22332,15 @@ function mcTick(now){
   }
 
   // Instrumentación de rendimiento
-  const _perfOn = typeof _perfAssert !== 'undefined' && _perfAssert > 0;
-  if (_perfOn && mc.last) {
+  const _perfActivo = (typeof _perfState !== 'undefined') && (_perfState.recording || _perfAssert > 0);
+  if (_perfActivo && mc.last) {
     const dtFrame = now - mc.last;
     if (dtFrame > 0 && typeof _perfComprobarFrame === 'function') {
       _perfComprobarFrame(1000 / dtFrame);
     }
   }
-  if (_perfOn && typeof _perfState !== 'undefined') _perfState.frame = {};
+  if (_perfActivo && !_perfState.preserveFrame) _perfState.frame = {};
+  const _tTick0 = _perfActivo ? performance.now() : 0;
 
   const dt = mc.last ? (now - mc.last) / 1000 : 0;
 
@@ -22015,14 +22354,29 @@ function mcTick(now){
     mc.fpsT = now;
   }
 
-  // Lógica y renderizado
-  if (mc.grid && typeof mcUpdate === 'function') mcUpdate(dt);
-  if (typeof game !== 'undefined' && game.fluidos) game.fluidos.tick();
-  if (mc.agents && mc.agents.size) {
-    if (typeof mcAgentsTick === 'function') mcAgentsTick(now);
-    if (typeof mcAgentsSmoothUpdate === 'function') mcAgentsSmoothUpdate(dt);
+  // Lógica y renderizado con medición
+  if (mc.grid && typeof mcUpdate === 'function') {
+    if (_perfActivo) { const _t0 = performance.now(); mcUpdate(dt); _perfRegistra('mcUpdate', performance.now() - _t0); }
+    else mcUpdate(dt);
   }
-  if (mc.grid && typeof mcDynSync === 'function') mcDynSync();
+  if (typeof game !== 'undefined' && game.fluidos) {
+    if (_perfActivo) { const _t0 = performance.now(); game.fluidos.tick(); _perfRegistra('game.fluidos.tick', performance.now() - _t0); }
+    else game.fluidos.tick();
+  }
+  if (mc.agents && mc.agents.size) {
+    if (typeof mcAgentsTick === 'function') {
+      if (_perfActivo) { const _t0 = performance.now(); mcAgentsTick(now); _perfRegistra('mcAgentsTick', performance.now() - _t0); }
+      else mcAgentsTick(now);
+    }
+    if (typeof mcAgentsSmoothUpdate === 'function') {
+      if (_perfActivo) { const _t0 = performance.now(); mcAgentsSmoothUpdate(dt); _perfRegistra('mcAgentsSmoothUpdate', performance.now() - _t0); }
+      else mcAgentsSmoothUpdate(dt);
+    }
+  }
+  if (mc.grid && typeof mcDynSync === 'function') {
+    if (_perfActivo) { const _t0 = performance.now(); mcDynSync(); _perfRegistra('mcDynSync', performance.now() - _t0); }
+    else mcDynSync();
+  }
 
   if (mc.heldBtn >= 0 && typeof mcMandoActivo === 'function' && mcMandoActivo() && now - mc.actAt >= MC_ACT_MS) {
     if (!mcToolPasiva() && !(mc.heldBtn === 2 && mc.slotStruct[mc.sel])) mcDoAction(mc.heldBtn);
@@ -22033,7 +22387,10 @@ function mcTick(now){
   if (typeof mcUpdateHotbar === 'function') mcUpdateHotbar(dt);
   if (typeof mcExtruBtn === 'function') mcExtruBtn();
   if (typeof mcSyncHeldToolStruct === 'function') mcSyncHeldToolStruct();
-  if (typeof mcRender === 'function') mcRender();
+  if (typeof mcRender === 'function') {
+    if (_perfActivo) { const _t0 = performance.now(); mcRender(); _perfRegistra('mcRender', performance.now() - _t0); }
+    else mcRender();
+  }
   if (typeof mcUpdateNoteView === 'function') mcUpdateNoteView();
 
   if (typeof mcNoteSignAt !== 'undefined' && now - mcNoteSignAt > 500) {
@@ -22045,6 +22402,11 @@ function mcTick(now){
 
   if (typeof mcUpdateXrayLabels === 'function') mcUpdateXrayLabels();
   if (typeof updateWorldMeters === 'function') updateWorldMeters();
+  if (typeof mcUpdatePolvo === 'function') mcUpdatePolvo(dt);
+
+  if (_perfActivo && _tTick0) {
+    _perfRegistra('mcTick', performance.now() - _tTick0);
+  }
 
   mc.last = now;
   mc.raf = requestAnimationFrame(mcTick);
@@ -22447,9 +22809,15 @@ function mcEsIntro(){
 // no cuesta nada, y quien quiera una distinta para el suyo la escribe con el nombre del mapa y esa gana.
 const MC_INTRO_GENERICA = 'arranque-intro';
 let _mcIntroSnip = null;
+const _mcSnippetCache = new Map();
 function mcPideSnippet(nombre){
-  return fetch('/api/snippets/'+encodeURIComponent(nombre),{cache:'no-store'})
-    .then(r=>r.ok?r.json():null).catch(()=>null);
+  const id = String(nombre==null?'':nombre).trim();
+  if(!id) return Promise.resolve(null);
+  if(_mcSnippetCache.has(id)) return Promise.resolve(_mcSnippetCache.get(id));
+  return fetch('/api/snippets/'+encodeURIComponent(id),{cache:'no-store'})
+    .then(r=>r.ok?r.json():null)
+    .then(s => { if(s && s.code) _mcSnippetCache.set(id, s); return s; })
+    .catch(()=>null);
 }
 function mcIntroPrefetch(forzar){
   if(!forzar && !mcEsIntro()) return null;
@@ -23825,7 +24193,7 @@ window.addEventListener('keydown',e=>{ if(!mc.active || !$('#mc-picker').hidden 
     e.preventDefault();
     return;
   }
-  if(k==='r' && (mc.slotStruct[mc.sel] || mc.tool==='box')){                                                                       // coloca la estructura en cualquiera de sus 24 posturas (mantén clic derecho para ver la vista-previa; suelta = estampa así)
+  if(k==='r' && (mc.slotStruct[mc.sel] || mc.hotbar[mc.sel] || mc.tool==='box' || mc.tool==='bloque' || mc.tool==='build')){                                                                       // coloca la estructura en cualquiera de sus 24 posturas (mantén clic derecho para ver la vista-previa; suelta = estampa así)
     // Dos pasos, que es como se piensa: primero QUÉ CARA queda arriba, y luego cómo está girada sobre ella.
     if(e.shiftKey){ mc.previewGiro=(mc.previewGiro+1)&3; toast('Giro: '+(mc.previewGiro*90)+'° sobre esa cara'); }   // Shift+R = los 4 giros dentro de la cara elegida
     else { mc.previewCara=(mc.previewCara+1)%6; toast('Cara arriba: '+MC_ORI_CARA[mc.previewCara]+' ('+(mc.previewCara+1)+'/6)'); }  // R = las 6 caras

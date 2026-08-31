@@ -2,5 +2,6 @@
   "id": "editor-autoarranque",
   "name": "editor autoarranque",
   "code": "game.showTool(true)\nlocation.href = '/map/multiverse';",
-  "savedAt": "2026-08-31T18:55:38"
+  "savedAt": "2026-08-31T19:16:17",
+  "categoria": "Autoarranque"
 }

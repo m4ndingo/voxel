@@ -2,5 +2,6 @@
   "id": "npc-explorador-cobertura",
   "name": "NPC Explorador de Cobertura (Pasajeros + Tickets + Margin:1 + Pintado Síncrono)",
   "code": "// NPC Explorador v4.0 (Declarativo OOP Standard + Carga Dinámica de Base)\n(async function() {\n  if (!game.defineStandardAgent) {\n    try {\n      var res = await fetch('/api/snippets/base-npc-skills');\n      var snip = await res.json();\n      if (snip && snip.code) (new Function(snip.code))();\n    } catch(e) { console.error('Error cargando base-npc-skills:', e); }\n  }\n\n  await game.addMaterial('obsidiana');\n  await game.addMaterial('red_concrete');\n\n  game.defineStandardAgent({\n    id: 'explorador',\n    name: 'Explorador v3',\n    block: 'obsidiana',\n    paintBlock: 'red_concrete',\n    margin: 1,\n    passengers: true,\n    tickMs: 250,\n    skills: {\n      pintadoSincrono: true\n    }\n  });\n})();\n",
-  "savedAt": "2026-08-31T18:55:45"
+  "savedAt": "2026-08-31T19:18:54",
+  "categoria": "Agentes / NPCs"
 }

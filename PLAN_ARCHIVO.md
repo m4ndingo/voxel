@@ -20,6 +20,22 @@ resuelve a una sección que existe.
 
 ---
 
+<a id="-perf-tnt1"></a>
+
+### 🟢 PERF-TNT1 · Prestaciones en explosiones encadenadas de TNT — 🟢 cerrado 2026-08-31
+
+Al detonar grupos grandes de TNT (64 bloques), la reacción en cascada con `explosion-tnt` y `alRomper` sufría caída drástica de FPS, parpadeo de bloques y agotamiento de recursos del navegador (`net::ERR_INSUFFICIENT_RESOURCES`).
+
+**Causas resueltas:**
+1. **Tormenta HTTP de snippets**: `game.snippet` / `mcPideSnippet` descargaba el snippet por red en cada llamada. Implementada caché en memoria `_mcSnippetCache` (`Map`) con sincronización en `snipSave`/`snipDelete`.
+2. **Deduplicación de `avisoDeRotura`**: `game.bloques.avisoDeRotura` deduplica llamadas concurrentes sobre la misma coordenada (`mc._avisosPendientes`), evitando la avalancha de más de 200.000 detonaciones duplicadas.
+3. **Anti-Phantom**: `mcSetVoxel` protege celdas destruidas a aire dentro de una ráfaga para evitar que ondas solapadas las resuciten con fuego o sólidos.
+4. **Optimización de estructuras**: `mcQuitaPiezaEn` con salida rápida cuando no hay estructuras.
+
+Detalle en [`data/tickets/PERF-TNT1/contexto.md`](data/tickets/PERF-TNT1/contexto.md).
+
+---
+
 <a id="-bug-cart1"></a>
 
 ### 🟡 BUG-CART1 · Carteles de nota apilados dentro de `mundo.json` — 🟡 resuelto 2026-08-23
