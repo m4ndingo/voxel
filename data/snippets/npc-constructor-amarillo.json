@@ -2,5 +2,5 @@
   "id": "npc-constructor-amarillo",
   "name": "NPC Constructor Héroe (Yellow Concrete + Continuous Walking)",
   "code": "// NPC Constructor Héroe v2.1 (Declarativo OOP Standard + 100% Caminata Continuada)\n(async function() {\n  if (!game.defineStandardAgent) {\n    try {\n      var res = await fetch('/api/snippets/base-npc-skills');\n      var snip = await res.json();\n      if (snip && snip.code) (new Function(snip.code))();\n    } catch(e) { console.error('Error cargando base-npc-skills:', e); }\n  }\n\n  await game.addMaterial('sand');\n  await game.addMaterial('yellow_concrete');\n\n  game.defineStandardAgent({\n    id: 'constructor_heroe',\n    name: 'Constructor Héroe (Yellow Concrete)',\n    block: 'yellow_concrete',\n    buildBlock: 'yellow_concrete',\n    triggerFloor: 'sand',\n    margin: 1,\n    passengers: true,\n    tickMs: 200,\n    skills: {\n      construccionEnCapa: true,\n      saltoTactico: false\n    }\n  });\n})();\n",
-  "savedAt": "2026-07-26T18:24:40.000Z"
+  "savedAt": "2026-08-31T18:55:45"
 }

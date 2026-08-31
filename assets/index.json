@@ -2513,5 +2513,57 @@
     "createdAt": "2026-08-27T16:36:06",
     "count": 1395,
     "description": "Pino — árbol voxel 32³ (MOCK, aún no es asset)."
+  },
+  {
+    "id": "tnt",
+    "name": "TNT",
+    "role": "Bloque explosivo 16³",
+    "icon": "📦",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/tnt.vox.json",
+    "savedAt": "2026-08-31T16:08:02",
+    "createdAt": "2026-08-28T21:41:21",
+    "count": 4096
+  },
+  {
+    "id": "castillo",
+    "name": "Castillo",
+    "role": "Asset · castillo",
+    "icon": "📦",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/castillo.vox.json",
+    "savedAt": "2026-08-31T19:21:22",
+    "createdAt": "2026-08-30T19:30:33",
+    "count": 905
+  },
+  {
+    "id": "casita",
+    "name": "Casita",
+    "role": "Asset · casita",
+    "icon": "📦",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/casita.vox.json",
+    "savedAt": "2026-08-31T19:21:28",
+    "createdAt": "2026-08-28T10:05:35",
+    "count": 311,
+    "categoria": "construccion"
   }
 ]
