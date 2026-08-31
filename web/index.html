@@ -420,8 +420,11 @@
     <!-- REQ-SPLIT1 · el agarre de la pantalla dividida. Solo se ve en modo dividido; arrastrarlo reparte
          la altura entre el Mundo (arriba) y el código (abajo), y el doble clic la devuelve a la mitad. -->
     <div class="snip-grip" id="snip-grip" title="Arrastra para repartir la pantalla · doble clic: a la mitad"></div>
-    <div class="modal-head">
-      <div><strong>🧩 Snippets de código</strong> <span class="muted" id="snip-sub">guarda, edita y ejecuta código contra el Mundo</span></div>
+    <div class="modal-head snip-modal-head">
+      <div class="snip-title-box">
+        <strong>🧩 Snippets de código</strong>
+        <div class="snip-tabs" id="snip-tabs"></div>
+      </div>
       <div class="modal-actions">
         <button class="btn sm" id="snip-split" title="Pantalla dividida: el Mundo arriba y el código abajo (Alt+D)">⬍ Dividir</button>
         <button class="btn sm" id="snip-refresh" title="Recargar lista">↻</button>
@@ -437,6 +440,7 @@
         <div class="snip-modo" id="snip-modo" hidden></div>
         <div class="snip-list" id="snip-list"></div>
       </aside>
+      <div class="snip-ctxmenu" id="snip-ctxmenu" hidden></div>
       <section class="snip-editor">
         <div class="snip-editor-head">
           <input type="text" id="snip-name" class="snip-name" placeholder="Nombre del snippet…" maxlength="80" />

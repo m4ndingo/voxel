@@ -2,5 +2,6 @@
   "id": "npc-constructor-puertas-madera",
   "name": "NPC Constructor Puertas de Madera",
   "code": "// NPC Constructor Puertas de Madera (OOP Standard + Detección de Puerta Madera)\n(async function() {\n  if (!game.defineStandardAgent) {\n    try {\n      var res = await fetch('/api/snippets/base-npc-skills');\n      var snip = await res.json();\n      if (snip && snip.code) (new Function(snip.code))();\n    } catch(e) { console.error('Error cargando base-npc-skills:', e); }\n  }\n\n  await game.addMaterial('lava');\n  await game.addMaterial('obsidian');\n  await game.addMaterial('obsidiana');\n  await game.addMaterial('madera');\n  await game.addMaterial('tejado');\n  await game.addMaterial('yellow_concrete');\n  await game.addMaterial('red_concrete');\n\n  game.defineStandardAgent({\n    id: 'constructor_puertas_madera',\n    name: 'Constructor Puertas de Madera',\n    margin: 1,\n    passengers: true,\n    tickMs: 200,\n    skills: {\n      puertasMadera: true,\n      saltoTactico: false\n    }\n  });\n})();",
-  "savedAt": "2026-07-27T23:38:00.000Z"
+  "savedAt": "2026-08-31T19:18:57",
+  "categoria": "Agentes / NPCs"
 }

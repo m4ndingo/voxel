@@ -2,5 +2,6 @@
   "id": "npc-constructor-tejado",
   "name": "NPC Constructor Tejado",
   "code": "// NPC Constructor Héroe v2.1 (Declarativo OOP Standard + 100% Caminata Continuada)\n(async function() {\n  if (!game.defineStandardAgent) {\n    try {\n      var res = await fetch('/api/snippets/base-npc-skills');\n      var snip = await res.json();\n      if (snip && snip.code) (new Function(snip.code))();\n    } catch(e) { console.error('Error cargando base-npc-skills:', e); }\n  }\n\n  await game.addMaterial('tejado');\n  await game.addMaterial('yellow_concrete');\n\n  game.defineStandardAgent({\n    id: 'constructor_heroe_tejado',\n    name: 'Constructor Héroe (Tejado)',\n    block: 'tejado',\n    buildBlock: 'tejado',\n    buildRadius: 3,\n    triggerFloor: 'yellow_concrete',\n    margin: 1,\n    passengers: true,\n    tickMs: 200,\n    skills: {\n      construccionEnCapa: true,\n      saltoTactico: false\n    }\n  });\n})();",
-  "savedAt": "2026-07-28T00:43:02"
+  "savedAt": "2026-08-31T19:18:56",
+  "categoria": "Agentes / NPCs"
 }

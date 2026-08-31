@@ -9,7 +9,10 @@
     "name": "Espada de Luz",
     "type": "objeto",
     "categoria": "herramienta",
-    "herramienta": "pick"
+    "herramienta": "pick",
+    "icon": "📦",
+    "description": "",
+    "alias": "espada"
   },
   "voxels": {
     "15,7,0": "#344bb4",
