@@ -127,6 +127,19 @@ game.osd — 1 pantalla(s), 2 acción(es). Abierta: intro
 - **El texto del botón ES su identidad**, normalizado (trim + mayúsculas). Por eso una pantalla puede
   pasar de `{html:…}` a `{mapa:…}` sin tocar ni una acción registrada: en los dos casos lo que llega es
   «JUGAR».
+- ⛔ **…y por eso DOS MENÚS QUE USEN EL MISMO TEXTO SE PISAN.** `mc.osdAcciones` es **un solo registro
+  para toda la página**: `alPulsar('AJUSTES', …)` no registra «AJUSTES en mi menú», registra «AJUSTES»
+  a secas, y **gana el último que se cargue**. No es hipotético, pasó en F5.3: `mundo-autoarranque`
+  carga primero `sesion-guardia` (que trae `menu-juego`) y **después** `miosd`, el menú del dueño, que
+  registra `AJUSTES`, `VOLAR`, `FANTASMA`… Resultado: el AJUSTES de la pausa abría las **FÍSICAS** de
+  `miosd`, y el VOLAR de `miosd` corría el de la pausa. **Un menú que no sea el del dueño pone su
+  prefijo**: `data-osd="pausa:ajustes"` — `mcOsdEngancha` lee `dataset.osd || textContent`
+  (`app.js:19534`), así que el texto sigue siendo lo que se lee en pantalla y la identidad pasa a ser
+  una clave que no puede chocar. Guardián: `tests/test_menu_juego.js` §2b.
+- ⚠️ **Las acciones se escriben CORTAS, con el trabajo en un ayudante del snippet.** `dump()` recorta
+  el código a 18 líneas (`MC_OSD_MAX_LINEAS`) y le pega un «… (N líneas más)» que `mcOsdLibres` vuelve
+  a leer como si fueran identificadores: una acción larga sale en el volcado con
+  `falta: ['l','neas','m','s']`, que no significa nada y **esconde los avisos que sí importan**.
 - **Al abrir** se suelta el puntero (`exitPointerLock`) y se vacía `mc.keys`. Con la cámara capturada
   no hay cursor con el que pulsar nada, y las teclas pulsadas se quedarían pegadas.
 - Mientras hay pantalla abierta **`mcLockPointer` no recaptura** (guarda de una línea) y **`mcDoAction`
@@ -430,6 +443,45 @@ apuntada a la anotada, incluidos los bloques del cartel).
 - `MC_OSD_ALCANCE = 96`: un botón de un menú puede estar lejos, no a distancia de brazo.
 
 Guardián: `tests/test_osd_boton.js` (`@area: general`).
+
+---
+
+## ⏸️ El menú de pausa (`menu-juego`) — F5.3
+
+**Esc dejó de tirar la partida.** Vive entero en el snippet `menu-juego`, se instala solo (lo carga
+`sesion-guardia`, que ya cuelga de los dos autoarranques por `herramientas/parche_snp_menu.py`) y
+expone `game.menu.on()/off()/abrir()/estado()`. **Cero líneas de `app.js`.**
+
+- **Esc es una ESCALERA** (`app.js:3862-3872`): con el Mundo abierto va cerrando lo que haya encima —la
+  nota que se planta, el panel de código, el de agentes, el editor de nota, el selector, la pantalla
+  OSD—, luego suelta el ratón y **solo al final cierra el Mundo**. El menú **hereda la escalera entera
+  y solo cambia el último escalón**: se pone un oyente en **captura** que se aparta (`return`) si hay
+  algo de eso abierto, y solo secuestra la tecla cuando lo que tocaba era `closeWorld()`. Si mañana
+  `app.js` añade un escalón, sigue funcionando — no se reimplementa nada.
+- **Se abre al PRIMER Esc, no al segundo.** El navegador suelta el puntero él solo al pulsar Esc y eso
+  no se puede evitar desde JS, así que el escalón de «suelta el ratón» no se ve: lo que se veía era que
+  hacían falta dos pulsaciones para que pasara algo. Un menú de pausa que pide dos Esc no lo es.
+  ⚠️ Con el menú **quitado** (`game.menu.off()`) vuelven los dos pasos de siempre: eso es lo que
+  comprueba `tests/test_menu_juego.js` §6, y es lo que demuestra que `off()` devuelve el motor byte a
+  byte.
+- **CONTINUAR recaptura el puntero DENTRO del manejador del clic** y **después** de cerrar la pantalla:
+  es un gesto de usuario, y pedida tras un `await` el navegador la rechaza; y `mcLockPointer` no
+  recaptura mientras haya pantalla abierta (`app.js:21431`).
+- **La pausa se redefine en cada apertura.** `game.osd.html()` deja el HTML que pinte **dentro de la
+  definición** de la pantalla, así que sin volver a `define` la segunda visita al menú enseñaría el
+  enlace de invitación de la vez anterior en vez del menú.
+- **INVITAR enseña el enlace para copiarlo a mano**, no lo manda al portapapeles: `navigator.clipboard`
+  solo existe en contexto seguro y esto arranca en LAN por `http://` (`docs/servidor-y-apis.md:103`).
+  El 401 («entra con tu cuenta») y el 403 («este mapa no es tuyo») dicen cosas distintas a propósito:
+  uno se arregla entrando y el otro no se arregla.
+- ⚠️ **`game.volar` es una FUNCIÓN-VALOR** (`app.js:23139`): `game.volar ? 'ON' : 'OFF'` da **siempre**
+  ON —un objeto siempre es cierto— y `game.volar(!game.volar)` **apaga siempre**, porque `!<función>`
+  es `false`. Se lee coaccionando (`!!+game.volar`) y se conmuta llamándola **sin argumentos**.
+- ⚠️ **La sensibilidad de fábrica es 0,25**, no 1 (`mc.sens = 0.000625` sobre una base de `0.0025`,
+  `app.js:7709`): una lista de pasos que empiece en 0,5 deja al jugador sin forma de volver a la
+  sensibilidad con la que entró.
+
+Guardián: `tests/test_menu_juego.js` (Playwright, `@area: render`).
 
 ---
 

@@ -44,9 +44,17 @@ def main():
     if nombre:
         cuerpo['name'] = nombre
 
+    # F0.4 · `POST /api/snippets` es del dueño. En desarrollo esto no hace falta (sin modo público la
+    # matriz no se aplica y la herramienta funciona como siempre), pero en un servidor publicado sin
+    # la cabecera esto es un 403 — y el sitio donde se descubriría es el despliegue.
+    cabeceras = {'Content-Type': 'application/json'}
+    token = (os.environ.get('VOXELFORGE_TOKEN') or '').strip()
+    if token:
+        cabeceras['X-VoxelForge-Token'] = token
+
     req = urllib.request.Request(BASE + '/api/snippets',
                                  data=json.dumps(cuerpo, ensure_ascii=False).encode('utf-8'),
-                                 headers={'Content-Type': 'application/json'}, method='POST')
+                                 headers=cabeceras, method='POST')
     try:
         with urllib.request.urlopen(req) as r:
             d = json.loads(r.read().decode('utf-8'))

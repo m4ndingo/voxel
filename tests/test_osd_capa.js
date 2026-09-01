@@ -40,14 +40,20 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     abierta: game.osd.abierta,
     oculta: $('#mc-osd').hidden,
     vacia: $('#mc-osd').innerHTML === '',
-    pantallas: game.osd.pantallas().length,
+    mias: game.osd.pantallas().filter(n => n === 'menu' || n === 'otra'),
     mundoAbierto: !$('#mc-modal').hidden
   }));
-  test('§1 el Mundo arranca sin ninguna pantalla OSD y con la capa vacia y oculta', () => {
+  // ⚠️ Esto NO puede exigir `pantallas().length === 0`, y lo exigia. El registro de pantallas y el de
+  // acciones son UNO SOLO para toda la pagina, y `mundo-autoarranque` carga menus que definen las
+  // suyas al entrar (`miosd` define `mi_menu*` desde hace meses; `menu-juego` registra su pausa desde
+  // F5.3). O sea que este test se ponia rojo por que el dueño tuviera menus, que es lo normal, y no
+  // por que la capa OSD estuviera mal. Lo que si tiene que ser cierto es que al arrancar no hay
+  // NINGUNA pantalla ABIERTA, la capa esta vacia y oculta, y las de este test todavia no existen.
+  test('§1 el Mundo arranca sin ninguna pantalla OSD abierta y con la capa vacia y oculta', () => {
     assert(virgen.abierta === null, 'arranca con la pantalla «' + virgen.abierta + '» abierta');
     assert(virgen.oculta, '#mc-osd no arranca oculto');
     assert(virgen.vacia, '#mc-osd arranca con contenido');
-    assert(virgen.pantallas === 0, 'arranca con pantallas definidas');
+    assert(virgen.mias.length === 0, 'las pantallas de este test ya estaban definidas: ' + virgen.mias);
     assert(virgen.mundoAbierto, 'el Mundo no esta abierto');
   });
 
@@ -83,8 +89,13 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     assert(define.sinNombre === 'tiro', 'define("") no protesta');
     assert(define.sinCuerpo === 'tiro', 'define sin html ni mapa no protesta');
   });
-  test('§2 las pantallas definidas se listan', () =>
-    assert(define.pantallas.join(',') === 'menu,otra', 'pantallas() = ' + define.pantallas));
+  // Se pregunta si ESTAN, no si son las unicas: en la lista hay tambien las de los menus que carga el
+  // mundo (ver el aviso del §1). Que aparezcan las dos, y en el orden en que se definieron, es lo que
+  // este caso dice comprobar.
+  test('§2 las pantallas definidas se listan', () => {
+    const mias = define.pantallas.filter(n => n === 'menu' || n === 'otra');
+    assert(mias.join(',') === 'menu,otra', 'pantallas() = ' + define.pantallas);
+  });
 
   // ── §3 · abrir: se ve, tapa el canvas y suelta el puntero ──────────────────────────────────────
   const abierto = await p.evaluate(() => {
@@ -134,8 +145,14 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     r.vistos = vistos.slice();
     return r;
   });
-  test('§4 el texto del boton se normaliza (trim + mayusculas)', () =>
-    assert(acciones.registradas.join(',') === 'JUGAR,CONSTRUIR', 'acciones() = ' + acciones.registradas));
+  // Lo que se comprueba es la NORMALIZACION: «  construir  » entra en el registro como CONSTRUIR. La
+  // lista entera no vale para eso —lleva las acciones de los menus del mundo— y ademas es justo el
+  // motivo por el que un menu propio no debe registrar nombres pelados: se pisan (ver `menu-juego`,
+  // que por esto usa claves «pausa:…»).
+  test('§4 el texto del boton se normaliza (trim + mayusculas)', () => {
+    const mias = acciones.registradas.filter(t => t === 'JUGAR' || t === 'CONSTRUIR');
+    assert(mias.join(',') === 'JUGAR,CONSTRUIR', 'acciones() = ' + acciones.registradas);
+  });
   test('§4 game.osd.pulsar dispara la accion sin mirar mayusculas', () => {
     assert(acciones.porApi === true, 'pulsar("jugar") devolvio ' + acciones.porApi);
     assert(acciones.vistos[0] === 'jugar', 'no se ejecuto la accion de JUGAR');
