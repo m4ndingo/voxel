@@ -4497,7 +4497,7 @@ async function snipMueveCategoria(id, nuevaCat){
     }).then(x => x.json());
   }catch(e){}
   if(!r || !r.id){ toast('No se pudo guardar la categoría'); return; }
-  _mcSnippetCache.set(r.id, d);
+  mcSnippetCachea(r.id, d);   // con marca de tiempo: acaba de guardarse, es la copia buena
   if(snipCur === id) snipCurCat = cleanCat;
   toast('📁 «' + id + '» movido a ' + (cleanCat || 'Sin Clasificar'));
   await snipReload();
@@ -4664,7 +4664,7 @@ async function snipSave(){
   let r=null;
   try{ r=await fetch('/api/snippets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()); }catch(e){}
   if(!r || !r.id){ toast('No se pudo guardar'); return; }
-  _mcSnippetCache.set(r.id, Object.assign({ id: r.id }, body));
+  mcSnippetCachea(r.id, Object.assign({ id: r.id }, body));   // idem: recien guardado
   if(mueve && r.id!==snipCur){
     _mcSnippetCache.delete(snipCur);
     let d=null; try{ d=await fetch('/api/snippets/'+encodeURIComponent(snipCur),{method:'DELETE'}); }catch(e){}
@@ -8757,11 +8757,16 @@ game.volatiles = {
     }
   }
 
-  function tick() {
+  // `forzar` salta la cadencia. Son dos preguntas distintas y hasta ahora solo habia una respuesta:
+  // el bucle de frame pregunta «¿toca dar un paso?» (llama SIN argumento, y ahi es donde viven los
+  // 10 pasos/segundo que dan los 120 FPS), mientras que quien llama a mano — una prueba, la consola,
+  // un snippet que quiere ver el agua caer YA — pide «dame UN paso», y esperar 90 ms de reloj para
+  // servirselo no era cadencia, era no hacerle caso.
+  function tick(forzar) {
     if (inTick || (!queue.size && !_fluidPendingBox)) return;
     var now = performance.now();
     // Cadencia natural de fluidos: procesar simulación cada ~100ms (10 ticks/segundo)
-    if (queue.size > 0 && now - _lastFluidStep < 90 && !_fluidPendingBox) return;
+    if (!forzar && queue.size > 0 && now - _lastFluidStep < 90 && !_fluidPendingBox) return;
 
     inTick = true;
     _lastFluidStep = now;
@@ -13551,7 +13556,6 @@ function mcUpdate(dt){
     }
     mc.vel[1]=0;
   }
-  mcUpdatePolvo(dt);
 }
 // ── POLVO DE ROTURA CON COLOR PROMEDIO (Pico, Herramientas, TNT) ─────────────────────────────
 const _mcBlockColorCache = new Map();
@@ -22402,6 +22406,9 @@ function mcTick(now){
 
   if (typeof mcUpdateXrayLabels === 'function') mcUpdateXrayLabels();
   if (typeof updateWorldMeters === 'function') updateWorldMeters();
+  // Aqui y SOLO aqui: mcUpdate() tambien lo llamaba, asi que el polvo avanzaba dos veces por frame y
+  // se apagaba al doble de velocidad de la que dicen sus propias constantes. Se queda esta llamada
+  // porque va con el resto de efectos por frame y sigue viva aunque no haya mc.grid (mcUpdate no).
   if (typeof mcUpdatePolvo === 'function') mcUpdatePolvo(dt);
 
   if (_perfActivo && _tTick0) {
@@ -22809,15 +22816,25 @@ function mcEsIntro(){
 // no cuesta nada, y quien quiera una distinta para el suyo la escribe con el nombre del mapa y esa gana.
 const MC_INTRO_GENERICA = 'arranque-intro';
 let _mcIntroSnip = null;
+// El caché no caducaba NUNCA, y eso convertia una sesion larga en una trampa: editabas un snippet en
+// el editor, lo llamabas desde el juego y seguia corriendo la copia vieja hasta recargar la pagina —
+// sin decirlo. Con un TTL corto, un cambio se ve solo; y dentro de esos segundos se sigue ahorrando
+// la rafaga (la intro pide el mismo snippet varias veces seguidas), que es para lo que se puso.
 const _mcSnippetCache = new Map();
+const _mcSnippetCacheAt = new Map();
+const MC_SNIPPET_TTL = 5000;
+function mcSnippetCachea(id, s){ _mcSnippetCache.set(id, s); _mcSnippetCacheAt.set(id, Date.now()); }
 function mcPideSnippet(nombre){
   const id = String(nombre==null?'':nombre).trim();
   if(!id) return Promise.resolve(null);
-  if(_mcSnippetCache.has(id)) return Promise.resolve(_mcSnippetCache.get(id));
+  if(_mcSnippetCache.has(id) && Date.now() - (_mcSnippetCacheAt.get(id) || 0) < MC_SNIPPET_TTL)
+    return Promise.resolve(_mcSnippetCache.get(id));
   return fetch('/api/snippets/'+encodeURIComponent(id),{cache:'no-store'})
     .then(r=>r.ok?r.json():null)
-    .then(s => { if(s && s.code) _mcSnippetCache.set(id, s); return s; })
-    .catch(()=>null);
+    // Si la red falla se sigue con la copia vieja: caducar no es tirar lo unico que tenemos, y una
+    // intro a medio empezar no deberia morir porque una peticion se perdio.
+    .then(s => { if(s && s.code){ mcSnippetCachea(id, s); return s; } return _mcSnippetCache.get(id) || s; })
+    .catch(()=> _mcSnippetCache.get(id) || null);
 }
 function mcIntroPrefetch(forzar){
   if(!forzar && !mcEsIntro()) return null;

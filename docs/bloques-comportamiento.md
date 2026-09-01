@@ -73,6 +73,36 @@ encadenada es una ejecución NUEVA del snippet y dos closures no se ven entre s�
 Los dos parches: `herramientas/parche_snp_romper_en_masa.py` (la puerta) y
 `herramientas/parche_snp_tnt_alromper.py` (la explosión).
 
+### BUG-SNP4 · la misma casita tenía **dos claves**, y el comportamiento caía en una sola
+
+El síntoma del dueño (2026-08-31): «*no funciona bien el `alRomper`, por eso estuve cambiando entre
+"casita" y "asset:assets/casita.vox.json"*» · «*en `test` me funciona, en `empty` no*» · «*he creado
+una casa y funcionó, no entiendo por qué ahora funciona*».
+
+**No era intermitente: dependía del mapa.** La misma casita se llama **`hab:casita`** cuando sale de
+la paleta (la que se coloca y se rompe) y **`asset:assets/casita.vox.json`** cuando sale del disco (la
+que se estampa). `define()` pasa por `resolver()`, que elige **una** de las dos según lo que el mundo
+tuviera **puesto al arrancar**:
+
+| mapa | qué encontraba `resolver()` | dónde quedaba el `alRomper` | romper el bloque de la paleta |
+|---|---|---|---|
+| `/map/test` | `hab:casita` en la paleta → **alias** | `tabla['hab:casita']` | ✅ |
+| `/map/empty` | la clave larga ya en el catálogo → exacta | `tabla['asset:…casita.vox.json']` | ❌ |
+
+Y `cfgDeClave()` solo miraba la clave **exacta** (y su base sin `@ori`), así que la otra mitad de la
+moneda no encontraba nada. Cambiar el nombre a mano arreglaba un mapa y rompía el otro.
+
+**El arreglo** (`herramientas/parche_snp_alromper_clave_corta.py`): el mismo criterio que `resolver()`
+ya usa al **dar de alta** se aplica también al **buscar** — si la clave exacta no está, se mira por
+**nombre corto** (`hab:casita` y `asset:assets/casita.vox.json` son los dos «casita»). Solo cuando ese
+nombre corto lleva a **un único** comportamiento; si dos materiales distintos lo comparten con
+configuraciones distintas, el atajo se apaga y se busca como siempre. Índice `porCorto`, que
+`reconstruirCache()` invalida. **Ahora las dos formas de escribirlo funcionan en todos los mapas.**
+
+De paso: `'castillo'` y `'tnt'` **a secas** valían para dos materiales (`hab:…` y `asset:…`) y ante la
+duda `define()` abortaba ⇒ en `/map/empty` **ninguno de los dos tenía comportamiento**, callado. Van
+con la clave entera; el nombre corto cubre la otra forma.
+
 Todo vive en el snippet **`data/snippets/mundo-autoarranque.json`** (el JSON *es* la fuente; se edita
 con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del diseño:
 

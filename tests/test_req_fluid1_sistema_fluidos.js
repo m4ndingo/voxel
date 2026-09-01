@@ -70,13 +70,16 @@ const { chromium } = require('playwright');
 
       // Colocar agua origen en (5, 4, 5)
       game.fluidos.setFluid(5, 4, 5, 'WATER', 0);
-      game.fluidos.tick(); // Tick 1: cae a (5, 3, 5)
+      // `tick(true)` = «dame UN paso», que es lo que esta prueba mide. Sin el `true` se pide «un paso
+      // si toca», y desde la optimizacion a 120 FPS solo toca cada 90 ms de reloj: tres tick() seguidos
+      // daban un solo paso y el agua se quedaba arriba. La cadencia sigue viva para el bucle de frame.
+      game.fluidos.tick(true); // Tick 1: cae a (5, 3, 5)
       const step1Below = game.fluidos.info(5, 3, 5);
 
-      game.fluidos.tick(); // Tick 2: cae a (5, 2, 5)
+      game.fluidos.tick(true); // Tick 2: cae a (5, 2, 5)
       const step2Below = game.fluidos.info(5, 2, 5);
 
-      game.fluidos.tick(); // Tick 3: al haber suelo en y=1, se extiende a (6, 2, 5) y (4, 2, 5)
+      game.fluidos.tick(true); // Tick 3: al haber suelo en y=1, se extiende a (6, 2, 5) y (4, 2, 5)
       const step3Side = game.fluidos.info(6, 2, 5);
       return {
         step1: step1Below.isFluid && step1Below.fluidLevel === 1,
@@ -92,9 +95,9 @@ const { chromium } = require('playwright');
     const recedeResult = await page.evaluate(() => {
       // Quitar fuente de (5, 4, 5)
       mcSetBlock(5, 4, 5, 0);
-      game.fluidos.tick(); // (5, 3, 5) pierde fuente y desaparece
-      game.fluidos.tick(); // (5, 2, 5) pierde fuente y desaparece
-      game.fluidos.tick(); // (6, 2, 5) pierde fuente y desaparece
+      game.fluidos.tick(true); // (5, 3, 5) pierde fuente y desaparece
+      game.fluidos.tick(true); // (5, 2, 5) pierde fuente y desaparece
+      game.fluidos.tick(true); // (6, 2, 5) pierde fuente y desaparece
 
       const f4 = game.fluidos.info(5, 4, 5);
       const f3 = game.fluidos.info(5, 3, 5);
@@ -116,21 +119,21 @@ const { chromium } = require('playwright');
       mcSetBlock(10, 1, 10, 0);
 
       game.fluidos.setFluid(10, 2, 10, 'LAVA', 0);
-      game.fluidos.tick(); // Cae a (10, 1, 10)
-      game.fluidos.tick(); // Se extiende a (11, 1, 10)
+      game.fluidos.tick(true); // Cae a (10, 1, 10)
+      game.fluidos.tick(true); // Se extiende a (11, 1, 10)
 
       const lavaBefore = game.fluidos.info(10, 1, 10);
 
       // 2. Colocar bloque STONE (roca) en (10, 1, 10) reemplazando la lava
       mcSetBlock(10, 1, 10, mcResolveMat('roca'));
-      game.fluidos.tick();
+      game.fluidos.tick(true);
 
       const stonePushed = game.fluidos.info(10, 1, 10);
       const lavaSideAfterStone = game.fluidos.info(11, 1, 10);
 
       // 3. Retirar el bloque STONE dejando AIR en (10, 1, 10)
       mcSetBlock(10, 1, 10, 0);
-      game.fluidos.tick(); // Origen en (10, 2, 10) vuelve a llenar (10, 1, 10) con lava
+      game.fluidos.tick(true); // Origen en (10, 2, 10) vuelve a llenar (10, 1, 10) con lava
 
       const lavaRefilled = game.fluidos.info(10, 1, 10);
 

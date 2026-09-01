@@ -157,6 +157,21 @@ Léelo como plantilla.
 
 ---
 
+## ⏳ El caché de snippets caduca (2026-08-31)
+
+`mcPideSnippet()` (`app.js`) guardaba cada snippet **para siempre** dentro de la sesión. En un ciclo de
+trabajo normal — editas el snippet, lo guardas, lo llamas desde el juego — seguías corriendo la copia
+vieja hasta recargar la pestaña, **y nadie te lo decía**. Eso es exactamente lo que este documento
+intenta evitar: creer que estás probando lo nuevo cuando corre lo viejo.
+
+Ahora el caché tiene **TTL de 5 s** (`MC_SNIPPET_TTL`): dentro de esa ventana se sigue ahorrando la
+ráfaga de peticiones (la intro pide el mismo snippet varias veces seguidas, que es para lo que se
+puso), y pasada, un cambio se ve solo. Si la petición falla, **se sigue con la copia vieja**: caducar
+no es tirar lo único que hay. El editor cachea por `mcSnippetCachea(id, s)`, que pone la marca de
+tiempo — lo que acaba de guardar es la copia buena y no hace falta volver a pedirla.
+
+---
+
 ## Movido verbatim desde CLAUDE.md el 2026-08-30
 
 (Minimización de `CLAUDE.md` pedida por el dueño; arriba queda la ley y el enlace.)

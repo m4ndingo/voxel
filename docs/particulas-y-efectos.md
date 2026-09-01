@@ -447,6 +447,19 @@ ponerla no bastaba — hubo que bajar `aEmit` a 0 en esa pasada. Son el mismo in
 
 ---
 
+## 🧹 El polvo de rotura vivía la mitad de lo que decía (2026-08-31)
+
+`mcUpdatePolvo(dt)` estaba llamado **dos veces por frame**: una desde `mcUpdate()` y otra desde
+`mcTick()`. Como `mcUpdate()` solo lo llama `mcTick()`, cada frame avanzaba el polvo dos pasos: las
+partículas se apagaban al **doble** de velocidad que sus propias constantes (`vidaMax` = 0,6–0,85 s
+⇒ se veían ~0,35 s) y la gravedad les caía doble. No era un ajuste: eran dos llamadas al mismo reloj.
+
+Se queda **una sola**, la de `mcTick()`, porque va con el resto de efectos por frame y sigue viva
+aunque no haya `mc.grid` (`mcUpdate()` no). ⚠️ Este polvo es **del motor**, no del snippet
+`particulas-voxel` — aunque se dibuje con `game.voxelesUI`, que sí es la capa del snippet.
+
+---
+
 ## Movido verbatim desde CLAUDE.md el 2026-08-30
 
 (Minimización de `CLAUDE.md` pedida por el dueño; arriba queda la regla y el enlace.)

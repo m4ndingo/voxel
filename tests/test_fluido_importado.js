@@ -88,7 +88,7 @@ function ok(cond, msg, extra) {
       for (let i = -1; i <= 1; i++) for (let k = -1; k <= 1; k++) pon(X + i, y0 - 1, Z + k, ROCA);
       for (let j = 0; j <= 2; j++) for (let i = -1; i <= 1; i++) for (let k = -1; k <= 1; k++) pon(X + i, y0 + j, Z + k, 0);
       game.fluidos.setFluid(X, y0 + 2, Z, tipo, 0);
-      for (let t = 0; t < 6; t++) game.fluidos.tick();
+      for (let t = 0; t < 6; t++) game.fluidos.tick(true);
       const idFuente = idEn(X, y0 + 2, Z), idCorre = idEn(X, y0, Z);
       return {
         fuente: claveEn(X, y0 + 2, Z),

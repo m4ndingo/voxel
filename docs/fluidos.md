@@ -201,6 +201,24 @@ un caso se cuela en el de al lado y el verde deja de significar nada.
 
 ---
 
+## ⏱️ `game.fluidos.tick()` responde a DOS preguntas distintas
+
+La optimización a 120 FPS metió una cadencia dentro de `tick()`: si hay cola y no han pasado 90 ms
+desde el paso anterior, **no hace nada** (`app.js:8764`). Eso es lo correcto para el bucle de frame —
+son los 10 pasos/segundo del fluido, y es lo que da los 120 FPS. Pero dejó **mudo** a quien llama a
+mano: tres `tick()` seguidos desde una prueba, la consola o un snippet daban **un solo paso**, y el
+agua se quedaba arriba sin que nadie dijera por qué. `test_req_fluid1_sistema_fluidos` se puso en
+rojo (4 de 12) por esto, no por los fluidos.
+
+- `tick()` — «**¿toca dar un paso?**». La cadencia manda. Es lo que llama `mcTick` cada frame.
+- `tick(true)` — «**dame UN paso**». Salta la cadencia. Es lo que quiere quien llama a mano.
+
+No es una válvula ni un modo de prueba: son dos preguntas que siempre fueron distintas y hasta ahora
+compartían respuesta. Los guardianes (`test_req_fluid1_sistema_fluidos`, `test_fluido_importado`)
+piden `tick(true)`, que es lo que de verdad están midiendo.
+
+---
+
 ## 🪞 La lámina de agua refleja el cielo (REQ-FLUID5)
 
 Fase 4 de REQ-FLUID4, sacada a ticket propio. Es lo que separa «un cristal azul tumbado» de «agua»:
