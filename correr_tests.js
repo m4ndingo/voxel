@@ -138,6 +138,23 @@ function checkPlaywrightInstalled() {
   }
 }
 
+// ¿El servidor de :8500 pide el token del dueño y nosotros no lo llevamos?
+//
+// Esto avisa de un fallo que MIENTE: los tests que escriben empiezan a recibir 401 y lo cuentan
+// como «la protección no deja borrar lo que está en uso», que es justo lo que el test dice
+// comprobar. Pasó de verdad: `test_en_uso_no_se_borra` daba 22/6 contra un 8500 con token y 28/0
+// contra uno sin él, y los seis «fallos» no eran del servidor sino del test sin identificarse.
+// `/api/panel/salud` sirve de sonda porque sin token configurado es dueño todo el mundo (200) y
+// con token puesto responde 401 a quien no lo trae.
+function checkTokenAusente() {
+  if ((process.env.VOXELFORGE_TOKEN || '').trim()) return Promise.resolve(false);
+  return new Promise(resolve => {
+    const req = http.get('http://localhost:8500/api/panel/salud', res => resolve(res.statusCode === 401));
+    req.on('error', () => resolve(false));
+    req.setTimeout(2000, () => { req.destroy(); resolve(false); });
+  });
+}
+
 (async () => {
   if (requiereServidor) {
     const pwOk = checkPlaywrightInstalled();
@@ -157,6 +174,13 @@ function checkPlaywrightInstalled() {
       console.error('       node correr_tests.js --node\n');
       process.exit(1);
     }
+  }
+
+  if (await checkTokenAusente()) {
+    console.error('\n⚠️  El servidor de :8500 pide el token del dueño y esta terminal no lo lleva.');
+    console.error('   Los tests que ESCRIBEN van a recibir 401 y contarlo como fallo de la');
+    console.error('   protección que dicen comprobar. Exporta el token antes de seguir:\n');
+    console.error('       export VOXELFORGE_TOKEN=$(grep -oP \'^VOXELFORGE_TOKEN=\\K.*\' /root/voxelforge.env)\n');
   }
 
   console.log(`\n🚀 Ejecutando ${selected.length} test(s)...\n`);

@@ -27,13 +27,23 @@ const RAIZ = path.join(__dirname, '..');
 const PUERTO = +(process.argv[2] || 8500);
 const HOST = 'http://localhost:' + PUERTO;
 
+// ⚠️ Este test ESCRIBE, así que necesita ser el dueño, y quién es el dueño depende de cómo se
+// arrancó el servidor: sin `VOXELFORGE_TOKEN` lo es todo el mundo (desarrollo), y con token hay que
+// traerlo en `X-VoxelForge-Token`. Sin esta cabecera, contra un 8500 con token el test daba 22/6 —
+// seis 401 que parecían un fallo de la protección y solo eran el test sin identificarse.
+// Se corre igual en los dos casos exportando el token si lo hay:
+//     export $(grep -h VOXELFORGE_TOKEN /root/voxelforge.env) && node correr_tests.js --node
+const TOKEN = (process.env.VOXELFORGE_TOKEN || '').trim();
+
 let ok = 0, fallos = 0;
 const check = (c, m) => c ? (ok++, console.log('  ok    ' + m)) : (fallos++, console.log('  FALLO  ' + m));
 
 async function pide(metodo, ruta, cuerpo) {
+  const headers = cuerpo === undefined ? {} : { 'Content-Type': 'application/json' };
+  if (TOKEN) headers['X-VoxelForge-Token'] = TOKEN;
   const r = await fetch(HOST + ruta, {
     method: metodo,
-    headers: cuerpo === undefined ? {} : { 'Content-Type': 'application/json' },
+    headers,
     body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
   });
   let d = null;
