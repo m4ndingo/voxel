@@ -1,0 +1,20 @@
+# F7.2 · Cuándo se copia. Se enciende ESTE, no el `.service`:
+#
+#   sudo systemctl enable --now voxelforge-copia.timer
+#   systemctl list-timers voxelforge-copia                 # cuándo tocó y cuándo toca
+
+[Unit]
+Description=VoxelForge · copia nocturna
+
+[Timer]
+# A las 3:30, que es cuando no hay nadie jugando. `Persistent=true` es la parte que se olvida: si la
+# máquina estaba apagada a esa hora, la copia se hace AL ENCENDER en vez de saltarse el día. Un
+# servidor que se apaga por las noches y tiene un temporizador sin `Persistent` no tiene copias.
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+# Los 20 minutos son para que dos máquinas con esto puesto no se tiren a la vez al disco de las
+# copias. Con una sola no cambia nada, y no molesta.
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target

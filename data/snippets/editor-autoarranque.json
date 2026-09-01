@@ -1,7 +1,7 @@
 {
   "id": "editor-autoarranque",
   "name": "editor autoarranque",
-  "code": "game.showTool(true)\nlocation.href = '/map/multiverse';",
-  "savedAt": "2026-08-31T19:16:17",
+  "code": "// ==GUARDIA-SESION==\n// F4.2 · lo primero de todo: `sesion-guardia` le quita los atajos de desarrollo (Alt+C, Alt+D,\n// Alt+A) a quien no tenga el permiso. No se espera a propósito — es cosmética y no puede retrasar\n// la entrada al Mundo; y fallar aquí tampoco puede impedirla, de ahí el `catch`.\ngame.snippet('sesion-guardia').catch(function (e) {\n  console.warn('sesion-guardia no se pudo arrancar:', e && e.message);\n});\n// ==FIN-GUARDIA-SESION==\n\ngame.showTool(true)\nlocation.href = '/map/multiverse';",
+  "savedAt": "2026-09-01T13:20:51",
   "categoria": "Autoarranque"
 }

@@ -1,0 +1,61 @@
+# F7.1 · VoxelForge, el servidor del sitio y de la API (el que decide los permisos).
+#
+#   sudo cp despliegue/voxelforge*.service /etc/systemd/system/
+#   sudo cp despliegue/voxelforge.env.ejemplo /etc/voxelforge.env && sudo chmod 600 /etc/voxelforge.env
+#   sudoedit /etc/voxelforge.env          # ⛔ los secretos van AHÍ, nunca en este fichero: esto se versiona
+#   sudo systemctl daemon-reload && sudo systemctl enable --now voxelforge
+#
+# ⚠️ Lee `despliegue/LEEME.md` antes de encender esto de cara a internet: en LAN el vale y la cookie
+# viajan EN CLARO, y `ThreadingMixIn` no tiene tope de conexiones — eso lo arregla nginx delante
+# (F7.5), no este fichero.
+
+[Unit]
+Description=VoxelForge · sitio y API
+Documentation=file:/opt/voxelforge/docs/cuentas-y-permisos.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=voxelforge
+Group=voxelforge
+WorkingDirectory=/opt/voxelforge
+# ⛔ El fichero de entorno lleva VOXELFORGE_SECRETO_SESION y VOXELFORGE_TOKEN. Sin el primero, en
+# modo público el proceso NO ARRANCA, y es a propósito: con un secreto improvisado en memoria las
+# cookies se caerían en cada reinicio y —peor— el árbitro del multijugador firma con EL MISMO secreto
+# desde otro proceso; dos secretos distintos y los vales dejan de valer sin que nada lo diga.
+EnvironmentFile=/etc/voxelforge.env
+ExecStart=/usr/bin/python3 /opt/voxelforge/server.py 8500
+Restart=always
+RestartSec=2
+
+# Aislamiento. `ProtectSystem=strict` deja TODO el disco de solo lectura salvo lo que se abra abajo:
+# es lo que convierte «un fallo en `server.py`» en «un fallo en `server.py`» y no en «el servidor».
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+# ⚠️ Escritura SOLO en `data/`: `web/`, `server.py`, `servidor/` y `assets/` quedan de solo lectura
+# ⇒ ni un fallo del servidor ni una petición retorcida pueden reescribir el código que sirve la
+# página.
+ReadWritePaths=/opt/voxelforge/data
+# …y `data/snippets/` se vuelve a cerrar DENTRO de lo abierto. Es el cinturón sobre el tirante de
+# F0.4/F1: el snippet `mundo-autoarranque` se ejecuta con `new AsyncFunction()` en ámbito global en
+# el navegador de cada visitante, así que quien pueda escribir ahí ejecuta JavaScript en la sesión de
+# todo el mundo. El permiso ya lo prohíbe; esto hace que ni un fallo del permiso baste.
+#
+# Precio, dicho sin adornos: **`POST /api/snippets` no funciona en producción con esta línea**. Los
+# snippets se publican en desarrollo y viajan con el repositorio (`git pull` + `systemctl restart`).
+# Quien necesite publicarlos en caliente comenta la línea y escribe aquí por qué.
+ReadOnlyPaths=/opt/voxelforge/data/snippets
+
+[Install]
+WantedBy=multi-user.target

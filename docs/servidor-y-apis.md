@@ -5,6 +5,11 @@ paga en cada turno y esto solo hace falta cuando se toca `server.py` o una panta
 ⚠️ Tras tocar `server.py` hay que **reiniciarlo** (`python3 server.py 8500`) o los endpoints nuevos
 dan 404. Las rutas de fichero que se citan abajo son de antes de la mudanza del sitio a `web/`.
 
+⛔ **Quién puede llamar a cada una de estas APIs es otro documento**, y hay que leerlo antes de
+añadir un endpoint que escriba: [`docs/cuentas-y-permisos.md`](cuentas-y-permisos.md) (cuentas,
+perfiles, la tabla `PERMISO_POR_RUTA`, propiedad y visibilidad de los mapas, cuotas y el registro de
+accesos). Lo de aquí abajo describe el **qué**; aquello, el **quién**.
+
 ---
 
 ## Qué es

@@ -1,0 +1,22 @@
+# F7.4 · Cada hora. Se enciende ESTE, no el `.service`:
+#
+#   sudo systemctl enable --now voxelforge-vigilancia.timer
+
+[Unit]
+Description=VoxelForge · ronda de vigilancia cada hora
+
+[Timer]
+# Cada hora y no cada minuto: lo que se vigila —disco que se llena, copia que dejó de hacerse— tarda
+# días en pasar, y un vigilante que habla mucho se silencia. Cada hora es de sobra para llegar antes
+# que el disco lleno, que es lo único que corre.
+OnCalendar=hourly
+Persistent=true
+# Descolgada de la hora en punto: a las 3:30 corre la copia, y una ronda justo encima leería la
+# carpeta de copias a medio escribir.
+RandomizedDelaySec=7m
+# Y la primera, poco después de arrancar la máquina: el momento en el que es más probable que algo no
+# haya subido bien es justo después de un reinicio.
+OnBootSec=10min
+
+[Install]
+WantedBy=timers.target

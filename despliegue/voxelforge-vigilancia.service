@@ -1,0 +1,43 @@
+# F7.4 · La ronda: disco, tamaño de data/, nº de mundos, los dos puertos y la EDAD DE LA ÚLTIMA COPIA.
+#
+#   sudo systemctl enable --now voxelforge-vigilancia.timer   # ⚠️ el .timer, NO el .service
+#   sudo systemctl start voxelforge-vigilancia && journalctl -u voxelforge-vigilancia -n 20
+#   systemctl --failed                                        # el buzón: aquí sale si algo va mal
+#
+# **El primer incidente de un multiverso es el disco**, y no se parece a una caída: nadie ve un
+# error, simplemente los mundos empiezan a guardarse a medias.
+#
+# El aviso NO se manda por correo a propósito: una unidad que sale con error se pone roja y SE QUEDA
+# roja, y `systemctl --failed` es un buzón que no hay que configurar y que no se puede caer en
+# silencio. Mandar correo desde aquí sería añadir un servicio más del que fiarse.
+
+[Unit]
+Description=VoxelForge · ronda de vigilancia
+Documentation=file:/opt/voxelforge/herramientas/vigilancia.py
+
+[Service]
+Type=oneshot
+User=voxelforge
+Group=voxelforge
+WorkingDirectory=/opt/voxelforge
+# Por VOXELFORGE_COPIAS: sin él miraría la edad de las copias en el sitio equivocado y diría que no
+# hay ninguna. Un vigilante que da una alarma falsa se ignora, y entonces ya no vigila nada.
+EnvironmentFile=/etc/voxelforge.env
+ExecStart=/usr/bin/python3 /opt/voxelforge/herramientas/vigilancia.py
+
+# Sale con 1 si hay AVISO y con 2 si hay ALARMA. El 1 NO tiene que poner la unidad roja —«míralo esta
+# semana» no es «te han llamado a las cuatro de la mañana»—, así que se declara como éxito. El 2 sí.
+SuccessExitStatus=1
+
+# Aislamiento: esto solo LEE. Ni un `ReadWritePaths`, que es la mejor manera de asegurarse de que un
+# vigilante nunca sea la causa del incidente que tenía que vigilar.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true

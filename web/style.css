@@ -34,6 +34,33 @@
 }
 
 *{box-sizing:border-box}
+
+/* ── F4.3 · Las superficies de desarrollo, escondidas POR PERMISO ────────────────────────────────
+   Esconder no es prohibir: quien pida a pelo lo que aquí se oculta recibe un 403 de `server.py`
+   (F1). Esto es solo para que a un invitado no se le enseñe una puerta que no puede abrir.
+
+   ⚠️ Va en CSS y NO en el snippet `sesion-guardia` a propósito. El snippet llega DESPUÉS de que la
+   página se pinte (baja por `fetch`), así que si él fuera quien esconde habría medio segundo en el
+   que Alt+C existe para todo el mundo — en una máquina lenta, bastante más. La regla al revés no
+   tiene ese agujero: nace escondido y el guardia lo DESTAPA. Fallar hacia cerrado es lo mismo que
+   hace `VOXELFORGE_PUBLICO`. Por eso tampoco se toca `app.js`, que era la otra salida.
+
+   Se gobierna por PERMISO y no por rol («data-rol="dueno"`) porque los perfiles son configurables y
+   además se ajustan cuenta por cuenta: el dueño pidió que «una cuenta concreta pueda crear snippets
+   propios». Un rol quemado en el CSS haría mentir al panel de F9 el día que reparta ese permiso.
+   `data-puede` lo pone `sesion-guardia` con la lista que devuelve `GET /api/yo`, y `~=` compara
+   palabra suelta. CSS no sabe cruzar dos atributos ⇒ hace falta UNA REGLA POR PERMISO que esconda
+   algo; añadir un `data-solo-si` nuevo es añadir también su línea aquí. */
+html:not([data-puede~="snippet.editar_sistema"]) [data-solo-si="snippet.editar_sistema"],
+html:not([data-puede~="agente.editar"])          [data-solo-si="agente.editar"],
+html:not([data-puede~="asset.subir"])            [data-solo-si="asset.subir"],
+html:not([data-puede~="asset.borrar"])           [data-solo-si="asset.borrar"]{display:none !important}
+/* Las tarjetas de la galería las pinta `renderHabGrid` en cada apertura, así que no se les puede
+   poner el atributo a mano en el HTML: se marcan por lo que ya llevan. Renombrar un asset es un
+   PATCH y borrarlo un DELETE, y los dos son del dueño. */
+html:not([data-puede~="asset.borrar"]) .hab-card [data-a="del"],
+html:not([data-puede~="asset.borrar"]) .hab-card [data-a="ren"]{display:none !important}
+
 html,body{height:100%}
 body{
   margin:0;

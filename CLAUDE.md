@@ -11,7 +11,7 @@ Guardián `tests/test_claude_tamano.js`. Estilo telegráfico **a propósito** (d
 
 ## 🗺️ MAPA — no navegar a ciegas
 
-`web/app.js` = **23762 líneas / ~419 k tokens** ⇒ NO cabe, NO se lee entero. Localizar función →
+`web/app.js` = **25376 líneas / ~448 k tokens** ⇒ NO cabe, NO se lee entero. Localizar función →
 **`SYMBOLS.md`** (`función → web/app.js:línea`; orden de regenerar en su cabecera, guardián
 `tests/test_symbols_sync.js`). ! motor **mudado a `web/` el 2026-08-13**: `app.js:1234` de antes vale
 como línea, pero el fichero es `web/app.js`.
@@ -146,6 +146,13 @@ Botón = **bloque con una nota**, identificado **por su texto** ⇒ una pantalla
 **entera** (10 mandamientos + 8 leyes + Sótano) y se **cita el artículo**. Dueño: «iluminación real y
 consistente; **cero apaños**». Si algo se ve mal, infringe un artículo. **2 sombras** (skylight horneada
 vs proyectada en GPU) y **2 bakes** de luz móvil → [`docs/luz-y-sombra.md`](docs/luz-y-sombra.md).
+
+## Cuentas y permisos → [`docs/cuentas-y-permisos.md`](docs/cuentas-y-permisos.md)
+
+**El permiso se decide en `server.py`**: el cliente esconde, el servidor prohíbe.
+`VOXELFORGE_PUBLICO=1` **enciende** el modo estricto (en desarrollo nada cambia ⇒ probarlo exige
+servidor propio en otro puerto). 2 puertas: `PERMISO_POR_RUTA` + `_mundo_ok` (¿**este** mapa?).
+Mapa sin registro = oculto y solo lectura.
 
 ## Redstone → [`docs/redstone.md`](docs/redstone.md)
 

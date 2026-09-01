@@ -1,0 +1,335 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Panel · VoxelForge</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/scrollbars.css">
+<!-- F9 · EL PANEL DEL DUEÑO. Petición literal: «los permisos de usuarios y mapas y todo lo que sea
+     administración, vía web, no consola».
+
+     Cuatro pestañas sobre `/api/panel/*`: Cuentas, Perfiles, Mundos y Salud.
+
+     ⚠️ Esta página no protege nada: si alguien la abre sin permiso, cada `fetch` de dentro
+     devuelve 401/403 y aquí solo se pinta el motivo. Quien prohíbe es `server.py` (`_panel_puede`).
+     Por eso puede escribirse sin miedo a «y si alguien ve el HTML». -->
+<style>
+:root{ --bg:#0e1016; --panel:#161a24; --panel-2:#1d2230; --line:#2a3040; --ink:#e7ecf4;
+       --muted:#8a93a6; --accent:#e2a44a; --accent-2:#6bd3a0; --danger:#e2685a; --radius:10px; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{max-width:1180px;margin:0 auto;padding:22px 24px 0;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:21px}
+h1 span{color:var(--muted);font-weight:400}
+header .vuelve{margin-left:auto;color:var(--muted);font-size:13px;text-decoration:none}
+header .vuelve:hover{color:var(--accent)}
+nav{max-width:1180px;margin:14px auto 0;padding:0 24px;display:flex;gap:6px;flex-wrap:wrap}
+nav button{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+           padding:8px 16px;border-radius:8px;font:inherit;cursor:pointer}
+nav button.on{border-color:var(--accent);color:var(--accent)}
+main{max-width:1180px;margin:16px auto 48px;padding:0 24px}
+.aviso{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+       border-radius:8px;padding:13px 17px;color:var(--muted);font-size:12.5px;margin-bottom:14px}
+.aviso.rojo{border-left-color:var(--danger)}
+.aviso b{color:var(--ink)}
+.aviso code{color:var(--accent);font-family:ui-monospace,Menlo,monospace}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--muted);font-weight:500;font-size:11.5px;text-transform:uppercase;
+   letter-spacing:.4px;padding:0 10px 7px;border-bottom:1px solid var(--line)}
+td{padding:9px 10px;border-bottom:1px solid #1c2130;vertical-align:middle}
+tr:hover td{background:#141824}
+.slug{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.pastilla{font-size:11px;color:var(--muted);background:var(--panel-2);border:1px solid var(--line);
+          border-radius:99px;padding:2px 9px;white-space:nowrap}
+.pastilla.ok{color:var(--accent-2);border-color:#2f4a3c}
+.pastilla.ojo{color:var(--accent);border-color:#4a3a20}
+select,input[type=text],input[type=number]{background:var(--panel-2);border:1px solid var(--line);
+       color:var(--ink);padding:5px 9px;border-radius:7px;font:inherit;font-size:12.5px}
+select:focus,input:focus{outline:none;border-color:var(--accent)}
+button.mini{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+            padding:5px 11px;border-radius:7px;font:inherit;font-size:12.5px;cursor:pointer}
+button.mini:hover{border-color:var(--accent);color:var(--accent)}
+button.mini.peligro:hover{border-color:var(--danger);color:var(--danger)}
+button.mini[disabled]{opacity:.4;cursor:default}
+.permisos{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:5px 14px;margin:9px 0 0}
+.permisos label{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.permisos label:hover{color:var(--ink)}
+.permisos input{accent-color:var(--accent)}
+.ficha{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+       padding:15px 18px;margin-bottom:12px}
+.ficha h3{margin:0 0 2px;font-size:14.5px}
+.ficha .desc{color:var(--muted);font-size:12.5px;margin:0}
+.ficha .pie{display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap}
+.salud{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.dato{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.dato .k{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
+.dato .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:3px}
+.dato .v.mal{color:var(--danger)}
+.dato .v.bien{color:var(--accent-2)}
+.dato small{color:var(--muted);font-size:11.5px}
+#chivato{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:50;
+         background:var(--panel-2);border:1px solid var(--accent);color:var(--ink);
+         padding:10px 18px;border-radius:9px;font-size:13px;box-shadow:0 8px 26px #000a}
+#chivato.mal{border-color:var(--danger);color:var(--danger)}
+@media(max-width:680px){ main,header,nav{padding-left:14px;padding-right:14px}
+  table{font-size:12px} td,th{padding-left:5px;padding-right:5px} }
+</style>
+
+<header>
+  <h1>Panel <span>· VoxelForge</span></h1>
+  <a class="vuelve" href="/">← volver</a>
+</header>
+<nav id="nav"></nav>
+<main id="main">Cargando…</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const megas = (b) => !b ? '0' : (b > 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : (b / 1048576).toFixed(1) + ' MB');
+const fecha = (s) => !s ? '—' : new Date(s * 1000).toLocaleDateString();
+
+let VOCAB = [], PERFILES = [], CUENTAS = [], MUNDOS = [];
+
+function chiva(txt, mal) {
+  const d = document.createElement('div');
+  d.id = 'chivato'; d.textContent = txt; if (mal) d.className = 'mal';
+  const v = $('#chivato'); if (v) v.remove();
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), mal ? 6000 : 2600);
+}
+
+async function pide(ruta, opciones) {
+  const r = await fetch(ruta, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opciones));
+  let d = {}; try { d = await r.json(); } catch (e) {}
+  return { ok: r.ok, codigo: r.status, d: d || {} };
+}
+
+// Guardar es SIEMPRE por aquí, para que el aviso de error salga sí o sí. El fallo clásico de un
+// panel es que un 403 se traga en un `catch` vacío y el dueño cree que ha guardado.
+async function guarda(ruta, cuerpo, luego) {
+  const { ok, d, codigo } = await pide(ruta, { method: 'POST', body: JSON.stringify(cuerpo) });
+  if (!ok) { chiva((d.error || 'no se ha podido guardar') + ' (' + codigo + ')', true); return false; }
+  chiva('Guardado');
+  if (luego) await luego();
+  return true;
+}
+
+// ── Cuentas ─────────────────────────────────────────────────────────────────────────────────────
+
+function pintaCuentas() {
+  if (!CUENTAS.length) {
+    $('#main').innerHTML = '<div class="aviso">Todavía no se ha registrado nadie. Las cuentas se ' +
+      'crean solas desde la portada: el registro es <b>abierto</b>, y todas nacen en ' +
+      '<code>cuarentena</code> hasta que las subas aquí.</div>';
+    return;
+  }
+  let h = '<div class="aviso">El permiso efectivo es <b>perfil + añadidos − quitados</b>. Cambiar el ' +
+          'perfil aquí surte efecto en la siguiente petición; <b>Revocar</b> tira las sesiones ' +
+          'abiertas de esa cuenta ahora mismo.</div>' +
+          '<table><thead><tr><th>Cuenta</th><th>Perfil</th><th>Permisos efectivos</th>' +
+          '<th>Mapas</th><th>Alta</th><th></th></tr></thead><tbody>';
+  for (const c of CUENTAS) {
+    h += '<tr data-uid="' + esc(c.uid) + '">' +
+      '<td><b>' + esc(c.nombre) + '</b><div class="slug" style="color:var(--muted)">' + esc(c.uid) + '</div></td>' +
+      '<td><select class="perfil">' + PERFILES.map((p) =>
+          '<option value="' + esc(p.nombre) + '"' + (p.nombre === c.perfil ? ' selected' : '') + '>' +
+          esc(p.nombre) + '</option>').join('') + '</select></td>' +
+      '<td>' + (c.permisos.length ? c.permisos.map((p) => '<span class="pastilla">' + esc(p) + '</span>').join(' ')
+                                  : '<span class="pastilla">ninguno</span>') +
+      '<div style="margin-top:5px"><button class="mini ajusta">Ajustar uno a uno…</button></div></td>' +
+      '<td>' + c.mapas + ' / ' + (c.cuota.mapas || 0) + '</td>' +
+      '<td style="color:var(--muted)">' + fecha(c.creado) + '</td>' +
+      '<td><button class="mini peligro revoca">Revocar</button></td></tr>';
+  }
+  $('#main').innerHTML = h + '</tbody></table>';
+
+  $('#main').querySelectorAll('tr[data-uid]').forEach((tr) => {
+    const uid = tr.getAttribute('data-uid');
+    tr.querySelector('.perfil').onchange = (e) =>
+      guarda('/api/panel/cuenta', { uid, perfil: e.target.value }, cargaYPinta);
+    tr.querySelector('.revoca').onclick = () => {
+      if (!confirm('¿Cerrar todas las sesiones abiertas de «' + uid + '»?')) return;
+      guarda('/api/panel/cuenta', { uid, revocar: true }, cargaYPinta);
+    };
+    tr.querySelector('.ajusta').onclick = () => ajustaCuenta(uid);
+  });
+}
+
+// El ajuste cuenta por cuenta que pidió el dueño: añadir o quitar permisos SOBRE el perfil, sin
+// tener que inventarse un perfil nuevo para una sola persona.
+function ajustaCuenta(uid) {
+  const c = CUENTAS.find((x) => x.uid === uid);
+  if (!c) return;
+  const base = new Set((PERFILES.find((p) => p.nombre === c.perfil) || {}).permisos || []);
+  let h = '<div class="aviso">Ajuste de <b>' + esc(c.nombre) + '</b>. Las casillas marcadas en el ' +
+          'perfil <code>' + esc(c.perfil) + '</code> vienen de serie; marcar una que no está la ' +
+          '<b>añade</b> a esta cuenta, y desmarcar una que sí está se la <b>quita</b>. ' +
+          'Lo que no toques sigue el perfil.</div><div class="ficha"><div class="permisos">';
+  for (const p of VOCAB) {
+    const efectivo = c.permisos.indexOf(p) >= 0;
+    h += '<label><input type="checkbox" value="' + esc(p) + '"' + (efectivo ? ' checked' : '') + '> ' +
+         esc(p) + (base.has(p) ? ' <span class="pastilla">perfil</span>' : '') + '</label>';
+  }
+  h += '</div><div class="pie"><button class="mini" id="ok">Guardar</button>' +
+       '<button class="mini" id="no">Cancelar</button></div></div>';
+  $('#main').innerHTML = h;
+  $('#no').onclick = pintaCuentas;
+  $('#ok').onclick = () => {
+    const mas = [], menos = [];
+    $('#main').querySelectorAll('.permisos input').forEach((i) => {
+      const p = i.value, enPerfil = base.has(p);
+      if (i.checked && !enPerfil) mas.push(p);
+      if (!i.checked && enPerfil) menos.push(p);
+    });
+    guarda('/api/panel/cuenta', { uid, permisos_mas: mas, permisos_menos: menos }, cargaYPinta);
+  };
+}
+
+// ── Perfiles ────────────────────────────────────────────────────────────────────────────────────
+
+function pintaPerfiles() {
+  let h = '<div class="aviso">Un perfil es una lista de permisos con nombre. Se editan aquí y ' +
+          '<b>mandan los ficheros</b>: el código no vuelve a pisarlos. ' +
+          '⚠️ <code>panel.perfiles</code> es el permiso que reparte permisos — quien lo tenga puede ' +
+          'ascender a cualquiera, incluido a sí mismo.</div>';
+  for (const p of PERFILES) {
+    h += '<div class="ficha" data-perfil="' + esc(p.nombre) + '">' +
+      '<h3>' + esc(p.nombre) + '</h3><p class="desc">' + esc(p.descripcion || '') + '</p>' +
+      '<div class="permisos">' + VOCAB.map((v) =>
+        '<label><input type="checkbox" value="' + esc(v) + '"' +
+        ((p.permisos || []).indexOf(v) >= 0 ? ' checked' : '') + '> ' + esc(v) + '</label>').join('') +
+      '</div><div class="pie"><button class="mini salva">Guardar</button>' +
+      '<button class="mini peligro borra">Borrar perfil</button></div></div>';
+  }
+  h += '<div class="ficha"><h3>Perfil nuevo</h3>' +
+       '<div class="pie"><input type="text" id="nuevo" placeholder="nombre (letras, números, guion)">' +
+       '<button class="mini" id="crea">Crear</button></div></div>';
+  $('#main').innerHTML = h;
+
+  $('#main').querySelectorAll('.ficha[data-perfil]').forEach((f) => {
+    const nombre = f.getAttribute('data-perfil');
+    const p = PERFILES.find((x) => x.nombre === nombre) || {};
+    f.querySelector('.salva').onclick = () => {
+      const permisos = [...f.querySelectorAll('.permisos input:checked')].map((i) => i.value);
+      guarda('/api/panel/perfil', { nombre, descripcion: p.descripcion || '', permisos }, cargaYPinta);
+    };
+    f.querySelector('.borra').onclick = async () => {
+      if (!confirm('¿Borrar el perfil «' + nombre + '»?')) return;
+      const { ok, d } = await pide('/api/panel/perfil/' + encodeURIComponent(nombre), { method: 'DELETE' });
+      if (!ok) { chiva(d.error || 'no se ha podido', true); return; }
+      chiva('Borrado'); await cargaYPinta();
+    };
+  });
+  $('#crea').onclick = () => {
+    const nombre = $('#nuevo').value.trim();
+    if (!nombre) return;
+    guarda('/api/panel/perfil', { nombre, descripcion: '', permisos: [] }, cargaYPinta);
+  };
+}
+
+// ── Mundos ──────────────────────────────────────────────────────────────────────────────────────
+
+function pintaMundos() {
+  const heredados = MUNDOS.filter((m) => m.heredado).length;
+  let h = '<div class="aviso">Aquí se decide <b>quién ve</b> y <b>quién construye</b> en cada mapa. ' +
+          (heredados ? '<b>' + heredados + '</b> siguen siendo <i>heredados</i>: de antes de que ' +
+            'hubiera cuentas, así que no son de nadie y <b>hoy no los ve nadie</b>. ' +
+            'Cambiarles la visibilidad es lo que los pone en juego. ' : '') +
+          'El <b>código</b> es la contraseña de entrada; déjalo vacío si no quieres ninguna.</div>' +
+          '<table><thead><tr><th>Mapa</th><th>Dueño</th><th>Quién lo ve</th><th>Quién escribe</th>' +
+          '<th>Código</th><th>Tamaño</th><th></th></tr></thead><tbody>';
+  for (const m of MUNDOS) {
+    h += '<tr data-slug="' + esc(m.slug) + '">' +
+      '<td><span class="slug">' + esc(m.slug) + '</span>' +
+        (m.heredado ? ' <span class="pastilla">heredado</span>' : '') +
+        (m.destacado ? ' <span class="pastilla ojo">destacado</span>' : '') + '</td>' +
+      '<td style="color:var(--muted)">' + esc(m.dueno || '—') + '</td>' +
+      '<td><select class="vis">' + ['privado', 'enlace', 'publico'].map((v) =>
+          '<option' + (v === m.visibilidad ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></td>' +
+      '<td><select class="esc">' + ['dueno', 'invitados', 'todos'].map((v) =>
+          '<option' + (v === m.escritura ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></td>' +
+      '<td><input type="text" class="cod" value="' + esc(m.codigo || '') + '" size="9" placeholder="—"></td>' +
+      '<td style="color:var(--muted)">' + megas(m.bytes) + '</td>' +
+      '<td><button class="mini salva">Guardar</button> ' +
+          '<a class="mini" style="text-decoration:none" href="/map/' + encodeURIComponent(m.slug) + '">Abrir</a></td></tr>';
+  }
+  $('#main').innerHTML = h + '</tbody></table>';
+
+  $('#main').querySelectorAll('tr[data-slug]').forEach((tr) => {
+    tr.querySelector('.salva').onclick = () => guarda('/api/panel/mundo', {
+      slug: tr.getAttribute('data-slug'),
+      visibilidad: tr.querySelector('.vis').value,
+      escritura: tr.querySelector('.esc').value,
+      codigo: tr.querySelector('.cod').value,
+    }, cargaYPinta);
+  });
+}
+
+// ── Salud ───────────────────────────────────────────────────────────────────────────────────────
+
+async function pintaSalud() {
+  const { ok, d } = await pide('/api/panel/salud');
+  if (!ok) { $('#main').innerHTML = '<div class="aviso rojo">' + esc(d.error || 'no se ha podido leer') + '</div>'; return; }
+  const pocoDisco = d.disco_pct < 15;
+  // La edad de la última copia es EL dato: un temporizador que dejó de dispararse hace tres semanas
+  // no se nota hasta el día que hace falta restaurar.
+  const copia = d.ultima_copia
+    ? '<span class="v bien">' + esc(d.ultima_copia) + '</span>'
+    : '<span class="v mal">ninguna</span>';
+  $('#main').innerHTML =
+    (d.ultima_copia ? '' : '<div class="aviso rojo">⛔ <b>No hay ninguna copia de seguridad</b> en el ' +
+      'destino configurado. Sin copias no hay vuelta atrás. Se enciende con ' +
+      '<code>systemctl enable --now voxelforge-copia.timer</code>.</div>') +
+    '<div class="salud">' +
+    '<div class="dato"><div class="k">Disco libre</div><div class="v' + (pocoDisco ? ' mal' : '') + '">' +
+      d.disco_pct + '%</div><small>' + megas(d.disco_libre) + ' de ' + megas(d.disco_total) + '</small></div>' +
+    '<div class="dato"><div class="k">Pesa data/</div><div class="v">' + megas(d.data_bytes) +
+      '</div><small>' + d.data_ficheros + ' ficheros</small></div>' +
+    '<div class="dato"><div class="k">Mundos</div><div class="v">' + d.mundos + '</div></div>' +
+    '<div class="dato"><div class="k">Cuentas</div><div class="v">' + d.cuentas + '</div></div>' +
+    '<div class="dato"><div class="k">Papelera</div><div class="v">' + megas(d.papelera_bytes) +
+      '</div><small>no se poda: es autoría</small></div>' +
+    '<div class="dato"><div class="k">Última copia</div>' + copia + '</div>' +
+    '</div>';
+}
+
+// ── Arranque ────────────────────────────────────────────────────────────────────────────────────
+
+const PESTANAS = [
+  ['cuentas', 'Cuentas', pintaCuentas],
+  ['perfiles', 'Perfiles', pintaPerfiles],
+  ['mundos', 'Mundos', pintaMundos],
+  ['salud', 'Salud', pintaSalud],
+];
+let actual = 'cuentas';
+
+async function carga() {
+  const a = await pide('/api/panel/perfiles');
+  if (!a.ok) {
+    $('#main').innerHTML = '<div class="aviso rojo"><b>' + esc(a.d.error || 'sin acceso') + '</b><br>' +
+      (a.codigo === 401
+        ? 'Entra primero. Si este servidor tiene <code>VOXELFORGE_TOKEN</code>, el modo diseño se abre ' +
+          'desde la portada con el token.'
+        : 'Tu cuenta no tiene <code>panel.usar</code>.') + '</div>';
+    return false;
+  }
+  VOCAB = a.d.vocabulario || [];
+  PERFILES = a.d.perfiles || [];
+  CUENTAS = (await pide('/api/panel/cuentas')).d.cuentas || [];
+  MUNDOS = (await pide('/api/panel/mundos')).d.mundos || [];
+  return true;
+}
+
+function pintaNav() {
+  $('#nav').innerHTML = PESTANAS.map(([id, txt]) =>
+    '<button data-p="' + id + '" class="' + (id === actual ? 'on' : '') + '">' + txt + '</button>').join('');
+  $('#nav').querySelectorAll('button').forEach((b) => {
+    b.onclick = () => { actual = b.getAttribute('data-p'); pintaNav(); pinta(); };
+  });
+}
+
+function pinta() { (PESTANAS.find((p) => p[0] === actual) || PESTANAS[0])[2](); }
+async function cargaYPinta() { if (await carga()) pinta(); }
+
+(async () => { pintaNav(); if (await carga()) pinta(); })();
+</script>

@@ -1,0 +1,71 @@
+# F7.1 · El árbitro del multijugador (presencia, chat, muñecos y reparto de bloques).
+#
+# Va aparte de `voxelforge.service` a propósito y no por gusto de tener dos ficheros: el árbitro se
+# reinicia MUCHO más a menudo que el sitio, y reiniciar el 8510 ECHA A TODO EL QUE ESTÉ JUGANDO. Con
+# dos unidades, tocar el sitio no toca la partida y al revés.
+#
+#   sudo -u voxelforge mkdir -p /opt/voxelforge/data/multi   # ⛔ ANTES: ver `ReadWritePaths` abajo
+#   sudo systemctl daemon-reload && sudo systemctl enable --now voxelforge-multi
+#   curl -s http://127.0.0.1:8510/ | python3 -m json.tool     # el estado; cualquier ruta sirve
+#
+# ⚠️ El árbitro NO decide permisos, y eso es del plan (§Principio rector 1): quien escribe en
+# `data/worlds/` es `POST /api/mundo/edits` en el 8500, y a eso lo llama un `curl` sin pasar por
+# aquí. Si el permiso viviera en este proceso, repartiría lo que ya está escrito y no se enteraría.
+
+[Unit]
+Description=VoxelForge · árbitro del multiverso (WebSocket)
+Documentation=file:/opt/voxelforge/multi/LEEME.md
+After=network-online.target voxelforge.service
+Wants=network-online.target
+# `Wants` y no `Requires`: si el sitio se cae, el árbitro puede seguir repartiendo la partida en
+# curso. Tirarlo también sería echar a la gente por un fallo que no es suyo.
+Wants=voxelforge.service
+
+[Service]
+Type=simple
+User=voxelforge
+Group=voxelforge
+WorkingDirectory=/opt/voxelforge
+# ⛔ EL MISMO fichero de entorno que el sitio, y no una copia: cuando llegue F6.2 el vale de
+# invitación lo firma `server.py` con `VOXELFORGE_SECRETO_SESION` y lo verifica ESTE proceso. Dos
+# ficheros y el día que se rote uno los vales dejan de valer sin que nada lo diga.
+EnvironmentFile=/etc/voxelforge.env
+
+# ⚠️ `--secreto` NO se pone aquí (esto se versiona): sale de VOXEL_MULTI_SECRETO, en el fichero de
+# entorno. Y no es opcional — si falta, `carga_secreto()` (multi/servidor_multi.py:130) SE INVENTA
+# uno y lo escribe en `multi/.secreto`, que con el `ProtectSystem=strict` de abajo es solo lectura:
+# excepción al arrancar, `Restart=always`, y un ciclo de reinicios eterno. Comprobado leyendo la
+# función: no hay `try` que lo salve.
+#
+# `--datos` apunta DENTRO de `data/` por lo mismo. Por defecto el árbitro escribe su memoria en
+# `multi/datos/` (multi/servidor_multi.py:115), o sea dentro del código; abrir `multi/` para
+# escritura sería abrir también `multi/cliente.js`, que es JavaScript que se sirve al navegador de
+# todo el mundo. Con esto, `multi/` entero se queda de solo lectura.
+#
+# `--tope 20` es el aforo que pidió el dueño (10-20). El defecto del programa es 10.
+ExecStart=/usr/bin/python3 /opt/voxelforge/multi/servidor_multi.py \
+    --puerto 8510 \
+    --tope 20 \
+    --voxel-url http://127.0.0.1:8500 \
+    --datos /opt/voxelforge/data/multi
+Restart=always
+RestartSec=2
+
+# Aislamiento, igual que el sitio. Ver la explicación larga en `voxelforge.service`.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+# Solo su carpeta de memoria, no `data/` entero: el árbitro no tiene por qué poder tocar
+# `data/usuarios/` ni `data/worlds/`. Quien escribe los mundos es el 8500.
+ReadWritePaths=/opt/voxelforge/data/multi
+
+[Install]
+WantedBy=multi-user.target

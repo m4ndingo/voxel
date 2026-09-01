@@ -1,0 +1,366 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>VoxelForge</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/scrollbars.css">
+<!-- F5.1 · LA PORTADA. En modo público `server.py` sirve ESTO en `/` a quien no sea el dueño, en vez
+     del editor de objetos (`index.html`), que es lo que había hasta hoy y que a un visitante no le
+     dice nada.
+
+     Sin build y sin dependencias, como el resto del sitio: mismas variables de color que
+     `mapas.html` para que se vea del mismo juego.
+
+     ⚠️ Esta página NO decide permisos, solo los PINTA. Todo lo que esconde aquí devuelve 403 si se
+     pide a pelo — el cliente esconde, el servidor prohíbe. Por eso puede fiarse de `/api/yo` sin
+     que eso sea un agujero. -->
+<style>
+:root{ --bg:#0e1016; --panel:#161a24; --panel-2:#1d2230; --line:#2a3040; --ink:#e7ecf4;
+       --muted:#8a93a6; --accent:#e2a44a; --accent-2:#6bd3a0; --danger:#e2685a; --radius:10px; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);min-height:100vh;
+     font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+     display:flex;flex-direction:column}
+/* La marca, centrada y grande: es lo primero que se ve y lo que dice que esto es un juego. */
+.marca{text-align:center;padding:52px 20px 6px}
+.marca h1{margin:0;font-size:40px;letter-spacing:2px;font-weight:700}
+.marca h1 b{color:var(--accent);font-weight:700}
+.marca .lema{color:var(--muted);font-size:13.5px;margin-top:5px}
+main{flex:1;width:100%;max-width:760px;margin:0 auto;padding:22px 24px 48px}
+.tarjeta{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+         padding:18px 20px;margin-bottom:14px}
+.tarjeta h2{margin:0 0 3px;font-size:15px;font-weight:600}
+.tarjeta p{margin:0;color:var(--muted);font-size:12.5px}
+/* Los botones grandes de portada: uno por línea, como un menú de consola. */
+.acciones{display:flex;flex-direction:column;gap:9px;margin-top:14px}
+.bot{display:flex;align-items:center;gap:11px;width:100%;text-align:left;text-decoration:none;
+     background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+     padding:13px 15px;border-radius:9px;font:inherit;font-size:14.5px;cursor:pointer;
+     transition:border-color .15s,transform .12s}
+.bot:hover{border-color:var(--accent);transform:translateX(2px)}
+.bot .ico{font-size:19px;width:24px;text-align:center;flex:none}
+.bot .txt{display:flex;flex-direction:column;gap:1px;min-width:0}
+.bot .txt small{color:var(--muted);font-size:11.5px}
+.bot.principal{background:var(--accent);color:#1a1206;border-color:var(--accent);font-weight:600}
+.bot.principal .txt small{color:#1a120699}
+.bot.principal:hover{border-color:var(--accent)}
+.bot[disabled]{opacity:.45;cursor:default}
+.bot[disabled]:hover{border-color:var(--line);transform:none}
+/* La barra de sesión: quién eres y cómo salir. */
+.sesion{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+        max-width:760px;margin:0 auto;padding:0 24px;width:100%}
+.sesion .yo{font-size:13px}
+.sesion .yo b{color:var(--accent)}
+.pastilla{font-size:11px;color:var(--muted);background:var(--panel-2);border:1px solid var(--line);
+          border-radius:99px;padding:2px 9px}
+.sesion .salir{margin-left:auto;background:none;border:1px solid var(--line);color:var(--muted);
+               padding:5px 12px;border-radius:8px;font:inherit;font-size:12.5px;cursor:pointer}
+.sesion .salir:hover{border-color:var(--danger);color:var(--danger)}
+/* Formulario de entrar / registrarse. */
+.pestanas{display:flex;gap:6px;margin-bottom:13px}
+.pestanas button{flex:1;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);
+                 padding:8px;border-radius:8px;font:inherit;cursor:pointer}
+.pestanas button.on{border-color:var(--accent);color:var(--accent)}
+form{display:flex;flex-direction:column;gap:9px}
+label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+input{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+      padding:9px 12px;border-radius:8px;font:inherit}
+input:focus{outline:none;border-color:var(--accent)}
+.pista{color:var(--muted);font-size:11.5px}
+/* F5.6 · El enlace de invitación ocupa el ancho entero a propósito: hay que poder verlo y
+   seleccionarlo con el dedo, porque en LAN por http no hay portapapeles que valga. */
+.nota{color:var(--muted);font-size:12.5px;margin:12px 0 8px;line-height:1.45}
+#enlace-invita input{width:100%;box-sizing:border-box;font-size:12.5px}
+.err{color:var(--danger);font-size:12.5px;min-height:17px}
+.ok{color:var(--accent-2);font-size:12.5px;min-height:17px}
+.enviar{background:var(--accent);color:#1a1206;border:0;border-radius:8px;
+        padding:10px;font:inherit;font-weight:600;cursor:pointer}
+.enviar[disabled]{opacity:.5;cursor:default}
+/* El aviso de cuarentena: un callejón sin salida hay que EXPLICARLO, no dejarlo en blanco. */
+.aviso{border-left:3px solid var(--accent);background:var(--panel)}
+.aviso.rojo{border-left-color:var(--danger)}
+.aviso code{color:var(--accent);font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.cuota{margin-top:12px;font-size:12px;color:var(--muted)}
+.cuota .barra{height:4px;background:var(--panel-2);border-radius:99px;overflow:hidden;margin-top:5px}
+.cuota .barra i{display:block;height:100%;background:var(--accent)}
+footer{text-align:center;color:var(--muted);font-size:11.5px;padding:0 24px 26px}
+footer a{color:var(--muted)}
+@media(max-width:680px){ .marca{padding:34px 16px 4px} .marca h1{font-size:31px}
+  main{padding:18px 14px 34px} .sesion{padding:0 14px} }
+</style>
+
+<div class="marca">
+  <h1>Voxel<b>Forge</b></h1>
+  <div class="lema" id="lema">Cargando…</div>
+</div>
+<div class="sesion" id="sesion" hidden></div>
+<main id="main"></main>
+<footer id="pie"></footer>
+
+<script>
+// ── Lo que sabemos de quién eres ────────────────────────────────────────────────────────────────
+// `/api/yo` contesta distinto en desarrollo y en público: en desarrollo el anónimo ES el dueño y los
+// permisos vienen dentro de `yo`; en público un anónimo trae `yo:null` y `permisos:[]` arriba. Se
+// normaliza aquí, en un solo sitio, para que el resto de la página no tenga que saberlo.
+let YO = null, PERMISOS = [], DUENO = false, PUBLICO = false, MUNDOS = [];
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const puede = (p) => DUENO || PERMISOS.indexOf(p) >= 0;
+
+async function pide(ruta, opciones) {
+  const r = await fetch(ruta, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opciones));
+  let d = null;
+  try { d = await r.json(); } catch (e) { d = null; }
+  return { ok: r.ok, codigo: r.status, d: d || {} };
+}
+
+// Los mundos de los que ESTA cuenta es dueña. El dueño del servidor no tiene `uid` (no es una
+// cuenta), así que para él vale cualquiera: puede escribir en todos.
+function mundosMios() {
+  if (DUENO) return MUNDOS;
+  if (!YO) return [];
+  return MUNDOS.filter((m) => m.dueno && m.dueno === YO.uid);
+}
+
+async function leeQuien() {
+  const { d } = await pide('/api/yo');
+  YO = d.yo || null;
+  DUENO = !!d.dueno;
+  PUBLICO = !!d.publico;
+  PERMISOS = d.permisos || (d.yo && d.yo.permisos) || [];
+}
+
+async function leeMundos() {
+  const { ok, d } = await pide('/api/mundos');
+  MUNDOS = ok && Array.isArray(d) ? d : (d && Array.isArray(d.mundos) ? d.mundos : []);
+}
+
+// ── Pintar ──────────────────────────────────────────────────────────────────────────────────────
+
+function pintaSesion() {
+  const s = $('#sesion');
+  if (!YO && !DUENO) { s.hidden = true; return; }
+  s.hidden = false;
+  const nombre = YO ? YO.nombre : 'dueño';
+  const perfil = YO ? YO.perfil : 'dueno';
+  s.innerHTML = '<div class="yo">Estás dentro como <b>' + esc(nombre) + '</b></div>' +
+                '<span class="pastilla">' + esc(perfil) + '</span>' +
+                (YO ? '<button class="salir" id="salir">Salir</button>' : '');
+  const b = $('#salir');
+  if (b) b.onclick = async () => { await pide('/api/salir', { method: 'POST', body: '{}' }); location.reload(); };
+}
+
+// «Continuar» solo aparece si de verdad hay algo que continuar: el último mapa se guarda AQUÍ, al
+// pulsarlo, y se comprueba contra la lista que el servidor deja ver. Ofrecer un mapa que ya no
+// existe —o que ha dejado de ser visible— es peor que no ofrecer nada.
+function ultimoMapa() {
+  try {
+    const m = localStorage.getItem('vf_ultimo_mapa');
+    return m && MUNDOS.some((x) => (x.slug || x.nombre) === m) ? m : null;
+  } catch (e) { return null; }
+}
+
+function botonMapa(slug, principal) {
+  return '<a class="bot' + (principal ? ' principal' : '') + '" href="/map/' + encodeURIComponent(slug) +
+         '" data-mapa="' + esc(slug) + '"><span class="ico">▶</span><span class="txt">' +
+         (principal ? 'Continuar' : esc(slug)) +
+         (principal ? '<small>' + esc(slug) + '</small>' : '') + '</span></a>';
+}
+
+function pintaMenu() {
+  const ultimo = ultimoMapa();
+  let h = '<div class="tarjeta"><h2>Jugar</h2><p>' +
+          (MUNDOS.length ? MUNDOS.length + ' mundo' + (MUNDOS.length === 1 ? '' : 's') + ' a tu alcance.'
+                         : 'Todavía no hay ningún mundo que puedas ver.') +
+          '</p><div class="acciones">';
+  if (ultimo) h += botonMapa(ultimo, true);
+  if (MUNDOS.length) {
+    h += '<a class="bot" href="/map/"><span class="ico">🗺</span><span class="txt">Explorar mundos' +
+         '<small>Ver los ' + MUNDOS.length + ' que puedes abrir</small></span></a>';
+  }
+  if (puede('mundo.crear')) {
+    h += '<button class="bot" id="crear"><span class="ico">✚</span><span class="txt">Crear un mundo' +
+         '<small>Tuyo, y eliges quién entra</small></span></button>';
+  }
+  if (DUENO) {
+    h += '<a class="bot" href="/index.html"><span class="ico">🧩</span><span class="txt">Editor de objetos' +
+         '<small>Modo diseño</small></span></a>';
+  }
+  if (puede('panel.usar')) {
+    h += '<a class="bot" href="/panel"><span class="ico">⚙</span><span class="txt">Panel de administración' +
+         '<small>Cuentas, permisos, mapas y salud</small></span></a>';
+  }
+  h += '</div>';
+
+  // F5.6 · Invitar en un clic. Solo aparece si tienes algún mundo QUE SEA TUYO: invitar es repartir
+  // acceso, y el servidor rechaza (403) invitar a un mapa en el que no puedas escribir. Enseñarlo
+  // igualmente sería ofrecer un botón que solo sabe fallar.
+  const mios = mundosMios();
+  if (puede('multi.invitar') && mios.length) {
+    h += '<div class="tarjeta"><h2>Invitar a alguien</h2>' +
+         '<p>Genera un enlace para tu mundo. Quien lo abra entra directo, sin registrarse.</p>' +
+         '<div class="acciones">';
+    for (const m of mios) {
+      const slug = m.slug || m.nombre;
+      h += '<button class="bot" data-invita="' + esc(slug) + '"><span class="ico">🔗</span>' +
+           '<span class="txt">' + esc(slug) + '<small>Crear enlace de invitación</small></span></button>';
+    }
+    h += '</div><div id="enlace-invita"></div></div>';
+  }
+
+  // La cuota, pintada solo si el servidor la da: es lo que evita que «no puedo crear» sea un misterio.
+  if (YO && YO.cuota && puede('mundo.crear')) {
+    const usados = MUNDOS.filter((m) => m.dueno && YO && m.dueno === YO.uid).length;
+    const tope = YO.cuota.mapas || 0;
+    h += '<div class="cuota">Mapas: <b>' + usados + ' de ' + tope + '</b>' +
+         '<span class="barra"><i style="width:' + (tope ? Math.min(100, usados * 100 / tope) : 0) + '%"></i></span></div>';
+  }
+  h += '</div>';
+
+  // Cuarentena: sin esto la pantalla se queda vacía y el usuario cree que el juego está roto.
+  if (YO && !MUNDOS.length && !puede('mundo.crear')) {
+    h += '<div class="tarjeta aviso"><h2>Tu cuenta está en cuarentena</h2>' +
+         '<p>El registro es abierto, así que todas las cuentas nacen pudiendo jugar y hablar, y nada ' +
+         'más. Para crear mundos o construir, el dueño tiene que subirte de nivel. ' +
+         'Díselo — no hay nada que puedas hacer desde aquí para acelerarlo.</p></div>';
+  }
+  $('#main').innerHTML = h;
+
+  const c = $('#crear');
+  if (c) c.onclick = creaMundo;
+  document.querySelectorAll('[data-mapa]').forEach((a) => {
+    a.addEventListener('click', () => {
+      try { localStorage.setItem('vf_ultimo_mapa', a.getAttribute('data-mapa')); } catch (e) {}
+    });
+  });
+  document.querySelectorAll('[data-invita]').forEach((b) => {
+    b.addEventListener('click', () => invita(b.getAttribute('data-invita')));
+  });
+}
+
+// F5.6 · Pide el vale al servidor y ENSEÑA el enlace. Que se vea es el requisito, no un adorno:
+// ⚠️ `navigator.clipboard` solo existe en contexto seguro (https o localhost), y esto va a correr
+// en LAN por http, donde no existe. Un botón «Copiar» que falla en silencio deja al dueño creyendo
+// que ha copiado algo. Así que el enlace se pinta siempre, seleccionable, y copiar es el extra.
+async function invita(slug) {
+  const caja = $('#enlace-invita');
+  if (caja) caja.innerHTML = '<p class="nota">Generando enlace…</p>';
+  const { ok, d } = await pide('/api/invitaciones', {
+    method: 'POST', body: JSON.stringify({ slug, base: location.origin }),
+  });
+  if (!ok || !d || !d.enlace) {
+    if (caja) caja.innerHTML = '<p class="nota err">' + esc((d && d.error) || 'no se ha podido crear el enlace') + '</p>';
+    return;
+  }
+  const dias = Math.max(1, Math.round((d.caduca - Date.now() / 1000) / 86400));
+  // La escritura del mapa manda sobre el vale, así que se dice AQUÍ lo que va a poder hacer quien
+  // entre. Sin esta línea, invitar a un mapa `escritura: dueno` parece roto: el amigo entra y no
+  // puede tocar nada, y nadie sabe por qué.
+  const nota = d.escritura === 'dueno'
+    ? 'Podrá <b>mirar</b>, no construir. Cambia la escritura del mapa en el panel si quieres que construya.'
+    : 'Podrá entrar y <b>construir</b> contigo.';
+  caja.innerHTML =
+    '<p class="nota">Enlace para <b>' + esc(slug) + '</b> · caduca en ' + dias + ' día' + (dias === 1 ? '' : 's') +
+    '. ' + nota + '</p>' +
+    '<input id="enl" readonly value="' + esc(d.enlace) + '">' +
+    '<div class="acciones"><button class="bot" id="copiar"><span class="txt">Copiar enlace</span></button></div>';
+  const inp = $('#enl');
+  inp.onclick = () => inp.select();
+  inp.select();
+  $('#copiar').onclick = async () => {
+    inp.select();
+    let bien = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(d.enlace); bien = true; }
+      else { bien = document.execCommand && document.execCommand('copy'); }
+    } catch (e) { bien = false; }
+    $('#copiar').querySelector('.txt').textContent = bien ? '¡Copiado!' : 'Cópialo a mano (Ctrl+C)';
+  };
+}
+
+async function creaMundo() {
+  const nombre = prompt('¿Cómo se llama tu mundo?');
+  if (!nombre) return;
+  const { ok, d } = await pide('/api/mundos/crear', { method: 'POST', body: JSON.stringify({ nombre }) });
+  if (!ok) { alert(d.error || 'no se ha podido crear'); return; }
+  const slug = d.slug || d.nombre;
+  try { localStorage.setItem('vf_ultimo_mapa', slug); } catch (e) {}
+  location.href = d.url || ('/map/' + encodeURIComponent(slug));
+}
+
+// ── Entrar y registrarse ────────────────────────────────────────────────────────────────────────
+
+function pintaAcceso(modo) {
+  $('#main').innerHTML =
+    '<div class="tarjeta">' +
+    '<div class="pestanas">' +
+    '<button id="t-entrar" class="' + (modo === 'entrar' ? 'on' : '') + '">Entrar</button>' +
+    '<button id="t-alta" class="' + (modo === 'alta' ? 'on' : '') + '">Crear una cuenta</button>' +
+    '</div>' +
+    '<form id="f">' +
+    '<label>Nombre<input id="nombre" autocomplete="username" autocapitalize="off" spellcheck="false"></label>' +
+    '<label>Contraseña<input id="clave" type="password" autocomplete="' +
+      (modo === 'alta' ? 'new-password' : 'current-password') + '"></label>' +
+    (modo === 'alta'
+      ? '<div class="pista">Al menos 3 letras en el nombre y 8 caracteres en la contraseña. ' +
+        'Tu cuenta nacerá en cuarentena: podrás jugar y hablar hasta que el dueño te suba de nivel.</div>'
+      : '') +
+    '<div class="err" id="err"></div>' +
+    '<button class="enviar" id="enviar">' + (modo === 'alta' ? 'Crear la cuenta' : 'Entrar') + '</button>' +
+    '</form></div>';
+
+  $('#t-entrar').onclick = () => pintaAcceso('entrar');
+  $('#t-alta').onclick = () => pintaAcceso('alta');
+  $('#f').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const nombre = $('#nombre').value.trim(), clave = $('#clave').value;
+    if (!nombre || !clave) { $('#err').textContent = 'faltan el nombre o la contraseña'; return; }
+    $('#enviar').disabled = true;
+    const { ok, d } = await pide(modo === 'alta' ? '/api/registro' : '/api/entrar',
+                                 { method: 'POST', body: JSON.stringify({ nombre, clave }) });
+    if (!ok) { $('#err').textContent = d.error || 'no ha podido ser'; $('#enviar').disabled = false; return; }
+    location.reload();   // la cookie ya está puesta: recargar es la forma honesta de repintarlo todo
+  };
+  $('#nombre').focus();
+}
+
+// ── Modo diseño ─────────────────────────────────────────────────────────────────────────────────
+// F5.8 · El editor, el panel y las herramientas se abren con el TOKEN del servidor, y desde aquí,
+// porque un navegador no puede mandar la cabecera `X-VoxelForge-Token` al escribir una URL.
+//
+// El enlace se pinta SIEMPRE que no seas ya el dueño —también estando dentro como jugador—: el
+// dueño entra a su propio servidor como uno más y tiene que poder subir a diseño sin salir.
+function pintaDisena() {
+  if (DUENO) return;
+  const caja = document.createElement('div');
+  caja.className = 'tarjeta';
+  caja.innerHTML = '<h2>Modo diseño</h2><p>El editor y el panel de administración piden el token ' +
+    'del servidor.</p><form id="fd" style="margin-top:11px">' +
+    '<label>Token<input id="tk" type="password" autocomplete="off"></label>' +
+    '<div class="err" id="errd"></div>' +
+    '<button class="enviar">Entrar en modo diseño</button></form>';
+  $('#main').appendChild(caja);
+  $('#fd').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const { ok, d } = await pide('/api/disena', { method: 'POST', body: JSON.stringify({ token: $('#tk').value }) });
+    if (!ok) { $('#errd').textContent = d.error || 'no ha podido ser'; return; }
+    location.reload();
+  };
+}
+
+// ── Arranque ────────────────────────────────────────────────────────────────────────────────────
+
+(async () => {
+  await leeQuien();
+  await leeMundos();
+  pintaSesion();
+  const dentro = !!YO || DUENO;
+  $('#lema').textContent = dentro ? 'Construye, invita y juega.'
+                                  : 'Entra para jugar, o crea una cuenta: es gratis y tarda diez segundos.';
+  if (dentro) pintaMenu(); else pintaAcceso('entrar');
+  pintaDisena();
+  $('#pie').innerHTML = PUBLICO ? '' : 'Servidor en <b>modo desarrollo</b>: aquí un anónimo tiene todos los permisos.';
+})();
+</script>

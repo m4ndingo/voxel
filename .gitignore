@@ -17,6 +17,22 @@ data/*
 # data/habitantes/ es el almacén de runtime de creaciones del usuario (los modelos públicos viven en assets/)
 data/habitantes/
 data/habitantes_trash/
+# ⛔ Cuentas y perfiles: NUNCA al repo. `data/usuarios/` lleva el hash de la contraseña de cada
+# persona, y `data/perfiles/` es la configuración de permisos de ESTA instalación, no del proyecto
+# (los perfiles de partida se siembran solos desde `servidor/sesion.py`). Ya lo cubriría `data/*`,
+# pero se dice explícito para que un futuro `!data/algo` no los destape sin querer.
+data/usuarios/
+data/perfiles/
+# ⛔ La papelera de AUTORÍA (F2.3): aquí aterriza lo que se borra de `data/snippets/`,
+# `data/habitantes/`, `data/agentes/` y `data/worlds/`, y de aquí NO poda nadie — es la red que
+# faltaba el día que se perdió `particulas-voxel`. No va al repo (crece sin tope y son borrados de
+# ESTA instalación), pero se dice explícito porque `!data/snippets/` está tres líneas más arriba y
+# un futuro `!data/papelera/algo` la destaparía sin querer.
+data/papelera/
+# ⛔ El registro de accesos (F7.3): lleva la IP y el uid de cada persona que entra. Ya lo cubrirían
+# `data/*` y `*.log`, pero se dice explícito porque publicar los accesos de tus conocidos en GitHub
+# no tiene arreglo después. Los tests lo desvían a un temporal con `VOXELFORGE_REGISTRO`.
+data/registro/
 # data/worlds/ almacén de mapas
 !data/worlds/
 data/worlds/*

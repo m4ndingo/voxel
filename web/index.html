@@ -11,6 +11,25 @@
   <!-- Los iconos horneados en /images (marca y herramientas). `defer` y sin bloquear nada: si no hay
        ninguno publicado, los botones se quedan con su emoji y aquí no ha pasado nada. -->
   <script defer src="/iconos.js"></script>
+  <!-- F4.3 · QUIÉN ERES, y solo para saber QUÉ ENSEÑAR. Deja en `<html data-puede="…">` la lista de
+       permisos que devuelve `GET /api/yo`; quien esconde es `style.css` con `[data-solo-si=…]`.
+       ⚠️ Esto no da permiso, lo pinta: lo que se destape aquí sigue contestando 403 en `server.py`.
+       Va en la página y no en un snippet —que es donde lo puso el plan— por la escotilla `?noauto=1`:
+       existe justamente para arreglar un autoarranque roto desde el panel Código, y si el panel se
+       destapara desde el autoarranque, ese rescate se quedaría sin panel. Y no en `app.js` por la ley
+       de oro, además del motivo que ya explica la tapa de aquí abajo: sería tarde.
+       La promesa se deja en `window.vfYo` para que `sesion-guardia` no vuelva a preguntar. -->
+  <script>
+    window.vfYo = fetch('/api/yo', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var p = d && ((d.yo && d.yo.permisos) || d.permisos);
+        if (!p) return null;              // no se sabe quién eres ⇒ sin atributo, y el CSS lo deja escondido
+        document.documentElement.dataset.puede = p.join(' ');
+        return p;
+      })
+      .catch(function () { return null; });
+  </script>
 </head>
 <!-- REQ-EDIT1 · La tapa viene puesta desde el HTML, no desde JS: si la pusiera app.js ya sería tarde para
      el primer píxel. La quita `mcDestapaApp()` en cuanto se sabe si nos quedamos en el editor o si
@@ -48,8 +67,13 @@
            atributo y nada más. -->
       <button class="menu-item" data-rpg data-tab="mapa" hidden>🗺 Mapa</button>
       <button class="menu-item" data-rpg data-tab="jugar" hidden>▶ Jugar<small>habitación y personaje al azar</small></button>
-      <button class="menu-item" data-tab="codigo">🧩 Código<small>Alt+C</small></button>
-      <button class="menu-item" data-tab="agentes">🦴 Agentes<small>Alt+A</small></button>
+      <!-- F4.3 · `data-solo-si` = «esto no se enseña a quien no tenga ESE permiso». Quien esconde es
+           `web/style.css` (una regla por permiso), y quien destapa es el snippet `sesion-guardia`
+           poniendo `data-puede` en el <html> con lo que devuelve `GET /api/yo`. Nace escondido a
+           propósito: al revés habría medio segundo con Alt+C a la vista. Y esconder no es prohibir
+           — `POST /api/snippets` contesta 403 igual (F1). -->
+      <button class="menu-item" data-solo-si="snippet.editar_sistema" data-tab="codigo">🧩 Código<small>Alt+C</small></button>
+      <button class="menu-item" data-solo-si="agente.editar" data-tab="agentes">🦴 Agentes<small>Alt+A</small></button>
       <div class="menu-sep"></div>
       <button class="menu-item" id="btn-nuevo">Nuevo<small>vaciar el lienzo</small></button>
       <button class="menu-item" id="btn-guardar">Guardar<small>en el servidor</small></button>
@@ -70,7 +94,10 @@
       <a class="menu-item" href="/map/" target="_blank" rel="noopener">🗺 Mundos ↗<small>listado de mapas</small></a>
       <a class="menu-item" href="/fotos" target="_blank" rel="noopener">📷 Fotos ↗<small>capturas del Mundo (Alt+F)</small></a>
       <a class="menu-item" href="/videos" target="_blank" rel="noopener">🎬 Vídeos ↗<small>clips de gameplay (Alt+V)</small></a>
-      <a class="menu-item" href="/images/" target="_blank" rel="noopener">🖼 Iconos ↗<small>favicon, marca y herramientas</small></a>
+      <!-- `/images/` publica en `data/ui/` con `POST /api/ui`, que es del dueño. Se cuelga de
+           `asset.subir` porque es el permiso del vocabulario que más se le parece (subir un dibujo
+           derivado); el día que F9 necesite distinguirlo, se añade el permiso y se cambia aquí. -->
+      <a class="menu-item" data-solo-si="asset.subir" href="/images/" target="_blank" rel="noopener">🖼 Iconos ↗<small>favicon, marca y herramientas</small></a>
       <a class="menu-item" href="/wiki/" target="_blank" rel="noopener">📖 Wiki ↗<small>guía y referencia</small></a>
     </div>
 
@@ -416,7 +443,10 @@
 
   <!-- ===================== Mapa del mundo ===================== -->
   <!-- ===================== Gestor de snippets de código (editor estilo Minecraft) ===================== -->
-  <div class="modal snip-modal" id="snip-modal" hidden>
+  <!-- El panel, además del botón que lo abre: `display:none` gana a quitarle el `hidden` desde la
+     consola, así que abrirlo a mano no lo enseña. El guardado seguiría dando 403 de todas formas
+     (F1); esto es para que no se enseñe el código de nadie por el camino. -->
+<div class="modal snip-modal" id="snip-modal" data-solo-si="snippet.editar_sistema" hidden>
     <!-- REQ-SPLIT1 · el agarre de la pantalla dividida. Solo se ve en modo dividido; arrastrarlo reparte
          la altura entre el Mundo (arriba) y el código (abajo), y el doble clic la devuelve a la mitad. -->
     <div class="snip-grip" id="snip-grip" title="Arrastra para repartir la pantalla · doble clic: a la mitad"></div>
@@ -508,7 +538,7 @@
   <!-- ===================== Agentes articulados (fase 3) =====================
        El preview NO compone la pose: se la pide a la librería del Mundo (game.esqueletos.pose),
        así que el muñeco de aquí es exactamente el que luego anda por ahí. Ver app.js §agentes. -->
-  <div class="modal" id="ag-modal" hidden>
+  <div class="modal" id="ag-modal" data-solo-si="agente.editar" hidden>
     <div class="modal-head">
       <div><strong>Agentes articulados</strong> <span class="muted" id="ag-sub">piezas, articulaciones y cómo se mueven</span></div>
       <div class="modal-actions">

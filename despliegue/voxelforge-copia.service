@@ -1,0 +1,49 @@
+# F7.2 · La copia nocturna. La dispara `voxelforge-copia.timer`, no se enciende con `enable`.
+#
+#   sudo systemctl enable --now voxelforge-copia.timer     # ⚠️ el .timer, NO el .service
+#   sudo systemctl start voxelforge-copia                  # una a mano, para verla correr
+#   journalctl -u voxelforge-copia -n 40
+#
+# ⛔ Y lo que de verdad importa, que no lo hace ningún temporizador: **PROBAR LA RESTAURACIÓN**. Una
+# copia sin restauración probada no es una copia. Está en `despliegue/LEEME.md` con el mandado exacto.
+
+[Unit]
+Description=VoxelForge · copia de lo irremplazable
+Documentation=file:/opt/voxelforge/herramientas/copia_seguridad.py
+
+[Service]
+Type=oneshot
+User=voxelforge
+Group=voxelforge
+WorkingDirectory=/opt/voxelforge
+# Por VOXELFORGE_COPIAS, y por nada más: aquí no se firma nada. Se comparte fichero con las otras dos
+# unidades para no tener tres sitios donde mirar cuando algo no cuadre.
+EnvironmentFile=/etc/voxelforge.env
+ExecStart=/usr/bin/python3 /opt/voxelforge/herramientas/copia_seguridad.py
+
+# ⚠️ SALE CON 2 SI UN MUNDO ESTÁ DESGARRADO, y entonces systemd marca la unidad como `failed`. Es lo
+# que se quiere: el fallo que mata a un sistema de copias es el que no se nota. Una copia incompleta
+# se hace igual (el mundo sano sí se copia) y lo deja escrito en su `MANIFIESTO.json`, pero la unidad
+# tiene que ponerse roja para que alguien lo mire. ⛔ No añadir `SuccessExitStatus=2`.
+
+# Aislamiento. Aquí es al revés que en las otras dos: `data/` de SOLO LECTURA —una copia que puede
+# escribir en el original no es una copia, es un riesgo—, y escritura solo donde viven las copias.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/backups/voxelforge
+# ⚠️ Esa ruta está QUEMADA aquí y en `VOXELFORGE_COPIAS` del fichero de entorno, y systemd no expande
+# variables en `ReadWritePaths`. Si se cambia una, hay que cambiar la otra o la copia muere con
+# «Read-only file system». Es la pega conocida de este fichero.
+
+# Que no compita con la partida: la copia es rsync sobre 300 MB y puede durar. Con esto, un mundo con
+# gente dentro no se entera de que hay una copia corriendo.
+Nice=10
+IOSchedulingClass=idle

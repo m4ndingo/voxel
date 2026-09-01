@@ -18,9 +18,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 
 const RAIZ = path.join(__dirname, '..');
-const HOST = 'http://localhost:8500';
+const PUERTO = +(process.argv[2] || 8500);
+const HOST = 'http://localhost:' + PUERTO;
 
 let ok = 0, fallos = 0;
 const check = (c, m) => c ? (ok++, console.log('  ok  ' + m)) : (fallos++, console.log('  FALLO  ' + m));
@@ -84,6 +86,63 @@ const estado = async (u) => (await fetch(HOST + u, { redirect: 'manual' })).stat
     check(s === 200, `${u} → ${s}`);
   }
 
+  console.log('\n§5 ninguna carpeta se lista, ni en desarrollo');
+  // `SimpleHTTPRequestHandler` trae listado de carpeta de serie, y con `data` en `RAIZ_URL` eso era
+  // un índice navegable de `data/tickets/` (capturas y conversaciones del dueño), `data/informes/`
+  // y 1,5 GB de `data/habitantes_trash/`. `list_directory` devuelve 404 — 404 y no 403, para que no
+  // se pueda distinguir «existe pero no te lo doy» de «no existe».
+  for (const u of ['/data/', '/data/tickets/', '/data/habitantes_trash/', '/data/worlds/', '/assets/']) {
+    const s = await estado(u);
+    check(s === 404, `${u} → ${s}`);
+  }
+  check(await estado('/images/') === 200, '/images/ → 200 (esa sí, porque tiene su index.html)');
+
+  console.log('\n§6 en modo público `data/` deja de servirse entero (servidor propio, puerto aparte)');
+  // Este trozo necesita su propio servidor: el cierre lo enciende `VOXELFORGE_PUBLICO=1`, y el 8500
+  // de desarrollo tiene que seguir sirviendo `/performance/` y `/data/tickets/` como siempre.
+  const PUB = PUERTO + 90;
+  // `VOXELFORGE_SECRETO_SESION` NO es decorado: en modo público `server.py` se niega a arrancar sin
+  // él (firma las cookies de sesión; sin secreto, cualquiera se firma la suya). Sin esta línea el
+  // hijo hacía `sys.exit` al instante y el fallo salía como «no levantó en el 8689», que no dice
+  // nada. Por eso el `stderr` se queda a la vista en vez de irse a `ignore`: el próximo motivo por
+  // el que este servidor no arranque también será una línea de Python que merece leerse.
+  const hijo = spawn('python3', [path.join(RAIZ, 'server.py'), String(PUB)],
+                     { cwd: RAIZ, stdio: ['ignore', 'ignore', 'inherit'],
+                       env: { ...process.env, VOXELFORGE_PUBLICO: '1',
+                              VOXELFORGE_SECRETO_SESION: 'secreto-de-pruebas-test-sitio-raiz' } });
+  try {
+    await arranca(PUB);
+    const pub = async (u) => {
+      const r = await fetch(`http://localhost:${PUB}${u}`, { redirect: 'manual' }).catch(() => null);
+      return r ? r.status : 0;
+    };
+    for (const [u, esperado, porque] of [
+      ['/data/tickets/BUG-AG3/contexto.md', 404, 'los tickets son del dueño, no del público'],
+      ['/data/habitantes_trash/', 404, 'la papelera, menos todavía'],
+      ['/performance/consola_donde_va_el_frame.js', 404, 'las sondas son de desarrollo'],
+      ['/data/ui/marca-64.png', 200, 'los iconos SÍ: el sitio los pide'],
+      ['/data/fotos/0001_test_20260805-103938.png', 200, 'y la galería de fotos también'],
+      ['/assets/index.json', 200, 'y los assets, que es de donde salen los nombres cortos'],
+      ['/app.js', 200, 'el motor se sigue sirviendo, faltaría más'],
+    ]) {
+      const s = await pub(u);
+      check(s === esperado, `[público] ${u} → ${s} (esperado ${esperado}) · ${porque}`);
+    }
+  } finally {
+    hijo.kill();
+  }
+
   console.log(`\n${ok} ok / ${fallos} fallos` + (fallos ? '' : '  ·  TODO OK'));
   process.exit(fallos ? 1 : 0);
 })();
+
+// Esperar a que el hijo conteste, en vez de dormir un número inventado de segundos: en una máquina
+// cargada el `sleep 2` falla de vez en cuando y nadie sabe por qué.
+async function arranca(puerto, intentos = 60) {
+  for (let i = 0; i < intentos; i++) {
+    const r = await fetch(`http://localhost:${puerto}/app.js`, { method: 'HEAD' }).catch(() => null);
+    if (r) return true;
+    await new Promise((r2) => setTimeout(r2, 100));
+  }
+  throw new Error(`el servidor de pruebas no levantó en el ${puerto}`);
+}
