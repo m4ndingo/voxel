@@ -70,6 +70,7 @@ input:focus{outline:none;border-color:var(--accent)}
 /* F5.6 · El enlace de invitación ocupa el ancho entero a propósito: hay que poder verlo y
    seleccionarlo con el dedo, porque en LAN por http no hay portapapeles que valga. */
 .nota{color:var(--muted);font-size:12.5px;margin:12px 0 8px;line-height:1.45}
+.nota.err{color:#ff9b9b}
 #enlace-invita input{width:100%;box-sizing:border-box;font-size:12.5px}
 .err{color:var(--danger);font-size:12.5px;min-height:17px}
 .ok{color:var(--accent-2);font-size:12.5px;min-height:17px}
@@ -258,14 +259,34 @@ async function invita(slug) {
   // La escritura del mapa manda sobre el vale, así que se dice AQUÍ lo que va a poder hacer quien
   // entre. Sin esta línea, invitar a un mapa `escritura: dueno` parece roto: el amigo entra y no
   // puede tocar nada, y nadie sabe por qué.
-  const nota = d.escritura === 'dueno'
-    ? 'Podrá <b>mirar</b>, no construir. Cambia la escritura del mapa en el panel si quieres que construya.'
+  //
+  // Y si no va a poder construir, el arreglo va AQUÍ, no en el panel. Mandar al dueño a otra
+  // pantalla en mitad de invitar a un amigo es donde se abandona: acaba de decir «ven a mi mapa» y
+  // la respuesta es «pues antes vete a Ajustes». Un botón, y sigue donde estaba.
+  const cerrado = d.escritura === 'dueno';
+  const nota = cerrado
+    ? 'Podrá <b>mirar</b>, no construir: este mapa solo lo escribes tú.'
     : 'Podrá entrar y <b>construir</b> contigo.';
   caja.innerHTML =
     '<p class="nota">Enlace para <b>' + esc(slug) + '</b> · caduca en ' + dias + ' día' + (dias === 1 ? '' : 's') +
     '. ' + nota + '</p>' +
     '<input id="enl" readonly value="' + esc(d.enlace) + '">' +
-    '<div class="acciones"><button class="bot" id="copiar"><span class="txt">Copiar enlace</span></button></div>';
+    '<div class="acciones"><button class="bot" id="copiar"><span class="txt">Copiar enlace</span></button>' +
+    (cerrado ? '<button class="bot" id="abrir-escritura"><span class="txt">Dejar que construya</span></button>' : '') +
+    '</div>';
+  if (cerrado) {
+    $('#abrir-escritura').onclick = async () => {
+      // ⛔ A `invitados`, NO a `todos`: el enlace ya es la llave, y quien no lo tenga sigue sin
+      // poder tocar el mapa. Abrirlo a `todos` para arreglar una invitación concreta sería
+      // regalar el mapa al que acierte el nombre.
+      const r = await pide('/api/mundos/' + encodeURIComponent(slug), {
+        method: 'PATCH', body: JSON.stringify({ escritura: 'invitados' }),
+      });
+      if (r.ok) invita(slug);                       // se rehace el enlace y la nota ya dice la verdad
+      else caja.insertAdjacentHTML('beforeend',
+        '<p class="nota err">' + esc((r.d && r.d.error) || 'no se ha podido cambiar la escritura') + '</p>');
+    };
+  }
   const inp = $('#enl');
   inp.onclick = () => inp.select();
   inp.select();
