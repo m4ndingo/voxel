@@ -44,6 +44,9 @@ cuelga de `BASE`): un test que cree mapas los llama `zz-test-*` y los recoge en 
 - **Permiso efectivo = perfil + `permisos_mas` − `permisos_menos`**. Los perfiles son **dato**
   (`data/perfiles/<nombre>.json`), no código, y además se ajusta **cuenta por cuenta**: es lo que
   pidió el dueño («una cuenta concreta podría crear snippets propios pero no modificar otros»).
+  ⛔ **`snippet.crear_propio` nace apagado para todos** y así sigue: un snippet corre en ámbito
+  global y mismo origen, así que darlo hoy sería regalar la cuenta del dueño. El porqué, los cuatro
+  caminos y la recomendación → [`codigo-de-usuario.md`](codigo-de-usuario.md) (F-E).
 - ⚠️ **`quien()` cachea en `self`, y con keep-alive un handler sirve MUCHAS peticiones.** Todo lo
   que sea «de esta petición» se borra en `handle_one_request`. Se olvidó con `_quien` y no era
   teórico: en el navegador —que siempre reaprovecha la conexión— entrar no surtía efecto, y salir
