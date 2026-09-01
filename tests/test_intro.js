@@ -63,13 +63,17 @@ async function abrir(b, url) {
   await seca.waitForTimeout(3000);
   const normal = await seca.evaluate(() => ({
     intro: mc._intro || null, volar: mc.volar, fantasma: mc.fantasma,
-    osd: game.osd.abierta, capa: $('#mc-osd').hidden, pantallas: game.osd.pantallas().length
+    osd: game.osd.abierta, capa: $('#mc-osd').hidden,
+    // OJO: el registro de pantallas es GLOBAL y los menus del mundo (miosd, menu-juego)
+    // definen las suyas legitimamente al autoarrancar. Lo que aqui se comprueba es que la
+    // pantalla DE LA INTRO no se defina sin ?intro=1, no que el registro este vacio.
+    intro_definida: game.osd.pantallas().indexOf('intro') >= 0
   }));
   test('§1 /map/' + MAPA + ' a secas entra como siempre: ni intro, ni vuelo, ni menu', () => {
     assert(!normal.intro, 'hay una intro corriendo sin pedirla');
     assert(normal.volar === false && normal.fantasma === false, 'el jugador arranca volando');
     assert(normal.osd === null && normal.capa, 'el menu OSD sale sin pedirlo');
-    assert(normal.pantallas === 0, 'se han definido ' + normal.pantallas + ' pantallas sin pedirlo');
+    assert(!normal.intro_definida, 'se ha definido la pantalla «intro» sin pedirla');
   });
   const erroresSeca = seca.__errores.slice();
   await seca.close();

@@ -608,8 +608,15 @@
       <span id="mc-rec-time">REC 00:00</span>
       <span class="rec-hint">(Alt+V para parar)</span>
     </div>
+    <!-- F5.7 · la pantalla de carga. El TEXTO lo escribe el motor (`mcShowLoading`, app.js:22547) y va
+         contando las fases de verdad —«Preparando bloques… (3/12)», «Horneando 41 200 voxels…»—; lo de
+         aquí es el vestido. La barra es de ida y vuelta A PROPÓSITO: el motor no sabe qué porcentaje
+         lleva, y una barra que se rellena inventándose el número miente en cuanto un mundo tarda el
+         doble. Esto dice «se está trabajando», que es lo único cierto.
+         ⚠️ `#mc-loading-text` no se toca: es el id que busca el motor. -->
     <div class="mc-loading" id="mc-loading" hidden>
-      <div class="mc-spinner" aria-hidden="true"></div>
+      <div class="mc-loading-marca" aria-hidden="true">VOXELFORGE</div>
+      <div class="mc-loading-barra" aria-hidden="true"><i></i></div>
       <div class="mc-loading-text" id="mc-loading-text">Cargando mundo…</div>
     </div>
     <div class="mc-crosshair" id="mc-crosshair" aria-hidden="true">+</div>
