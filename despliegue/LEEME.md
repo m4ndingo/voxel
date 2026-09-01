@@ -99,6 +99,23 @@ Sale con `0` y dice «*N* ok» solo si **verifica** cada mundo con `voxfmt.compl
 función con la que el servidor decide si un mundo es utilizable — no un `ls`. Si sale con `2`, hay un
 mundo desgarrado y lo dice por su nombre.
 
+### Hecho una vez, de verdad (2026-09-01)
+
+Verificar la copia **no basta**: `--verificar` dice que el par `.json`+`.vox` está entero, no que un
+servidor sepa arrancar con él. Así que el simulacro se hizo entero, con los datos vivos:
+
+1. Copia de los 34 mundos (351,3 MB) → `--verificar`: **34 ok, 0 incompletos**.
+2. `--restaurar` a una carpeta vacía → **34 mundos**.
+3. Se levantó un `server.py` **de verdad** contra esa carpeta (raíz de usar y tirar con enlaces
+   simbólicos a `server.py`/`web`/`servidor`/`assets` y `data` → la restaurada) en el **8598**.
+   `/` → 200, `/map/multiverse` → 200, `/api/mundos` → 200.
+4. `diff -rq` contra los datos vivos: **0 diferencias** en `worlds`, `snippets`, `habitantes`,
+   `agentes`, `usuarios`, `perfiles` y `mundos_meta`.
+
+⛔ El paso 3 es el que no se puede saltar, y es el único que no automatiza nada: el resto comprueba
+ficheros, ese comprueba que **el juego arranca**. Puerto 8598 a propósito — ⛔ nunca el 8510, que es
+la partida en vivo del dueño.
+
 ## Operar
 
 ```bash
