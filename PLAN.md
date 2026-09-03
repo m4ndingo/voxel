@@ -45,7 +45,9 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-MUNDOS1](#-req-mundos1) | en `/map` **no se ve de quién es cada mapa ni qué permisos tiene**, y no se puede **borrar** ninguno | 🔴 abierto 2026-09-02 | **la API ya lo da todo**: `/api/mundos` devuelve `dueno`/`visibilidad`/`escritura` (server.py) y `DELETE /api/mundos/<slug>` existe con sus permisos (F3.3). Lo que falta es **sólo `web/mapas.html`** — pintarlo y poner el Borrar en el menú del botón derecho |
 | [REQ-ASSET1](#-req-asset1) | un usuario recién creado ve en las ranuras los assets **`hab:` del dueño**; debería ver los suyos y los del mundo | 🟢 hecho 2026-09-03, falta que el dueño lo mire | **fases 1 y 2 cerradas**: el documento nace con `autor` dentro (`servidor/autoria.py`) y `GET /api/habitantes` devuelve **lo mío + lo del mundo**. Los 26 heredados: 17 marcados «del mundo» por `herramientas/adopta_habitantes.py` (los que están estampados en mundos/snippets) y 9 privados del dueño. Guardián `tests/test_autoria_habitantes.js`. **Fase 3** (enviar/pedir, mensajería) sigue sin diseñar |
 | [REQ-MULTI2](#-req-multi2) | **invitar debería encender solo el modo colaborativo** en ese mapa, para el que invita y para el invitado | 🔴 abierto 2026-09-02 | hoy multi **sólo arranca si alguien carga el snippet `multi-verse` a mano**: crear un mundo e invitar no lo enciende. El vale de invitación ya existe (F5.6) — falta que **invitar marque el mapa** y que el arranque del mapa lo lea. Continúa [REQ-MULTI1](#-req-multi1) |
-| [REQ-MULTI3](#-req-multi3) | el menú de pausa gana **MULTIJUGADOR** (activar/desactivar + INVITAR dentro), un **jugador normal** puede encenderlo, y al invitar quedan dentro **los dos** | 🟢 hecho 2026-09-03, falta que el dueño lo mire | no faltaba permiso (`jugador` ya trae `multi.entrar`/`multi.invitar`): faltaba **credencial**. `entra()` pedía el **secreto del árbitro**, que es del servidor entero y no de un jugador; ahora el menú se firma un **vale de su propio mapa** con `POST /api/invitaciones` y `entra()` no pregunta nada. **0 líneas de `app.js` y 0 de `multi-verse`**: todo en `menu-juego` v1.3. Segundo fallo, este de despliegue: el árbitro del 8510 llevaba desde el 2026-08-28 arrancado a mano **sin `VOXELFORGE_SECRETO_SESION`** ⇒ se inventaba un secreto volátil y **no verificaba ningún vale** (401, «secreto malo»). Reiniciado con el secreto del sitio; ⚠️ a mano, **no sobrevive a un reinicio de la máquina** |
+| [REQ-MULTI5](#-req-multi5) | el menú de pausa gana **MULTIJUGADOR** (activar/desactivar + INVITAR dentro), un **jugador normal** puede encenderlo, y al invitar quedan dentro **los dos** | 🟢 hecho 2026-09-03, falta que el dueño lo mire | no faltaba permiso (`jugador` ya trae `multi.entrar`/`multi.invitar`): faltaba **credencial**. `entra()` pedía el **secreto del árbitro**, que es del servidor entero y no de un jugador; ahora el menú se firma un **vale de su propio mapa** con `POST /api/invitaciones` y `entra()` no pregunta nada. **0 líneas de `app.js` y 0 de `multi-verse`**: todo en `menu-juego` v1.3. Segundo fallo, este de despliegue: el árbitro del 8510 llevaba desde el 2026-08-28 arrancado a mano **sin `VOXELFORGE_SECRETO_SESION`** ⇒ se inventaba un secreto volátil y **no verificaba ningún vale** (401, «secreto malo»). Reiniciado con el secreto del sitio; ⚠️ a mano, **no sobrevive a un reinicio de la máquina** |
+| [REQ-MULTI6](#-req-multi6) | al saltar, el otro sólo veía saltar **el arma y el letrero**: el cuerpo se quedaba en el suelo | 🟢 hecho 2026-09-03, falta que el dueño lo mire | el arma y el nombre se dibujan **en la pose recibida**, pero el cuerpo es un esqueleto que persigue el destino con `seguir.ejes:'xz'` ⇒ **la Y no la miraba nadie**. Arreglado haciéndole **saltar de verdad**: se detecta el **flanco** de subida de la vertical que ya viajaba en cada foto y se entrega por `rig.mov.vy`, el mismo canal del trampolín (gravedad, parábola y aterrizaje salen gratis del motor). **0 líneas de `app.js` y 0 de `mundo-autoarranque`**: sólo `multi/cliente.js`. Sonda `multi/probe_salto.js` |
+| [BUG-AG20](#-bug-ag20) | `game.esqueletos.enCaja()` y `.desplazar()` **suman `mov.alto` a un `g.y` que ya lo lleva**: quien pregunte desde fuera del paso del motor sitúa al agente hasta 1,2 bloques más arriba de donde está | 🔴 abierto 2026-09-03 | encontrado midiendo [REQ-MULTI6](#-req-multi6). Dentro de `pasoSeguir` sumarlo **es correcto** (`g.y -= mov.alto` abre el paso, así que ahí `g.y` es el SUELO) y por eso `libreDeAgentes`/`separarDeAgentes` están bien; pero al acabar el paso el motor lo devuelve (`g.y += movPaso(...)`) ⇒ **fuera, `eje + g.y` ya es la altura de verdad**. Sólo se nota con un agente EN EL AIRE (puñetazo, trampolín, borde): el pistón que pregunta a quién va a aplastar (`test_piston_empuja.js`) puede no verlo. `data/snippets/mundo-autoarranque.json`, dos líneas |
 | [REQ-EXTRU6](#-req-extru6) | Ctrl/Shift+rueda **machaca los bloques del otro lado** en vez de empujarlos | 🔴 abierto 2026-09-02 | ⚠️ **la guarda de «no pisar» está COMENTADA en `mcSelExtruir`** (`web/app.js:17408`), así que hoy pisa a propósito. Ojo al invariante del dueño ya escrito ahí: *«un wup seguido de un wdown debería dejar los bloques iguales»* — empujar y luego cavar **no** los devuelve. **Por parcheo en caliente** (orden del dueño) |
 | [REQ-PLANT1](#-req-plant1) | crear un mapa **siempre empieza vacío**: falta un carrusel de **fichas con foto** (biomas ya hechos, «solo terreno base», «mapa vacío») y ajustes previos de tamaño y ambiente | 🔴 abierto 2026-09-02 | **los generadores ya existen y ya se autoejecutan** (`construye-badlands`, `-oceanos-y-playas`, `-monta-as`, `-fortnite-chapter-2-island`, `-fornite-tilted-towers`) y **ya aceptan `options` con `mapWidth/mapHeight/mapDepth`** ⇒ el «personalizar antes de generar» es exponer lo que ya hay. `POST /api/mundos/crear` **ignora la plantilla** y escribe `DEFAULT_WORLD` a secas (server.py:2037). ⚠️ **la cuota se cobra por 96³ y el generador redimensiona a 128³ o 512³** |
 | [REQ-PLANT2](#-req-plant2) | **gestionar las fichas** del carrusel: asociar la foto, cambiar los metadatos y tener las imágenes en una **zona segura** | 🟢 hecho 2026-09-02, a falta de que el dueño lo mire | pestaña **Plantillas** en `web/panel.html` + `game.fichas.retrato()` para sacar la foto **desde dentro del juego**. La foto se resuelve **contra el disco**: si desaparece, la tarjeta vuelve a su marcador y no se rompe nada. Continúa [REQ-PLANT1](#-req-plant1) |
@@ -1085,9 +1087,9 @@ Contexto y palabras completas → `data/tickets/REQ-MULTI2/contexto.md`.
 
 ---
 
-<a id="-req-multi3"></a>
+<a id="-req-multi5"></a>
 
-### REQ-MULTI3 · MULTIJUGADOR en la pausa, y encenderlo deja de ser cosa del dueño — 🟢 hecho 2026-09-03, falta que el dueño lo mire
+### REQ-MULTI5 · MULTIJUGADOR en la pausa, y encenderlo deja de ser cosa del dueño — 🟢 hecho 2026-09-03, falta que el dueño lo mire
 
 Pedido por el dueño el 2026-09-03, tres cosas en una frase:
 
@@ -1133,6 +1135,99 @@ fichero de entorno con el sitio. Detalle → [`docs/osd-e-intro.md`](docs/osd-e-
 
 Continúa [REQ-MULTI1](#-req-multi1); no cierra [REQ-MULTI2](#-req-multi2), que es el encendido
 **automático** por metadatos del mapa.
+
+---
+
+<a id="-req-multi6"></a>
+
+### REQ-MULTI6 · el otro salta y su cuerpo se queda en el suelo — 🟢 hecho 2026-09-03, falta que el dueño lo mire
+
+**Palabras del dueño** (2026-09-03): «*en modo multijugador pasa algo raro, cuando saltas (que va
+bien) el otro jugador cuando te mira solamente ve saltar la herramienta que llevas en la mano y el
+nombre, pero el avatar se queda en el sitio*».
+
+Y era literal, no una impresión: **el arma y el letrero se dibujan EN la pose recibida**, así que
+suben con ella; el cuerpo no, porque el cuerpo **no se dibuja: anda**. Es un esqueleto del motor que
+persigue el destino con `seguir.ejes:'xz'` — o sea que **la Y no la mira nadie**: la manda el suelo, y
+en el suelo se quedaba. Lo avisaba ya el propio comentario de «LA GOMA» en `multi/cliente.js`.
+
+**Lo que NO se hizo**: seguir también la Y del destino (`ejes:'xyz'`). Eso le quita al motor la
+gravedad y el asentado de pies —las dos cosas que hoy salen gratis— y el muñeco pasaría a flotar a la
+altura que diga la red, con el «te falta una pierna» de vuelta en cuanto los dos suelos no coincidan.
+
+**Lo que se hizo**: que **salte de verdad**. El motor ya tiene el canal, y es el mismo por el que le
+brincan el trampolín y el puñetazo: `rig.mov.vy` es velocidad vertical y `movPaso` la integra con
+`mcCaidaPaso`, **el mismo paso de caída del jugador** ([REQ-FLUID6](PLAN_ARCHIVO.md#-req-fluid6)). La velocidad
+vertical **ya viajaba en cada foto** (la manda `mandaPose` para extrapolar), así que no hubo que
+tocar ni el protocolo ni el árbitro: parábola, aterrizaje y pies los pone el motor.
+
+Se detecta el **FLANCO**, no el estado: `v[1]` llega a 15 Hz y a mitad de salto ya viene frenada por
+la gravedad, así que «va hacia arriba» duraría varias fotos y lanzaría al muñeco varias veces. De «no
+subía» (≤0,5·√escala) a «sube claramente» (>2·√escala) = ha saltado, **una vez** — es el mismo
+`saltoPrev` con el que el motor evita que una tecla pulsada encadene saltos. El flanco se mide
+**antes** de pisar `velFoto` con la foto nueva, que es la única línea donde todavía se sabe de dónde
+venía la vertical.
+
+**0 líneas de `app.js`, 0 de `mundo-autoarranque`**: todo en `multi/cliente.js` (bloque «EL SALTO»),
+publicado con `python3 multi/publica_cliente.py`.
+
+Sonda: [`multi/probe_salto.js`](multi/probe_salto.js) — dos navegadores contra un árbitro propio en el
+8512; mide el cuerpo **por fuera**, con `game.esqueletos.enCaja`, para no depender de las tripas del
+cliente. Sube 2,3 bloques, vuelve al suelo y quedarse quieto no dispara nada (7 ok).
+
+⚠️ **Piedra de la sonda, apuntada para el próximo**: los dos jugadores nacen en el **mismo punto de
+reaparición**, o sea uno dentro del otro, y el cuerpo del vecino **cuenta para `mcCollides`** ⇒ el
+motor anula la subida en el primer frame y el salto no llega ni a salir del que salta. Parecía que se
+perdiera por el cable, y era un techo hecho de vecino. Hay que apartarlos antes de medir.
+
+#### Segunda vuelta: «*se hunde en el suelo*» (dueño, 2026-09-03)
+
+Con el salto ya puesto: «*despues de hacerlo un par de veces el avatar visto desde el otro jugador se
+hunde en el suelo, aunque en realidad no se hunde para el que juega con él; lo que no se hunde es la
+herramienta que lleva en su mano, esa esta bien*».
+
+Y **la herramienta era la pista**: se dibuja en la pose recibida, así que si ella está bien y el
+cuerpo no, el que miente es quien calcula la altura del cuerpo. Era la goma, y por **medir mal**:
+sumaba `mov.alto` a un `g.y` que **ya lo lleva dentro**. El motor descuenta el aire al empezar su paso
+(`g.y -= rig.mov.alto`), asienta la raíz en el suelo y se lo vuelve a sumar al acabar
+(`g.y += movPaso(...)`) ⇒ desde FUERA del paso, que es donde corre el cliente, `eje + g.y` ya es la
+altura buena. Sumándolo otra vez la goma creía al muñeco `alto` bloques más arriba de lo que estaba y
+le metía ese `alto` de empujón **hacia abajo**; salto tras salto, enterrado. Una línea.
+
+Lo mismo hacía la sonda, y por eso el primer salto pasó por bueno: medía el doble de lo que se
+dibujaba. Ahora §1 **compara las dos cimas** —muñeco 1,13 vs jugador 1,26— en vez de conformarse con
+«sube algo», y §4 exige que cuatro saltos seguidos **no le roben ni 0,05 bloques**. Con el cliente sin
+arreglar la sonda cae en rojo (el cuerpo se queda en 0,36 de un reposo de 1,19), que es la queja
+exacta del dueño. 11 ok con el arreglo.
+
+De medir esto salió [BUG-AG20](#-bug-ag20), que es la misma confusión pero en el motor.
+
+Continúa [REQ-MULTI1](#-req-multi1).
+
+---
+
+<a id="-bug-ag20"></a>
+
+### BUG-AG20 · `enCaja()` y `desplazar()` suman una altura que `g.y` ya lleva — 🔴 abierto 2026-09-03
+
+Encontrado midiendo [REQ-MULTI6](#-req-multi6), no reportado por nadie.
+
+`g.y` **incluye lo que el agente lleve en el aire** salvo durante el paso del motor: `pasoSeguir` abre
+con `g.y -= rig.mov.alto` (para que `asentar()` resuelva la raíz desde el SUELO) y cierra con
+`g.y += movPaso(...)`. Dentro de esa ventana sumar `mov.alto` es lo correcto, y `libreDeAgentes` y
+`separarDeAgentes` —que viven ahí— lo hacen bien. Pero `game.esqueletos.enCaja()` y `.desplazar()` son
+**API pública**: a quien los llama le contestan desde fuera de la ventana, donde `eje + g.y` ya es la
+altura de verdad, y le suman el aire **otra vez**.
+
+Sólo se nota con un agente EN EL AIRE (puñetazo, trampolín, caída por un borde): mientras esté posado
+`mov.alto` es 0 y las dos cuentas coinciden. El caso que importa es el pistón, que pregunta con
+`enCaja` a quién está a punto de aplastar (`tests/test_piston_empuja.js`): a un agente al que acaban
+de pegar un puñetazo lo busca hasta 1,2 bloques por encima de donde está, y puede no encontrarlo.
+
+Arreglo: quitar el `+ alto` de esos dos, en `data/snippets/mundo-autoarranque.json` (⛔ se **parchea**,
+`herramientas/parche_snp_*.py`, que hay dos copias vivas). Antes hay que decidir la otra mitad: o se
+documenta que `g.y` lleva el aire dentro, o se le da a la API un lector propio que devuelva la altura
+sin que nadie tenga que saber en qué mitad del frame pregunta.
 
 ---
 

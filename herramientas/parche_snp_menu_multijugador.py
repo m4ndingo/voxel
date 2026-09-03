@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @area: snippets
 #
-# REQ-MULTI3 · el menu de pausa gana MULTIJUGADOR, y encenderlo deja de ser cosa del dueño.
+# REQ-MULTI5 · el menu de pausa gana MULTIJUGADOR, y encenderlo deja de ser cosa del dueño.
 #
 # LO QUE PIDIO EL DUEÑO (2026-09-03), tres cosas:
 #   a) que Esc no lleve directo a INVITAR, sino a un MULTIJUGADOR con «activar/desactivar» dentro,
@@ -52,9 +52,12 @@ TOKEN = (os.environ.get('VOXELFORGE_TOKEN') or '').strip()
 
 CAMBIOS = [
     (
-        'VERSION v1.1 → v1.2 (el menú cambia de forma)',
+        # ⛔ UN SOLO salto, no v1.1→v1.2 y luego v1.2→v1.3. Encadenados, la segunda vez que se corre
+        # esto el ancla `v1.1` ya no existe (el snippet está en v1.3) y la herramienta aborta: deja de
+        # ser idempotente, que es justo lo único que se le pide.
+        'VERSION v1.1 → v1.3 (el menú cambia de forma)',
         """M.VERSION = 'v1.1';""",
-        """M.VERSION = 'v1.2';""",
+        """M.VERSION = 'v1.3';""",
     ),
     (
         'la pausa lleva a MULTIJUGADOR, no directa a INVITAR',
@@ -98,11 +101,29 @@ M.multiPuesto = function () {
   try { return !!(G.multi && G.multi.estado && G.multi.estado().activo); } catch (e) { return false; }
 };
 
+// ⛔ «activo» NO es «conectado». `entra()` levanta la bandera ANTES de que exista el socket, y si el
+// árbitro rechaza el apretón la baja `onclose` un rato después (multi-verse:1923) — que es justo lo
+// que pasa cuando al árbitro le falta `VOXELFORGE_SECRETO_SESION` y no verifica ningún vale. Decir
+// «Dentro» mientras la conexión vuela es prometer algo que todavía puede no ocurrir.
 M.notaMulti = function () {
-  if (!M.multiPuesto()) return 'Estás jugando a solas en «' + M.mapa() + '».';
-  let otros = 0;
-  try { otros = G.multi.estado().otrosAhora || 0; } catch (e) {}
+  let e = null;
+  try { e = (G.multi && G.multi.estado) ? G.multi.estado() : null; } catch (er) {}
+  if (!e || !e.activo) return 'Estás jugando a solas en «' + M.mapa() + '».';
+  // Los cuatro nombres salen de `estado()` en multi-verse, que traduce `ws.readyState`.
+  if (e.socket === 'conectando' || e.socket === 'sin socket') return 'Conectando con el servidor de multijugador…';
+  if (e.socket !== 'abierto') return 'Se ha cortado la conexión con el servidor de multijugador.';
+  const otros = e.otrosAhora || 0;
   return otros ? ('Dentro, y ahora mismo hay ' + otros + ' más.') : 'Dentro. Todavía no hay nadie más.';
+};
+
+// Qué pantalla se está viendo AHORA. `game.osd.abierta` dice «pausa» para TODAS las de este menú, así
+// que no sirve para decidir un repintado tardío: el título sí. Sin esto, la vuelta de encender borra
+// el enlace de INVITAR justo cuando lo estás copiando.
+M.enPantalla = function (titulo) {
+  try {
+    const t = document.querySelector('#mc-osd .mc-osd-title');
+    return !!t && t.textContent.trim() === titulo;
+  } catch (e) { return false; }
 };
 
 // ⛔ LA MISMA LLAVE QUE `multi-verse` (su `LLAVE_VALE`, línea 61), y por eso está anotada en los dos
@@ -157,8 +178,10 @@ M.conmutaMulti = function () {
   if (M.multiPuesto()) { M.apaga(); return Promise.resolve(G.osd.html(M.panelMulti())); }
   G.osd.html(M.panelMulti('Entrando…'));
   return M.enciende()
-    .then(function () { G.osd.html(M.panelMulti()); })
-    .catch(function (e) { G.osd.html(M.panelMulti('No se ha podido entrar: ' + (e && e.message))); });
+    .then(function () { if (M.enPantalla('MULTIJUGADOR')) G.osd.html(M.panelMulti()); })
+    .catch(function (e) {
+      if (M.enPantalla('MULTIJUGADOR')) G.osd.html(M.panelMulti('No se ha podido entrar: ' + (e && e.message)));
+    });
 };
 
 M.panelInvita = function (enlace, escritura, error) {
@@ -215,7 +238,7 @@ M.invitar = function () {
     // termina ya no dice lo mismo que cuando se pintó.
     if (r.d.vale && !M.multiPuesto()) {
       Promise.resolve(M.enciende())
-        .then(function () { if (G.osd.abierta === 'pausa') G.osd.html(M.panelInvita(r.d.enlace, r.d.escritura)); })
+        .then(function () { if (M.enPantalla('INVITAR')) G.osd.html(M.panelInvita(r.d.enlace, r.d.escritura)); })
         .catch(function (e) { console.warn('👥 menu-juego: invité pero no pude entrar yo:', e && e.message); });
     }
   }).catch(function (e) {
@@ -230,60 +253,6 @@ M.invitar = function () {
   G.osd.alPulsar(M.CLAVE + 'multi-onoff', function () { M.conmutaMulti(); }, yo);
   G.osd.alPulsar(M.CLAVE + 'volver-multi', function () { G.osd.html(M.panelMulti()); }, yo);
   G.osd.alPulsar(M.CLAVE + 'invitar', function () { M.invitar(); }, yo);""",
-    ),
-
-    # ---- v1.3: la pantalla decia «Dentro» antes de estarlo -------------------------------------
-    (
-        'VERSION v1.2 → v1.3 (la nota deja de adelantarse al socket)',
-        """M.VERSION = 'v1.2';""",
-        """M.VERSION = 'v1.3';""",
-    ),
-    (
-        'la nota distingue «conectando» de «dentro», y saber qué pantalla se ve',
-        """M.notaMulti = function () {
-  if (!M.multiPuesto()) return 'Estás jugando a solas en «' + M.mapa() + '».';
-  let otros = 0;
-  try { otros = G.multi.estado().otrosAhora || 0; } catch (e) {}
-  return otros ? ('Dentro, y ahora mismo hay ' + otros + ' más.') : 'Dentro. Todavía no hay nadie más.';
-};""",
-        """// ⛔ «activo» NO es «conectado». `entra()` levanta la bandera ANTES de que exista el socket, y si el
-// árbitro rechaza el apretón la baja `onclose` un rato después (multi-verse:1923) — que es justo lo
-// que pasa cuando al árbitro le falta `VOXELFORGE_SECRETO_SESION` y no verifica ningún vale. Decir
-// «Dentro» mientras la conexión vuela es prometer algo que todavía puede no ocurrir.
-M.notaMulti = function () {
-  let e = null;
-  try { e = (G.multi && G.multi.estado) ? G.multi.estado() : null; } catch (er) {}
-  if (!e || !e.activo) return 'Estás jugando a solas en «' + M.mapa() + '».';
-  // Los cuatro nombres salen de `estado()` en multi-verse, que traduce `ws.readyState`.
-  if (e.socket === 'conectando' || e.socket === 'sin socket') return 'Conectando con el servidor de multijugador…';
-  if (e.socket !== 'abierto') return 'Se ha cortado la conexión con el servidor de multijugador.';
-  const otros = e.otrosAhora || 0;
-  return otros ? ('Dentro, y ahora mismo hay ' + otros + ' más.') : 'Dentro. Todavía no hay nadie más.';
-};
-
-// Qué pantalla se está viendo AHORA. `game.osd.abierta` dice «pausa» para TODAS las de este menú, así
-// que no sirve para decidir un repintado tardío: el título sí. Sin esto, la vuelta de encender borra
-// el enlace de INVITAR justo cuando lo estás copiando.
-M.enPantalla = function (titulo) {
-  try {
-    const t = document.querySelector('#mc-osd .mc-osd-title');
-    return !!t && t.textContent.trim() === titulo;
-  } catch (e) { return false; }
-};""",
-    ),
-    (
-        'conmutar solo repinta si sigues en MULTIJUGADOR',
-        """    .then(function () { G.osd.html(M.panelMulti()); })
-    .catch(function (e) { G.osd.html(M.panelMulti('No se ha podido entrar: ' + (e && e.message))); });""",
-        """    .then(function () { if (M.enPantalla('MULTIJUGADOR')) G.osd.html(M.panelMulti()); })
-    .catch(function (e) {
-      if (M.enPantalla('MULTIJUGADOR')) G.osd.html(M.panelMulti('No se ha podido entrar: ' + (e && e.message)));
-    });""",
-    ),
-    (
-        'y el repintado de INVITAR mira su propio título, no «pausa»',
-        """        .then(function () { if (G.osd.abierta === 'pausa') G.osd.html(M.panelInvita(r.d.enlace, r.d.escritura)); })""",
-        """        .then(function () { if (M.enPantalla('INVITAR')) G.osd.html(M.panelInvita(r.d.enlace, r.d.escritura)); })""",
     ),
 ]
 

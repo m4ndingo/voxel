@@ -73,7 +73,7 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
   test('§1 la pausa trae las cinco entradas del menú', () => {
     // La quinta cambia de rótulo según haya editor detrás o no (§8): lo que no puede faltar es la
     // entrada, no una palabra concreta.
-    // ⚠️ MULTIJUGADOR estaba aquí como INVITAR hasta REQ-MULTI3. Ahora INVITAR cuelga de él y no de
+    // ⚠️ MULTIJUGADOR estaba aquí como INVITAR hasta REQ-MULTI5. Ahora INVITAR cuelga de él y no de
     // la raíz, que es lo que pidió el dueño; lo comprueba el §9.
     const esperadas = ['CONTINUAR', 'MULTIJUGADOR', 'AJUSTES', 'MIS MUNDOS'];
     for (const e of esperadas) assert(tras.botones.includes(e), 'falta «' + e + '» (hay: ' + tras.botones.join(', ') + ')');
@@ -210,7 +210,7 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     assert(!/[Ee]ntra con tu cuenta/.test(con403.texto), 'el 403 manda a entrar, que no arregla nada');
   });
 
-  // ── §9 · MULTIJUGADOR: encender es de todos, e invitar mete a LOS DOS (REQ-MULTI3) ───────────────
+  // ── §9 · MULTIJUGADOR: encender es de todos, e invitar mete a LOS DOS (REQ-MULTI5) ───────────────
   //
   // Las tres cosas que pidió el dueño (2026-09-03), y por qué cada una necesita su comprobación:
   //

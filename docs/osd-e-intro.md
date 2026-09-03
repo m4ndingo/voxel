@@ -475,7 +475,7 @@ expone `game.menu.on()/off()/abrir()/estado()`. **Cero líneas de `app.js`.**
   El 401 («entra con tu cuenta») y el 403 («este mapa no es tuyo») dicen cosas distintas a propósito:
   uno se arregla entrando y el otro no se arregla.
 
-### MULTIJUGADOR, la pantalla de dentro (REQ-MULTI3, `menu-juego` v1.3)
+### MULTIJUGADOR, la pantalla de dentro (REQ-MULTI5, `menu-juego` v1.3)
 
 INVITAR ya no cuelga de la raíz: la pausa lleva a **MULTIJUGADOR**, y ahí dentro están el interruptor
 (`ACTIVAR`/`DESACTIVAR MULTIJUGADOR`) y el INVITAR de siempre. Tres cosas que cuestan caro:
