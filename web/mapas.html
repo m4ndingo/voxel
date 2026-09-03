@@ -4,8 +4,14 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="/favicon.ico">
 <link rel="stylesheet" href="/scrollbars.css">   <!-- tema de las barras de scroll, común a todo el sitio -->
-<!-- Listado de mundos servido en /map/ (server.py). Los datos y las miniaturas vienen de /api/mundos,
-     que lee data/mundo.json + data/worlds/*.json con cache por mtime en data/_thumbs/. -->
+<script src="/quien.js" defer></script>   <!-- la chapa de identidad; se calla sola en /map/ -->
+<!-- Listado de mundos servido en /map/ (server.py). Los datos vienen de /api/mundos, que lee
+     data/mundo.json + data/worlds/*.json con cache por mtime en data/_thumbs/.
+     F3.6 · la miniatura YA NO viene dentro: `m.thumb` es la URL /api/mundos/<slug>/thumb.png?v=<sello>,
+     así que el <img loading="lazy"> solo baja las que se ven y el navegador se las queda (ETag).
+     Se pide el listado ENTERO a propósito (sin ?desde/?cuantos): buscar y ordenar se hace aquí, en el
+     navegador, y paginar obligaría a ir al servidor por cada tecla. -->
+
 <style>
 :root{ --bg:#0e1016; --panel:#161a24; --panel-2:#1d2230; --line:#2a3040; --ink:#e7ecf4;
        --muted:#8a93a6; --accent:#e2a44a; --accent-2:#6bd3a0; --danger:#e2685a; --radius:10px; }
@@ -37,6 +43,14 @@ h1 span{color:var(--muted);font-weight:400}
 .cuerpo{padding:12px 13px 13px;display:flex;flex-direction:column;gap:9px;flex:1}
 .nombre{font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px}
 .ruta{color:var(--muted);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+/* De quién es y quién puede entrar. Se pinta SIEMPRE, también cuando no es de nadie: «sin dueño»
+   es un hecho del mapa (los heredados de antes de F3.1), no un dato que falte. */
+.duenno{display:flex;flex-wrap:wrap;align-items:center;gap:5px;font-size:11px;color:var(--muted);
+        margin-top:3px}
+.duenno .yo{color:var(--accent);font-weight:600}
+.duenno .nadie{font-style:italic}
+.acceso{font-size:10px;border:1px solid var(--line);border-radius:99px;padding:0 6px;
+        background:var(--panel-2)}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;font-size:12px}
 .stats div{display:flex;justify-content:space-between;gap:6px;
            border-bottom:1px dotted #232838;padding-bottom:2px}
@@ -69,6 +83,11 @@ h1 span{color:var(--muted);font-weight:400}
 .menu button:hover{background:var(--panel);color:var(--accent)}
 .menu button[disabled]{color:var(--muted);cursor:default}
 .menu button[disabled]:hover{background:none;color:var(--muted)}
+/* Borrar se separa y se pinta en rojo: es la única entrada del menú que no se puede deshacer desde
+   aquí (el mundo va a `data/papelera/mundos/`, pero recuperarlo ya es cosa del disco). */
+.menu .peligro{color:var(--danger);border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
+.menu .peligro:hover{background:var(--panel);color:var(--danger)}
+.dlg .ok.peligro{background:var(--danger);color:#fff}
 .velo{position:fixed;inset:0;z-index:30;background:#0009;display:flex;align-items:center;justify-content:center}
 .dlg{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;
       width:min(400px,92vw);display:flex;flex-direction:column;gap:11px}
@@ -85,6 +104,158 @@ h1 span{color:var(--muted);font-weight:400}
 .dlg .ok[disabled]{opacity:.45;cursor:default}
 @media(max-width:680px){ .grid{grid-template-columns:1fr;padding:0 14px} header{padding:18px 14px 6px}
   .barra{padding:0 14px} .orden{margin-left:0;width:100%} }
+
+/* ═══ REQ-PLANT1 · el asistente de mundo nuevo ═══════════════════════════════════════════════
+   Ocupa la pantalla entera a propósito: es el momento de «voy a empezar un mundo», y una ficha con
+   foto de 9:16 dentro de un diálogo de 400 px no es una portada de juego, es un formulario.
+
+   ⚠️ La fuente del juego SÓLO es nítida en múltiplos de 9 px (su rejilla nativa es 1836/9 = 204
+   unidades ⇒ un píxel de diseño = font-size/9). Por eso los tamaños de aquí son 9, 18, 27 y 36 y no
+   «los que quedaban bien»: 14 px la deja borrosa. Se declara aquí porque mapas.html no carga
+   style.css — sólo scrollbars.css — y arrastrar 1,5 MB de CSS del editor por dos rótulos no sale. */
+@font-face{ font-family:'Pixeloid Sans'; src:url('/assets/fonts/PixeloidSans.ttf') format('truetype');
+  font-weight:400; font-style:normal; font-display:swap }
+@font-face{ font-family:'Pixeloid Sans'; src:url('/assets/fonts/PixeloidSans-Bold.ttf') format('truetype');
+  font-weight:700; font-style:normal; font-display:swap }
+
+.nuevo{background:var(--accent-2);color:#08150f;border:0;border-radius:8px;
+  padding:9px 16px;font:inherit;font-weight:600;font-size:13px;cursor:pointer}
+.nuevo:hover{filter:brightness(1.12)}
+
+/* El velo del asistente. `--acc` es VERDE y no el ámbar del resto de la página: crear es la acción
+   de sembrar, y distinguirla de «abrir» de un vistazo cuesta una variable. */
+/* Casi opaco (`f8`, no `f2`): con el velo translúcido se leían por debajo las tarjetas de mundos y
+   el resultado era ruido. Un poco de transparencia sí se deja — recuerda que esto está ENCIMA del
+   selector y que Escape vuelve allí. */
+.asis{position:fixed;inset:0;z-index:40;background:#070a0ff8;display:flex;flex-direction:column;
+  font-synthesis:none;--acc:#6bd3a0;overflow:hidden}
+/* El fondo de voxels: un damero de 36 px que se desliza muy despacio. Es CSS puro (dos gradientes),
+   no una imagen, así que no baja un byte y no compite con las fotos de las fichas por el ancho. */
+.asis::before{content:'';position:absolute;inset:-40px;pointer-events:none;opacity:.5;
+  background:
+    linear-gradient(#141a22 1px,transparent 1px) 0 0/36px 36px,
+    linear-gradient(90deg,#141a22 1px,transparent 1px) 0 0/36px 36px;
+  animation:asis-deriva 42s linear infinite}
+@keyframes asis-deriva{ to{ transform:translate3d(36px,36px,0) } }
+@media(prefers-reduced-motion:reduce){ .asis::before{animation:none} }
+
+.asis-cab{position:relative;padding:27px 27px 9px;display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap}
+.asis-cab h2{margin:0;font-family:'Pixeloid Sans',ui-monospace,monospace;font-size:27px;
+  font-weight:700;letter-spacing:2px;color:var(--ink);text-shadow:0 3px 0 #0b0f16}
+.asis-cab h2 i{color:var(--acc);font-style:normal}
+.asis-cab .paso{font-family:'Pixeloid Sans',ui-monospace,monospace;font-size:9px;letter-spacing:1px;
+  color:var(--muted);margin-bottom:6px}
+.asis-cab .x{margin-left:auto;background:none;border:1px solid var(--line);color:var(--muted);
+  border-radius:8px;padding:7px 13px;font:inherit;cursor:pointer}
+.asis-cab .x:hover{border-color:var(--danger);color:var(--danger)}
+
+/* ── El carrusel ────────────────────────────────────────────────────────────────────────────────
+   El dueño pidió «por lo menos 4 en pantalla a la vez» y proporciones de teléfono. Las dos cosas a
+   la vez fijan el ancho: 4 fichas de 9:16 en 100vw. Es scroll horizontal con imán (`scroll-snap`),
+   que en un móvil es el gesto natural y en escritorio se maneja con las flechas de al lado. */
+.asis-tira{position:relative;flex:1;min-height:0;display:flex;align-items:center;gap:18px;padding:9px 27px 18px;
+  overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none}
+.asis-tira::-webkit-scrollbar{display:none}
+.ficha{position:relative;flex:0 0 auto;width:min(22vw,260px);aspect-ratio:9/16;max-height:100%;
+  scroll-snap-align:center;border:2px solid var(--line);border-radius:2px;   /* esquinas rectas: es un juego de voxels */
+  background:#0b0d12;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;
+  justify-content:flex-end;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.ficha:hover,.ficha:focus-visible{transform:translateY(-9px) scale(1.03);border-color:var(--acc);
+  box-shadow:0 18px 36px #000a;outline:none;z-index:2}
+.ficha.sel{border-color:var(--acc);box-shadow:0 0 0 3px #6bd3a033,0 18px 36px #000a}
+/* ⚠️ SIN color de fondo, y es lo que hace que el marcador funcione: el atajo `background:#0b0d12
+   center/cover` pintaba un color OPACO encima del marcador de debajo, así que una foto que todavía
+   no existe tapaba la inicial y la ficha salía en negro. Sólo posición y encuadre. */
+.ficha .foto{position:absolute;inset:0;background-position:center;background-size:cover;
+  background-repeat:no-repeat;animation:asis-respira 18s ease-in-out infinite}
+/* «Respirar»: un 4 % de zoom en 18 s. Lo justo para que la pantalla no parezca congelada y no tanto
+   como para distraer de elegir — que es lo único que se hace aquí. */
+@keyframes asis-respira{ 0%,100%{transform:scale(1)} 50%{transform:scale(1.04)} }
+@media(prefers-reduced-motion:reduce){ .ficha .foto{animation:none} }
+/* Sin foto todavía (el dueño las hace aparte): en vez de un hueco gris, el marcador enseña la
+   inicial gigante sobre una trama de voxels. Cuando el .jpg aparezca en data/ui/plantillas/ se
+   pinta solo, sin tocar una línea. */
+.ficha .marca{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:'Pixeloid Sans',ui-monospace,monospace;font-size:72px;color:#4d6d5e;
+  text-shadow:0 4px 0 #0b0d12;
+  background:radial-gradient(circle at 50% 38%,#1b2a24,#0b0d12 72%)}
+.ficha .txt{position:relative;padding:36px 13px 13px;
+  background:linear-gradient(transparent,#060a0ee6 42%,#060a0ef7)}
+.ficha .tit{font-family:'Pixeloid Sans',ui-monospace,monospace;font-size:18px;line-height:1.25;
+  color:#fff;text-shadow:0 2px 0 #000}
+.ficha .des{color:#b9c3d4;font-size:11.5px;line-height:1.45;margin-top:6px;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ficha .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.ficha .tags span{font-size:10px;color:#cfe6da;background:#0f2a1fcc;border:1px solid #26543f;
+  border-radius:99px;padding:1px 7px}
+.ficha .n{position:absolute;top:9px;left:9px;font-family:'Pixeloid Sans',ui-monospace,monospace;
+  font-size:9px;color:#0b1c14;background:var(--acc);padding:3px 7px;border-radius:2px}
+
+.asis-flecha{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:36px;height:54px;
+  background:#111823e0;border:1px solid var(--line);color:var(--ink);border-radius:4px;
+  font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.asis-flecha:hover{border-color:var(--acc);color:var(--acc)}
+.asis-flecha.izq{left:6px} .asis-flecha.der{right:6px}
+
+/* ── El pie: personalizar y crear ───────────────────────────────────────────────────────────── */
+.asis-pie{position:relative;border-top:1px solid var(--line);background:#0c1017f0;
+  padding:14px 27px 18px;display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap}
+.campo{display:flex;flex-direction:column;gap:5px}
+.campo>label{font-family:'Pixeloid Sans',ui-monospace,monospace;font-size:9px;letter-spacing:1px;
+  color:var(--muted)}
+.campo input{background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  padding:8px 11px;border-radius:8px;font:inherit;min-width:210px}
+.campo input:focus{outline:none;border-color:var(--acc)}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.chips button{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+  padding:7px 11px;border-radius:8px;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.chips button:hover{border-color:#3c4658}
+.chips button.on{border-color:var(--acc);color:var(--acc);background:#0f2a1f66}
+.chips button[disabled]{opacity:.35;cursor:default}
+.asis-pie .final{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+/* ⚠️ EL MENSAJE DE ERROR NO OCUPA SITIO, Y ESO ES EL ARREGLO. Estaba en el flujo del pie con un
+   `min-height` de UNA línea: en cuanto el servidor contestaba algo que no cabía en esa línea
+   —«ya has llegado a tu cuota de 5 mundos y a los 100 MB…», que son tres— el pie crecía 39 px, la
+   tira encogía otros tanto y TODO el asistente pegaba un salto hacia arriba al pulsar CREAR. No era
+   un desplazamiento de la ventana (`scrollY` no se mueve), era el panel reflotando; se ve igual.
+   Reservar más `min-height` sólo cambia el tamaño del salto, porque el texto lo elige el servidor y
+   puede ser de cualquier largo. Sacándolo del flujo (`bottom:100%` sobre el pie, que es
+   `position:relative`) el panel mide lo mismo diga lo que diga el mensaje. Misma enfermedad que
+   `.aviso-lado` aquí debajo, curada del todo en vez de acotada. */
+.asis-pie .err{position:absolute;right:27px;bottom:100%;margin-bottom:9px;z-index:2;
+  color:var(--danger);font-size:12px;max-width:340px;text-align:right;line-height:1.45;
+  background:#0c1017f0;border:1px solid var(--danger);border-radius:8px;padding:0;
+  transition:padding .12s}
+.asis-pie .err:empty{border:0;background:none}        /* sin mensaje, ni se intuye que está */
+.asis-pie .err:not(:empty){padding:7px 11px}
+.crear{background:var(--acc);color:#08150f;border:0;border-radius:8px;padding:11px 27px;
+  font-family:'Pixeloid Sans',ui-monospace,monospace;font-size:18px;cursor:pointer;letter-spacing:1px}
+.crear:hover{filter:brightness(1.12)}
+.crear[disabled]{opacity:.4;cursor:default;filter:none}
+/* ⚠️ LOS DOS RÓTULOS VIVEN SIEMPRE DENTRO DEL BOTÓN, APILADOS, Y ESO ES EL ARREGLO. «CREANDO…» es
+   22 px más ancho que «CREAR ▸»; con `textContent` el botón engordaba al pulsarlo y, en la banda de
+   anchos en que el pie iba justo (medido: 1616–1630 px), `.final` ya no cabía en la línea y bajaba
+   sola: el botón caía a una fila nueva, el pie crecía 62 px y TODO lo de arriba —nombre, tamaños,
+   ambiente, efectos— pegaba un salto hacia arriba. Fuera de esa banda no se veía nada, por eso
+   parecía un fantasma. Apilando ambos en la misma celda de rejilla la caja mide siempre lo que el
+   más ancho, así que no se mueve nada; y se mide con la fuente REAL, sin `min-width` a ojo que
+   habría que retocar al cambiar el rótulo o la tipografía. Misma enfermedad que `.asis-pie .err` y
+   `.aviso-lado` aquí al lado: se cura quitando el cambio de tamaño, no acotándolo. */
+.crear{display:grid;place-items:center}
+.crear>span{grid-area:1/1;white-space:nowrap}
+.crear>span:nth-child(2){visibility:hidden}            /* reserva sitio, no se ve */
+.crear.trabajando>span:nth-child(1){visibility:hidden}
+.crear.trabajando>span:nth-child(2){visibility:visible}
+/* ⚠️ `min-height` de dos líneas Y NO SE QUITA: este aviso sólo sale en las plantillas de bioma, así
+   que al pasar de un bioma a «mapa vacío» el pie encogía y TODO el panel de abajo —el nombre, los
+   tamaños, CREAR— pegaba un salto. El hueco se reserva siempre; ver también `centra()`. */
+.aviso-lado{color:var(--muted);font-size:11px;max-width:330px;min-height:2.9em;line-height:1.45}
+@media(max-width:900px){
+  .ficha{width:min(42vw,230px)}
+  .asis-pie{flex-direction:column;align-items:stretch}
+  .asis-pie .final{margin-left:0;align-items:stretch}
+  .asis-pie .err{left:27px;text-align:left;max-width:none}
+}
 </style>
 <header>
   <h1>Mundos <span>· VoxelForge</span></h1>
@@ -98,6 +269,9 @@ h1 span{color:var(--muted);font-weight:400}
     <button data-k="estructuras">Estructuras</button>
     <button data-k="nombre">Nombre</button>
   </div>
+  <!-- REQ-PLANT1 · hasta ahora un mundo nacía de VISITAR /map/<nombre>, que es un efecto colateral
+       que nadie descubre solo. Esto es la puerta de delante. -->
+  <button class="nuevo" id="btn-nuevo">＋ Nuevo mundo</button>
 </div>
 <div class="grid" id="grid"></div>
 <div class="nota">
@@ -122,6 +296,32 @@ const cuando = iso => {
 const rutaDe = m => '/map/' + encodeURIComponent(m.nombre);
 
 let DATOS = [], orden = 'mtime', filtro = '';
+// Quién soy, para poder decir «tuyo» en vez de repetir mi propio nombre en cada tarjeta.
+// ⚠️ El dueño DEL SERVIDOR no tiene uid (`/api/yo` le responde `anonimo:true, dueno:true`), así que
+// nunca sale «tuyo» en un mapa registrado a nombre de otra cuenta — y está bien: mandar sobre un mapa
+// no es lo mismo que ser su dueño, y la lista tiene que decir la verdad de quién lo hizo.
+let YO = null;
+
+// De quién es este mapa y quién puede entrar, tal como está en `data/mundos_meta/<slug>.json`.
+// Los tres campos vienen de `/api/mundos` (server.py:1747). Se pintan SIEMPRE los dos: sin dueño es
+// un hecho —los mapas de antes de que hubiera cuentas nacieron «de nadie» y así siguen—, no un vacío.
+function propiedad(m) {
+  const uid = m.dueno || '';
+  const mio = uid && YO && YO.yo && YO.yo.uid && YO.yo.uid === uid;
+  const quien = !uid ? '<span class="nadie">sin dueño · heredado</span>'
+              : mio  ? '<span class="yo">tuyo</span>'
+                     : 'de ' + esc(uid);
+  // El vocabulario es el del registro, sin adornos: `privado` no se ve, `enlace` se abre con la URL
+  // pero no se lista, `publico` sale para todos. Y la escritura dice quién puede TOCARLO, que es la
+  // otra mitad de «de quién es»: un mapa ajeno con escritura `todos` es tan tuyo como suyo.
+  const VIS = { privado: 'privado', enlace: 'por enlace', publico: 'público' };
+  const ESC = { dueno: 'escribe su dueño', invitados: 'escriben invitados', todos: 'escribe cualquiera' };
+  const vis = VIS[m.visibilidad] || m.visibilidad || 'privado';
+  const escr = ESC[m.escritura] || m.escritura || 'escribe su dueño';
+  return '👤 ' + quien +
+         '<span class="acceso">' + esc(vis) + '</span>' +
+         '<span class="acceso">' + esc(escr) + '</span>';
+}
 function pinta() {
   const lista = DATOS
     .filter(m => !filtro || m.nombre.includes(filtro) || m.top.join(' ').includes(filtro))
@@ -143,6 +343,7 @@ function pinta() {
         <div>
           <div class="nombre">${esc(m.nombre)}</div>
           <div class="ruta">${esc(rutaDe(m))}</div>
+          <div class="duenno">${propiedad(m)}</div>
         </div>
         <div class="stats">
           <div><span class="k">voxels</span><b>${fmt(m.voxels)}</b></div>
@@ -174,6 +375,12 @@ document.getElementById('orden').addEventListener('click', e => {
 });
 
 function carga() {
+  // `/api/yo` va aparte y SIN bloquear: saber quién soy solo cambia si una tarjeta dice «tuyo» o
+  // repite mi nombre, así que si esa petición falla la lista se pinta igual, con el uid literal.
+  fetch('/api/yo', { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { if (d) { YO = d; if (DATOS.length) pinta(); } })   // sin datos aún no se repinta: el «no hay mundos» parpadearía
+    .catch(() => {});
   return fetch('/api/mundos', { cache: 'no-store' })
     .then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j.error || r.status)))
     .then(d => { DATOS = d; pinta(); })
@@ -217,7 +424,8 @@ document.getElementById('grid').addEventListener('contextmenu', e => {
   menu.innerHTML = `<div class="cab">${esc(nombre)}</div>
     <button data-a="abrir">Abrir</button>
     <button data-a="duplicar">Duplicar…</button>
-    <button data-a="renombrar" ${esDefecto ? 'disabled title="«default» es el mundo de siempre: duplícalo y renombra la copia"' : ''}>Renombrar…</button>`;
+    <button data-a="renombrar" ${esDefecto ? 'disabled title="«default» es el mundo de siempre: duplícalo y renombra la copia"' : ''}>Renombrar…</button>
+    <button class="peligro" data-a="borrar" ${esDefecto ? 'disabled title="«default» es el mundo sagrado: no se borra"' : ''}>Borrar…</button>`;
   // Se coloca ya medido: si se pega al borde derecho o abajo, se dobla hacia dentro en vez de salirse.
   menu.style.left = menu.style.top = '0px';
   document.body.appendChild(menu);
@@ -233,7 +441,49 @@ document.getElementById('grid').addEventListener('contextmenu', e => {
   });
 });
 
+// Borrar tiene su propio diálogo porque no pide un nombre NUEVO: pide el que ya tiene, escrito a
+// mano. Es la confirmación que no se pulsa sin querer, y la única que vale para algo que se lleva un
+// mundo entero. Lo que hay detrás es `DELETE /api/mundos/<slug>`, que NO borra: mueve el par
+// `.json`+`.vox` a `data/papelera/mundos/` con el cerrojo de `voxfmt` (alguien puede estar poniendo
+// bloques ahí ahora mismo) y se lleva también su registro y su snippet de ambiente.
+function dialogoBorrar(nombre) {
+  const velo = document.createElement('div');
+  velo.className = 'velo';
+  velo.innerHTML = `<div class="dlg" role="dialog" aria-modal="true">
+      <h2>Borrar «${esc(nombre)}»</h2>
+      <p>Se lleva el mundo entero —terreno, estructuras y notas— y su ambientación. Va a la papelera
+         del servidor (<code>data/papelera/mundos/</code>), pero desde aquí no hay vuelta atrás.</p>
+      <p>Escribe <b>${esc(nombre)}</b> para confirmar:</p>
+      <input id="dlg-n" spellcheck="false" autocomplete="off" placeholder="${esc(nombre)}">
+      <div class="slug"></div>
+      <div class="err" id="dlg-err"></div>
+      <div class="botones">
+        <button id="dlg-no">Cancelar</button>
+        <button class="ok peligro" id="dlg-si" disabled>Borrar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(velo);
+  const inp = velo.querySelector('#dlg-n'), err = velo.querySelector('#dlg-err'),
+        si = velo.querySelector('#dlg-si');
+  const cierra = () => { velo.remove(); removeEventListener('keydown', tecla); };
+  const tecla = e => { if (e.key === 'Escape') cierra(); };
+  addEventListener('keydown', tecla);
+  velo.addEventListener('click', e => { if (e.target === velo) cierra(); });
+  velo.querySelector('#dlg-no').addEventListener('click', cierra);
+  inp.addEventListener('input', () => { si.disabled = inp.value.trim() !== nombre; });
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !si.disabled) si.click(); });
+  inp.focus();
+  si.addEventListener('click', () => {
+    si.disabled = true; si.textContent = 'Borrando…';
+    fetch('/api/mundos/' + encodeURIComponent(nombre), { method: 'DELETE' })
+      .then(r => r.json().then(j => r.ok ? j : Promise.reject(j.error || r.status)))
+      .then(() => { cierra(); return carga(); })
+      .catch(e => { err.textContent = String(e); si.disabled = false; si.textContent = 'Borrar'; });
+  });
+}
+
 function dialogo(accion, origen) {
+  if (accion === 'borrar') return dialogoBorrar(origen);
   const duplica = accion === 'duplicar';
   const velo = document.createElement('div');
   velo.className = 'velo';
@@ -289,5 +539,260 @@ function dialogo(accion, origen) {
         si.disabled = false; si.textContent = duplica ? 'Duplicar' : 'Renombrar';
       });
   });
+}
+
+/* ═══ REQ-PLANT1 · EL ASISTENTE DE MUNDO NUEVO ═══════════════════════════════════════════════════
+   Todo el catálogo viene de `GET /api/plantillas`: las fichas (que viven DENTRO de cada snippet
+   `construye-*`), los lados con lo que pesa cada uno y si cabe en la cuota, y las listas CERRADAS de
+   ambientes y efectos.
+
+   ⛔ Aquí NO se decide nada de lo que importa. El lado, el ambiente y los efectos se mandan como
+   CLAVES y el servidor los valida contra su propia tabla; si esta página mintiera sobre el tope, el
+   409 llegaría igual. Lo que se pinta es lo que el servidor ya ha dicho que se puede — «el cliente
+   esconde, el servidor prohíbe».
+
+   El jugador no ve un solo nombre de snippet, que era la petición: elige la foto que le gusta. */
+let CAT = null;                                    // el catálogo, pedido una vez y reutilizado
+
+async function abreAsistente() {
+  if (!CAT) {
+    try { CAT = await fetch('/api/plantillas', { cache: 'no-store' }).then(r => r.json()); }
+    catch (e) { alert('No se pudo leer el catálogo de plantillas: ' + e); return; }
+  }
+  // Lo elegido. `lado` arranca en el que propone el servidor, no en el mayor que quepa: un mundo de
+  // 512 tarda mucho más en generarse y no es lo que quiere quien entra por primera vez.
+  const el = {
+    plantilla: (CAT.plantillas[0] || {}).id || '',
+    lado: CAT.ladoPorDefecto,
+    ambiente: 'dia',
+    efectos: new Set()
+  };
+
+  const velo = document.createElement('div');
+  velo.className = 'asis';
+  velo.innerHTML = `
+    <div class="asis-cab">
+      <h2>NUEVO <i>MUNDO</i></h2>
+      <div class="paso">ELIGE CÓMO EMPIEZA · LO DEMÁS SE CONSTRUYE SOLO</div>
+      <button class="x" id="a-x">Cancelar ✕</button>
+    </div>
+    <div style="position:relative;flex:1;min-height:0;display:flex">
+      <button class="asis-flecha izq" id="a-izq" aria-label="Anterior">‹</button>
+      <div class="asis-tira" id="a-tira"></div>
+      <button class="asis-flecha der" id="a-der" aria-label="Siguiente">›</button>
+    </div>
+    <div class="asis-pie">
+      <div class="campo">
+        <label for="a-nom">NOMBRE</label>
+        <input id="a-nom" placeholder="mi mundo" maxlength="40">
+      </div>
+      <div class="campo">
+        <label>TAMAÑO</label>
+        <div class="chips" id="a-lados"></div>
+        <div class="aviso-lado" id="a-avisolado"></div>
+      </div>
+      <div class="campo">
+        <label>AMBIENTE</label>
+        <div class="chips" id="a-amb"></div>
+      </div>
+      <div class="campo">
+        <label>EFECTOS</label>
+        <div class="chips" id="a-efe"></div>
+      </div>
+      <div class="final">
+        <div class="err" id="a-err"></div>
+        <button class="crear" id="a-crear"><span>CREAR ▸</span><span>CREANDO…</span></button>
+      </div>
+    </div>`;
+  document.body.appendChild(velo);
+  document.body.style.overflow = 'hidden';
+
+  const $$ = s => velo.querySelector(s);
+  const tira = $$('#a-tira'), nom = $$('#a-nom'), err = $$('#a-err'), boton = $$('#a-crear');
+
+  const cierra = () => {
+    velo.remove(); document.body.style.overflow = '';
+    document.removeEventListener('keydown', tecla);
+  };
+  const tecla = e => { if (e.key === 'Escape') cierra(); };
+  document.addEventListener('keydown', tecla);
+  $$('#a-x').addEventListener('click', cierra);
+
+  // ⛔ Centrar una ficha NO se hace con `scrollIntoView`: ese método arrastra a TODOS los ancestros
+  // que se puedan desplazar, y `overflow:hidden` no impide el desplazamiento por programa — sólo la
+  // barra. Así que al pasar a las fichas de la derecha se llevaba también el velo `.asis`, y con él
+  // subía el pie donde se escribe el nombre del mundo. Se mueve la TIRA, y sólo la tira.
+  const centra = (c) => {
+    tira.scrollTo({ left: c.offsetLeft - (tira.clientWidth - c.offsetWidth) / 2, behavior: 'smooth' });
+  };
+
+  // ── Las fichas ────────────────────────────────────────────────────────────────────────────────
+  CAT.plantillas.forEach((p, i) => {
+    const f = p.ficha || {};
+    const c = document.createElement('div');
+    c.className = 'ficha' + (p.id === el.plantilla ? ' sel' : '');
+    c.tabIndex = 0;
+    c.dataset.id = p.id;
+    // ⚠️ El marcador va SIEMPRE, y la foto ENCIMA — no uno o el otro. Las fichas de bioma declaran
+    // su `foto` desde el primer día (`/data/ui/plantillas/<id>.jpg`) pero el dueño las hace aparte,
+    // así que durante un tiempo esa URL da 404. Con un `if`, esas cinco fichas salían en negro; con
+    // la foto encima, un 404 en `background-image` simplemente deja ver el marcador de debajo, y el
+    // día que el .jpg aparezca se pinta solo sin tocar una línea. Vale igual para una foto rota.
+    c.innerHTML = `<div class="marca">${esc((f.titulo || '?').trim().charAt(0).toUpperCase())}</div>`
+      + (f.foto ? `<div class="foto" style="background-image:url('${f.foto}')"></div>` : '')
+      + `<div class="n">${i + 1}/${CAT.plantillas.length}</div>`
+      + '<div class="txt">'
+      +   `<div class="tit">${esc(f.titulo || p.id)}</div>`
+      +   `<div class="des">${esc(f.descripcion || '')}</div>`
+      +   `<div class="tags">${(f.etiquetas || []).map(t => '<span>' + esc(t) + '</span>').join('')}</div>`
+      + '</div>';
+    const elige = () => {
+      el.plantilla = p.id;
+      tira.querySelectorAll('.ficha').forEach(x => x.classList.toggle('sel', x.dataset.id === p.id));
+      centra(c);
+      pintaAviso();
+      // Elegida la plantilla, lo único que queda por teclear es el nombre: el cursor va solo.
+      // ⚠️ `preventScroll` no es un adorno. `focus()` sin él desplaza a TODOS los ancestros para
+      // enseñar el campo, igual que hacía `scrollIntoView` con las fichas (ver `centra`), y aquí
+      // además pelearía con el desplazamiento suave de la tira que se acaba de lanzar.
+      nom.focus({ preventScroll: true });
+    };
+    c.addEventListener('click', elige);
+    c.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); elige(); } });
+    tira.appendChild(c);
+  });
+  const rueda = d => {
+    const paso = (tira.querySelector('.ficha') || {}).offsetWidth || 240;
+    tira.scrollBy({ left: d * (paso + 18), behavior: 'smooth' });
+  };
+  $$('#a-izq').addEventListener('click', () => rueda(-1));
+  $$('#a-der').addEventListener('click', () => rueda(1));
+
+  // ── Tamaño ────────────────────────────────────────────────────────────────────────────────────
+  //
+  // `CAT.lados` son objetos `{lado, bytes, cabe}`. El peso se enseña porque «512» no le dice nada a
+  // nadie y «21 MB» sí, sobre todo con una cuota de por medio; y `cabe` lo calcula el SERVIDOR
+  // contra el disco que le queda a esta cuenta, así que un tamaño que no entra sale apagado en vez
+  // de fallar después de rellenar todo el formulario.
+  const lados = $$('#a-lados'), avisoLado = $$('#a-avisolado');
+  const botLado = new Map();
+  CAT.lados.forEach(L => {
+    const b = document.createElement('button');
+    b.textContent = L.lado + '×' + L.lado;
+    b.dataset.lado = L.lado;
+    b.addEventListener('click', () => {
+      el.lado = L.lado;
+      lados.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+    });
+    botLado.set(L.lado, b);
+    lados.appendChild(b);
+  });
+
+  // ⚠️ DOS TOPES, Y NINGUNO SOBRA. `cabe` es DISCO: lo calcula el servidor contra la cuota de esta
+  // cuenta. `ficha.ladoMax` es MEMORIA DEL NAVEGADOR de quien lo genera: los `construye-*` escalan
+  // con el tamaño del mapa, y la ciudad a 256×256 dejó al navegador sin memoria a mitad de la
+  // generación («borrame-6», 2026-09-02). Un tamaño que no va sale APAGADO y diciendo por qué —
+  // enterarse después de rellenar el formulario, o peor, con la pestaña muerta, no es avisar.
+  // El servidor rechaza igual lo que aquí se apaga (`/api/mundos/crear`): esto es la cortesía.
+  function pintaAviso() {
+    const p = CAT.plantillas.find(x => x.id === el.plantilla) || {};
+    const f = p.ficha || {};
+    const max = f.ladoMax || 0;
+    CAT.lados.forEach(L => {
+      const b = botLado.get(L.lado);
+      const grande = max && L.lado > max;
+      b.disabled = !L.cabe || grande;
+      b.title = (L.bytes / 1048576).toFixed(1) + ' MB'
+              + (L.cabe ? '' : ' · no cabe en tu cuota')
+              + (grande ? ' · demasiado para esta plantilla' : '');
+    });
+    // Si el tamaño elegido ya no vale para la plantilla nueva, se baja al que ella recomienda: dejar
+    // seleccionado un botón apagado es enseñar una elección que el servidor va a rechazar.
+    if ((max && el.lado > max) || !(CAT.lados.find(L => L.lado === el.lado) || {}).cabe) {
+      el.lado = f.lado || max || CAT.ladoPorDefecto || 128;
+    }
+    lados.querySelectorAll('button').forEach(x => x.classList.toggle('on', +x.dataset.lado === el.lado));
+    avisoLado.textContent = p.especial ? ''
+      : (f.lado ? 'Pensada para ' + f.lado + '×' + f.lado + (max > (f.lado || 0)
+          ? '; hasta ' + max + '×' + max + ' el relieve puede quedar distinto.'
+          : '. Más grande no le cabe al navegador.')
+        : 'En otro tamaño el relieve puede quedar distinto.');
+  }
+  pintaAviso();
+
+  // ── Ambiente (uno) y efectos (los que quiera) ─────────────────────────────────────────────────
+  const amb = $$('#a-amb'), efe = $$('#a-efe');
+  CAT.ambientes.forEach(a => {
+    const b = document.createElement('button');
+    b.textContent = a.rotulo;
+    b.className = a.id === el.ambiente ? 'on' : '';
+    b.addEventListener('click', () => {
+      el.ambiente = a.id;
+      amb.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+    });
+    amb.appendChild(b);
+  });
+  CAT.efectos.forEach(f => {
+    const b = document.createElement('button');
+    b.textContent = f.rotulo;
+    b.addEventListener('click', () => {
+      if (el.efectos.has(f.id)) el.efectos.delete(f.id); else el.efectos.add(f.id);
+      b.classList.toggle('on', el.efectos.has(f.id));
+    });
+    efe.appendChild(b);
+  });
+
+  // ── Crear ─────────────────────────────────────────────────────────────────────────────────────
+  //
+  // El botón nace APAGADO y se enciende con el nombre: sin nombre no hay mundo, y un botón que se
+  // deja pulsar para contestar «ponle un nombre» es una trampa. El aviso se queda igualmente para
+  // quien llegue con Enter desde el campo vacío.
+  const revisaNombre = () => {
+    boton.disabled = !nom.value.trim();
+    boton.title = boton.disabled ? 'Escribe un nombre para tu mundo' : '';
+  };
+  nom.addEventListener('input', revisaNombre);
+  nom.addEventListener('keydown', e => { if (e.key === 'Enter') boton.click(); });
+  revisaNombre();
+  nom.focus();
+  boton.addEventListener('click', async () => {
+    const nombre = nom.value.trim();
+    if (!nombre) { err.textContent = 'Ponle un nombre a tu mundo.'; nom.focus(); return; }
+    // El rótulo se cambia con una clase, NO con `textContent`: los dos textos han de seguir dentro
+    // del botón para que su caja no cambie de ancho y el pie no dé el salto (ver `.crear` en el CSS).
+    boton.disabled = true; boton.classList.add('trabajando'); err.textContent = '';
+    try {
+      const r = await fetch('/api/mundos/crear', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombre, lado: el.lado, plantilla: el.plantilla,
+          ambiente: el.ambiente, efectos: [...el.efectos]
+        })
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || ('error ' + r.status));
+      // Y a construirlo: el mapa ya existe, pero está marcado `generado:false` y quien lo levanta es
+      // `generador-mundo` desde el autoarranque, ya dentro de la página del propio mundo.
+      // ⚠️ El campo es `ruta` (así lo devuelve `/api/mundos/crear`, como el resto de este fichero) y
+      // el nombre puede NO ser el tecleado: si «castillo» estaba cogido, el servidor da «castillo-2».
+      location.href = j.ruta || ('/map/' + j.meta.slug);
+    } catch (e) {
+      err.textContent = String(e.message || e);
+      boton.classList.remove('trabajando'); revisaNombre();
+    }
+  });
+}
+document.getElementById('btn-nuevo').addEventListener('click', abreAsistente);
+
+// `/map?nuevo=1` = «vengo de "Crear un mundo" del menú, ábreme el asistente ya». La portada no crea
+// mundos, solo trae aquí (`web/menu.html`).
+// ⚠️ El parámetro se BORRA de la barra nada más usarlo, con `replaceState`: si se quedara, volver
+// atrás desde el mundo recién creado —o recargar tras cancelar— reabriría el asistente encima del
+// listado, que es justo lo que el usuario acaba de cerrar. Se usa una vez y desaparece.
+if (new URLSearchParams(location.search).get('nuevo') === '1') {
+  history.replaceState(null, '', location.pathname + location.hash);
+  abreAsistente();
 }
 </script>
