@@ -73,7 +73,9 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
   test('§1 la pausa trae las cinco entradas del menú', () => {
     // La quinta cambia de rótulo según haya editor detrás o no (§8): lo que no puede faltar es la
     // entrada, no una palabra concreta.
-    const esperadas = ['CONTINUAR', 'INVITAR', 'AJUSTES', 'MIS MUNDOS'];
+    // ⚠️ MULTIJUGADOR estaba aquí como INVITAR hasta REQ-MULTI3. Ahora INVITAR cuelga de él y no de
+    // la raíz, que es lo que pidió el dueño; lo comprueba el §9.
+    const esperadas = ['CONTINUAR', 'MULTIJUGADOR', 'AJUSTES', 'MIS MUNDOS'];
     for (const e of esperadas) assert(tras.botones.includes(e), 'falta «' + e + '» (hay: ' + tras.botones.join(', ') + ')');
     assert(tras.botones.includes('SALIR') || tras.botones.includes('IR AL EDITOR'),
            'falta la salida (hay: ' + tras.botones.join(', ') + ')');
@@ -206,6 +208,143 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
   test('§4 el 403 no se confunde con el 401: no es tu mapa', () => {
     assert(/no es tuyo|no es tuy/.test(con403.texto), 'el 403 no explica que el mapa es de otro: ' + con403.texto);
     assert(!/[Ee]ntra con tu cuenta/.test(con403.texto), 'el 403 manda a entrar, que no arregla nada');
+  });
+
+  // ── §9 · MULTIJUGADOR: encender es de todos, e invitar mete a LOS DOS (REQ-MULTI3) ───────────────
+  //
+  // Las tres cosas que pidió el dueño (2026-09-03), y por qué cada una necesita su comprobación:
+  //
+  //   a) INVITAR deja de colgar de la raíz y pasa a estar dentro de MULTIJUGADOR, junto al
+  //      interruptor. Eso ya lo mira el §1 por arriba; aquí se mira por dentro.
+  //   b) un jugador normal PUEDE encender. Lo que se lo impedía no era un permiso —`jugador` ya trae
+  //      `multi.entrar`— sino que `entra()` pregunta el SECRETO del árbitro cuando no hay vale
+  //      (multi-verse:2010), y el secreto es del dueño. Encender ahora es pedirse un vale del mapa
+  //      propio, así que lo que hay que vigilar es que el vale ACABE DONDE `multi-verse` LO BUSCA.
+  //   c) al invitar entran los dos. Antes el invitado sí (lo arranca `invitacion-multi` con el
+  //      `?invita=`) y el anfitrión no: mandaba gente a una fiesta a la que él no iba.
+  //
+  // ⛔ NO se abre un socket de verdad: se sustituye `game.snippet` y `game.menu.enciende` por sondas.
+  // Lo que aquí se prueba es que el MENÚ hace su parte. Que el árbitro acepte un vale ya lo prueba
+  // `multi/probe_vale_invitacion.py`, que además levanta su propio árbitro en el 8512 para no echar
+  // a quien esté jugando en el 8510.
+  invita = { status: 200, body: JSON.stringify({ ok: true, vale: 'test.uid.999.FIRMA', enlace: 'http://prueba/map/test?invita=VALE', escritura: 'todos' }) };
+  await p.evaluate(() => game.osd.pulsar('pausa:volver'));
+  await p.waitForTimeout(150);
+  await p.evaluate(() => game.osd.pulsar('pausa:multi'));
+  await p.waitForTimeout(250);
+  const multi = await p.evaluate(() => ({
+    titulo: document.querySelector('#mc-osd .mc-osd-title').textContent.trim(),
+    texto: document.querySelector('#mc-osd .mc-osd-panel').textContent,
+    botones: [...document.querySelectorAll('#mc-osd .mc-osd-btn')].map(x => x.textContent.trim())
+  }));
+  test('§9 MULTIJUGADOR trae el interruptor y el INVITAR dentro', () => {
+    assert(multi.titulo === 'MULTIJUGADOR', 'no se abrió la pantalla (título: ' + multi.titulo + ')');
+    assert(multi.botones.some(t => /ACTIVAR MULTIJUGADOR/.test(t)),
+      'falta el activar/desactivar: ' + multi.botones.join(', '));
+    assert(multi.botones.includes('INVITAR'), 'INVITAR no está dentro: ' + multi.botones.join(', '));
+    assert(multi.botones.includes('VOLVER'), 'no hay vuelta: ' + multi.botones.join(', '));
+  });
+  test('§9 el rótulo dice lo que VA A PASAR y la nota dice cómo estoy', () => {
+    // Un botón que ponga «MULTIJUGADOR: ON» obliga a adivinar si eso es el estado o la acción.
+    assert(!multi.botones.some(t => /MULTIJUGADOR: (ON|OFF)/.test(t)),
+      'el botón enseña estado en vez de acción: ' + multi.botones.join(', '));
+    assert(/a solas/.test(multi.texto), 'la nota no dice que estoy solo: ' + multi.texto);
+  });
+
+  // ⛔ «activo» NO es «conectado»: `entra()` sube la bandera ANTES de que exista el socket y `onclose`
+  // la baja después si el árbitro rechaza el apretón (multi-verse:1923) — que es exactamente lo que
+  // hace hoy un árbitro sin `VOXELFORGE_SECRETO_SESION`. Si la nota mira sólo `activo`, la pantalla
+  // dice «Dentro» de una conexión que va a fracasar, y el jugador construye creyendo que le ven.
+  const notas = await p.evaluate(() => {
+    const antes = window.game.multi;
+    const finge = (e) => { window.game.multi = { estado: () => e }; return game.menu.notaMulti(); };
+    const r = {
+      conectando: finge({ activo: true, socket: 'conectando', otrosAhora: 0 }),
+      sinSocket: finge({ activo: true, socket: 'sin socket', otrosAhora: 0 }),
+      caido: finge({ activo: true, socket: 'cerrado', otrosAhora: 0 }),
+      dentro: finge({ activo: true, socket: 'abierto', otrosAhora: 2 }),
+      fuera: finge({ activo: false, socket: 'sin socket', otrosAhora: 0 })
+    };
+    window.game.multi = antes;
+    return r;
+  });
+  test('§9 la nota NO canta «Dentro» hasta que el socket lo está', () => {
+    assert(/Conectando/.test(notas.conectando), 'con el socket a medias dice: ' + notas.conectando);
+    assert(/Conectando/.test(notas.sinSocket), 'sin socket todavía dice: ' + notas.sinSocket);
+    assert(/cortado/.test(notas.caido), 'con el socket caído dice: ' + notas.caido);
+    assert(/Dentro/.test(notas.dentro) && /2/.test(notas.dentro),
+      'con el socket abierto y dos vecinos dice: ' + notas.dentro);
+    assert(/a solas/.test(notas.fuera), 'apagado dice: ' + notas.fuera);
+  });
+
+  // Y el repintado tardío: `game.osd.abierta` vale «pausa» para TODAS las pantallas de este menú, así
+  // que no sirve para decidir si repintar. Sin mirar el título, la vuelta de encender pisa el enlace
+  // de INVITAR justo cuando lo estás copiando.
+  const pisada = await p.evaluate(async () => {
+    game.osd.html(game.menu.panelInvita('http://prueba/map/test?invita=VALE', 'todos'));
+    const titulo = document.querySelector('#mc-osd .mc-osd-title').textContent.trim();
+    game.osd.html(game.menu.panelMulti());   // como si el repintado llegase tarde…
+    const tapado = document.querySelector('#mc-osd .mc-osd-title').textContent.trim();
+    game.osd.html(game.menu.panelInvita('http://prueba/map/test?invita=VALE', 'todos'));
+    return { titulo, tapado, enInvitar: game.menu.enPantalla('INVITAR'), enMulti: game.menu.enPantalla('MULTIJUGADOR'), abierta: game.osd.abierta };
+  });
+  test('§9 el menú sabe QUÉ pantalla se ve, no sólo que hay una', () => {
+    assert(pisada.abierta === 'pausa', 'la pantalla dejó de ser «pausa» (' + pisada.abierta + ')');
+    assert(pisada.titulo === 'INVITAR' && pisada.tapado === 'MULTIJUGADOR',
+      'las dos pantallas no se distinguen por el título: ' + pisada.titulo + ' / ' + pisada.tapado);
+    assert(pisada.enInvitar === true, 'estando en INVITAR dice que no');
+    assert(pisada.enMulti === false, 'estando en INVITAR dice que está en MULTIJUGADOR');
+  });
+
+  const enciende = await p.evaluate(async () => {
+    const orig = game.snippet; let pedido = null;
+    game.snippet = function (id) { pedido = id; return Promise.resolve('sonda'); };
+    let err = null;
+    try { await game.menu.enciende(); } catch (e) { err = e.message; }
+    game.snippet = orig;
+    return { pedido, err, vale: sessionStorage.getItem('vf_multi_vale:' + game.menu.mapa()) };
+  });
+  test('§9 (b) encender pide el vale y arranca el cliente', () => {
+    assert(enciende.err === null, 'encender se quejó: ' + enciende.err);
+    assert(enciende.pedido === 'multi-verse', 'no cargó multi-verse (cargó: ' + enciende.pedido + ')');
+  });
+  // ⛔ ESTE es el que de verdad sostiene lo demás: `menu-juego` guarda el vale y `multi-verse` lo
+  // lee, y son dos ficheros distintos. El día que uno cambie la llave, encender dejará de funcionar
+  // SIN QUE NADA FALLE: `entra()` no vería vale, preguntaría el secreto, y volveríamos al principio.
+  const llaveMV = await p.evaluate(async () => {
+    const d = await (await fetch('/api/snippets/multi-verse')).json();
+    const m = /const LLAVE_VALE = '([^']+)'/.exec(d.code || '');
+    return m ? m[1] : null;
+  });
+  test('§9 (b) el vale queda EXACTAMENTE donde multi-verse lo busca', () => {
+    assert(llaveMV, 'no encuentro `LLAVE_VALE` en multi-verse: ¿se ha renombrado?');
+    assert(enciende.vale === 'test.uid.999.FIRMA',
+      'el vale no se guardó en «' + llaveMV + '<mapa>» (hay: ' + enciende.vale + ')');
+  });
+
+  const invitados = await p.evaluate(async () => {
+    sessionStorage.removeItem('vf_multi_vale:' + game.menu.mapa());
+    const orig = game.menu.enciende; let llamado = 0;
+    game.menu.enciende = function () { llamado++; return Promise.resolve('sonda'); };
+    await game.menu.invitar();
+    await new Promise(r => setTimeout(r, 200));
+    const c = document.querySelector('#mc-osd .mc-osd-panel');
+    const i = c.querySelector('input');
+    game.menu.enciende = orig;
+    return { llamado, enlace: i ? i.value : null };
+  });
+  test('§9 (c) INVITAR sigue enseñando el enlace Y mete también al anfitrión', () => {
+    assert(invitados.enlace === 'http://prueba/map/test?invita=VALE',
+      'se ha perdido el enlace por el camino: ' + invitados.enlace);
+    assert(invitados.llamado === 1,
+      'el anfitrión se queda fuera de su propia invitación (llamadas a enciende: ' + invitados.llamado + ')');
+  });
+
+  await p.evaluate(() => game.osd.pulsar('pausa:volver-multi'));
+  await p.waitForTimeout(200);
+  const vuelta9 = await p.evaluate(() => document.querySelector('#mc-osd .mc-osd-title').textContent.trim());
+  test('§9 el VOLVER de INVITAR vuelve a MULTIJUGADOR, no a la raíz', () => {
+    assert(vuelta9 === 'MULTIJUGADOR', 'volvió a «' + vuelta9 + '»: se pierde el sitio donde estaba');
   });
 
   // ── §5 · CONTINUAR cierra el menú y devuelve la partida ─────────────────────────────────────────

@@ -10,7 +10,8 @@
     "type": "herramienta",
     "role": "Herramienta · mano para mover/arrastrar (hand tool)",
     "icon": "✋",
-    "description": "Mano humana abierta vertical en matriz 16³."
+    "description": "",
+    "alias": "mano"
   },
   "voxels": {
     "6,1,7": "#d4a279",

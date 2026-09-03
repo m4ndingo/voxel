@@ -1518,7 +1518,9 @@
     "file": "assets/mano-de-desplazamiento.vox.json",
     "savedAt": "2026-08-23T12:06:16",
     "createdAt": "2026-08-18T00:16:35",
-    "count": 87
+    "count": 87,
+    "description": "",
+    "alias": "mano"
   },
   {
     "id": "calamar",

@@ -474,6 +474,56 @@ expone `game.menu.on()/off()/abrir()/estado()`. **Cero líneas de `app.js`.**
   solo existe en contexto seguro y esto arranca en LAN por `http://` (`docs/servidor-y-apis.md:103`).
   El 401 («entra con tu cuenta») y el 403 («este mapa no es tuyo») dicen cosas distintas a propósito:
   uno se arregla entrando y el otro no se arregla.
+
+### MULTIJUGADOR, la pantalla de dentro (REQ-MULTI3, `menu-juego` v1.3)
+
+INVITAR ya no cuelga de la raíz: la pausa lleva a **MULTIJUGADOR**, y ahí dentro están el interruptor
+(`ACTIVAR`/`DESACTIVAR MULTIJUGADOR`) y el INVITAR de siempre. Tres cosas que cuestan caro:
+
+- **Encender NO pide el secreto del árbitro.** `game.multi.entra()` a pelo exige una clave de servidor
+  que un jugador no tiene, y por eso el modo era de hecho solo del dueño. El menú se firma antes un
+  **vale de su propio mapa** con `POST /api/invitaciones` —que el servidor solo concede donde ya
+  puedes escribir— y lo deja en `sessionStorage` bajo `vf_multi_vale:<mapa>`.
+  ⛔ **Esa llave es LA MISMA que `multi-verse` (`LLAVE_VALE`, línea 61)**: si una de las dos cambia
+  sola, encender deja de funcionar sin que nada falle. Lo vigila `test_menu_juego.js` §9.
+- **INVITAR mete a LOS DOS.** Antes el anfitrión repartía enlaces a una fiesta a la que él no entraba
+  (solo arrancaba el cliente quien llegaba con `?invita=`). El mismo vale que firma el enlace le entra
+  a él también.
+- ⛔ **`estado().activo` NO es «conectado»**: `entra()` sube la bandera **antes** de que exista el
+  socket y `onclose` la baja después si el árbitro rechaza el apretón (`multi-verse:1923`). La nota
+  mira `estado().socket` («conectando» / «abierto» / «cerrado»); decir «Dentro» de una conexión que
+  todavía vuela es prometer algo que puede no pasar.
+- **`game.osd.abierta` vale `'pausa'` para TODAS estas pantallas** ⇒ no sirve para decidir un
+  repintado tardío. Se mira el título con `M.enPantalla('INVITAR')`, o la vuelta de encender borra el
+  enlace justo cuando lo estás copiando.
+
+### ⛔ El árbitro tiene que compartir `VOXELFORGE_SECRETO_SESION` con `server.py`
+
+El vale es un HMAC y **lo verifican los dos extremos con el mismo secreto** (`servidor/vales.py:13`).
+Si el árbitro arranca **sin** esa variable, `sesion._firma` le inventa un secreto volátil por proceso
+(`servidor/sesion.py:170`) y entonces **ningún vale legítimo verifica**: el 8510 contesta 401 y el
+navegador enseña *«el servidor no me deja entrar (¿secreto? ¿tope de jugadores?)»*, que suena a culpa
+del jugador y no lo es. En el log del árbitro se ve como `secreto malo`.
+
+Pasó de verdad el 2026-09-03: el 8510 llevaba desde el 2026-08-28 arrancado a mano con
+`--secreto probando` y sin fichero de entorno, o sea de antes de que existieran los vales (F6.2).
+`test2` hacía su parte bien —*«no ha fijado ningún secreto porque no puede»*, y así debe ser— y aun
+así no entraba.
+
+```bash
+# el árbitro, con el MISMO secreto que el sitio:
+set -a && . /root/voxelforge.env && set +a
+python3 multi/servidor_multi.py -v --secreto probando       # `--secreto` sigue valiendo para desarrollo
+```
+
+⚠️ **Arrancado a mano no sobrevive a un reinicio de la máquina.** Lo definitivo es la unidad
+[`despliegue/voxelforge-multi.service`](../despliegue/voxelforge-multi.service), que ya trae el
+`EnvironmentFile=/etc/voxelforge.env` **compartido con el sitio a propósito** — y lo dice ahí: dos
+ficheros de entorno y el día que se rote uno, los vales dejan de valer sin que nada lo avise.
+
+Para comprobarlo sin navegador, un apretón crudo contra el 8510 con un vale recién firmado
+(⛔ el token es `vale-` **fuera** del base64: `'vale-' + base64url(vale)`, `servidor_multi.py:181`;
+al revés da 401 y parece el mismo fallo). → [`docs/cuentas-y-permisos.md`](cuentas-y-permisos.md).
 - ⚠️ **`game.volar` es una FUNCIÓN-VALOR** (`app.js:23139`): `game.volar ? 'ON' : 'OFF'` da **siempre**
   ON —un objeto siempre es cierto— y `game.volar(!game.volar)` **apaga siempre**, porque `!<función>`
   es `false`. Se lee coaccionando (`!!+game.volar`) y se conmuta llamándola **sin argumentos**.

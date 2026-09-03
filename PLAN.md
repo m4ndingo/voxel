@@ -45,6 +45,7 @@ Al cerrar uno: `⬜ todo` → `✅ done (fecha)` y **su fila y su sección se va
 | [REQ-MUNDOS1](#-req-mundos1) | en `/map` **no se ve de quién es cada mapa ni qué permisos tiene**, y no se puede **borrar** ninguno | 🔴 abierto 2026-09-02 | **la API ya lo da todo**: `/api/mundos` devuelve `dueno`/`visibilidad`/`escritura` (server.py) y `DELETE /api/mundos/<slug>` existe con sus permisos (F3.3). Lo que falta es **sólo `web/mapas.html`** — pintarlo y poner el Borrar en el menú del botón derecho |
 | [REQ-ASSET1](#-req-asset1) | un usuario recién creado ve en las ranuras los assets **`hab:` del dueño**; debería ver los suyos y los del mundo | 🟢 hecho 2026-09-03, falta que el dueño lo mire | **fases 1 y 2 cerradas**: el documento nace con `autor` dentro (`servidor/autoria.py`) y `GET /api/habitantes` devuelve **lo mío + lo del mundo**. Los 26 heredados: 17 marcados «del mundo» por `herramientas/adopta_habitantes.py` (los que están estampados en mundos/snippets) y 9 privados del dueño. Guardián `tests/test_autoria_habitantes.js`. **Fase 3** (enviar/pedir, mensajería) sigue sin diseñar |
 | [REQ-MULTI2](#-req-multi2) | **invitar debería encender solo el modo colaborativo** en ese mapa, para el que invita y para el invitado | 🔴 abierto 2026-09-02 | hoy multi **sólo arranca si alguien carga el snippet `multi-verse` a mano**: crear un mundo e invitar no lo enciende. El vale de invitación ya existe (F5.6) — falta que **invitar marque el mapa** y que el arranque del mapa lo lea. Continúa [REQ-MULTI1](#-req-multi1) |
+| [REQ-MULTI3](#-req-multi3) | el menú de pausa gana **MULTIJUGADOR** (activar/desactivar + INVITAR dentro), un **jugador normal** puede encenderlo, y al invitar quedan dentro **los dos** | 🟢 hecho 2026-09-03, falta que el dueño lo mire | no faltaba permiso (`jugador` ya trae `multi.entrar`/`multi.invitar`): faltaba **credencial**. `entra()` pedía el **secreto del árbitro**, que es del servidor entero y no de un jugador; ahora el menú se firma un **vale de su propio mapa** con `POST /api/invitaciones` y `entra()` no pregunta nada. **0 líneas de `app.js` y 0 de `multi-verse`**: todo en `menu-juego` v1.3. Segundo fallo, este de despliegue: el árbitro del 8510 llevaba desde el 2026-08-28 arrancado a mano **sin `VOXELFORGE_SECRETO_SESION`** ⇒ se inventaba un secreto volátil y **no verificaba ningún vale** (401, «secreto malo»). Reiniciado con el secreto del sitio; ⚠️ a mano, **no sobrevive a un reinicio de la máquina** |
 | [REQ-EXTRU6](#-req-extru6) | Ctrl/Shift+rueda **machaca los bloques del otro lado** en vez de empujarlos | 🔴 abierto 2026-09-02 | ⚠️ **la guarda de «no pisar» está COMENTADA en `mcSelExtruir`** (`web/app.js:17408`), así que hoy pisa a propósito. Ojo al invariante del dueño ya escrito ahí: *«un wup seguido de un wdown debería dejar los bloques iguales»* — empujar y luego cavar **no** los devuelve. **Por parcheo en caliente** (orden del dueño) |
 | [REQ-PLANT1](#-req-plant1) | crear un mapa **siempre empieza vacío**: falta un carrusel de **fichas con foto** (biomas ya hechos, «solo terreno base», «mapa vacío») y ajustes previos de tamaño y ambiente | 🔴 abierto 2026-09-02 | **los generadores ya existen y ya se autoejecutan** (`construye-badlands`, `-oceanos-y-playas`, `-monta-as`, `-fortnite-chapter-2-island`, `-fornite-tilted-towers`) y **ya aceptan `options` con `mapWidth/mapHeight/mapDepth`** ⇒ el «personalizar antes de generar» es exponer lo que ya hay. `POST /api/mundos/crear` **ignora la plantilla** y escribe `DEFAULT_WORLD` a secas (server.py:2037). ⚠️ **la cuota se cobra por 96³ y el generador redimensiona a 128³ o 512³** |
 | [REQ-PLANT2](#-req-plant2) | **gestionar las fichas** del carrusel: asociar la foto, cambiar los metadatos y tener las imágenes en una **zona segura** | 🟢 hecho 2026-09-02, a falta de que el dueño lo mire | pestaña **Plantillas** en `web/panel.html` + `game.fichas.retrato()` para sacar la foto **desde dentro del juego**. La foto se resuelve **contra el disco**: si desaparece, la tarjeta vuelve a su marcador y no se rompe nada. Continúa [REQ-PLANT1](#-req-plant1) |
@@ -1081,6 +1082,57 @@ esté jugando. Siempre `--puerto 8512 --datos /tmp/multi-datos-8512` con `VOXEL_
 y de uno en uno.
 
 Contexto y palabras completas → `data/tickets/REQ-MULTI2/contexto.md`.
+
+---
+
+<a id="-req-multi3"></a>
+
+### REQ-MULTI3 · MULTIJUGADOR en la pausa, y encenderlo deja de ser cosa del dueño — 🟢 hecho 2026-09-03, falta que el dueño lo mire
+
+Pedido por el dueño el 2026-09-03, tres cosas en una frase:
+
+> el menu de usuario cuando da ESC en lugar de tener directamente invitar tendria que tener una
+> opcion de multiplayer, dentro «activar/desactivar multiplayer» y la opcion de invitar ahi dentro
+> tambien; la cosa es que tiene que a) el jugador por defecto no puede activar el modo multiplayer
+> actualmente y deberia poder, y luego que si invita a otro jugador a su mapa, el otro jugador sí
+> entra en modo multiplayer pero el que esta en el mapa que envio la invitación no
+
+**(b) no era un problema de permisos, y ahí estaba la trampa.** El perfil `jugador` **ya** trae
+`multi.entrar` y `multi.invitar` (`servidor/sesion.py:101`). Lo que pedía `entra()` era el **secreto
+de la partida** (`multi-verse:2004`), que es la credencial de quien **arranca el árbitro** — una
+llave del servidor entero, no de un mapa. Un jugador no la tiene y **no debe tenerla**, así que
+«activar multijugador» era, para todo el que no fuera el dueño, un diálogo sin respuesta posible.
+
+**El arreglo**: encender = **pedirse un vale del mapa en el que ya puedes escribir**. `POST
+/api/invitaciones` lo firma el servidor (`server.py:2189`) y **solo** si tienes escritura ahí
+(`server.py:2205`) — que es exactamente la condición que se quería. El vale se deja donde
+`multi-verse` lo busca (`sessionStorage vf_multi_vale:<slug>`) y `entra()` ya no pregunta nada.
+
+**(c)**: `invitacion-multi` arranca el cliente a quien llega con `?invita=` — el **invitado**. El
+anfitrión no llegaba por ningún sitio: repartía enlaces a una fiesta a la que él no entraba. Ahora el
+**mismo** vale que firma el enlace le mete a él también, en una sola petición.
+
+⛔ **Cero líneas de `app.js` y cero de `multi-verse`**: esto es un menú (`menu-juego` v1.3, por
+`herramientas/parche_snp_menu_multijugador.py`). Lo único que se toma prestado es **dónde** se guarda
+el vale, anotado en los dos sitios y vigilado por `tests/test_menu_juego.js` §9.
+
+**Y un segundo fallo, este de despliegue, que salió al probarlo con `test2`.** Con el menú ya bien,
+seguía sin entrar: *«el servidor no me deja entrar (¿secreto? ¿tope de jugadores?)»*. No era el menú
+ni la cuenta — el dueño lo dijo exacto: *«test2 no ha fijado ningún secreto porque no puede, no tiene
+esa capacidad»*. El árbitro del 8510 llevaba desde el **2026-08-28** arrancado a mano con
+`--secreto probando` y **sin `VOXELFORGE_SECRETO_SESION`**, o sea de antes de que existieran los
+vales (F6.2): sin esa variable `sesion._firma` se inventa un secreto volátil por proceso, así que
+**ningún vale legítimo verificaba** y el 8510 devolvía 401 a todos (`multi/servidor.log`: «secreto
+malo»). Reiniciado con el secreto del sitio, sin nadie conectado. Comprobado contra el 8510 **vivo**
+con un vale firmado por el 8500 vivo: `masplaya`/`test2` → `101 Switching Protocols`, y una firma
+inventada sigue dando 401.
+
+⚠️ **Ese arranque es a mano y no sobrevive a un reinicio de la máquina.** Lo definitivo es
+[`despliegue/voxelforge-multi.service`](despliegue/voxelforge-multi.service), que ya comparte el
+fichero de entorno con el sitio. Detalle → [`docs/osd-e-intro.md`](docs/osd-e-intro.md).
+
+Continúa [REQ-MULTI1](#-req-multi1); no cierra [REQ-MULTI2](#-req-multi2), que es el encendido
+**automático** por metadatos del mapa.
 
 ---
 
