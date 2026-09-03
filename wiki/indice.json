@@ -25,6 +25,12 @@
       ]
     },
     {
+      "titulo": "Bloques con comportamiento",
+      "paginas": [
+        { "id": "bloques", "titulo": "Qué puede hacer un material" }
+      ]
+    },
+    {
       "titulo": "Partículas y efectos",
       "paginas": [
         { "id": "particulas", "titulo": "El motor de partículas" }

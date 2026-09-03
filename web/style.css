@@ -54,7 +54,21 @@
 html:not([data-puede~="snippet.editar_sistema"]) [data-solo-si="snippet.editar_sistema"],
 html:not([data-puede~="agente.editar"])          [data-solo-si="agente.editar"],
 html:not([data-puede~="asset.subir"])            [data-solo-si="asset.subir"],
-html:not([data-puede~="asset.borrar"])           [data-solo-si="asset.borrar"]{display:none !important}
+html:not([data-puede~="asset.borrar"])           [data-solo-si="asset.borrar"],
+html:not([data-puede~="panel.usar"])             [data-solo-si="panel.usar"],
+html:not([data-puede~="mundo.crear"])            [data-solo-si="mundo.crear"],
+html:not([data-puede~="multi.invitar"])          [data-solo-si="multi.invitar"]{display:none !important}
+/* `data-solo-sesion` NO es un permiso: es «¿hay algo de lo que salir?» — cuenta de verdad o modo
+   diseño. Por eso va aparte y mira `data-sesion`, no `data-puede`. */
+html:not([data-sesion="si"]) [data-solo-sesion]{display:none !important}
+/* Y `data-solo-si-alguno` = «basta con UNO de estos». Lo llevan los títulos y separadores de grupo
+   del menú «⋯», para que un grupo entero escondido no deje su rótulo flotando. Se encadenan los
+   `:not()` sobre el <html>, que es lo mismo que un OR sobre los permisos, y por eso también hace
+   falta UNA REGLA POR GRUPO: añadir un grupo nuevo es añadir su línea aquí. */
+html:not([data-puede~="snippet.editar_sistema"]):not([data-puede~="agente.editar"])
+     [data-solo-si-alguno="snippet.editar_sistema agente.editar"],
+html:not([data-puede~="panel.usar"]):not([data-puede~="asset.subir"])
+     [data-solo-si-alguno="panel.usar asset.subir"]{display:none !important}
 /* Las tarjetas de la galería las pinta `renderHabGrid` en cada apertura, así que no se les puede
    poner el atributo a mano en el HTML: se marcan por lo que ya llevan. Renombrar un asset es un
    PATCH y borrarlo un DELETE, y los dos son del dueño. */
@@ -117,6 +131,10 @@ body.app-tapada > *{visibility:hidden}
   display:flex; flex-direction:column; padding:6px;
   background:var(--panel); border:1px solid var(--line); border-radius:10px;
   box-shadow:0 12px 32px rgba(0,0,0,.5);
+  /* El menú crece con las opciones y la pantalla no: sin tope, las últimas caían por debajo del
+     borde y no había forma de llegar a ellas. `overscroll-behavior` evita que al llegar al final
+     la rueda siga bajando la página de debajo. Los 56px son la cabecera, que ya se ha gastado. */
+  max-height:calc(100vh - 56px); overflow-y:auto; overscroll-behavior:contain;
 }
 .menu[hidden]{display:none}
 .menu-item{
@@ -133,6 +151,35 @@ a.menu-item{text-decoration:none}
 .menu-item:hover{background:var(--panel-2); color:#fff}
 .menu-item small{color:var(--muted); font-size:11px; white-space:nowrap}
 .menu-sep{height:1px; margin:6px 4px; background:var(--line)}
+/* Rótulo de grupo. Es un <div> y NO un `.menu-item` a propósito: el enrutador de app.js hace
+   `closest('.menu-item')`, así que un rótulo con esa clase se tragaría el clic y cerraría el menú
+   sin ir a ninguna parte. Sin ella, pinchar el rótulo no hace nada, que es lo que debe hacer. */
+.menu-titulo{
+  padding:7px 12px 4px; font-size:10px; font-weight:700;
+  letter-spacing:1.3px; text-transform:uppercase; color:var(--muted);
+}
+/* REQ-NAV2 · Submenús plegables del «⋯». El disparador NO es `.menu-item` por la misma razón que el
+   rótulo de aquí arriba: `closest('.menu-item')` cerraría el menú entero al desplegar un grupo. */
+.menu-sub{
+  background:transparent; border:0; color:var(--ink); text-align:left; width:100%;
+  padding:9px 12px; border-radius:7px; cursor:pointer; font-size:13px;
+  display:flex; align-items:baseline; gap:10px;
+}
+.menu-sub:hover{background:var(--panel-2); color:#fff}
+.menu-sub small{color:var(--muted); font-size:11px; white-space:nowrap; margin-left:auto}
+/* La flecha la pone el CSS desde `aria-expanded` y no un carácter en el HTML: así el estado abierto
+   solo se escribe en un sitio, y es el que además lee el lector de pantalla. */
+.menu-sub::after{content:"▸"; color:var(--muted); font-size:11px; transition:transform .12s}
+.menu-sub[aria-expanded="true"]{color:var(--accent)}
+.menu-sub[aria-expanded="true"]::after{transform:rotate(90deg); color:var(--accent)}
+.menu-cuerpo{display:flex; flex-direction:column}
+.menu-cuerpo[hidden]{display:none}
+/* Sangría y guía vertical: desplegado hay que poder ver de un vistazo dónde acaba el grupo, que es
+   justo lo que no se veía con 17 filas seguidas. */
+.menu-cuerpo .menu-item{
+  margin-left:10px; padding-left:14px;
+  border-left:1px solid var(--line); border-radius:0 7px 7px 0;
+}
 
 .btn{
   background:var(--panel-2); color:var(--ink);

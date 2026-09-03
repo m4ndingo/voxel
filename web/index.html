@@ -11,6 +11,9 @@
   <!-- Los iconos horneados en /images (marca y herramientas). `defer` y sin bloquear nada: si no hay
        ninguno publicado, los botones se quedan con su emoji y aquí no ha pasado nada. -->
   <script defer src="/iconos.js"></script>
+  <!-- La chapa de identidad, abajo la izquierda. ⚠️ Este mismo fichero lo sirve `/map/<slug>`, que es
+       el JUEGO y ahí no va chapa: quien se calla es `quien.js` mirando la ruta, no esta línea. -->
+  <script defer src="/quien.js"></script>
   <!-- F4.3 · QUIÉN ERES, y solo para saber QUÉ ENSEÑAR. Deja en `<html data-puede="…">` la lista de
        permisos que devuelve `GET /api/yo`; quien esconde es `style.css` con `[data-solo-si=…]`.
        ⚠️ Esto no da permiso, lo pinta: lo que se destape aquí sigue contestando 403 en `server.py`.
@@ -23,6 +26,11 @@
     window.vfYo = fetch('/api/yo', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
+        // ¿Hay algo de lo que salir? Cuenta de verdad (`yo.uid`) o modo diseño (`dueno`, que es la
+        // galleta `vf_disena`). Sin esto, «Salir» se le ofrecía también a un anónimo, y a ese
+        // `/api/salir` no le quita nada: un botón que solo sabe no hacer nada.
+        document.documentElement.dataset.sesion =
+          (d && ((d.yo && d.yo.uid) || d.dueno)) ? 'si' : 'no';
         var p = d && ((d.yo && d.yo.permisos) || d.permisos);
         if (!p) return null;              // no se sabe quién eres ⇒ sin atributo, y el CSS lo deja escondido
         document.documentElement.dataset.puede = p.join(' ');
@@ -72,16 +80,52 @@
            poniendo `data-puede` en el <html> con lo que devuelve `GET /api/yo`. Nace escondido a
            propósito: al revés habría medio segundo con Alt+C a la vista. Y esconder no es prohibir
            — `POST /api/snippets` contesta 403 igual (F1). -->
+      <!-- `data-solo-si-alguno` = «esto se enseña si tienes CUALQUIERA de estos permisos». Lo llevan
+           los TÍTULOS y los SEPARADORES, nunca las entradas: sin él, a quien no tuviera NINGUNO de
+           los permisos del grupo le quedaba el rótulo flotando sobre un hueco. Su regla también vive
+           en `web/style.css`, y también es UNA POR GRUPO — CSS no sabe cruzar dos atributos. -->
+      <div class="menu-titulo" data-solo-si-alguno="snippet.editar_sistema agente.editar">Diseño</div>
       <button class="menu-item" data-solo-si="snippet.editar_sistema" data-tab="codigo">🧩 Código<small>Alt+C</small></button>
       <button class="menu-item" data-solo-si="agente.editar" data-tab="agentes">🦴 Agentes<small>Alt+A</small></button>
-      <div class="menu-sep"></div>
-      <button class="menu-item" id="btn-nuevo">Nuevo<small>vaciar el lienzo</small></button>
-      <button class="menu-item" id="btn-guardar">Guardar<small>en el servidor</small></button>
-      <button class="menu-item" id="btn-guardar-como">Guardar como…<small>un habitante nuevo</small></button>
-      <button class="menu-item" id="btn-exportar">Exportar<small>descargar .vox.json</small></button>
-      <label class="menu-item">Importar<small>cargar .vox.json</small>
-        <input type="file" id="file-importar" accept="application/json" hidden />
-      </label>
+      <div class="menu-sep" data-solo-si-alguno="snippet.editar_sistema agente.editar"></div>
+      <!-- La portada es la única página que NO abre pestaña: es «salir de aquí», y en modo público
+           es además donde se entra, se registra uno y se sube a modo diseño (`web/menu.html`). Va
+           suelta y la primera porque es la vuelta atrás, y enterrar la vuelta atrás en un submenú
+           es lo que hace que la gente cierre la pestaña. Se enlaza `/menu.html` explícito y no `/`,
+           porque al dueño `/` le devuelve este mismo editor (`server.py:1442`). -->
+      <a class="menu-item" href="/menu.html">🏠 Portada<small>menú principal del juego</small></a>
+
+      <!-- REQ-NAV2 · De 17 filas a 8: lo que no se usa a diario se pliega. El acordeón se despliega
+           EN EL SITIO y no como panel lateral porque el dueño juega en ventana estrecha (~390 px),
+           donde un panel al lado se sale de la pantalla, y en táctil no existe «pasar por encima».
+           ⚠️ El disparador es `.menu-sub` y NO `.menu-item` A PROPÓSITO: el enrutador de `app.js`
+           hace `closest('.menu-item')` y cerraría el menú entero justo al desplegar el grupo.
+           Quién está abierto lo dice `aria-expanded` y nada más (el CSS gira la flecha desde ahí):
+           una sola fuente de verdad, y la que además lee el lector de pantalla. -->
+      <button class="menu-sub" aria-expanded="false" aria-controls="sub-objeto">Este objeto<small>nuevo, guardar, exportar…</small></button>
+      <div class="menu-cuerpo" id="sub-objeto" hidden>
+        <button class="menu-item" id="btn-nuevo">Nuevo<small>vaciar el lienzo</small></button>
+        <button class="menu-item" id="btn-guardar">Guardar<small>en el servidor</small></button>
+        <button class="menu-item" id="btn-guardar-como">Guardar como…<small>un habitante nuevo</small></button>
+        <button class="menu-item" id="btn-exportar">Exportar<small>descargar .vox.json</small></button>
+        <label class="menu-item">Importar<small>cargar .vox.json</small>
+          <input type="file" id="file-importar" accept="application/json" hidden />
+        </label>
+      </div>
+
+      <!-- Crear un mundo e Invitar VIVEN en la portada (cuota, plantilla, enlace firmado): duplicar
+           aquí esos formularios sería tener dos sitios donde arreglar el mismo fallo. Lo que se
+           añade es la PUERTA, con `#ancla` para caer directamente en la sección — quien las honra es
+           `web/menu.html`, que enfoca la tarjeta después de pintarla.
+           El disparador NO lleva `data-solo-si-alguno` porque «Mundos ↗» no pide permiso: el grupo
+           nunca se queda vacío, aunque las dos primeras entradas estén escondidas. -->
+      <button class="menu-sub" aria-expanded="false" aria-controls="sub-mundos">Mundos<small>crear, invitar, listado</small></button>
+      <div class="menu-cuerpo" id="sub-mundos" hidden>
+        <a class="menu-item" data-solo-si="mundo.crear" href="/menu.html#crear">✚ Crear un mundo<small>en la portada</small></a>
+        <a class="menu-item" data-solo-si="multi.invitar" href="/menu.html#invitar">🔗 Invitar a un amigo<small>enlace de invitación</small></a>
+        <a class="menu-item" href="/map/" target="_blank" rel="noopener">🗺 Mundos ↗<small>listado de mapas</small></a>
+      </div>
+
       <!-- Las otras páginas del sitio. Son <a> de verdad y no botones con un `onclick`: así el clic
            central, «abrir en una pestaña nueva» y «copiar dirección» funcionan solos, y el enrutador
            de app.js las ignora por no llevar `data-tab` (solo cierra el menú y deja pasar el enlace).
@@ -90,16 +134,72 @@
            `window.opener` y puede reescribir la de origen. Las rutas que son CARPETA llevan la barra
            final para evitar el 301 (`/map/`, `/images/`, `/wiki/`); `/fotos` no la lleva porque es
            una ruta propia de server.py, no un directorio — con barra también responde 200. -->
-      <div class="menu-sep"></div>
-      <a class="menu-item" href="/map/" target="_blank" rel="noopener">🗺 Mundos ↗<small>listado de mapas</small></a>
-      <a class="menu-item" href="/fotos" target="_blank" rel="noopener">📷 Fotos ↗<small>capturas del Mundo (Alt+F)</small></a>
-      <a class="menu-item" href="/videos" target="_blank" rel="noopener">🎬 Vídeos ↗<small>clips de gameplay (Alt+V)</small></a>
-      <!-- `/images/` publica en `data/ui/` con `POST /api/ui`, que es del dueño. Se cuelga de
-           `asset.subir` porque es el permiso del vocabulario que más se le parece (subir un dibujo
-           derivado); el día que F9 necesite distinguirlo, se añade el permiso y se cambia aquí. -->
-      <a class="menu-item" data-solo-si="asset.subir" href="/images/" target="_blank" rel="noopener">🖼 Iconos ↗<small>favicon, marca y herramientas</small></a>
-      <a class="menu-item" href="/wiki/" target="_blank" rel="noopener">📖 Wiki ↗<small>guía y referencia</small></a>
+      <button class="menu-sub" aria-expanded="false" aria-controls="sub-sitio">El sitio<small>fotos, vídeos y wiki</small></button>
+      <div class="menu-cuerpo" id="sub-sitio" hidden>
+        <a class="menu-item" href="/fotos" target="_blank" rel="noopener">📷 Fotos ↗<small>capturas del Mundo (Alt+F)</small></a>
+        <a class="menu-item" href="/videos" target="_blank" rel="noopener">🎬 Vídeos ↗<small>clips de gameplay (Alt+V)</small></a>
+        <a class="menu-item" href="/wiki/" target="_blank" rel="noopener">📖 Wiki ↗<small>guía y referencia</small></a>
+      </div>
+
+      <!-- Aquí el disparador SÍ lleva `data-solo-si-alguno`: sus dos entradas piden permiso, así que
+           sin ninguno de los dos el grupo se queda vacío y desplegarlo enseñaría un hueco. Va en el
+           disparador Y en el cuerpo porque son dos nodos hermanos, no uno dentro de otro. -->
+      <button class="menu-sub" aria-expanded="false" aria-controls="sub-admin" data-solo-si-alguno="panel.usar asset.subir">Administración<small>panel e iconos</small></button>
+      <div class="menu-cuerpo" id="sub-admin" hidden data-solo-si-alguno="panel.usar asset.subir">
+        <a class="menu-item" data-solo-si="panel.usar" href="/panel" target="_blank" rel="noopener">⚙ Panel ↗<small>cuentas, permisos, mapas y salud</small></a>
+        <!-- `/images/` publica en `data/ui/` con `POST /api/ui`, que es del dueño. Se cuelga de
+             `asset.subir` porque es el permiso del vocabulario que más se le parece (subir un dibujo
+             derivado); el día que F9 necesite distinguirlo, se añade el permiso y se cambia aquí. -->
+        <a class="menu-item" data-solo-si="asset.subir" href="/images/" target="_blank" rel="noopener">🖼 Iconos ↗<small>favicon, marca y herramientas</small></a>
+      </div>
+
+      <!-- «Salir» cierra la sesión Y el modo diseño: `/api/salir` borra las dos galletas de una
+           (`server.py:1641`). Solo se enseña si hay sesión — lo dice `data-sesion`, que pone el
+           guion de arriba con lo que responde `GET /api/yo`. -->
+      <div class="menu-sep" data-solo-sesion></div>
+      <button class="menu-item" id="btn-salir" data-solo-sesion>🚪 Salir<small>cerrar la sesión</small></button>
     </div>
+    <script>
+      // Aquí y no en `app.js`: la ley de oro. El menú «⋯» lo enruta `app.js` por `data-tab`, y esta
+      // entrada no lo lleva, así que allí solo se cierra el menú y el clic llega intacto.
+      document.getElementById('btn-salir').addEventListener('click', function () {
+        // El editor tiene trabajo SIN GUARDAR y salir recarga: preguntar es lo barato.
+        if (!confirm('¿Salir? Se cierra la sesión y se pierde lo que no hayas guardado.')) return;
+        fetch('/api/salir', { method: 'POST', body: '{}' })
+          .then(function () { location.href = '/'; })
+          .catch(function () { location.href = '/'; });
+      });
+
+      // REQ-NAV2 · El acordeón del menú «⋯». Aquí y no en `app.js`: la ley de oro, y además el motor
+      // no tiene por qué saber cómo está agrupado un menú.
+      (function () {
+        var menu = document.getElementById('mas-menu');
+        function cuerpo(t) { return document.getElementById(t.getAttribute('aria-controls')); }
+        function plegarTodo() {
+          menu.querySelectorAll('.menu-sub').forEach(function (t) {
+            t.setAttribute('aria-expanded', 'false');
+            cuerpo(t).hidden = true;
+          });
+        }
+        menu.addEventListener('click', function (e) {
+          var t = e.target.closest('.menu-sub');
+          if (!t) return;                       // una entrada normal: es cosa del enrutador de app.js
+          var abierto = t.getAttribute('aria-expanded') === 'true';
+          plegarTodo();                         // uno abierto a la vez, que era el problema del dueño:
+          if (abierto) return;                  // con dos grupos abiertos el menú vuelve a no caber
+          t.setAttribute('aria-expanded', 'true');
+          cuerpo(t).hidden = false;
+          // Si el grupo desplegado se sale por abajo, acercarlo. El menú ya tiene su propio scroll
+          // (`.menu{max-height;overflow-y:auto}`), así que esto no mueve la página.
+          if (t.nextElementSibling) t.nextElementSibling.scrollIntoView({ block: 'nearest' });
+        });
+        // Cerrar el «⋯» pliega los grupos: al volver a abrirlo tiene que estar corto otra vez. Quien
+        // lo cierra es `cerrarMas()` en app.js (Esc, clic fuera, segundo clic en «⋯») y no avisa a
+        // nadie, así que se mira el atributo en vez de tocar el motor para que emita un evento.
+        new MutationObserver(function () { if (menu.hidden) plegarTodo(); })
+          .observe(menu, { attributes: true, attributeFilter: ['hidden'] });
+      })();
+    </script>
 
   </header>
 

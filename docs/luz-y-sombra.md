@@ -16,6 +16,13 @@
 > Este fichero es el **cómo está construido**; la Ley es el **qué debe cumplirse**. Cuando los dos no
 > coincidan, manda la Ley y este fichero está desfasado.
 
+⚡ **`mcComputeLight` está MEMORIZADA al entrar a un mapa** (snippet `perf-mallado`, 2026-08-31): es
+una función pura y se la llamaba 5 veces con las mismas entradas, ~1 s cada una. Memoriza **la firma
+de las entradas**, no el resultado, así que un cambio de rejilla la invalida sola. Si tocas lo que
+entra en la luz —rejilla, `mcTablaLuz`, `mcTablaCielo`, `dim`, `interiorDark`— **mira que entre en la
+firma** o servirá luz vieja. Reversible: `game.perfMallado.off()`. Detalle y medidas →
+[`rendimiento-de-entrada.md`](rendimiento-de-entrada.md). Guardián `tests/test_perf_mallado.js`.
+
 ### 💡 Poner un bloque no puede costar el mundo entero (skylight incremental)
 
 Hasta aquí, **cada bloque puesto o roto recalculaba la luz del mundo entero**: `mcRemeshAround` llamaba

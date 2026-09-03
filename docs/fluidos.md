@@ -217,6 +217,20 @@ No es una válvula ni un modo de prueba: son dos preguntas que siempre fueron di
 compartían respuesta. Los guardianes (`test_req_fluid1_sistema_fluidos`, `test_fluido_importado`)
 piden `tick(true)`, que es lo que de verdad están midiendo.
 
+### El gobernador de cadencia (PERF-AGUA1, 2026-09-03)
+
+Hay agua que **nunca se asienta** (fuga + realimentación: cornisas y capas parciales que oscilan) y
+mantiene la cola viva PARA SIEMPRE: ~11 pasos/s × re-mallar la caja tocada = ~44 `mcMeshChunk`/s
+= 1,3-1,7 ms/frame mire donde mire el jugador. Por eso `tick()` lleva un **gobernador**: si la cola
+lleva **>5 s sin vaciarse**, es agua en bucle y la cadencia baja a **1 paso/s**; en cuanto la cola
+toca 0, vuelve a la normal. Medido en `default`: 123,9 → 144,2 fps.
+
+- El agua **nueva** (romper un dique, colocar una fuente) fluye a velocidad normal sus primeros 5 s;
+  solo el bucle interminable va a cámara lenta.
+- `tick(true)` **salta también el gobernador** (es «dame UN paso», como siempre) ⇒ los tests no lo ven.
+- Chivato: `game.fluidos.gobernado()`; al activarse avisa **una vez** por consola.
+- Evidencia y cadena completa → [`performance/fps-casos.md#agua`](../performance/fps-casos.md#agua).
+
 ---
 
 ## 🪞 La lámina de agua refleja el cielo (REQ-FLUID5)

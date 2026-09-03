@@ -16,9 +16,17 @@ const ok = (nom, cond, extra) => {
 };
 const RAIZ = 'http://localhost:8500';
 
+// El token del dueño, si esta terminal lo lleva. En desarrollo NO hace falta (el anonimo ya es el
+// dueño) y por eso este test vivio sin el; contra un 8500 en modo publico, en cambio, un anonimo solo
+// ve los mundos publicos y este test se quedaba sin `default` ni `lab` — o sea, decia que el listado
+// esta roto cuando lo que pasa es que no le dejan mirar.
+// Se lee del entorno o, si no está, de `/root/voxelforge.env`: acordarse de exportarlo era el caso
+// raro, no el normal (ver `tests/_token.js`).
+const TOKEN = require('./_token').tokenDueno();
+
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
-  const ctx = await b.newContext();
+  const ctx = await b.newContext(TOKEN ? { extraHTTPHeaders: { 'X-VoxelForge-Token': TOKEN } } : {});
   await ctx.addInitScript(() => {
     const orig = window.fetch;
     window.fetch = (u, o) => {
@@ -44,7 +52,33 @@ const RAIZ = 'http://localhost:8500';
     api.every(m => claves.every(k => m[k] !== undefined)),
     claves.join(','));
   ok('el mundo sagrado aparece como «default»', api.some(m => m.nombre === 'default'));
-  ok('las miniaturas son PNG embebidos', api.every(m => /^data:image\/png;base64,/.test(m.thumb)));
+  // F3.6 · las miniaturas YA NO viajan dentro del listado. Iban como `data:image/png;base64,` y eso
+  // hacia una respuesta que el navegador no puede cachear, ni pedir perezosamente, ni partir: con 33
+  // mundos ya eran megas y con 300 de usuarios el listado no se abre. Ahora cada una es su URL.
+  ok('cada miniatura es una URL con sello, no un PNG embebido',
+    api.every(m => /^\/api\/mundos\/[a-z0-9-]+\/thumb\.png\?v=/.test(m.thumb)), api[0].thumb);
+  ok('el listado entero cabe holgado (sin los PNG dentro)',
+    JSON.stringify(api).length < 400 * 1024, (JSON.stringify(api).length / 1024).toFixed(1) + ' KB');
+  // Y la miniatura se sirve aparte, cacheable: mismo ETag => 304 y ni un byte de PNG por el cable.
+  const rt = await ctx.request.get(RAIZ + api[0].thumb);
+  const etag = rt.headers()['etag'] || '';
+  ok('GET de la miniatura devuelve un PNG con ETag', rt.status() === 200 && !!etag,
+    rt.status() + ' ' + (rt.headers()['content-type'] || '') + ' ' + etag);
+  const r304 = await ctx.request.get(RAIZ + api[0].thumb, { headers: { 'If-None-Match': etag } });
+  ok('…y con If-None-Match contesta 304', r304.status() === 304, String(r304.status()));
+
+  // El paginado (F3.6). Sin parametros sigue saliendo la lista entera, que es lo que espera la
+  // pagina para buscar y ordenar sin ir al servidor; con `?desde/?cuantos` sale el sobre con el total.
+  const pag = await (await ctx.request.get(RAIZ + '/api/mundos?desde=1&cuantos=2')).json();
+  ok('?desde/?cuantos devuelve {total, desde, cuantos, mundos}',
+    pag.total === api.length && pag.desde === 1 && Array.isArray(pag.mundos) && pag.mundos.length === 2,
+    JSON.stringify({ total: pag.total, desde: pag.desde, cuantos: pag.cuantos }));
+  ok('…y es la ventana que se pidio, del mismo orden',
+    pag.mundos[0].nombre === api[1].nombre && pag.mundos[1].nombre === api[2].nombre);
+  const basura = await (await ctx.request.get(RAIZ + '/api/mundos?desde=hola&cuantos=999999')).json();
+  ok('una query con basura no revienta ni sirve el listado entero disfrazado',
+    basura.desde === 0 && basura.mundos.length <= 100, JSON.stringify({ desde: basura.desde, n: basura.mundos.length }));
+
   // La cache es lo unico que hace viable el listado: en frio son ~33 MB de JSON.
   const t0 = Date.now(); await ctx.request.get(RAIZ + '/api/mundos');
   const t1 = Date.now(); await ctx.request.get(RAIZ + '/api/mundos'); const t2 = Date.now();

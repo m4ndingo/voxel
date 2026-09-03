@@ -534,23 +534,210 @@
         {
           "nombre": "comportamiento",
           "tipo": "object",
-          "desc": "Qué hace. `trepable`/`subida`/`bajada`, `impulso` o `altura`, `velocidad`/`deslizamiento`, `alPisar(c)`, `mirar:{…}`, `luz:'pasa'|'tapa'`…"
+          "desc": "Qué hace. `trepable`/`subida`/`bajada`, `impulso` o `altura`, `velocidad`/`deslizamiento`, `atravesable`, `luz:'pasa'|'tapa'`, `viento`, `recibeSombra`/`proyectaSombra`, `alPisar(c)`, `alSeguirPisando(c)`, `alRomper(c)`, `alCoger(c)` + `alcance`/`consume`, `alImpactar` + `impactos`/`cambiaPor`/`alCambiar`/`persistente`, `mirar`, `seguir`, `nota`."
         }
       ],
       "devuelve": "Nada.",
-      "ejemplo": "game.bloques.define('hab:escalera', { trepable:true, subida:4, bajada:5 });\ngame.bloques.define('hab:placa',    { alPisar(c){ /* c.quien = 'jugador' | 'agente' */ } });\ngame.bloques.define('hab:hielo',    { velocidad:2, deslizamiento:1.2 });\n\ngame.bloques.info();   // ← el descubridor: la clave EXACTA de lo que piso / tengo delante",
+      "ejemplo": "// se declara por MATERIAL, y la clave la dice game.bloques.info()\ngame.bloques.define('hab:escalera', { trepable: true, subida: 4, bajada: 5 });\ngame.bloques.define('asset:assets/hielo.vox.json', { velocidad: 2, deslizamiento: 1.2 });\n\n// la antorcha se apaga de un flechazo, y la apagada se enciende: el par se alterna\ngame.bloques.define('asset:assets/antorcha.vox.json',\n                    { alImpactar: 'cambiar', cambiaPor: 'antorcha-apagada' });\ngame.bloques.define('asset:assets/antorcha-apagada.vox.json',\n                    { alImpactar: 'cambiar', cambiaPor: 'antorcha' });\n\n// aguanta 3 flechazos y al tercero se rompe… pero vuelve al recargar el mapa\ngame.bloques.define('asset:assets/farolillo-zen.vox.json', {\n  impactos: 3, alImpactar: 'romper', persistente: false,\n  alRomper(c) { toast('💥 roto en ' + c.x + ',' + c.y + ',' + c.z); }\n});",
       "notas": [
-        "**Un id sin espacio de nombres no identifica nada**: `hab:cable` y `asset:assets/cable.vox.json` son el mismo dibujo entrando por puertas distintas. La clave se pregunta, no se adivina.",
-        "`mirar` solo funciona sobre **estructuras** (piezas estampadas), no sobre terreno. Definirlo en un mapa donde esa pieza no está plantada suelta un aviso legítimo por consola — y ése es justo el motivo de que exista el autoarranque **por mapa**.",
-        "Un material que aún no está en la paleta **no se rechaza**: se guarda en lista de espera y se promueve cuando aparezca.",
-        "Todo esto vive en el snippet de autoarranque, no en `app.js`. El detalle largo está en `docs/bloques-comportamiento.md`."
+        "**Un id sin espacio de nombres no identifica nada**: `hab:cable` y `asset:assets/cable.vox.json` son el mismo dibujo entrando por puertas distintas. La clave se pregunta con [[game.bloques.info]], no se adivina.",
+        "**Cuelga del MATERIAL, nunca de un voxel**: si la antorcha se apaga de un flechazo, se apagan TODAS las antorchas del mapa, las puestas y las que se pongan mañana. Si hace falta una excepción, hace falta otro material.",
+        "`alImpactar` no es un evento más: es un DESPACHADOR, dice QUÉ pasa al chocar algo. Cuatro modos: `'romper'`, `'cambiar'` (con `cambiaPor`), `'coger'` y una función de JS. Lo acompañan `impactos` (golpes que aguanta, contados POR CELDA) y `persistente:false` (el destrozo es solo de la vista y vuelve al recargar).",
+        "**Un `define` que no hace nada se rechaza entero** y avisa por consola. Un `rromper` o un `Coger` dejan `alImpactar` en nada y, si no había otra cosa en la definición, se descarta: mirar la consola es el primer paso siempre.",
+        "`mirar` solo funciona sobre **estructuras** (piezas estampadas), no sobre terreno. Definirlo en un mapa donde esa pieza no está plantada suelta un aviso legítimo — y ése es justo el motivo de que exista el autoarranque **por mapa**.",
+        "Un material que aún no está en la paleta **no se rechaza**: se guarda en lista de espera y se promueve cuando aparezca. Sale en [[game.bloques.lista]] como «en espera».",
+        "Todo esto vive en el snippet `mundo-autoarranque`, no en `app.js`. El manual está en la página **Bloques con comportamiento**; el detalle técnico, en `docs/bloques-comportamiento.md`."
       ],
       "ver": [
-        "game.snippet",
-        "game.mapName",
-        "game.esqueletos.crear"
+        "game.bloques.info",
+        "game.bloques.lista",
+        "game.bloques.quitar",
+        "game.bloques.impacto",
+        "game.bloques.cambiar",
+        "game.snippet"
       ],
-      "fuente": "app.js · mc"
+      "fuente": "snippet mundo-autoarranque · mcAutoarranque"
+    },
+    {
+      "nombre": "game.bloques.info",
+      "firma": "game.bloques.info()",
+      "grupo": "Bloques",
+      "resumen": "El descubridor: dice la clave EXACTA de lo que hay bajo los pies, delante y detrás, y el comportamiento que ya tenga. Es por donde se empieza siempre.",
+      "devuelve": "Un array de tres fichas (pies · delante · detrás) y, de paso, las pinta en la consola con `console.table`.",
+      "ejemplo": "// ponte encima de lo que te interese y pregunta\ngame.bloques.info()\n// → bajo los pies · asset:assets/hielo.vox.json · velocidad ×2 · desliza 1.2s",
+      "notas": [
+        "**La clave se pregunta, no se adivina.** Es el error número uno: definir el comportamiento sobre un nombre corto ambiguo y quedarse mirando un bloque que no reacciona.",
+        "Necesita el Mundo abierto (🌍). Sin rejilla no hay nada que mirar y lo dice."
+      ],
+      "ver": [
+        "game.bloques.define",
+        "game.bloques.lista",
+        "game.osd.dump"
+      ],
+      "fuente": "snippet mundo-autoarranque · mcAutoarranque"
+    },
+    {
+      "nombre": "game.bloques.lista",
+      "firma": "game.bloques.lista()",
+      "grupo": "Bloques",
+      "resumen": "Todo lo que tiene comportamiento en este mapa ahora mismo, con su resumen y su `nota`.",
+      "devuelve": "Un array de `{clave, comportamiento, nota}`, también pintado con `console.table`.",
+      "ejemplo": "game.bloques.lista()\n// incluye lo que está EN ESPERA: un material definido que todavía\n// no está en la paleta de este mundo sale como «en espera».",
+      "notas": [
+        "Lo que espera sale **también** aquí a propósito: si no, una definición aplazada sería indistinguible de una definición perdida."
+      ],
+      "ver": [
+        "game.bloques.define",
+        "game.bloques.info",
+        "game.bloques.quitar"
+      ],
+      "fuente": "snippet mundo-autoarranque · mcAutoarranque"
+    },
+    {
+      "nombre": "game.bloques.quitar",
+      "firma": "game.bloques.quitar(clave)",
+      "grupo": "Bloques",
+      "resumen": "Le retira el comportamiento a un material y lo devuelve a ser un bloque normal.",
+      "params": [
+        {
+          "nombre": "clave",
+          "tipo": "string",
+          "desc": "La clave del material. Admite el nombre corto si no es ambiguo, igual que [[game.bloques.define]]."
+        }
+      ],
+      "devuelve": "`true` si tenía algo que quitar; `false` (con aviso por consola) si no.",
+      "ejemplo": "game.bloques.quitar('asset:assets/hielo.vox.json');",
+      "notas": [
+        "También quita lo que estuviera **en espera** (definido para un material que todavía no está en la paleta).",
+        "Si el material tenía `seguir`, las piezas desplazadas vuelven a su ancla: sin config no habría quien las moviera y se quedarían de fantasma."
+      ],
+      "ver": [
+        "game.bloques.define",
+        "game.bloques.lista"
+      ],
+      "fuente": "snippet mundo-autoarranque · mcAutoarranque"
+    },
+    {
+      "nombre": "game.bloques.impacto",
+      "firma": "game.bloques.impacto(x, y, z, info)",
+      "grupo": "Bloques",
+      "resumen": "«Algo ha chocado aquí». Cuenta el golpe y, si toca, desencadena lo que diga el `alImpactar` del material. Es lo que llama la flecha.",
+      "params": [
+        {
+          "nombre": "x, y, z",
+          "tipo": "number",
+          "desc": "El punto exacto del choque, en coordenadas del mundo (no en celdas)."
+        },
+        {
+          "nombre": "info",
+          "tipo": "object",
+          "desc": "Lo que quiera contar de sí mismo quien choca: `{fuente:'flecha', dir:[…]}`. Llega tal cual al evento como `c.info`, y es lo que permite escribir «rota de un flechazo»."
+        }
+      ],
+      "devuelve": "`null` si ahí no había nada con `alImpactar` — y entonces quien choca hace lo de siempre. Si lo había, `{tipo, clave, golpe, de, listo, accion, valor}`; con `accion:'cambiar'`, `valor` es **una promesa**.",
+      "ejemplo": "// desde el proyectil, una vez por choque:\nconst r = game.bloques.impacto(px, py, pz, { fuente: 'flecha' });\nif (r) toast('golpe ' + r.golpe + ' de ' + r.de);   // p.ej. «golpe 2 de 3»\n\n// ¿hay algo que reaccione aquí? sondeo puro, sin efectos:\nif (game.bloques.impactoEn(px, py, pz)) { /* … */ }",
+      "notas": [
+        "**Se llama UNA vez por choque.** Todo el conocimiento vive aquí —qué hay, cuántos golpes lleva, qué evento toca— para que el proyectil no sepa nada de bloques.",
+        "El contador de golpes es **por celda**, no por material: con `impactos: 3`, cada farolillo lleva su cuenta. Y vive en `mc`, no en el snippet, porque el autoarranque se reejecuta y si no curaría solo cualquier cristal a medio romper.",
+        "Con `alImpactar:'cambiar'` el trabajo es **asíncrono** (estampar lo es) y `impacto()` no lo es: se lanza y `valor` es la promesa, para quien la quiera esperar.",
+        "El evento que se dispara recibe `por:'impacto'` más `info`, `golpe`, `de` y `punto` — así el mismo `alCoger` sirve para el flechazo y para la recogida al pasar, y aun así se distinguen."
+      ],
+      "ver": [
+        "game.bloques.impactoEn",
+        "game.bloques.define",
+        "game.bloques.cambiar",
+        "game.bloques.avisoDeRotura"
+      ],
+      "fuente": "snippet mundo-autoarranque · mcAutoarranque"
+    },
+    {
+      "nombre": "game.bloques.impactoEn",
+      "firma": "game.bloques.impactoEn(x, y, z)",
+      "grupo": "Bloques",
+      "resumen": "Sondeo puro: ¿hay en este punto algo con `alImpactar`? Sin efectos ni contadores, para poder preguntarlo en cada subpaso de un proyectil.",
+      "params": [
+        {
+          "nombre": "x, y, z",
+          "tipo": "number",
+          "desc": "Punto del mundo a sondear."
+        }
+      ],
+      "devuelve": "La ficha del bloque (`{tipo, clave, claveExacta, x, y, z, ori}`) o `null`.",
+      "ejemplo": "// mirar sin tocar: no cuenta golpes ni dispara nada\nconst b = game.bloques.impactoEn(px, py, pz);\nif (b) console.log('reacciona:', b.clave, b.tipo);",
+      "notas": [
+        "Es el hermano **sin efectos** de [[game.bloques.impacto]]. Sondear no cuenta como golpe."
+      ],
+      "ver": [
+        "game.bloques.impacto",
+        "game.bloques.info"
+      ],
+      "fuente": "snippet mundo-autoarranque · mcAutoarranque"
+    },
+    {
+      "nombre": "game.bloques.cambiar",
+      "firma": "game.bloques.cambiar(ficha | x, y, z, material)",
+      "grupo": "Bloques",
+      "resumen": "Reemplaza una pieza por otro material heredando su giro, sin dejar hueco ni un fotograma. Es el motor de `alImpactar:'cambiar'`, suelto para quien lo quiera a mano.",
+      "params": [
+        {
+          "nombre": "ficha",
+          "tipo": "object",
+          "desc": "La ficha que ya te llega en un evento (`c`). Trae celda, giro y clave, así que no hay que buscar nada."
+        },
+        {
+          "nombre": "x, y, z",
+          "tipo": "number",
+          "desc": "…o las coordenadas a pelo: averigua sola qué hay ahí (estructura o rejilla) y con qué giro."
+        },
+        {
+          "nombre": "material",
+          "tipo": "string",
+          "desc": "El material nuevo. Nombre corto (`'antorcha-apagada'`) o clave entera."
+        }
+      ],
+      "devuelve": "Una **promesa** a `true`/`false`.",
+      "ejemplo": "game.bloques.cambiar(c, 'antorcha-apagada');      // con la ficha del evento\ngame.bloques.cambiar(12, 34, 56, 'antorcha');     // o por coordenadas\n\n// lo mismo, declarado, que es como conviene:\ngame.bloques.define('asset:assets/antorcha.vox.json',\n                    { alImpactar: 'cambiar', cambiaPor: 'antorcha-apagada' });",
+      "notas": [
+        "**Pone la nueva ANTES de quitar la vieja**: hacerlo al revés deja un fotograma con el hueco abierto, y se ve.",
+        "⛔ La pieza vieja se busca **después** de estampar la nueva: estampar RECREA los objetos de `mc.structures` y la referencia de antes se queda huérfana. Ésta es la trampa que justifica que exista esta función.",
+        "El **giro se hereda**; no se declara. Y sirve igual para una estructura estampada que para un bloque de la rejilla: se entera sola de cuál es.",
+        "⚠️ `persistente:false` **no se puede honrar en estructuras**: estampar guarda la cabecera del mundo de todas formas. En la rejilla sí."
+      ],
+      "ver": [
+        "game.bloques.impacto",
+        "game.bloques.define",
+        "game.stamp"
+      ],
+      "fuente": "snippet mundo-autoarranque · mcAutoarranque"
+    },
+    {
+      "nombre": "game.bloques.avisoDeRotura",
+      "firma": "game.bloques.avisoDeRotura(x, y, z, por)",
+      "grupo": "Bloques",
+      "resumen": "Para quien borra bloques EN MASA (la explosión de TNT): coge el aviso ANTES de borrar y lo da DESPUÉS, para que el `alRomper` de lo borrado se dispare igual.",
+      "params": [
+        {
+          "nombre": "x, y, z",
+          "tipo": "number",
+          "desc": "La celda que se va a borrar."
+        },
+        {
+          "nombre": "por",
+          "tipo": "string",
+          "desc": "Quién lo borra, y es lo que llegará como `c.por`. Por defecto `'masa'` (el barrido), que es para lo que nació."
+        }
+      ],
+      "devuelve": "**Una función** ya cargada con lo que hay ahora en esa celda, o `null` si ahí no hay nada con `alRomper`.",
+      "ejemplo": "// se PIDE con el bloque puesto (es cuando existen su clave y su giro)…\nconst aviso = game.bloques.avisoDeRotura(x, y, z);\nborraLaCelda(x, y, z);\n// …y se DA con la celda ya en aire, que es el orden del pico\nif (aviso) aviso();",
+      "notas": [
+        "Que devuelva una **función** y no una ficha es a propósito: así quien borra en masa no toca ni una clave, ni un giro, ni sabe qué snippet hay detrás. Solo guarda el aviso y lo da.",
+        "El orden importa: **pedir antes de borrar, llamar después**. Es «se rompe, se abre la sorpresa»."
+      ],
+      "ver": [
+        "game.bloques.impacto",
+        "game.bloques.define"
+      ],
+      "fuente": "snippet mundo-autoarranque · mcAutoarranque"
     },
     {
       "nombre": "game.tp",

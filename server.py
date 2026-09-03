@@ -11,10 +11,15 @@ from servidor import sesion                                # cuentas, perfiles, 
 from servidor import mundos_meta                           # de quién es cada mapa y quién puede verlo/escribirlo
 from servidor import registro                              # F7.3 · qué se pidió, quién y con qué respuesta
 from servidor import vales                                 # F5.6 · el enlace de invitación a UN mapa
+from servidor import plantillas                            # REQ-PLANT1 · fichas de mundo nuevo y ambientes cerrados
+from servidor import autoria                               # REQ-ASSET1 · de quién es cada habitante y quién lo ve
 
 BASE  = os.path.dirname(os.path.abspath(__file__))
 WEB   = os.path.join(BASE, 'web')                          # el SITIO: los .html/.js/.css que se sirven tal cual
-STORE = os.path.join(BASE, 'data', 'habitantes')
+# REQ-ASSET1 · La carpeta se puede desviar por entorno, como ya se hace con `usuarios`, `perfiles`
+# y `mundos_meta`. No es un capricho: el guardián de autoría guarda dibujos de prueba, y sin esto
+# cada pasada le dejaría al dueño un `zz-*.json` en su galería (y su copia en la papelera).
+STORE = os.environ.get('VOXELFORGE_HABITANTES') or os.path.join(BASE, 'data', 'habitantes')
 TRASH = os.path.join(BASE, 'data', 'habitantes_trash')   # NADA se borra de verdad: va aquí
 MAPFILE = os.path.join(BASE, 'data', 'mapa.json')         # mapa del mundo (rejilla de habitaciones)
 WORLDFILE = os.path.join(BASE, 'data', 'mundo.json')       # mundo sandbox 3D (REQ-MC) — fichero único "sagrado" (mapa «default»)
@@ -89,6 +94,84 @@ DEFAULT_WORLD = {'format': 'voxelworld-1', 'dim': {'x': 96, 'y': 40, 'z': 96}, '
 CLI_TOKEN = None
 CLI_PUBLICO = False
 
+# El servidor se configura por ENTORNO, no por línea de comandos: los secretos no se escriben en un
+# `ps aux` y las tres unidades de systemd comparten un solo `EnvironmentFile`. Por eso la ayuda
+# dedica más sitio a las variables que a las banderas — son las que de verdad mandan.
+USO = """VoxelForge · servidor de mapas, assets, snippets y wiki.
+
+  python3 server.py [puerto] [--token LLAVE] [--publico]
+
+Argumentos
+  puerto              Un número suelto. Por defecto 8500.
+  --token, -t LLAVE   Llave del dueño (también --token=LLAVE). Gana sobre VOXELFORGE_TOKEN.
+                      ⚠️ Queda a la vista en `ps aux`: para algo permanente, la variable.
+  --publico           Enciende el MODO PÚBLICO (lo mismo que VOXELFORGE_PUBLICO=1). Ver abajo.
+  --help, -h          Esto.
+
+LOS DOS MODOS · es lo que más confunde, así que va con nombre y apellidos
+  Sin VOXELFORGE_PUBLICO el servidor da por hecho que está en TU máquina y no le pide nada a
+  nadie: cualquiera que llegue al puerto puede escribir un snippet, borrar un asset o listar
+  /data/ entero. Es lo que hace falta para trabajar —los 128 tests y los ~90 parche_snp_*.py
+  hacen POST anónimos— y es exactamente lo que NO se puede publicar.
+
+  Con VOXELFORGE_PUBLICO=1 se encienden las reglas de un servidor abierto a gente de fuera:
+    · Escribir exige identidad. Sin token del dueño ni sesión iniciada → 401/403. Es lo que
+      apaga la bomba: POST /api/snippets ejecuta JS en el navegador de TODOS los visitantes.
+    · /data/ deja de servirse entero: solo ui, fotos, videos e informes. Fuera quedan los
+      tickets, los mundos y la papelera, que hoy son un listado navegable.
+    · Los POST traen tope de tamaño y hay freno por IP (429 si te pasas).
+    · Las escrituras exigen cabecera Origin (el CSRF de los pobres).
+    · «/» deja de ser el editor y pasa a ser el menú del juego para quien no traiga el token.
+    · Se enciende el registro de accesos.
+    · Y el proceso NO ARRANCA sin VOXELFORGE_SECRETO_SESION.
+
+  ⚠️ El interruptor ENCIENDE la seguridad, nunca la apaga: un despliegue olvidadizo sale
+  seguro. Al revés —estricto por defecto y una bandera para relajarlo— la primera prisa lo
+  apaga «un momento» y ahí se queda para siempre.
+
+Variables de entorno (lo normal es ponerlas en un fichero y cargarlo; ver abajo)
+  VOXELFORGE_TOKEN              Llave del dueño. Dos puertas: cabecera X-VoxelForge-Token (curl y
+                                herramientas/*.py) y galleta vf_disena que pone POST /api/disena.
+                                ⛔ SIN ella, en desarrollo TODO EL MUNDO es el dueño.
+  VOXELFORGE_PUBLICO=1          Enciende el modo público de ahí arriba. Rompe a propósito los POST
+                                anónimos de los tests y de los parche_snp_*.py.
+  VOXELFORGE_SECRETO_SESION     Firma las cookies de sesión y los vales de invitación.
+                                ⛔ En modo público el proceso NO ARRANCA sin ella.
+                                ⚠️ multi/servidor_multi.py tiene que compartir el MISMO valor o
+                                rechazará los vales que emita este servidor.
+                                Generar:  python3 -c "import secrets;print(secrets.token_urlsafe(32))"
+  VOXELFORGE_REGISTRO           Fichero del registro de accesos. En público se enciende solo; con
+                                esta variable se fuerza también en desarrollo, o se lleva a otro disco.
+  VOXELFORGE_USUARIOS           Carpeta de cuentas.          (data/usuarios)
+  VOXELFORGE_PERFILES           Carpeta de perfiles.         (data/perfiles)
+  VOXELFORGE_MUNDOS_META        Carpeta de metadatos de mundo. (data/mundos_meta)
+  VOXELFORGE_HABITANTES         Carpeta de habitantes.       (data/habitantes)
+  VOXELFORGE_COPIAS             Destino de las copias que lanza el panel del dueño.
+  VOXELFORGE_TOPE_ESCRITURAS         Escrituras por minuto y por IP, anónimo.  (600)
+  VOXELFORGE_TOPE_ESCRITURAS_SESION  Lo mismo con sesión iniciada.             (3000)
+
+Arrancar con las variables de /root/voxelforge.env (600, fuera del repo a propósito)
+  set -a; . /root/voxelforge.env; set +a; nohup python3 server.py 8500 > /tmp/srv8500.log 2>&1 &
+
+  `set -a` exporta todo lo que se lea a continuación (sin él, las variables se quedan en el shell
+  y el proceso hijo no las ve); `set +a` lo vuelve a apagar para no exportar media sesión.
+  `nohup … &` lo suelta en segundo plano y lo deja vivo al cerrar la terminal.
+
+  ⚠️ Ese fichero trae VOXELFORGE_PUBLICO=1, o sea que esa línea arranca en MODO PÚBLICO y los
+  tests y los parche_snp_*.py empezarán a recibir 401. Para trabajar con la llave puesta pero
+  con las reglas de desarrollo, se vacía la variable en la propia línea:
+  set -a; . /root/voxelforge.env; set +a; VOXELFORGE_PUBLICO= nohup python3 server.py 8500 > /tmp/srv8500.log 2>&1 &
+
+  Con nohup el saludo del arranque va al log, no a la pantalla. Comprobar que está y en qué modo:
+  head -3 /tmp/srv8500.log        # dice «modo PÚBLICO», el token y dónde va el registro
+  curl -s localhost:8500/api/yo   # {"publico": true|false, …}
+
+  Y para pararlo:  pkill -f 'server.py 8500'
+
+En un servidor de verdad esto no se lanza a mano: despliegue/voxelforge.service lo hace con
+EnvironmentFile=/etc/voxelforge.env. Ver despliegue/LEEME.md."""
+
+
 def parse_cli_args():
     global PORT, CLI_TOKEN, CLI_PUBLICO
     port = 8500
@@ -96,9 +179,13 @@ def parse_cli_args():
     publico = False
     args = sys.argv[1:]
     i = 0
+    sueltos = []
     while i < len(args):
         arg = args[i]
-        if arg in ('--token', '-t') and i + 1 < len(args):
+        if arg in ('--help', '-h'):
+            print(USO)
+            sys.exit(0)
+        elif arg in ('--token', '-t') and i + 1 < len(args):
             token = args[i + 1].strip()
             i += 2
         elif arg.startswith('--token='):
@@ -111,7 +198,13 @@ def parse_cli_args():
             port = int(arg)
             i += 1
         else:
+            # Lo desconocido se sigue ignorando —arrancar es más importante que ser estricto— pero
+            # se DICE: un `--tokne` mal escrito dejaba el servidor sin llave en silencio.
+            sueltos.append(arg)
             i += 1
+    if sueltos:
+        print('⚠️  argumento(s) que no entiendo y me salto: ' + ' '.join(sueltos)
+              + '\n    python3 server.py --help', file=sys.stderr)
     PORT = port
     CLI_TOKEN = token
     CLI_PUBLICO = publico
@@ -189,6 +282,20 @@ PERMISO_POR_RUTA = (
     ('/api/fotos',         'foto.subir',             'subir fotos',         None),
     ('/api/videos',        'foto.subir',             'subir vídeos',        None),
 )
+
+# F3.6 · el paginado de `/api/mundos`. El TOPE existe porque `?cuantos=999999` es la forma más fácil
+# de pedir el listado entero fingiendo que se pagina, y entonces paginar no sirve de nada.
+MUNDOS_POR_PAGINA = 24
+MUNDOS_POR_PAGINA_TOPE = 100
+
+
+def _entero(txt, porDefecto):
+    """Un entero de la query, o el de por defecto. Nunca revienta: `?desde=hola` no es un 500."""
+    try:
+        return int(str(txt).strip())
+    except (TypeError, ValueError):
+        return porDefecto
+
 
 def slugify(s):
     s = re.sub(r'[^a-z0-9]+', '-', (s or 'objeto').lower()).strip('-')
@@ -389,6 +496,11 @@ def list_snips():
                     'categoria': d.get('categoria', '') or d.get('category', ''),
                     'lines': (d.get('code', '') or '').count('\n') + 1,
                     'savedAt': d.get('savedAt', ''),
+                    # REQ-PLANT1 · el carrusel de mundo nuevo se pinta con ESTO. Va en el listado y no
+                    # pidiendo cada snippet aparte porque los generadores pesan de 6 a 15 KB de código
+                    # y el carrusel sólo quiere el título y la foto: siete peticiones y 70 KB para
+                    # enseñar cuatro fichas es lo que se evita aquí.
+                    'ficha': d.get('ficha') if isinstance(d.get('ficha'), dict) else None,
                     # La UI esconde el botón; el DELETE lo corta el servidor. Se pasa el `doc` ya
                     # leído para no abrir 200 ficheros otra vez solo por mirar una marca.
                     'protegido': bool(esta_protegido(fn[:-5], d))})
@@ -634,7 +746,13 @@ def list_assets_auto():
     return idx
 
 
-def list_all():
+def list_all(criba=None):
+    """El listado de la galería. `criba(doc)` decide cuáles entran; sin criba, entran todos.
+
+    REQ-ASSET1 · La criba se pasa desde fuera y NO se calcula aquí a propósito: quién puede ver qué
+    depende de la petición (`quien()`, `_es_dueno()`), y meter eso en una función que solo sabe leer
+    ficheros la ataría al `Handler` y la dejaría sin poder probarse sola.
+    """
     out = []
     for fn in sorted(os.listdir(STORE)):
         if not fn.endswith('.json'):
@@ -643,8 +761,13 @@ def list_all():
             d = json.load(open(os.path.join(STORE, fn), encoding='utf-8'))
         except Exception:
             continue
+        if criba and not criba(d):
+            continue
         meta = d.get('meta', {})
         out.append({'id': fn[:-5], 'name': meta.get('name', '(sin nombre)'),
+                    # REQ-ASSET1 · de quién es y si es «del mundo». Viajan en el listado porque la
+                    # galería tiene que poder enseñar «tuyo» / «del mundo» sin una segunda petición.
+                    **autoria.resumen(d),
                     'role': meta.get('role', ''), 'type': meta.get('type', 'objeto'),
                     'categoria': meta.get('categoria', ''),
                     # REQ-TOOL1: qué herramienta del Mundo ES este dibujo ('build'|'paint'|...).
@@ -988,7 +1111,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         # Sin esto el navegador cachea app.js/style.css (heurística de SimpleHTTP sin Cache-Control)
         # y los cambios del editor no llegan al recargar. no-cache = revalidar siempre.
-        self.send_header('Cache-Control', 'no-cache')
+        #
+        # ⚠️ Salvo que la respuesta traiga la SUYA (`self._cache_propia`, F3.6). Dos `Cache-Control` en
+        # la misma respuesta no son dos opciones: el navegador los junta con comas y `no-cache` gana,
+        # así que sin esta puerta el `max-age` de las miniaturas no cachearía nada y encima parecería
+        # que sí. Se pone en las respuestas cuyo contenido no puede cambiar porque la URL lleva sello.
+        if not getattr(self, '_cache_propia', False):
+            self.send_header('Cache-Control', 'no-cache')
         # `nosniff`: sin ella, un .json o un .txt que empiece por «<» lo puede interpretar el navegador
         # como HTML y ejecutarlo. Todo lo que sube un usuario (fotos, piezas) se sirve de este mismo
         # origen, así que adivinar el tipo es adivinar mal.
@@ -1027,6 +1156,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if ruta.startswith('/api/videos'):   return VIDEO_MAX_BYTES
         if ruta.startswith('/api/ui'):       return UI_MAX_BYTES
         if ruta.startswith('/api/snippets'): return 2 * 1024 * 1024
+        # REQ-PLANT2 · la foto de una ficha viaja en base64, que abulta un tercio más que el fichero.
+        # Con el tope general de 512 KB ninguna foto de móvil pasaba, y el 413 no decía por qué.
+        if ruta.startswith('/api/panel/plantilla/foto'):
+            return plantillas.FOTO_MAX_BYTES * 4 // 3 + 4096
         if ruta.startswith('/api/assets') or ruta.startswith('/api/habitantes') or ruta.startswith('/api/agentes'):
             return 8 * 1024 * 1024
         if ruta == '/api/mundo':
@@ -1084,10 +1217,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return directa
 
     def _freno_ok(self):
-        """False (y ya ha respondido 429) si esta IP está escribiendo demasiado. Sólo en público."""
+        """False (y ya ha respondido 429) si esta IP está escribiendo demasiado. Sólo en público.
+
+        El freno es contra el ABUSO ANÓNIMO —un bucle de `curl` llenando el disco—, así que se
+        aplica por identidad y no a todo el mundo por igual:
+
+          · el DUEÑO no se frena. Sus herramientas (`herramientas/*.py`, `multi/publica_cliente.py`)
+            y la tanda de tests hacen ráfagas de cientos de escrituras seguidas, y frenarlas es
+            romper el trabajo, no proteger nada: quien trae el token ya puede hacer lo que quiera.
+          · quien ha ENTRADO con su cuenta tiene un tope alto (`TOPE_SESION`): tiene nombre, cuota
+            y a quién reclamarle.
+          · el anónimo, el de siempre (`TOPE`).
+        """
         if not es_publico():
             return True
-        cabe, restantes = limites.cabe(self._ip())
+        if self._es_dueno():
+            return True
+        tope = limites.TOPE_SESION if self.quien() else limites.TOPE
+        cabe, restantes = limites.cabe(self._ip(), tope)
         if not cabe:
             self.send_response(429)
             self.send_header('Retry-After', str(int(limites.VENTANA)))
@@ -1123,6 +1270,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # del navegador sería dejar la llave del servidor en un fichero de texto que cualquier
         # extensión lee, y encima sin caducar nunca.
         return self._galleta_disena_ok()
+
+    def _via_dueno(self):
+        """POR DÓNDE es dueño quien pide: `'token'`, `'galleta'` o `'desarrollo'`. `None` si no lo es.
+
+        Lo pinta la chapa de identidad (`web/quien.js`), y la que importa es `'desarrollo'`: ahí no
+        hay token configurado y `_es_dueno` le dice que sí a cualquiera que abra la página. Sin
+        distinguirla, la chapa pondría «dueño» en la máquina de desarrollo y quien la leyera creería
+        estar viendo una sesión — justo la confusión que la chapa venía a quitar.
+        """
+        if not self._es_dueno():
+            return None
+        if not get_server_token():
+            return 'desarrollo'
+        if str(self.headers.get('X-VoxelForge-Token') or '').strip() == get_server_token():
+            return 'token'
+        return 'galleta'
 
     COOKIE_DISENA = 'vf_disena'
     DIAS_DISENA = 7
@@ -1483,11 +1646,91 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # Sin cuenta, pero con el token del dueño (o en desarrollo, donde no hay token): se dice
             # que puede todo, porque es verdad, y así el editor no se esconde a sí mismo.
             if self._es_dueno():
-                return self._send(200, {'anonimo': True, 'dueno': True,
+                # `via` dice por CUÁL de las tres puertas: la chapa de identidad la pinta, y sin ella
+                # la máquina de desarrollo enseñaría «dueño» a cualquiera (ver `_via_dueno`).
+                return self._send(200, {'anonimo': True, 'dueno': True, 'via': self._via_dueno(),
                                         'yo': {'uid': None, 'nombre': 'dueño', 'perfil': 'dueno',
                                                'permisos': sorted(sesion.PERMISOS), 'cuota': None}})
             return self._send(200, {'anonimo': True, 'yo': None,
                                     'permisos': [], 'publico': es_publico()})
+        # F3.6 · la miniatura, cada una por su URL y con ETag. Antes viajaba como `data:image/png` DENTRO
+        # del listado: una respuesta enorme, imposible de cachear y que se baja entera aunque solo se vean
+        # tres tarjetas. Va ANTES de `/api/mundos` a secas porque el prefijo más largo manda.
+        mt = re.match(r'^/api/mundos/([a-z0-9-]+)/thumb\.png$', path_only)
+        if mt:
+            slug = world_slug(mt.group(1))
+            # Mismo criterio que el listado: si el mundo no sale para ti, su foto tampoco. Sin esto, la
+            # miniatura sería la rendija por la que asomarse a los mapas privados de otro.
+            if not self._es_dueno() and not mundos_meta.sale_en_listados(mundos_meta.lee(slug), self.quien()):
+                return self._send(404, {'error': 'no hay tal mundo'})
+            png, etag = mundos.miniatura(slug)
+            if not png:
+                return self._send(404, {'error': 'no hay miniatura'})
+            etag = '"' + etag + '"'
+            if self.headers.get('If-None-Match') == etag:
+                self.send_response(304); self.send_header('ETag', etag); self.end_headers()
+                return
+            # La URL lleva el sello colgando (`?v=…`), así que ESTE contenido no cambia nunca: se puede
+            # guardar sin preguntar. Cuando el mundo cambia, cambia la URL y el navegador pide otra.
+            self._cache_propia = True
+            return self._send_bytes(200, 'image/png', png, None,
+                                    extra=[('ETag', etag), ('Cache-Control', 'public, max-age=604800')])
+        # F6.5 · el MANDO: la credencial con la que el dueño de un mapa echa o calla en el 8510.
+        # ⛔ Es un endpoint aparte y no un campo de `/api/yo` a propósito: el mando va por mapa, y
+        # `/api/yo` no sabe en cuál estás. Y ⛔ no se puede reutilizar el vale de invitación para
+        # esto — el vale se COMPARTE por enlace, así que autorizar con él sería darle a cada invitado
+        # el poder de echar a quien le invitó (ver `vales.emite_mando`).
+        mm = re.match(r'^/api/mundos/([a-z0-9-]+)/mando$', path_only)
+        if mm:
+            slug = world_slug(mm.group(1))
+            u = self.quien()
+            # ⚠️ La existencia se mira en el DISCO, no en `mundos_meta.lee`, que NUNCA devuelve vacío:
+            # para un slug que no existe devuelve una copia de `HEREDADO`, así que un `if not meta`
+            # aquí es código muerto que no se ve serlo (lo era, y el guardián lo cazó).
+            if not os.path.exists(os.path.join(WORLDS, slug + '.json')) and slug != 'default':
+                return self._send(404, {'error': f'no existe el mundo «{slug}»'})
+            meta = mundos_meta.lee(slug)
+            if not self._es_dueno() and not mundos_meta.es_suyo(meta, u):
+                # 403 y no 404: quien pregunta ya ha entrado al mapa, así que sabe que existe.
+                return self._send(403, {'error': 'el mando es del dueño del mapa'})
+            return self._send(200, {'mando': vales.emite_mando(slug, (u or {}).get('uid') or ''),
+                                    'horas': vales.HORAS_MANDO})
+        # REQ-PLANT1 · «¿este mapa está a medias, y de qué plantilla?». Lo pregunta el corredor de
+        # generación al entrar (snippet `generador-mundo`), y por eso NO exige escritura: si el mapa
+        # ya está hecho —que es el caso de todos menos el recién creado— la respuesta es `generado:
+        # true` y ahí acaba. Lo que sí exige es poder VER el mapa, o revelaría qué plantilla usó
+        # alguien en un mapa privado.
+        mp = re.match(r'^/api/mundos/([a-z0-9-]+)/plantilla$', path_only)
+        if mp:
+            slug = world_slug(mp.group(1))
+            meta = mundos_meta.lee(slug)
+            # ⚠️ La query se parsea AQUÍ. `q` se creaba 40 líneas más abajo, dentro de la rama de
+            # `/api/mundos`, y aquí llegaba sin asignar: `UnboundLocalError`, o sea 500 y la conexión
+            # cerrada sin respuesta. Como el `and` es perezoso y `_es_dueno()` va primero, al dueño
+            # no le pasaba nunca — el fallo sólo lo veía un JUGADOR, que es justo quien crea mapas
+            # con plantilla. Resultado: mapas vacíos y ni un error en pantalla (el corredor da el
+            # `fetch` por perdido y se callaba). Guardián: `tests/test_permisos_api.js` §9b. Y el
+            # silencio del corredor está arreglado aparte, en el propio snippet `generador-mundo`
+            # (REQ-PLANT1b, `herramientas/parche_snp_generador_aviso.py`).
+            qp = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if not self._es_dueno() and not mundos_meta.puede_ver(meta, self.quien(),
+                                                                  qp.get('codigo', [''])[0]):
+                return self._send(403, {'error': 'este mapa no es tuyo'})
+            # La ficha viaja con la respuesta para que el corredor pinte las frases de la pantalla de
+            # carga sin una segunda petición: cuando llega esto, la generación tiene que empezar YA.
+            ficha = None
+            if meta.get('plantilla'):
+                try:
+                    with open(self._snip_path(meta['plantilla']), encoding='utf-8') as f:
+                        ficha = plantillas.normaliza_ficha(json.load(f))
+                except Exception:
+                    ficha = None
+            elif meta.get('especial'):
+                ficha = next((dict(e['ficha']) for e in plantillas.ESPECIALES
+                              if e['especial'] == meta['especial']), None)
+            return self._send(200, {'slug': slug, 'generado': bool(meta.get('generado')),
+                                    'plantilla': meta.get('plantilla') or '',
+                                    'especial': meta.get('especial') or '', 'ficha': ficha})
         if path_only == '/api/mundos':                            # listado de /map/ (cache por mtime en data/_thumbs/)
             try:
                 filas = mundos.listar()
@@ -1506,6 +1749,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     f['dueno'] = m.get('dueno')
                     f['visibilidad'] = m.get('visibilidad')
                     f['escritura'] = m.get('escritura')
+                # F3.6 · paginado, y OPCIONAL a propósito. Sin `?desde`/`?cuantos` esto devuelve la
+                # lista entera como siempre, que es lo que espera `web/mapas.html` para buscar y
+                # ordenar en el navegador sin ir al servidor por cada tecla. Quien pida página recibe
+                # un sobre `{total, desde, cuantos, mundos}`: la cuenta total no se puede deducir de
+                # una página, y sin ella no hay «página siguiente» ni «300 mundos».
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                if 'desde' in q or 'cuantos' in q:
+                    total = len(filas)
+                    desde = max(0, _entero(q.get('desde', ['0'])[0], 0))
+                    cuantos = min(MUNDOS_POR_PAGINA_TOPE,
+                                  max(1, _entero(q.get('cuantos', [str(MUNDOS_POR_PAGINA)])[0],
+                                                 MUNDOS_POR_PAGINA)))
+                    trozo = filas[desde:desde + cuantos]
+                    return self._send(200, {'total': total, 'desde': desde,
+                                            'cuantos': len(trozo), 'mundos': trozo})
                 return self._send(200, filas)
             except Exception as e:
                 return self._send(500, {'error': f'no se pudo listar los mundos: {e}'})
@@ -1546,6 +1804,46 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if par:
                     return self._send_bytes(200, 'application/json; charset=utf-8', par[0], par[1])
             return self._send(200, {**DEFAULT_WORLD, 'fresh': True})   # sin fichero = mundo recién nacido → terreno plano (un vacío guardado NO lleva fresh)
+        if path_only == '/api/plantillas':                       # REQ-PLANT1 · el carrusel de mundo nuevo
+            # El catálogo NO es una lista aparte que mantener: es lo que hay en `data/snippets/` con
+            # una `ficha` puesta. Añadir un bioma = publicar su generador con su ficha, y aparece.
+            # Se sirve a cualquiera (es un escaparate, no toca nada), y con él van los tamaños y los
+            # ambientes elegibles para que el asistente no los tenga escritos por su cuenta: si el
+            # tope de tamaño lo sube el panel por perfil, el selector se entera solo.
+            u = self.quien()
+            tope = plantillas.LADO_TOPE_POR_DEFECTO
+            if u:
+                tope = ((u.get('cuota') or {}).get('mapa_lado')
+                        or (sesion.CUOTA_POR_DEFECTO.get('mapa_lado') or plantillas.LADO_TOPE_POR_DEFECTO))
+            elif self._es_dueno():
+                tope = max(plantillas.LADOS)                     # el dueño paga el disco: sin tope
+            fichas = []
+            # ⚠️ La foto se resuelve contra el DISCO, no se copia de la ficha (REQ-PLANT2): una ruta
+            # que ya no existe sale como '' y la tarjeta se pinta con su marcador, y una foto subida
+            # al panel con el nombre de la ficha vale aunque nadie haya tocado los metadatos.
+            for s in list_snips():
+                f = plantillas.normaliza_ficha({'ficha': s.get('ficha'), 'name': s.get('name'), 'id': s.get('id')})
+                # …y la baja es `oculta` en la ficha (REQ-PLANT3): el generador sigue publicado y
+                # funcionando, pero deja de tener tarjeta. Se filtra AQUÍ y no en el panel, que es
+                # justo donde se sigue viendo para poder devolverla al carrusel.
+                if f and not f.get('oculta'):
+                    f['foto'] = plantillas.foto_de(BASE, s['id'], f['foto'])
+                    fichas.append({'id': s['id'], 'snippet': s['id'], 'especial': '',
+                                   'orden': f.pop('orden', 500), 'ficha': f})
+            for e in plantillas.ESPECIALES:
+                f = plantillas.normaliza_ficha(e)
+                f['foto'] = plantillas.foto_de(BASE, e['id'], f['foto'])
+                fichas.append({'id': e['id'], 'snippet': '', 'especial': e['especial'],
+                               'orden': e['orden'], 'ficha': f})
+            fichas.sort(key=lambda x: (x['orden'], x['ficha']['titulo']))
+            return self._send(200, {
+                'plantillas': fichas,
+                'lados': [{'lado': l, 'bytes': plantillas.bytes_de(l), 'cabe': l <= tope}
+                          for l in plantillas.LADOS],
+                'ladoPorDefecto': min(plantillas.LADO_POR_DEFECTO, tope), 'ladoTope': tope,
+                'ambientes': [{'id': k, 'rotulo': v[0]} for k, v in plantillas.AMBIENTES.items()],
+                'efectos': [{'id': k, 'rotulo': v[0]} for k, v in plantillas.EFECTOS.items()],
+            })
         if path_only == '/api/snippets':                         # gestor de snippets: lista
             # ?q=<texto> busca dentro del código; ?usa=<id> dice quién llama a ese snippet (REQ-SNP6).
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -1579,12 +1877,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     pass
             return self._send(404, {'error': 'no existe asset'})
         if self.path == '/api/habitantes':
-            return self._send(200, list_all())
+            # REQ-ASSET1 · cada uno ve LO SUYO y LO DEL MUNDO; lo de los demás, no. El dueño del
+            # servidor lo ve todo — y en desarrollo sin token todo el mundo es el dueño, así que la
+            # galería de siempre y los tests no se enteran de que esto existe.
+            if self._es_dueno():
+                return self._send(200, list_all())
+            u = self.quien()
+            return self._send(200, list_all(lambda d: autoria.puede_ver(d, u)))
         idd = self._id()
         if idd:
             fp = self._path(idd)
             if os.path.exists(fp):
-                return self._send(200, json.load(open(fp, encoding='utf-8')))
+                doc = json.load(open(fp, encoding='utf-8'))
+                # La misma regla que el listado, y hace falta LAS DOS VECES: sin esto, esconderlo de
+                # la lista sería cosmética — bastaría con acertar el id para bajarse el dibujo entero.
+                if not self._es_dueno() and not autoria.puede_ver(doc, self.quien()):
+                    return self._send(403, {'error': f'«{idd}» no es tuyo'})
+                return self._send(200, doc)
             return self._send(404, {'error': 'no existe'})
         # Estáticos .json — sobre todo los assets/*.vox.json de la paleta, que son 1,4 MB por apertura
         # del Mundo y comprimen ×4. translate_path confina la ruta al directorio servido.
@@ -1706,6 +2015,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return bool(self._send(200, {'mundos': panel_mod.mundos(WORLDS)}) or True)
             if ruta == '/api/panel/salud':
                 return bool(self._send(200, panel_mod.salud(BASE, WORLDS)) or True)
+            if ruta == '/api/panel/plantillas':                  # REQ-PLANT2 · las fichas del carrusel
+                return bool(self._send(200, panel_mod.plantillas(BASE, list_snips())) or True)
             self._send(404, {'error': 'no hay nada en ' + ruta})
             return True
 
@@ -1720,6 +2031,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 motivo = panel_mod.borra_perfil(ruta.rsplit('/', 1)[-1])
                 self._send(409 if motivo else 200, {'error': motivo} if motivo else {'ok': True})
                 return True
+            # REQ-PLANT2 · quitar la foto de una ficha. Va a la papelera y NO toca la ficha: lo que
+            # se está probando aquí es justo que una foto que ya no está no rompe nada.
+            if self.command == 'DELETE' and ruta.startswith('/api/panel/plantilla/foto/'):
+                quitadas = panel_mod.borra_foto_plantilla(BASE, ruta.rsplit('/', 1)[-1], to_trash)
+                self._send(200, {'ok': True, 'quitadas': quitadas})
+                return True
             d = self._read()
             if not isinstance(d, dict):
                 self._send(400, {'error': 'faltan datos'})
@@ -1730,6 +2047,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 r, motivo = panel_mod.guarda_perfil(quien, d)
             elif ruta == '/api/panel/mundo':
                 r, motivo = panel_mod.guarda_mundo(d)
+            elif ruta == '/api/panel/plantilla':                 # REQ-PLANT2 · metadatos de la ficha
+                r, motivo = panel_mod.guarda_plantilla(BASE, SNIPS, d, atomic_dump, to_trash)
+            elif ruta == '/api/panel/plantilla/foto':            # REQ-PLANT2 · la imagen, en base64
+                r, motivo = panel_mod.guarda_foto_plantilla(BASE, d.get('id'), d.get('dato'))
             else:
                 self._send(404, {'error': 'no hay nada en ' + ruta})
                 return True
@@ -1900,6 +2221,51 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._send(400, {'error': 'faltan datos'})
             u = self.quien()
             uid = (u or {}).get('uid')
+            # REQ-PLANT1 · el TAMAÑO lo elige quien crea, dentro de lo que le deje su perfil. El tope
+            # vive en la cuota (`mapa_lado`) porque el dueño lo quiso ajustable desde el panel.
+            cuota = (u.get('cuota') if u else None) or sesion.CUOTA_POR_DEFECTO
+            tope_lado = cuota.get('mapa_lado') or plantillas.LADO_TOPE_POR_DEFECTO
+            if not uid and self._es_dueno():
+                tope_lado = max(plantillas.LADOS)             # el dueño paga el disco: sin tope
+            lado = plantillas.lado_valido(d.get('lado') or plantillas.LADO_POR_DEFECTO, tope_lado)
+            if lado is None:
+                return self._send(409, {'error': f'ese tamaño no está permitido para tu perfil '
+                                                 f'(máximo {tope_lado}).',
+                                        'ladoTope': tope_lado, 'lados': list(plantillas.LADOS)})
+
+            # REQ-PLANT1 · qué plantilla se pidió. Se acepta O un generador que EXISTA y tenga ficha,
+            # O una de las dos especiales. Cualquier otra cosa se ignora y sale un mapa vacío: el id
+            # de la plantilla acaba llamando a `game.snippet(...)` en el navegador, así que no puede
+            # ser texto libre que venga del cliente.
+            plantilla = especial = ''
+            ficha_pedida = None
+            pedida = str(d.get('plantilla') or '').strip()
+            if pedida in [e['id'] for e in plantillas.ESPECIALES]:
+                especial = next(e['especial'] for e in plantillas.ESPECIALES if e['id'] == pedida)
+                ficha_pedida = plantillas.normaliza_ficha(
+                    next(e for e in plantillas.ESPECIALES if e['id'] == pedida))
+            elif pedida:
+                try:
+                    with open(self._snip_path(re.sub(r'[^A-Za-z0-9_-]+', '', pedida)), encoding='utf-8') as f:
+                        doc_p = json.load(f)
+                    ficha_pedida = plantillas.normaliza_ficha(doc_p)
+                    if ficha_pedida:
+                        plantilla = re.sub(r'[^A-Za-z0-9_-]+', '', pedida)
+                except Exception:
+                    plantilla = ''
+
+            # ⚠️ Y AHORA EL OTRO TOPE: el de la plantilla. El de arriba es disco (lo que le dejamos
+            # gastar a esta cuenta); éste es MEMORIA DEL NAVEGADOR de quien lo genera, y el disco no
+            # sabe nada de eso. El cliente ya apaga estos tamaños, pero el que prohíbe es el
+            # servidor: `/api/mundos/crear` lo llama un `curl` igual de bien.
+            tope_p = plantillas.tope_de_plantilla(ficha_pedida)
+            if lado > tope_p:
+                return self._send(409, {
+                    'error': f'«{(ficha_pedida or {}).get("titulo") or pedida}» no da para {lado}×{lado}: '
+                             f'su máximo es {tope_p}×{tope_p}. Más grande no sale más bonito — sale un '
+                             f'navegador sin memoria a mitad de la generación.',
+                    'ladoMax': tope_p, 'lados': list(plantillas.LADOS)})
+            dim = {'x': lado, 'y': plantillas.ALTO, 'z': lado}
             # La cuota se mira ANTES de escribir, que es la única forma de que sirva de algo. El
             # dueño del servidor no tiene cuota: no es una cuenta, es quien paga el disco.
             if uid:
@@ -1911,10 +2277,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                                      'Borra alguno para hacer sitio.',
                                             'cuota': {'mapas': tope, 'usados': tiene}})
                 # Y los BYTES, que son el tope que de verdad llena el disco: cinco mapas son cinco
-                # ficheros, pero un mapa grande son seis megas. Un mundo recién nacido ocupa lo que
-                # diga `DEFAULT_WORLD`: 96×40×96 celdas a dos bytes ⇒ unos 720 KB.
-                dim = DEFAULT_WORLD['dim']
-                if self._lleno_o_409(uid, dim['x'] * dim['y'] * dim['z'] * 2, 'un mapa nuevo'):
+                # ficheros, pero un mapa grande son seis megas.
+                # ⚠️ REQ-PLANT1 · se cobra por el tamaño ELEGIDO, no por el de `DEFAULT_WORLD`. Antes
+                # se cobraban siempre 96³ (720 KB) y después el generador hacía `resizeWorld(128…)` o
+                # más: la cuota daba el visto bueno para 720 KB y en disco acababan 21 MB.
+                if self._lleno_o_409(uid, plantillas.bytes_de(lado), 'un mapa nuevo'):
                     return
             # El nombre es global (el registro es LATERAL, no hay `@usuario/` en la ruta), así que la
             # colisión no se rechaza: se propone. `castillo` cogido → `castillo-2`.
@@ -1925,11 +2292,42 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._send(409, {'error': '«default» es el mundo sagrado: elige otro nombre'})
             slug = mundos_meta.nombre_libre(
                 pedido, lambda s: os.path.exists(os.path.join(WORLDS, s + '.json')))
-            voxfmt.guardar_v1(os.path.join(WORLDS, slug + '.json'), dict(DEFAULT_WORLD),
-                              atomic_dump, to_trash)
-            meta = mundos_meta.crea(slug, uid)
+            mundo = dict(DEFAULT_WORLD, dim=dim)
+            voxfmt.guardar_v1(os.path.join(WORLDS, slug + '.json'), mundo, atomic_dump, to_trash)
+
+            # (`plantilla` y `especial` ya están resueltos arriba: hacía falta la ficha ANTES de
+            # escribir nada, para poder rechazar un tamaño que la plantilla no aguanta.)
+
+            # La AMBIENTACIÓN se persiste como un `mundo-<slug>`, porque `game.entorno(...)` es un
+            # ajuste de tiempo de ejecución y se perdería al salir. ⛔ Lo escribe el SERVIDOR a partir
+            # de la lista cerrada de `servidor/plantillas.py`: el jugador manda claves («tormenta»),
+            # nunca código. Ver el porqué largo en la cabecera de ese módulo — es lo que permite dar
+            # esta función sin abrir `snippet.crear_propio`, que sigue bajo candado (F-E).
+            # ⛔ El `construye-*` NO entra aquí: empieza por `game.wipeMap()` y arrasaría el mundo en
+            # cada entrada. El generador corre UNA vez; esto corre siempre.
+            codigo = plantillas.codigo_ambiente(d.get('ambiente'), d.get('efectos'))
+            if codigo:
+                sid_amb = 'mundo-' + slug
+                atomic_dump({'id': sid_amb, 'name': 'Ambiente de «' + slug + '»', 'code': codigo,
+                             'dueno': uid, 'savedAt': now_iso()}, self._snip_path(sid_amb))
+
+            meta = mundos_meta.crea(slug, uid, plantilla=plantilla, especial=especial)
             return self._send(200, {'ok': True, 'nombre': slug, 'ruta': '/map/' + slug,
-                                    'renombrado': slug != pedido, 'meta': meta})
+                                    'renombrado': slug != pedido, 'meta': meta,
+                                    'lado': lado, 'plantilla': plantilla, 'especial': especial})
+        mg = re.match(r'^/api/mundos/([a-z0-9-]+)/generado$', ruta_post)
+        if mg:                                                    # REQ-PLANT1 · «ya he terminado de construir»
+            # Lo llama el navegador cuando el `construye-*` acaba. Hasta que llega esto, el mapa está
+            # marcado a medias y al volver a entrar se regenera — que es lo que el dueño pidió: **no
+            # dejarlo a medias**. Sólo puede marcarlo quien puede escribir en el mapa; si no, un
+            # tercero podría dar por bueno un mundo que se quedó a la mitad.
+            # ⚠️ Aquí NO vale `_mundo_ok()`: ese saca el mapa de `?map=`, y este slug viene en la
+            # RUTA. Se comprueba a mano contra el registro, como hace el DELETE de mundos.
+            slug = mg.group(1)
+            if not self._es_dueno() and not mundos_meta.puede_escribir(
+                    mundos_meta.lee(slug), self.quien(), False):
+                return self._send(403, {'error': f'«{slug}» no es tuyo'})
+            return self._send(200, {'ok': True, 'meta': mundos_meta.marca_generado(slug)})
         if ruta_post in ('/api/mundos/duplicar', '/api/mundos/renombrar'):   # menú del botón derecho en /map/
             # Un mundo son DOS ficheros (.json + .vox hermano): el par lo mueve `voxfmt`, que es quien
             # sabe eso y quien tiene el cerrojo por ruta. Aquí sólo se decide QUIÉN puede y hacia dónde.
@@ -1987,6 +2385,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             d = self._read()
             if not isinstance(d, dict):
                 return self._send(400, {'error': 'cabecera inválida'})
+            # F6.4 · EL SITIO DE APARICIÓN LO MUEVE SOLO EL DUEÑO DEL MAPA. No es lo mismo construir
+            # que decidir dónde aparece TODO EL MUNDO al entrar: con `escritura:'todos'`, cualquiera
+            # podía plantar el spawn dentro de la roca o en el aire a 40 de altura y el mapa quedaba
+            # inservible para los demás sin haber roto un solo bloque.
+            #
+            # ⚠️ Se QUITA el campo, no se rechaza la petición entera: `mcScheduleSave` manda la cabecera
+            # completa (spawn + estructuras + notas) desde CADA navegador cada vez, así que un 403 aquí
+            # dejaría a los invitados sin poder guardar las estructuras que sí son suyas. Y se dice en la
+            # respuesta (`spawnIgnorado`), porque un campo que se cae en silencio es un fallo invisible:
+            # el autor vería su spawn volver al de antes al recargar sin nada que mirar.
+            if 'spawn' in d:
+                slug_cab = self._slug_pedido()
+                meta_cab = mundos_meta.lee(slug_cab)
+                dueno_cab = meta_cab.get('dueno')
+                yo_cab = (self.quien() or {}).get('uid')
+                # Sin dueño registrado no hay a quién reservárselo: los 33 mapas de antes de F3.1 no
+                # tienen `dueno`, y ahí manda quien pueda escribir, como hasta hoy.
+                if dueno_cab and not self._es_dueno() and yo_cab != dueno_cab:
+                    d.pop('spawn')
+                    if not voxfmt.guardar_cabecera(wf, d, atomic_dump, to_trash):
+                        return self._send(409, {'error': 'el mundo no está en voxelworld-2',
+                                                'reintenta': 'completo'})
+                    return self._send(200, {'ok': True, 'spawnIgnorado': True,
+                                            'aviso': 'el sitio de aparición solo lo mueve el dueño del mapa'})
             if not voxfmt.guardar_cabecera(wf, d, atomic_dump, to_trash):
                 return self._send(409, {'error': 'el mundo no está en voxelworld-2', 'reintenta': 'completo'})
             return self._send(200, {'ok': True})
@@ -2033,6 +2455,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             cat = str(d.get('categoria') if 'categoria' in d else (d.get('category') or '')).strip()
             if cat:
                 rec['categoria'] = cat
+            # REQ-PLANT1 · la FICHA del carrusel de mundo nuevo (título, descripción, etiquetas, foto
+            # y frases de carga) viaja DENTRO del generador, que es donde la quiso el dueño: «podria
+            # haber metadatos en esos snippets para indicar la foto, el titulo de la ficha, una
+            # descripcion, etc». Es pegajosa por el mismo motivo que `protegido` justo aquí abajo —
+            # `rec` se arma de cero, así que sin esto el primer guardado desde el botón del editor se
+            # llevaría la ficha por delante y el bioma desaparecería del carrusel sin un solo error.
+            # ⛔ La foto va por RUTA, nunca en base64: `/api/snippets` tiene 2 MB de cuerpo y este
+            # fichero se lee entero en cada arranque del mapa.
+            if 'ficha' in d:
+                if isinstance(d.get('ficha'), dict):
+                    rec['ficha'] = d['ficha']
+            else:
+                try:
+                    with open(self._snip_path(sid), encoding='utf-8') as f:
+                        vieja = json.load(f).get('ficha')
+                    if isinstance(vieja, dict):
+                        rec['ficha'] = vieja
+                except Exception:
+                    pass
             # `protegido` es PEGAJOSO: si el fichero ya lo llevaba y quien guarda no dice nada, se
             # queda. `rec` se arma de cero, así que sin esto cualquier guardado normal —el botón del
             # editor, `redstone/make_snippets.js`— desprotegería la pieza en silencio, y una marca
@@ -2305,6 +2746,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 except Exception:
                     previo = {}
             d['createdAt'] = previo.get('createdAt') or previo.get('savedAt') or d['savedAt']
+
+            # REQ-ASSET1 · de quién es esto.
+            #
+            # ⚠️ EL CHOQUE DE NOMBRES ES REAL Y HAY QUE FRENARLO AQUÍ. El id de un habitante es su
+            # nombre pasado por `slugify`, así que dos personas que llamen «casa» a su dibujo
+            # aterrizan en el MISMO fichero. Antes de este ticket eso daba igual (todo era del
+            # dueño); con cuentas, dejarlo pasar es sobrescribir el dibujo de otro sin avisar.
+            mando = self._es_dueno()
+            if not mando:
+                de_otro = autoria.choca(previo, self.quien())
+                if de_otro:
+                    return self._send(409, {
+                        'error': f'ya hay un habitante llamado «{idd}» y no es tuyo. '
+                                 'Ponle otro nombre y vuelve a guardar.',
+                        'id': idd, 'deOtro': True})
+            autoria.sella(d, self.quien(), previo, manda=mando)
+
             to_trash(self._path(idd), move=False)             # respaldo antes de sobrescribir
             atomic_dump(d, self._path(idd))
             dedup(idd)                                        # consolida otros con el mismo nombre (a papelera)
@@ -2529,6 +2987,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # dueño, si era público), no autoría. Si se quedase, el día que alguien reutilice el
             # nombre heredaría dueño y permisos de un mapa que ya no existe.
             mundos_meta.olvida(slug)
+            # REQ-PLANT1 · y su snippet de ambiente, si el asistente le puso uno. Va a papelera como
+            # todo, no se borra. ⚠️ Hace falta hacerlo aquí a propósito: `mundo-` es un PREFIJO
+            # PROTEGIDO (`esta_protegido`), así que un `mundo-<slug>` de un mapa que ya no existe no
+            # habría manera de quitarlo por API — quedaría para siempre, y encima intentaría
+            # ejecutarse el día que alguien reutilizara el nombre del mapa.
+            amb = self._snip_path('mundo-' + slug)
+            if os.path.exists(amb):
+                try:
+                    with open(amb, encoding='utf-8') as f:
+                        suyo = json.load(f).get('name', '').startswith('Ambiente de ')
+                except Exception:
+                    suyo = False
+                if suyo:                                     # sólo el que escribió el asistente
+                    to_trash(amb)
             return self._send(200, {'ok': True, 'borrado': slug, 'papelera': 'data/papelera/mundos/'})
         mf = re.match(r'^/api/fotos/(\d{4,}_[a-z0-9-]+_\d{8}-\d{6})$', urllib.parse.urlparse(self.path).path)
         if mf:
@@ -2600,6 +3072,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._send(200, {'ok': True})
         idd = self._id()
         if idd and os.path.exists(self._path(idd)):
+            # REQ-ASSET1 · solo se borra lo propio. Que algo sea DEL MUNDO no lo hace de todos: lo
+            # comparte su autor y lo descomparte su autor. Un heredado no lo borra nadie por aquí —
+            # queda para el dueño del servidor, que ya ha pasado por `_es_dueno()`.
+            if not self._es_dueno():
+                try:
+                    doc = json.load(open(self._path(idd), encoding='utf-8'))
+                except Exception:
+                    doc = {}
+                if not autoria.puede_escribir(doc, self.quien()):
+                    return self._send(403, {'error': f'«{idd}» no es tuyo'})
             if self._en_uso_o_409(f'hab:{idd}', f'el habitante «{idd}»'):
                 return
             to_trash(self._path(idd)); return self._send(200, {'ok': True})   # a papelera, no borrado real
@@ -2625,10 +3107,14 @@ if __name__ == '__main__':
     # del dueño y un fichero creciendo por debajo sería una sorpresa. `VOXELFORGE_REGISTRO` lo fuerza
     # (lo usa su guardián) y también sirve para llevarlo a otro disco.
     reg = registro.arranca() if (es_publico() or os.environ.get('VOXELFORGE_REGISTRO')) else None
+    # ⛔ flush: lanzado con `nohup … > log &` la salida es de bloque, y como `serve_forever()` no
+    # vuelve NUNCA, el buffer no se vacía jamás y el log se queda vacío. Justo el saludo que dice en
+    # qué modo ha arrancado, que es lo único que se va a mirar ahí.
     print(f'VoxelForge server en http://0.0.0.0:{PORT}  ·  habitantes -> {STORE}{tk_info}{modo}'
-          + (f'  ·  registro -> {reg}' if reg else ''))
+          + (f'  ·  registro -> {reg}' if reg else ''), flush=True)
     if es_publico() and not tk:
         # No se aborta —el servidor sigue siendo útil de solo lectura— pero el aviso tiene que doler:
         # sin token, `_es_dueno()` es False para todos y no se puede escribir ni un snippet.
-        print('⚠️  modo público SIN token: nadie podrá escribir snippets. Arranca con --token o VOXELFORGE_TOKEN.')
+        print('⚠️  modo público SIN token: nadie podrá escribir snippets. Arranca con --token o VOXELFORGE_TOKEN.',
+              flush=True)
     Server(('0.0.0.0', PORT), Handler).serve_forever()

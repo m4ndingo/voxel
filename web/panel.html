@@ -4,10 +4,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="/favicon.ico">
 <link rel="stylesheet" href="/scrollbars.css">
+<script src="/quien.js" defer></script>   <!-- la chapa de identidad; se calla sola en /map/ -->
 <!-- F9 · EL PANEL DEL DUEÑO. Petición literal: «los permisos de usuarios y mapas y todo lo que sea
      administración, vía web, no consola».
 
-     Cuatro pestañas sobre `/api/panel/*`: Cuentas, Perfiles, Mundos y Salud.
+     Cinco pestañas sobre `/api/panel/*`: Cuentas, Perfiles, Mundos, Plantillas y Salud.
 
      ⚠️ Esta página no protege nada: si alguien la abre sin permiso, cada `fetch` de dentro
      devuelve 401/403 y aquí solo se pinta el motivo. Quien prohíbe es `server.py` (`_panel_puede`).
@@ -59,6 +60,30 @@ button.mini[disabled]{opacity:.4;cursor:default}
 .ficha h3{margin:0 0 2px;font-size:14.5px}
 .ficha .desc{color:var(--muted);font-size:12.5px;margin:0}
 .ficha .pie{display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap}
+/* REQ-PLANT2 · las fichas del carrusel. La miniatura se pinta con la MISMA proporción de teléfono
+   (9/16) que la tarjeta del asistente, para que el dueño vea aquí lo que se va a ver allí y no
+   descubra el recorte después de subir veinte fotos. */
+.plant{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.plant .caja{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+             padding:14px;display:flex;gap:14px}
+/* Dada de baja: se sigue viendo y se sigue pudiendo editar (es de donde se devuelve al carrusel),
+   pero tiene que distinguirse de un vistazo de las que sí salen en el asistente. */
+.plant .caja.apagada{opacity:0.62;border-style:dashed}
+.plant .caja.apagada:hover,.plant .caja.apagada:focus-within{opacity:1}
+/* ⚠️ NO se llama `.mini`: en esta página `.mini` ya son los botones pequeños, y `.plant .mini`
+   habría convertido en un rectángulo de 96×170 cada botón de dentro de la tarjeta. */
+.plant .retrato{width:96px;flex:0 0 96px;aspect-ratio:9/16;border:1px solid var(--line);border-radius:4px;
+             background-position:center;background-size:cover;background-repeat:no-repeat;
+             position:relative;background-color:var(--panel-2);cursor:pointer}
+.plant .retrato .marca{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+                    font-size:30px;font-weight:700;color:#38405a}
+.pastilla.mal{color:var(--danger);border-color:var(--danger)}
+.plant .cuerpo{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.plant .cuerpo input,.plant .cuerpo textarea{width:100%;box-sizing:border-box}
+.plant textarea{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+                padding:5px 9px;border-radius:7px;font:inherit;font-size:12.5px;resize:vertical}
+.plant .fila{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.plant .fila small{color:var(--muted);font-size:11.5px}
 .salud{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
 .dato{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
 .dato .k{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
@@ -251,7 +276,8 @@ function pintaMundos() {
       '<td><input type="text" class="cod" value="' + esc(m.codigo || '') + '" size="9" placeholder="—"></td>' +
       '<td style="color:var(--muted)">' + megas(m.bytes) + '</td>' +
       '<td><button class="mini salva">Guardar</button> ' +
-          '<a class="mini" style="text-decoration:none" href="/map/' + encodeURIComponent(m.slug) + '">Abrir</a></td></tr>';
+          '<a class="mini" style="text-decoration:none" href="/map/' + encodeURIComponent(m.slug) + '">Abrir</a> ' +
+          (m.slug === 'default' ? '' : '<button class="mini peligro borra">Borrar</button>') + '</td></tr>';
   }
   $('#main').innerHTML = h + '</tbody></table>';
 
@@ -262,7 +288,173 @@ function pintaMundos() {
       escritura: tr.querySelector('.esc').value,
       codigo: tr.querySelector('.cod').value,
     }, cargaYPinta);
+    // Borrar pide el nombre escrito a mano: es lo único de esta pestaña que se lleva un mundo
+    // entero. No lo borra de verdad —`DELETE /api/mundos/<slug>` lo manda a la papelera del
+    // servidor con el par `.json`+`.vox` junto— pero desde aquí no hay deshacer.
+    const bb = tr.querySelector('.borra');
+    if (bb) bb.onclick = async () => {
+      const slug = tr.getAttribute('data-slug');
+      const dicho = prompt('Borrar «' + slug + '» y su ambientación.\n' +
+                           'Va a data/papelera/mundos/, pero desde aquí no hay vuelta atrás.\n\n' +
+                           'Escribe el nombre del mapa para confirmar:', '');
+      if (dicho === null) return;
+      if (dicho.trim() !== slug) return alert('El nombre no coincide: no se ha borrado nada.');
+      const r = await pide('/api/mundos/' + encodeURIComponent(slug), { method: 'DELETE' });
+      if (!r.ok) return alert('No se pudo borrar: ' + (r.d.error || r.codigo));
+      cargaYPinta();
+    };
   });
+}
+
+// ── Plantillas de mundo (REQ-PLANT2) ────────────────────────────────────────────────────────────
+//
+// La ficha que se ve en el carrusel de «mundo nuevo»: título, descripción, etiquetas, frases de
+// carga, orden… y la FOTO, que era lo que no había forma de poner sin copiar un fichero a mano.
+//
+// ⚠️ La foto se sube SOLA, en cuanto se elige, y no espera al botón Guardar: son dos cosas
+// distintas (un fichero y unos metadatos) y mezclarlas obligaría a mandar la imagen otra vez cada
+// vez que se corrige una coma. Por eso al elegir foto la tarjeta se refresca al momento.
+
+let PLANTILLAS = [];
+let LADOS_PLANT = [];      // los que valida el servidor, no una lista escrita aquí
+
+async function pintaPlantillas() {
+  const { ok, d } = await pide('/api/panel/plantillas');
+  if (!ok) { $('#main').innerHTML = '<div class="aviso rojo">' + esc(d.error || 'no se ha podido leer') + '</div>'; return; }
+  PLANTILLAS = d.plantillas || [];
+  LADOS_PLANT = d.lados || [];
+  const peladas = PLANTILLAS.filter((p) => p.sinFoto);
+  const fuera = PLANTILLAS.filter((p) => p.ficha.oculta);
+  $('#main').innerHTML =
+    // ⛔ Lo que NO se ve mirando el panel es de dónde salen las tarjetas, y sin eso no hay forma de
+    // adivinar cómo se añade una (petición del dueño, 2026-09-02: «*no se ve / entiende cuál es el
+    // método para dar de alta una nueva o borrar una existente*»). No hay catálogo que mantener:
+    // el catálogo ES `data/snippets/`, y lo que convierte un generador en plantilla es tener una
+    // `ficha` dentro. Por eso el alta se explica y no se hace desde aquí: haría falta escribir el
+    // generador, que es código, y el código se publica por `POST /api/snippets`.
+    '<div class="aviso"><b>De dónde salen estas tarjetas</b><br>' +
+    'No hay una lista de plantillas que mantener: el carrusel enseña <b>los snippets de ' +
+    '<code>data/snippets/</code> que llevan una <code>ficha</code> dentro</b>, más las dos del ' +
+    'propio programa. Así que:<br>' +
+    '· <b>Dar de alta una plantilla</b> = publicar su generador con una <code>ficha</code> en el ' +
+    'documento (<code>POST /api/snippets</code>, o el gestor de código con <kbd>Alt</kbd>+<kbd>C</kbd>). ' +
+    'En cuanto tenga ficha aparece aquí y en el asistente, y ya se le pone foto y textos desde este panel.<br>' +
+    '· <b>Dar de baja</b> = <b>Quitar del carrusel</b>, aquí abajo. ⛔ No borra nada: el generador ' +
+    'sigue publicado y funcionando, sólo deja de tener tarjeta, y se devuelve cuando se quiera. ' +
+    'Para borrarlo de verdad hay que borrar el snippet, y eso se hace en el gestor de código ' +
+    '(va a la papelera).<br>' +
+    '· Las dos fichas <b>del programa</b> no se dan de baja: son el punto de partida de cualquier mundo.' +
+    '</div>' +
+    (fuera.length ? '<div class="aviso">' + fuera.length + ' fuera del carrusel, que se siguen ' +
+      'viendo aquí para poder devolverlas: <b>' + fuera.map((p) => esc(p.id)).join(', ') + '</b>.</div>' : '') +
+    '<div class="aviso">Cada tarjeta del asistente de <b>mundo nuevo</b> sale de aquí. Para poner ' +
+    'una foto se pulsa el retrato. Se guarda en <code>' + esc(d.carpeta) + '</code>, que se sirve ' +
+    'para mirar pero sólo se escribe desde este panel. <b>Si una foto desaparece no se rompe ' +
+    'nada</b>: la tarjeta vuelve a su marcador. Van bien JPEG, PNG y WebP hasta ' + megas(d.topeFoto) + '.</div>' +
+    (peladas.length ? '<div class="aviso">' + peladas.length + ' de ' + PLANTILLAS.length + ' fichas ' +
+      'todavía no tienen foto y se pintan con su inicial: <b>' + peladas.map((p) => esc(p.id)).join(', ') +
+      '</b>.</div>' : '') +
+    '<div class="plant">' + PLANTILLAS.map(cajaPlantilla).join('') + '</div>';
+  PLANTILLAS.forEach((p) => enganchaPlantilla(p));
+}
+
+// Un desplegable de tamaño. El 0 es «sin definir», que NO es lo mismo que un tamaño: sin `ladoMax`
+// la plantilla no limita nada y el tope lo pone la cuota del usuario (`tope_de_plantilla`).
+function opcionesLado(sel, cero) {
+  return '<option value="0"' + (sel ? '' : ' selected') + '>' + cero + '</option>' +
+    LADOS_PLANT.map((l) => '<option value="' + l + '"' + (l === sel ? ' selected' : '') + '>' +
+      l + '×' + l + '</option>').join('');
+}
+
+function cajaPlantilla(p) {
+  const inicial = esc((p.ficha.titulo || p.id || '?').trim().charAt(0).toUpperCase());
+  return '<div class="caja' + (p.ficha.oculta ? ' apagada' : '') + '" data-id="' + esc(p.id) + '">' +
+    '<div class="retrato" data-foto style="' + (p.foto ? 'background-image:url(\'' + esc(p.foto) + '?v=' + Date.now() + '\')' : '') + '" ' +
+         'title="Pulsa para elegir una foto">' +
+      (p.foto ? '' : '<div class="marca">' + inicial + '</div>') + '</div>' +
+    '<div class="cuerpo">' +
+      '<div class="fila"><b>' + esc(p.id) + '</b>' +
+        (p.especial ? ' <span class="pastilla">del programa</span>' : '') +
+        (p.fotoPorNombre ? ' <span class="pastilla">foto por nombre</span>' : '') +
+        (p.sinFoto ? ' <span class="pastilla ojo">sin foto</span>' : '') +
+        (p.ficha.oculta ? ' <span class="pastilla mal">fuera del carrusel</span>' : '') + '</div>' +
+      '<input data-k="titulo" value="' + esc(p.ficha.titulo) + '" placeholder="título" ' + (p.editable ? '' : 'disabled') + '>' +
+      '<textarea data-k="descripcion" rows="2" placeholder="descripción" ' + (p.editable ? '' : 'disabled') + '>' +
+        esc(p.ficha.descripcion) + '</textarea>' +
+      '<input data-k="etiquetas" value="' + esc((p.ficha.etiquetas || []).join(', ')) + '" ' +
+        'placeholder="etiquetas, separadas por comas (4 como mucho)" ' + (p.editable ? '' : 'disabled') + '>' +
+      '<input data-k="frases" value="' + esc((p.ficha.frases || []).join(' | ')) + '" ' +
+        'placeholder="frases de la pantalla de carga, separadas por |" ' + (p.editable ? '' : 'disabled') + '>' +
+      // ⚠️ Los dos tamaños son de la PLANTILLA, no del servidor: el «recomendado» es el que se
+      // marca solo al elegirla y el «máximo» el último que aguanta el NAVEGADOR generándola. Sin
+      // el máximo, un bioma denso a 256×256 deja al navegador sin memoria («borrame-6»).
+      (p.editable ? '<div class="fila">' +
+        '<small>tamaño que propone</small><select data-k="lado">' + opcionesLado(p.ficha.lado, 'el de siempre') + '</select>' +
+        '<small title="Los tamaños mayores salen tachados en el asistente">máximo que aguanta</small>' +
+        '<select data-k="ladoMax">' + opcionesLado(p.ficha.ladoMax, 'sin límite') + '</select>' +
+      '</div>' : '') +
+      '<div class="fila">' +
+        '<small>orden</small><input data-k="orden" type="number" style="width:80px" value="' + (p.orden || 500) + '" ' +
+          (p.editable ? '' : 'disabled') + '>' +
+        '<input type="file" accept="image/jpeg,image/png,image/webp" data-file hidden>' +
+        '<button class="mini" data-sube>Foto…</button>' +
+        (p.foto ? '<button class="mini" data-quita>Quitar foto</button>' : '') +
+        (p.editable ? '<button class="mini" data-ok>Guardar</button>'
+                    : '<small>los textos de esta ficha son del propio programa</small>') +
+        // La baja, al lado de lo demás y con su explicación en el `title`: es el botón que la
+        // pestaña no tenía y por el que no se entendía cómo se quita una plantilla.
+        (p.editable ? (p.ficha.oculta
+          ? '<button class="mini" data-carrusel title="Vuelve a salir en el asistente de mundo nuevo">Devolver al carrusel</button>'
+          : '<button class="mini peligro" data-carrusel title="Deja de salir en el asistente. No borra el generador: se puede devolver cuando quieras">Quitar del carrusel</button>') : '') +
+      '</div>' +
+    '</div></div>';
+}
+
+function enganchaPlantilla(p) {
+  const caja = $('.plant .caja[data-id="' + CSS.escape(p.id) + '"]');
+  if (!caja) return;
+  const v = (k) => { const e = caja.querySelector('[data-k="' + k + '"]'); return e ? e.value : ''; };
+  const fich = caja.querySelector('[data-file]');
+
+  caja.querySelector('[data-sube]').onclick = () => fich.click();
+  caja.querySelector('[data-foto]').onclick = () => fich.click();
+  fich.onchange = async () => {
+    const f = fich.files && fich.files[0];
+    if (!f) return;
+    // Se manda en base64 porque el resto del sitio ya sube así (iconos, fotos, vídeos) y el
+    // servidor comprueba los BYTES de cabecera: da igual lo que diga el nombre del fichero.
+    const dato = await new Promise((r) => { const l = new FileReader(); l.onload = () => r(l.result); l.readAsDataURL(f); });
+    await guarda('/api/panel/plantilla/foto', { id: p.id, dato }, pintaPlantillas);
+  };
+  const quita = caja.querySelector('[data-quita]');
+  if (quita) quita.onclick = async () => {
+    if (!confirm('¿Quitar la foto de «' + (p.ficha.titulo || p.id) + '»?\n\nVa a la papelera, no se ' +
+                 'borra, y la tarjeta vuelve a su marcador.')) return;
+    const { ok, d } = await pide('/api/panel/plantilla/foto/' + encodeURIComponent(p.id), { method: 'DELETE' });
+    chiva(ok ? 'Foto quitada' : (d.error || 'no se ha podido'), !ok);
+    await pintaPlantillas();
+  };
+  const ok = caja.querySelector('[data-ok]');
+  if (ok) ok.onclick = () => guarda('/api/panel/plantilla', {
+    id: p.id,
+    ficha: {
+      titulo: v('titulo'), descripcion: v('descripcion'),
+      etiquetas: v('etiquetas').split(',').map((s) => s.trim()).filter(Boolean),
+      frases: v('frases').split('|').map((s) => s.trim()).filter(Boolean),
+      orden: parseInt(v('orden'), 10) || 500,
+      lado: parseInt(v('lado'), 10) || 0, ladoMax: parseInt(v('ladoMax'), 10) || 0,
+    },
+  }, pintaPlantillas);
+
+  // Alta y baja del carrusel. ⛔ Se manda SÓLO `oculta`: el resto de la ficha se queda como está en
+  // el disco, para que dar de baja no guarde de paso lo que hubiera a medio escribir en la tarjeta.
+  const carr = caja.querySelector('[data-carrusel]');
+  if (carr) carr.onclick = async () => {
+    const quitando = !p.ficha.oculta;
+    if (quitando && !confirm('¿Quitar «' + (p.ficha.titulo || p.id) + '» del asistente de mundo nuevo?' +
+      '\n\nNo se borra nada: el generador sigue publicado y la puedes devolver desde aquí.')) return;
+    await guarda('/api/panel/plantilla', { id: p.id, ficha: { oculta: quitando } }, pintaPlantillas);
+  };
 }
 
 // ── Salud ───────────────────────────────────────────────────────────────────────────────────────
@@ -299,6 +491,7 @@ const PESTANAS = [
   ['cuentas', 'Cuentas', pintaCuentas],
   ['perfiles', 'Perfiles', pintaPerfiles],
   ['mundos', 'Mundos', pintaMundos],
+  ['plantillas', 'Plantillas', pintaPlantillas],
   ['salud', 'Salud', pintaSalud],
 ];
 let actual = 'cuentas';

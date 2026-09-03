@@ -71,8 +71,12 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     assert(tras.abierta === 'pausa', 'no se abrió la pausa (abierta: ' + tras.abierta + ')');
   });
   test('§1 la pausa trae las cinco entradas del menú', () => {
-    const esperadas = ['CONTINUAR', 'INVITAR', 'AJUSTES', 'MIS MUNDOS', 'SALIR'];
+    // La quinta cambia de rótulo según haya editor detrás o no (§8): lo que no puede faltar es la
+    // entrada, no una palabra concreta.
+    const esperadas = ['CONTINUAR', 'INVITAR', 'AJUSTES', 'MIS MUNDOS'];
     for (const e of esperadas) assert(tras.botones.includes(e), 'falta «' + e + '» (hay: ' + tras.botones.join(', ') + ')');
+    assert(tras.botones.includes('SALIR') || tras.botones.includes('IR AL EDITOR'),
+           'falta la salida (hay: ' + tras.botones.join(', ') + ')');
   });
 
   // ── §2 · ningún botón muerto ────────────────────────────────────────────────────────────────────
@@ -242,6 +246,130 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
     assert(sinMenu.abierta === null, 'con el menú quitado Esc abrió «' + sinMenu.abierta + '»');
     assert(!sinMenu.mundo, 'con el menú quitado Esc ya no cierra el Mundo: queda algo del envoltorio puesto');
   });
+
+  // ── §8 · SALIR sabe de dónde viene ──────────────────────────────────────────────────────────────
+  //
+  // EL CASO, tal cual lo contó el dueño: entra en modo diseño, abre el Mundo desde el editor 2D/3D,
+  // hace Esc, pulsa SALIR — y aparece en la portada, sin camino de vuelta al editor.
+  //
+  // La causa era que SALIR hacía `location.href = '/'` siempre. En desarrollo `/` ERA el editor, así
+  // que no se notaba; el día que el servidor pasó a modo público, `/` pasó a ser la portada y salir
+  // del Mundo dejó de devolver al editor. Por eso este §8 comprueba las DOS caras, no una:
+  //
+  //   · en `/map/<slug>` (lo que ya mira todo el fichero) el botón lleva AL EDITOR **sin navegar**;
+  //   · encima del editor, lo mismo: cierra la capa del Mundo — que es el último escalón que hacía
+  //     Esc antes de que este menú existiera.
+  //
+  // ⚠️ SEGUNDA VUELTA (petición del dueño): en `/map/<slug>` esto ANTES hacía `location.href='/'`, y
+  // ahí se perdía el mapa. `/map/<x>` sirve el MISMO `index.html` (server.py:1431), o sea que el
+  // editor está debajo de la capa; y `mcMapName()` (app.js:21476) saca el mapa DE LA URL. Al ir a `/`
+  // el icono «mundo» del editor reabría `default` en vez de volver a `empty3`. La regla nueva:
+  // **desde un mapa NO se navega a ninguna parte**, se cierra la capa y la URL se conserva. Eso es lo
+  // que hace posible el viaje de vuelta, y es lo que vigila este §8.
+  // ⚠️ Este fichero corre ANÓNIMO, y para quien no tiene `snippet.editar_sistema` el editor es una
+  // superficie de desarrollo que no debe pisar: ahí el botón sigue siendo SALIR (se comprueba abajo).
+  // El caso que tenía el bug es el del DUEÑO, así que se le ponen sus permisos a mano — `sesion-guardia`
+  // los guarda en el módulo justo para esto, y así el guardián no depende de montar una sesión.
+  // §6 ha dejado el Mundo CERRADO (era justo lo que comprobaba). Aquí hace falta abierto y con el
+  // menú puesto otra vez, que es la situación real desde la que se pulsa.
+  await p.evaluate(() => openWorld());
+  await p.waitForFunction('!document.getElementById("mc-modal").hidden && typeof mc !== "undefined" && mc.grid', null, { timeout: 180000 });
+  await p.evaluate(() => game.menu.on());
+  await p.waitForTimeout(600);
+
+  const enMapa = await p.evaluate(() => {
+    if (window.game && game.guardia) { game.guardia._antes = game.guardia.permisos; game.guardia.permisos = ['snippet.editar_sistema']; }
+    return { hayEditor: game.menu.hayEditorDetras(), texto: game.menu.textoSalir(), ruta: location.pathname };
+  });
+  test('§8 en /map/<slug> el botón lleva AL EDITOR, no a la portada', () => {
+    assert(enMapa.hayEditor === true, 'no ve el editor debajo estando en ' + URL);
+    assert(enMapa.texto === 'IR AL EDITOR', 'el rótulo dice «' + enMapa.texto + '»');
+  });
+
+  // Y lo que de verdad importa: pulsarlo NO puede mover la URL, porque la URL ES el mapa.
+  const rutaAntes = enMapa.ruta;
+  await p.evaluate(() => game.menu.salir());
+  await p.waitForTimeout(900);
+  const trasSalirEnMapa = await p.evaluate(() => ({
+    ruta: location.pathname,
+    mundo: !document.getElementById('mc-modal').hidden,
+    editor: !!document.getElementById('mas-menu'),
+    mapa: mcMapName()
+  }));
+  test('§8 …y CONSERVA LA RUTA DEL MAPA (el viaje de vuelta)', () => {
+    assert(trasSalirEnMapa.ruta === rutaAntes,
+           'ha navegado a «' + trasSalirEnMapa.ruta + '»: el editor ya no sabe a qué mapa volver');
+    assert(trasSalirEnMapa.mundo === false, 'la capa del Mundo sigue abierta');
+    assert(trasSalirEnMapa.editor, 'el editor no está debajo');
+  });
+
+  // Y el regreso, que es el motivo de todo esto: el mismo botón «mundo» de siempre.
+  await p.evaluate(() => openWorld());
+  await p.waitForFunction('!document.getElementById("mc-modal").hidden && typeof mc !== "undefined" && mc.grid', null, { timeout: 180000 });
+  const regreso = await p.evaluate(() => ({ ruta: location.pathname, mapa: mcMapName() }));
+  test('§8 …y el icono «mundo» devuelve AL MISMO MAPA, no a «default»', () => {
+    assert(regreso.mapa === trasSalirEnMapa.mapa && regreso.mapa !== 'default',
+           'ha vuelto a «' + regreso.mapa + '» en vez de «' + trasSalirEnMapa.mapa + '»');
+    assert(regreso.ruta === rutaAntes, 'la ruta acabó en «' + regreso.ruta + '»');
+  });
+
+  // La otra cara: sin el permiso, el editor no se ofrece. No se pulsa (navegaría y se llevaría por
+  // delante lo que queda de fichero): basta con que el rótulo y la decisión sean los otros.
+  const sinPermiso = await p.evaluate(() => {
+    if (window.game && game.guardia) game.guardia.permisos = ['multi.entrar'];
+    const r = { hayEditor: game.menu.hayEditorDetras(), texto: game.menu.textoSalir() };
+    if (window.game && game.guardia) game.guardia.permisos = game.guardia._antes || [];
+    return r;
+  });
+  test('§8 sin permiso de desarrollo, el botón vuelve a ser SALIR', () => {
+    assert(sinPermiso.hayEditor === false, 'ofrece el editor a quien no tiene permiso');
+    assert(sinPermiso.texto === 'SALIR', 'el rótulo dice «' + sinPermiso.texto + '»');
+  });
+
+  // La otra cara pide otra página: el editor con el Mundo COMO CAPA, que es donde estaba el fallo.
+  const q = await b.newPage();
+  const erroresQ = [];
+  q.on('pageerror', e => erroresQ.push('EXCEPCION ' + e.message));
+  // ⚠️ `new URL(...)` NO se puede usar aquí: `URL` es la constante de arriba (el mapa del test), que
+  // tapa la global del navegador. Se corta a mano, que además deja ver qué se espera.
+  const RAIZ = URL.match(/^https?:\/\/[^/]+/)[0];
+  await q.goto(RAIZ + '/index.html?noauto=1', { waitUntil: 'load', timeout: 120000 });
+  await q.waitForFunction('typeof window.openWorld === "function"', null, { timeout: 60000 });
+  await q.evaluate(() => openWorld());
+  await q.waitForFunction('!document.getElementById("mc-modal").hidden', null, { timeout: 180000 });
+  await q.waitForFunction('window.game && game.menu && game.menu.estado().puesto', null, { timeout: 60000 });
+  await q.keyboard.press('Escape');
+  await q.waitForTimeout(600);
+  const enEditor = await q.evaluate(() => ({
+    enElEditor: game.menu.enElEditor(),
+    abierta: game.osd.abierta,
+    botones: Array.from(document.querySelectorAll('#mc-osd .mc-osd-btn')).map(b => b.textContent.trim())
+  }));
+  test('§8 encima del editor el botón se llama IR AL EDITOR', () => {
+    assert(enEditor.enElEditor === true, 'no se reconoce como capa del editor');
+    assert(enEditor.abierta === 'pausa', 'Esc no abrió la pausa (abierta: ' + enEditor.abierta + ')');
+    assert(enEditor.botones.includes('IR AL EDITOR'),
+           'no está el rótulo (hay: ' + enEditor.botones.join(', ') + ')');
+  });
+
+  await q.evaluate(() => game.menu.salir());
+  await q.waitForTimeout(900);
+  const salido = await q.evaluate(() => ({
+    ruta: location.pathname,
+    mundo: !document.getElementById('mc-modal').hidden,
+    abierta: game.osd.abierta,
+    editor: !!document.getElementById('mas-menu')
+  }));
+  test('§8 …y devuelve AL EDITOR: cierra la capa y no navega a ninguna parte', () => {
+    assert(salido.ruta === '/index.html', 'ha navegado a «' + salido.ruta + '» en vez de quedarse');
+    assert(salido.mundo === false, 'la capa del Mundo sigue abierta');
+    assert(salido.abierta === null, 'la pantalla «' + salido.abierta + '» se ha quedado encima');
+    assert(salido.editor, 'el editor no está debajo');
+  });
+  test('§8 sin excepciones por el camino', () => {
+    assert(erroresQ.length === 0, erroresQ.join('\n        '));
+  });
+  await q.close();
 
   test('§7 nada de esto lanzó una excepción', () => {
     assert(errores.length === 0, errores.join('\n        '));

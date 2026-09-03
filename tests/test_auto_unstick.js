@@ -57,7 +57,9 @@ const r3 = n => Math.round(n * 1000) / 1000;
     const frame = () => new Promise(res => requestAnimationFrame(res));
 
     out.defecto = game.autoUnstick;
-    out.enDump = 'autoUnstick' in game.dumpVars();
+    // `game.dumpVars()` a secas devuelve el TEXTO ejecutable estilo .cfg; el diccionario, que es lo
+    // que aquí se quiere inspeccionar, sale con {objeto:true}. (`'x' in "un string"` es un TypeError.)
+    out.enDump = 'autoUnstick' in game.dumpVars({ objeto: true });
     out.hayTeclaU = typeof game.unstick === 'function';
 
     // Persistencia: se toca, se lee lo guardado, y se deja como estaba.

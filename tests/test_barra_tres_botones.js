@@ -10,11 +10,14 @@
 //
 // No abre el Mundo ni guarda nada: los POST van bloqueados.
 //
-//   node test_barra_tres_botones.js [url]        por defecto http://localhost:8500/
+//   node test_barra_tres_botones.js [url]        por defecto http://localhost:8500/index.html
+//
+// ⚠️ `/index.html` explícito y NO `/`: en modo público la raíz sirve la PORTADA a quien no es dueño
+// (`server.py:1442`), y allí no hay ni barra ni menú «⋯» que mirar.
 
 const { chromium } = require('playwright');
 
-const URL = process.argv[2] || 'http://localhost:8500/';
+const URL = process.argv[2] || 'http://localhost:8500/index.html';
 let ok = 0, fallos = 0;
 function test(nombre, cond, extra) {
   if (cond) { console.log('  ok    ' + nombre + (extra ? '   (' + extra + ')' : '')); ok++; }
@@ -59,26 +62,46 @@ function test(nombre, cond, extra) {
 
   console.log('\n── B · el «⋯» abre, cierra y lleva todo lo demás ──');
   await p.click('#btn-mas');
-  const B = await p.evaluate(() => ({
-    abierto: !document.querySelector('#mas-menu').hidden,
-    aria: document.querySelector('#btn-mas').getAttribute('aria-expanded'),
-    items: [...document.querySelectorAll('#mas-menu .menu-item')].map(i => i.firstChild.nodeValue.trim()),
-    // «Se ve» ≠ «está»: Mapa y Jugar siguen en el DOM pero están APARCADOS (`data-rpg`), y los tres
-    // enlaces de abajo son <a> que salen a otra pestaña. Contar solo nodos mezclaba las tres cosas.
-    visibles: [...document.querySelectorAll('#mas-menu .menu-item')]
-                .filter(i => i.getBoundingClientRect().height > 0).map(i => i.firstChild.nodeValue.trim()),
-  }));
+  const B = await p.evaluate(() => {
+    // REQ-NAV2 · el menú es un acordeón: para INVENTARIAR hay que desplegarlo entero, o «Nuevo» y
+    // los enlaces de las otras páginas no estarían en el DOM visible y el test los daría por
+    // perdidos. Se despliega a mano (sin clic) porque el guion solo deja uno abierto a la vez.
+    const cuerpos = [...document.querySelectorAll('#mas-menu .menu-cuerpo')];
+    const plegados = cuerpos.filter(c => c.hidden);
+    plegados.forEach(c => { c.hidden = false; });
+    const B = {
+      abierto: !document.querySelector('#mas-menu').hidden,
+      aria: document.querySelector('#btn-mas').getAttribute('aria-expanded'),
+      items: [...document.querySelectorAll('#mas-menu .menu-item')].map(i => i.firstChild.nodeValue.trim()),
+      // «Se ve» ≠ «está»: Mapa y Jugar siguen en el DOM pero están APARCADOS (`data-rpg`), y los
+      // enlaces de abajo son <a> que salen a otra pestaña. Contar solo nodos mezclaba las tres cosas.
+      visibles: [...document.querySelectorAll('#mas-menu .menu-item')]
+                  .filter(i => i.getBoundingClientRect().height > 0).map(i => i.firstChild.nodeValue.trim()),
+      // Los grupos plegables, que son la ganancia del ticket: 17 filas seguidas pasan a 8.
+      grupos: [...document.querySelectorAll('#mas-menu .menu-sub')].map(t => t.firstChild.nodeValue.trim()),
+    };
+    plegados.forEach(c => { c.hidden = true; });
+    return B;
+  });
   test('un clic en ⋯ lo abre', B.abierto && B.aria === 'true');
   // Las nueve que el dueño quería dentro, ni una menos.
   const esperadas = ['🗺 Mapa', '▶ Jugar', '🧩 Código', '🦴 Agentes', 'Nuevo', 'Guardar', 'Guardar como…', 'Exportar', 'Importar'];
+  // Las que entraron con la sesión y los mundos de usuario (F1/F3/F5): puerta a la portada, salida.
+  const cuenta = ['🏠 Portada', '✚ Crear un mundo', '🔗 Invitar a un amigo', '🚪 Salir'];
   // Y los tres enlaces a las otras páginas del sitio, que entraron después. El total se DERIVA de
   // las dos listas: escrito como un número suelto («9»), cada entrada nueva rompe este test por el
   // motivo equivocado y hay que venir a traducir el número a mano.
-  const enlaces = ['🗺 Mundos ↗', '📷 Fotos ↗', '🖼 Iconos ↗', '📖 Wiki ↗'];
-  const faltan = [...esperadas, ...enlaces].filter(e => !B.items.some(i => i === e));
-  test('están las 9 entradas que salieron de la barra, y los 4 enlaces',
-    faltan.length === 0 && B.items.length === esperadas.length + enlaces.length,
-    B.items.length + ' entradas' + (faltan.length ? ' · faltan: ' + faltan.join(', ') : ''));
+  const enlaces = ['🗺 Mundos ↗', '📷 Fotos ↗', '🎬 Vídeos ↗', '📖 Wiki ↗', '⚙ Panel ↗', '🖼 Iconos ↗'];
+  const todas = [...esperadas, ...cuenta, ...enlaces];
+  const faltan = todas.filter(e => !B.items.some(i => i === e));
+  test('están las 9 entradas que salieron de la barra, más cuenta y enlaces',
+    faltan.length === 0 && B.items.length === todas.length,
+    B.items.length + '/' + todas.length + ' entradas' + (faltan.length ? ' · faltan: ' + faltan.join(', ') : ''));
+  // REQ-NAV2 · lo largo era el problema. Se comprueba que los grupos existen y que, plegado, el menú
+  // no pasa de 8 filas a la vista (las 4 sueltas del dueño + los 4 grupos).
+  const plegables = ['Este objeto', 'Mundos', 'El sitio', 'Administración'];
+  test('el menú está en 4 grupos plegables', plegables.every(g => B.grupos.includes(g)) && B.grupos.length === 4,
+    B.grupos.join(' · '));
   // Mapa y Jugar están aparcados: en el DOM sí, a la vista no (ver test_rpg_aparcado.js).
   test('…pero Mapa y Jugar no se VEN (línea de RPG aparcada)',
     !B.visibles.includes('🗺 Mapa') && !B.visibles.includes('▶ Jugar'),
@@ -181,11 +204,31 @@ function test(nombre, cond, extra) {
   console.log('\n── F · anti-falso-verde: el menú de verdad ABRE cosas ──');
   // A/B miran el DOM. Si las entradas no hicieran nada, saldrían verdes igual: aquí se pulsa una y se
   // comprueba que abre su panel.
+  // §E dejó la ventana en 390 px y ahí la insignia de sesión tapa la barra: se devuelve al tamaño
+  // de siempre antes de pulsar nada, o el fallo que se ve es geometría y no navegación.
+  await p.setViewportSize({ width: 1280, height: 800 });
+  await p.waitForTimeout(200);
   await p.click('#btn-mas');
-  await p.click('#mas-menu [data-tab="codigo"]');
-  await p.waitForFunction('!document.querySelector("#snip-modal").hidden', { timeout: 20000 });
-  test('«🧩 Código» del menú abre el panel de snippets', true);
-  test('...y al pulsarlo el menú se cierra solo', await p.evaluate(() => document.querySelector('#mas-menu').hidden));
+  // REQ-NAV2 · primero el grupo, que ahora está plegado. Desplegarlo NO puede cerrar el menú: el
+  // disparador es `.menu-sub` y no `.menu-item` justamente por eso, y aquí es donde se comprueba.
+  await p.click('#mas-menu .menu-sub[aria-controls="sub-objeto"]');
+  test('desplegar un grupo no cierra el «⋯»', await p.evaluate(() => !document.querySelector('#mas-menu').hidden));
+  test('...y sus entradas ya se pueden pulsar',
+    await p.evaluate(() => !!document.querySelector('#btn-guardar').offsetParent));
+  // «🧩 Código» pide `snippet.editar_sistema`. Sin sesión de diseño no está a la vista, y forzar el
+  // clic solo probaría que Playwright sabe esperar. Se dice en voz alta en vez de callarlo.
+  const hayCodigo = await p.evaluate(() => !!document.querySelector('#mas-menu [data-tab="codigo"]').offsetParent);
+  if (hayCodigo) {
+    await p.click('#mas-menu [data-tab="codigo"]');
+    await p.waitForFunction('!document.querySelector("#snip-modal").hidden', { timeout: 20000 });
+    test('«🧩 Código» del menú abre el panel de snippets', true);
+    test('...y al pulsarlo el menú se cierra solo', await p.evaluate(() => document.querySelector('#mas-menu').hidden));
+  } else {
+    console.log('  –  «🧩 Código» no se comprueba: este visitante no tiene «snippet.editar_sistema»');
+    await p.click('#tabs [data-tab="galeria"]');
+    await p.waitForFunction('!document.querySelector("#hab-modal").hidden', { timeout: 20000 });
+    test('el menú abre paneles de verdad (Galería, en su lugar)', true);
+  }
   await p.keyboard.press('Escape');
 
   test('no hay errores de página', errores.length === 0, errores.join(' | '));

@@ -25,6 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { spawnSync } = require('child_process');
+const { tokenDueno, ENV_DUENO } = require('./tests/_token');
 
 const ARGS = process.argv.slice(2);
 
@@ -147,7 +148,7 @@ function checkPlaywrightInstalled() {
 // `/api/panel/salud` sirve de sonda porque sin token configurado es dueño todo el mundo (200) y
 // con token puesto responde 401 a quien no lo trae.
 function checkTokenAusente() {
-  if ((process.env.VOXELFORGE_TOKEN || '').trim()) return Promise.resolve(false);
+  if (tokenDueno()) return Promise.resolve(false);
   return new Promise(resolve => {
     const req = http.get('http://localhost:8500/api/panel/salud', res => resolve(res.statusCode === 401));
     req.on('error', () => resolve(false));
@@ -177,10 +178,13 @@ function checkTokenAusente() {
   }
 
   if (await checkTokenAusente()) {
-    console.error('\n⚠️  El servidor de :8500 pide el token del dueño y esta terminal no lo lleva.');
+    // Ojo: si se llega aquí es que NO hay token en ninguna parte — ni en el entorno ni en
+    // `/root/voxelforge.env`, que `tests/_token.js` ya ha intentado leer. Ya no sirve decir
+    // «expórtalo»: el problema es que no está o que este usuario no puede leer ese fichero (600).
+    console.error('\n⚠️  El servidor de :8500 pide el token del dueño y aquí no hay ninguno.');
     console.error('   Los tests que ESCRIBEN van a recibir 401 y contarlo como fallo de la');
-    console.error('   protección que dicen comprobar. Exporta el token antes de seguir:\n');
-    console.error('       export VOXELFORGE_TOKEN=$(grep -oP \'^VOXELFORGE_TOKEN=\\K.*\' /root/voxelforge.env)\n');
+    console.error('   protección que dicen comprobar. Comprueba que existe y es legible:\n');
+    console.error('       sudo grep VOXELFORGE_TOKEN ' + ENV_DUENO + '\n');
   }
 
   console.log(`\n🚀 Ejecutando ${selected.length} test(s)...\n`);
@@ -201,7 +205,10 @@ function checkTokenAusente() {
       cwd: __dirname,
       encoding: 'utf8',
       stdio: 'pipe',
-      env: process.env
+      // El token del dueño va al hijo por el ENTORNO, nunca por la línea de órdenes (donde lo vería
+      // cualquier `ps`). Así los ~12 tests que ya leen `process.env.VOXELFORGE_TOKEN` se identifican
+      // solos contra un 8500 en modo público, sin que nadie tenga que acordarse de exportarlo.
+      env: Object.assign({}, process.env, tokenDueno() ? { VOXELFORGE_TOKEN: tokenDueno() } : {})
     });
 
     const dur = ((Date.now() - tStart) / 1000).toFixed(1) + 's';

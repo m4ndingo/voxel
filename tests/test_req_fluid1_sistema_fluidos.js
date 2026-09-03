@@ -111,6 +111,16 @@ const { chromium } = require('playwright');
 
     // 4. Caso de integración: Verificación de puente de pistón (Requirement 4)
     const pistonTest = await page.evaluate(async () => {
+      // ⚠️ `tick(true)` NO es «un paso del mundo»: procesa 32 celdas como mucho y se corta a las 8 si
+      // lleva más de 1,2 ms de reloj (`app.js`, el bucle de `tick`). Cuántas llamadas hacen falta
+      // depende, pues, de lo que quede en la cola y de lo rápida que vaya la máquina — y aquí quedaban
+      // las celdas del agua de la sección anterior. Por eso este bloque salía 10 ok / 2 fallos en una
+      // pasada y 11 ok / 1 fallo en la siguiente (2026-09-02): el test medía el presupuesto del tick.
+      // Los ticks contados de arriba se quedan como están, que allí el número de pasos SÍ es el examen;
+      // aquí lo que se prueba es que la roca tapa y que al quitarla el origen vuelve a llenar.
+      const asienta = () => { for (let i = 0; i < 200 && game.fluidos.queueSize(); i++) game.fluidos.tick(true); };
+      asienta();
+
       // 1. Colocar LAVA_SOURCE (nivel 0) en (10, 2, 10)
       mcSetBlock(10, 1, 10, mcResolveMat('roca')); // Suelo bajo lava en (10, 0, 10)
       mcSetBlock(10, 0, 10, mcResolveMat('roca'));
@@ -119,21 +129,20 @@ const { chromium } = require('playwright');
       mcSetBlock(10, 1, 10, 0);
 
       game.fluidos.setFluid(10, 2, 10, 'LAVA', 0);
-      game.fluidos.tick(true); // Cae a (10, 1, 10)
-      game.fluidos.tick(true); // Se extiende a (11, 1, 10)
+      asienta(); // cae a (10, 1, 10) y se extiende a (11, 1, 10)
 
       const lavaBefore = game.fluidos.info(10, 1, 10);
 
       // 2. Colocar bloque STONE (roca) en (10, 1, 10) reemplazando la lava
       mcSetBlock(10, 1, 10, mcResolveMat('roca'));
-      game.fluidos.tick(true);
+      asienta();
 
       const stonePushed = game.fluidos.info(10, 1, 10);
       const lavaSideAfterStone = game.fluidos.info(11, 1, 10);
 
       // 3. Retirar el bloque STONE dejando AIR en (10, 1, 10)
       mcSetBlock(10, 1, 10, 0);
-      game.fluidos.tick(true); // Origen en (10, 2, 10) vuelve a llenar (10, 1, 10) con lava
+      asienta(); // el origen de (10, 2, 10) vuelve a llenar (10, 1, 10) con lava
 
       const lavaRefilled = game.fluidos.info(10, 1, 10);
 

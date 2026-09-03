@@ -4,11 +4,24 @@ Aquí vive **todo lo de rendimiento**: los ayudantes de consola (F12) que se cre
 `REQ-PERF1` / `REQ-PERF2` / `PERF-RS1`, las sondas que los ejercitan y la propuesta de arreglo que
 está esperando decisión del dueño.
 
+> 🔻 **¿Se te caen los fps y no sabes por qué? Empieza por [`CAIDA_DE_FPS.md`](CAIDA_DE_FPS.md)**,
+> el documento maestro. Este README es el **inventario de herramientas**; aquél es el **método**.
+
 | fichero | qué es |
 |---|---|
+| **`CAIDA_DE_FPS.md`** | 🔻 **documento maestro**: síntoma → sospechoso, y los 3 puntos ciegos |
+| `fps-metodo.md` | el **protocolo** de 4 pasos, con el JS a pegar en consola |
+| `fps-costes.md` | los **números** medidos: µs/llamada, ms/frame, draw calls, presupuestos |
+| `fps-casos.md` | **casos cerrados** con su evidencia completa |
 | `README.md` | esto: **el inventario de ayudantes de consola** |
 | `PROTOCOLO_TEST_DUENO.md` | el guion para medir **en el navegador del dueño** (GPU real) |
 | `PROPUESTA_PERF-RS1_pasada9.md` | diagnóstico de la pasada 9 + arreglo propuesto (🟡 sin aprobar) |
+| `sonda_mirar_suelo.js` | 🔎 **pegar en consola**: A/B horizonte↔suelo con veredicto (caída por dirección de cámara) |
+| `sonda_coste_fijo.js` | 🔎 **pegar en consola**: coste fijo por frame — sombra A/B/C (`sunShade`, horneos congelados) + quién llama a `mcMeshChunk` en reposo |
+| `sonda_luz_dinamica.js` | 🔎 **pegar en consola**: A/B `mc.luzDinamica` + inventario de emisores en movimiento + pilas de `mcSetVoxel` (caso del coste fijo, 3ª vuelta) |
+| `sonda_fluidos.js` | 🔎 **pegar en consola**: A/B pausando `game.fluidos.tick` + cola viva + mapa de calor de chunks re-mallados (caso del coste fijo, 4ª vuelta) |
+| `consola_gobernador_fluidos.js` | 🔧 **pegar en consola**: gobernador de cadencia — agua en bucle >5 s ⇒ 11→1 tick/s, con A/B propio; **queda puesto** hasta `gobiernoFluidos.off()` (PERF-AGUA1: ya graduado a `app.js`, sirve para re-medir) |
+| `sonda_tinte_luz.js` | 🔎 **pegar en consola**: bisección de un TINTE de color en 4 fases (`fast` / luz dinámica / luz de bloque) + volcado de mandos, localStorage y filtros CSS |
 | `sonda_req_perf1.js` | ejercita la API del profiler (`perfAssert`, `perfDump`, …) |
 | `sonda_perf_rs1.js` | mide el coste de un circuito de redstone oscilando |
 | `sonda_cache_lru.js` | mide el caché LRU de `mcMeshChunk` con un observador |

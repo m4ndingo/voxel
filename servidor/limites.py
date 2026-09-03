@@ -16,10 +16,33 @@ tiene el escalón del contador de ventana fija, que deja pasar el doble del tope
 de minuto. No hay hilo de limpieza: las IPs viejas se recogen al vuelo cada `PURGA_CADA` llamadas,
 porque un hilo más en un servidor que ya es `ThreadingMixIn` es una pieza que puede morirse sola.
 """
+import os
 import threading, time
 
+
+def _entero(nombre, porDefecto):
+    """El tope, ajustable sin tocar código: `VOXELFORGE_TOPE_ESCRITURAS=2000 python3 server.py 8500`.
+
+    Una basura en la variable NO tumba el arranque ni deja el servidor sin freno: se ignora y manda
+    el valor de aquí. Un servidor que no arranca por una errata en un número es peor que uno lento.
+    """
+    try:
+        v = int(str(os.environ.get(nombre, '')).strip())
+        return v if v > 0 else porDefecto
+    except ValueError:
+        return porDefecto
+
+
 VENTANA = 60.0        # segundos que dura un tramo
-TOPE = 60             # escrituras por ventana y por IP
+# El tope es para el ABUSO ANÓNIMO, no para el trabajo normal. 60/min se quedaba corto hasta para
+# construir a mano: cada bloque puesto es un `POST /api/mundo/edits`, y los ~90 `parche_snp_*.py` y
+# la tanda de tests hacen ráfagas de cientos seguidas. Con el freno tan bajo lo que se rompía era el
+# uso legítimo, que es exactamente al revés de para lo que está. Generoso a propósito: 10/s
+# sostenidas siguen dejando el disco a salvo de un bucle de `curl`, que es lo único que esto frena.
+TOPE = _entero('VOXELFORGE_TOPE_ESCRITURAS', 600)          # escrituras por ventana y por IP (anónimo)
+# Quien ha entrado con su cuenta ya no es «alguien de internet»: tiene nombre, cuota y a quién
+# reclamarle. El dueño no pasa por aquí (`_freno_ok` en server.py).
+TOPE_SESION = _entero('VOXELFORGE_TOPE_ESCRITURAS_SESION', 3000)
 PURGA_CADA = 500      # cada cuántas comprobaciones se recogen las IPs que ya no cuentan
 
 _cerrojo = threading.Lock()

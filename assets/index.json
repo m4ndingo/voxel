@@ -1630,8 +1630,7 @@
     "count": 87,
     "categoria": "herramienta",
     "herramienta": "pick",
-    "description": "",
-    "alias": "espada"
+    "description": ""
   },
   {
     "id": "pico-de-piedra",
@@ -1787,7 +1786,7 @@
       "z": 16
     },
     "file": "assets/cable-on.vox.json",
-    "savedAt": "2026-08-23T12:11:06",
+    "savedAt": "2026-09-03T09:12:59",
     "createdAt": "2026-08-06T13:51:05",
     "count": 36,
     "categoria": "redstone"
@@ -2587,5 +2586,60 @@
     "savedAt": "2026-08-30T19:30:33",
     "createdAt": "2026-08-30T19:30:33",
     "count": 905
+  },
+  {
+    "id": "hierba-terreno-sorpresa",
+    "name": "Hierba Terreno Sorpresa",
+    "role": "Textura · césped sobre tierra",
+    "icon": "🌿",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/hierba-terreno-sorpresa.vox.json",
+    "savedAt": "2026-09-02T18:27:59",
+    "createdAt": "2026-09-02T13:17:28",
+    "count": 4096,
+    "description": "Textura Hierba — objeto 16³ usado como pincel."
+  },
+  {
+    "id": "zz-test-galeria",
+    "name": "ZZ Renombrada",
+    "role": "Bloque · zz-test-galeria",
+    "icon": "🧱",
+    "type": "textura",
+    "group": "Bloques de construcción",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/zz-test-galeria.vox.json",
+    "savedAt": "2026-09-03T09:37:47",
+    "createdAt": "2026-09-03T09:37:47",
+    "count": 1
+  },
+  {
+    "id": "espada-de-diamante",
+    "name": "Espada de Diamante",
+    "role": "Arma · espada corta de diamante",
+    "icon": "🗡️",
+    "type": "objeto",
+    "group": "Objetos",
+    "size": {
+      "x": 16,
+      "y": 16,
+      "z": 16
+    },
+    "file": "assets/espada-de-diamante.vox.json",
+    "savedAt": "2026-09-03T13:39:33",
+    "createdAt": "2026-08-18T16:27:42",
+    "count": 86,
+    "categoria": "herramienta",
+    "description": "",
+    "alias": "espada"
   }
 ]

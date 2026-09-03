@@ -1,0 +1,7 @@
+{
+  "id": "mundo-masplaya",
+  "name": "Ambiente de «masplaya»",
+  "code": "// Ambientación elegida en el asistente de mundo nuevo (REQ-PLANT1).\n// Generado por el servidor a partir de una lista cerrada: NO es código de usuario.\n// Se puede borrar sin miedo — sólo pinta el ambiente, no construye nada.\ngame.entorno(\"DIA\", 0);\n",
+  "dueno": "test2",
+  "savedAt": "2026-09-03T20:51:51"
+}

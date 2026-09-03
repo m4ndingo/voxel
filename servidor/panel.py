@@ -18,7 +18,9 @@
 # candados (`_no_te_dispares`) que impiden que alguien se quite a sí mismo el acceso al panel o se
 # ascienda: un panel que se puede cerrar por dentro deja al dueño fuera de su propio servidor.
 
+import json
 import os
+import re
 import shutil
 import time
 
@@ -69,6 +71,25 @@ def _no_te_dispares(quien, uid, perfil_nuevo, menos_nuevo):
     return ''
 
 
+def _candado_fe(permisos, donde):
+    """Motivo por el que este reparto abriría el agujero de F-E, o '' si no.
+
+    Es el cumplimiento de `sesion.FE_CODIGO_DE_USUARIO_DECIDIDO` (ver el porqué entero allí). Se
+    comprueba AQUÍ y no en `sesion.permisos_de` a propósito: `permisos_de` la llama todo el mundo en
+    cada petición y filtrar ahí escondería el permiso en vez de impedir concederlo — el dueño
+    marcaría la casilla en el panel, se guardaría, y luego no haría nada, que es la peor de las dos
+    respuestas. Así el panel dice que no y dice por qué.
+    """
+    if sesion.FE_CODIGO_DE_USUARIO_DECIDIDO:
+        return ''
+    if sesion.FE_PERMISO_BAJO_CANDADO not in set(permisos or ()):
+        return ''
+    return (f'«{sesion.FE_PERMISO_BAJO_CANDADO}» está bajo el candado de F-E y no se le da a '
+            f'{donde}: un snippet corre en el mismo origen que la sesión de quien lo mira, así que '
+            'darlo antes de resolverlo deja la cuenta del dueño al alcance de cualquiera que '
+            'publique código. El porqué y las salidas, en docs/codigo-de-usuario.md.')
+
+
 def guarda_cuenta(quien, d):
     """Aplica cambios a una cuenta. Devuelve (dict_para_el_panel, None) o (None, motivo)."""
     uid = str(d.get('uid') or '')
@@ -92,6 +113,14 @@ def guarda_cuenta(quien, d):
     mas, menos = limpia('permisos_mas'), limpia('permisos_menos')
 
     motivo = _no_te_dispares(quien, uid, perfil_nuevo, menos)
+    if motivo:
+        return None, motivo
+    # Se mira `mas` y también el perfil de destino: colar el permiso por la puerta de atrás sería
+    # tan fácil como mover la cuenta a un perfil que ya lo llevara.
+    motivo = _candado_fe(mas, 'una cuenta')
+    if not motivo and perfil_nuevo not in (None, 'dueno'):
+        motivo = _candado_fe(sesion.perfil(perfil_nuevo).get('permisos'),
+                             f'el perfil «{perfil_nuevo}»')
     if motivo:
         return None, motivo
 
@@ -143,6 +172,13 @@ def guarda_perfil(quien, d):
         if 'panel.usar' not in (set(permisos) | set(simulado.get('permisos_mas') or [])) - set(simulado.get('permisos_menos') or []):
             return None, ('ese perfil es el tuyo y te dejaría sin `panel.usar`: no podrías volver a '
                           'entrar al panel')
+
+    # `dueno` queda exento: el agujero de F-E no es que el dueño tenga el permiso, es que lo tenga
+    # otro cuyo código el dueño vaya a ejecutar en su propio navegador.
+    if nombre != 'dueno':
+        motivo = _candado_fe(permisos, f'el perfil «{nombre}»')
+        if motivo:
+            return None, motivo
 
     sesion.siembra_perfiles()
     fp = os.path.join(sesion.PERFILES, nombre + '.json')
@@ -234,6 +270,157 @@ def guarda_mundo(d):
     meta['heredado'] = False
     mundos_meta.guarda(meta)
     return meta, None
+
+
+# ── Plantillas de mundo (REQ-PLANT2) ────────────────────────────────────────────────────────────
+#
+# El carrusel de «mundo nuevo» se alimenta de la `ficha` que cada generador lleva dentro. Eso está
+# bien para el catálogo —añadir un bioma es publicar su snippet— pero dejaba la gestión en manos de
+# un `parche_snp_*.py`: para cambiar un título había que escribir Python, y para poner una foto,
+# copiar un fichero a mano a una carpeta que ni existía. Esto es esa gestión, por web.
+#
+# ⛔ AQUÍ NO SE TOCA EL `code` DEL SNIPPET, NUNCA. Se lee el documento, se le cambia sólo `ficha` y
+# se vuelve a escribir entero: el generador sale byte a byte como estaba. Por eso este guardado NO
+# pasa por `POST /api/snippets` (que arma el registro de cero y le pediría al navegador que
+# devolviera los 30 KB de código para no perderlos); y por eso el que sí pasa por ahí conserva la
+# ficha aunque no se la manden. Los dos caminos se respetan el uno al otro.
+
+CAMPOS_FICHA = ('titulo', 'descripcion', 'etiquetas', 'foto', 'frases', 'orden',
+                # Los dos topes de tamaño (`lado` recomendado, `ladoMax` el último que aguanta) se
+                # ponían a mano en un `parche_snp_*.py`. Están aquí porque el que descubre que un
+                # bioma deja al navegador sin memoria es el dueño mirando el juego, no editando
+                # Python: `ladoMax` es lo que evita repetir el «borrame-6».
+                'lado', 'ladoMax',
+                # Y la baja: ver `plantillas.normaliza_ficha`.
+                'oculta')
+
+
+def plantillas(base, snips):
+    """Las fichas del carrusel, con el estado REAL de su foto. `snips` es `list_snips()` ya leído."""
+    from . import plantillas as plant
+    filas = []
+    for s in snips:
+        f = plant.normaliza_ficha(s)
+        if not f:
+            continue
+        filas.append(_fila_plantilla(base, s.get('id'), f, s.get('name') or '', ''))
+    for e in plant.ESPECIALES:
+        f = plant.normaliza_ficha(e)
+        f['orden'] = e['orden']
+        filas.append(_fila_plantilla(base, e['id'], f, f['titulo'], e['especial']))
+    filas.sort(key=lambda x: (x['orden'], x['ficha']['titulo']))
+    return {'plantillas': filas, 'carpeta': plant.URL_FOTOS,
+            'topeFoto': plant.FOTO_MAX_BYTES, 'extensiones': list(plant.EXT_FOTO),
+            # Los lados van del servidor y no escritos en el panel: son la MISMA lista que valida
+            # `lado_valido`, y un desplegable que ofrezca un tamaño que el servidor rechaza es peor
+            # que no tener desplegable.
+            'lados': list(plant.LADOS)}
+
+
+def _fila_plantilla(base, idd, ficha, nombre, especial):
+    from . import plantillas as plant
+    declarada = ficha.get('foto') or ''
+    viva = plant.foto_de(base, idd, declarada)
+    return {
+        'id': idd, 'nombre': nombre, 'especial': especial,
+        # ⚠️ Las dos especiales («solo terreno base» y «mapa vacío») no son snippets: su ficha son
+        # constantes de `plantillas.py`. Se puede cambiarles la FOTO —eso es un fichero— pero no el
+        # texto, y el panel tiene que decirlo en vez de aceptar un guardado que no guardaría nada.
+        'editable': not especial,
+        'orden': ficha.pop('orden', 500), 'ficha': ficha,
+        'foto': viva,                      # lo que se pinta de verdad
+        'fotoDeclarada': declarada,        # lo que dice la ficha
+        # ⚠️ Lo que se informa es SIN FOTO QUE PINTAR, no «la ruta declarada ya no está»: las cinco
+        # fichas nacieron declarando un `.jpg` que nunca ha existido, y si la subida es un `.png` la
+        # tarjeta se ve perfecta por el nombre. Avisar de eso sería un panel rojo permanente.
+        'sinFoto': not viva,
+        'fotoPorNombre': bool(viva and viva != declarada),
+    }
+
+
+def guarda_plantilla(base, snips_dir, d, atomic_dump, to_trash):
+    """Cambia los metadatos de una ficha dentro de su snippet. `(fila, motivo)`."""
+    from . import plantillas as plant
+    idd = re.sub(r'[^A-Za-z0-9_-]+', '-', str(d.get('id') or '')).strip('-')
+    if not idd:
+        return None, 'falta la plantilla'
+    if any(e['id'] == idd for e in plant.ESPECIALES):
+        return None, 'esa ficha es del propio programa: sólo se le puede cambiar la foto'
+    fp = os.path.join(snips_dir, idd + '.json')
+    if not os.path.isfile(fp):
+        return None, f'no hay ningún snippet «{idd}»'
+    try:
+        with open(fp, encoding='utf-8') as f:
+            doc = json.load(f)
+    except Exception as e:
+        return None, f'el snippet no se puede leer: {e}'
+
+    ficha = dict(doc.get('ficha') or {}) if isinstance(doc.get('ficha'), dict) else {}
+    pedida = d.get('ficha') if isinstance(d.get('ficha'), dict) else {}
+    for k in CAMPOS_FICHA:
+        if k in pedida:
+            ficha[k] = pedida[k]
+    # Se sanea con la MISMA función que lee el catálogo: lo que se guarda es exactamente lo que se
+    # va a servir, sin un segundo criterio que un día se desincronice.
+    limpia = plant.normaliza_ficha({'ficha': ficha, 'name': doc.get('name'), 'id': idd})
+    if not limpia.get('titulo'):
+        return None, 'la ficha necesita un título: es lo que se lee en la tarjeta'
+    if limpia.get('foto') and not plant.ruta_de_url(base, limpia['foto']):
+        return None, 'la foto tiene que estar en ' + plant.URL_FOTOS + ' o en ' + plant.URL_CAPTURAS
+    doc['ficha'] = limpia
+
+    to_trash(fp, move=False)                      # respaldo, como todo guardado de snippet
+    atomic_dump(doc, fp)
+    return _fila_plantilla(base, idd, limpia, doc.get('name') or '', ''), None
+
+
+def guarda_foto_plantilla(base, idd, dato):
+    """Escribe `data/ui/plantillas/<id>.<ext>` con la imagen mandada. `(url, motivo)`.
+
+    ⚠️ Se escribe con nombre temporal + `os.replace` como todo en este repo, y se borran las OTRAS
+    extensiones del mismo id: subir un `.png` encima de un `.jpg` dejaba los dos y `foto_de()`
+    devolvía el viejo (busca por orden de extensión), así que la foto nueva no aparecía nunca.
+    """
+    from . import plantillas as plant
+    idd = re.sub(r'[^A-Za-z0-9_-]+', '-', str(idd or '')).strip('-')
+    if not idd:
+        return None, 'falta la plantilla'
+    crudo, ext = plant.imagen_cruda(dato)
+    if not crudo:
+        return None, 'eso no es una imagen JPEG, PNG o WebP (o pasa de %d KB)' % (plant.FOTO_MAX_BYTES // 1024)
+    carpeta = plant.carpeta_fotos(base)
+    os.makedirs(carpeta, exist_ok=True)
+    fp = os.path.join(carpeta, idd + '.' + ext)
+    tmp = fp + '.tmp'
+    with open(tmp, 'wb') as f:
+        f.write(crudo)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, fp)
+    for otra in plant.EXT_FOTO:
+        if otra != ext:
+            vieja = os.path.join(carpeta, idd + '.' + otra)
+            if os.path.isfile(vieja):
+                os.remove(vieja)
+    return plant.URL_FOTOS + idd + '.' + ext, None
+
+
+def borra_foto_plantilla(base, idd, to_trash):
+    """Quita la foto de una ficha. A la PAPELERA, no al vacío: la regla del repo es que nada se borra.
+
+    No toca la `ficha`: si la ruta declarada se queda coja, `foto_de()` devuelve '' y la tarjeta
+    vuelve a su marcador. Eso es justo lo que hay que probar que pasa.
+    """
+    from . import plantillas as plant
+    idd = re.sub(r'[^A-Za-z0-9_-]+', '-', str(idd or '')).strip('-')
+    carpeta = plant.carpeta_fotos(base)
+    quitadas = []
+    for ext in plant.EXT_FOTO:
+        fp = os.path.join(carpeta, idd + '.' + ext)
+        if os.path.isfile(fp):
+            to_trash(fp)
+            quitadas.append(os.path.basename(fp))
+    return quitadas
 
 
 # ── Salud ───────────────────────────────────────────────────────────────────────────────────────

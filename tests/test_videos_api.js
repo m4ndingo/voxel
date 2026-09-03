@@ -18,6 +18,14 @@ function request(method, path, body = null, headers = {}) {
       method: method,
       headers: Object.assign({}, headers)
     };
+    // ⚠️ Este test ESCRIBE (`POST /api/videos` pide `foto.subir`), y quién es el dueño depende de
+    // cómo se arrancó el servidor: sin `VOXELFORGE_TOKEN` lo es todo el mundo (desarrollo), y con
+    // token —o en modo público— hay que traerlo. Sin la cabecera el POST recibe 401 y el test lo
+    // cuenta como fallo de la API, que es mentira: es el test sin identificarse.
+    //     export $(grep -h VOXELFORGE_TOKEN /root/voxelforge.env) && node correr_tests.js --node
+    if ((process.env.VOXELFORGE_TOKEN || '').trim()) {
+      opts.headers['X-VoxelForge-Token'] = process.env.VOXELFORGE_TOKEN.trim();
+    }
     if (body) {
       const data = typeof body === 'string' ? body : JSON.stringify(body);
       opts.headers['Content-Type'] = 'application/json';

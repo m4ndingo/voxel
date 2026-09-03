@@ -44,9 +44,13 @@ cuelga de `BASE`): un test que cree mapas los llama `zz-test-*` y los recoge en 
 - **Permiso efectivo = perfil + `permisos_mas` − `permisos_menos`**. Los perfiles son **dato**
   (`data/perfiles/<nombre>.json`), no código, y además se ajusta **cuenta por cuenta**: es lo que
   pidió el dueño («una cuenta concreta podría crear snippets propios pero no modificar otros»).
-  ⛔ **`snippet.crear_propio` nace apagado para todos** y así sigue: un snippet corre en ámbito
-  global y mismo origen, así que darlo hoy sería regalar la cuenta del dueño. El porqué, los cuatro
-  caminos y la recomendación → [`codigo-de-usuario.md`](codigo-de-usuario.md) (F-E).
+  ⛔ **`snippet.crear_propio` nace apagado para todos, y además está BAJO CANDADO**: un snippet
+  corre en ámbito global y mismo origen, así que darlo hoy sería regalar la cuenta del dueño. Desde
+  el 2026-09-02 no es una costumbre sino una regla — `sesion.FE_CODIGO_DE_USUARIO_DECIDIDO` +
+  `panel._candado_fe` hacen que el panel devuelva **400** si se intenta dar por cualquiera de sus
+  tres puertas (`permisos_mas`, perfil nuevo, o mudar la cuenta a un perfil que lo lleve). El
+  dueño queda exento a propósito. La decisión y **qué hace falta para levantarlo** →
+  [`codigo-de-usuario.md`](codigo-de-usuario.md) (F-E).
 - ⚠️ **`quien()` cachea en `self`, y con keep-alive un handler sirve MUCHAS peticiones.** Todo lo
   que sea «de esta petición» se borra en `handle_one_request`. Se olvidó con `_quien` y no era
   teórico: en el navegador —que siempre reaprovecha la conexión— entrar no surtía efecto, y salir
@@ -89,6 +93,41 @@ registro entero borraría `dueno` y `creado` en cuanto alguien mandase solo `cod
 nombre** (lo que uno sabe de sus amigos) y se guarda **por uid** (lo que no cambia al renombrarse), y
 `destacado` es solo del dueño del servidor: la portada no es una propiedad del mapa.
 
+### Entrar con invitación ya enciende el multijugador (F5.6b)
+
+El vale daba **permiso** y no daba **compañía**: `server.py` dejaba escribir al que llegaba con
+`?invita=<vale>` y el árbitro sabía aceptar ese mismo vale, pero **en el navegador no había quien
+arrancase el cliente**. `multi-verse` se conecta solo en cuanto se carga (acaba en
+`tomaValeDeLaUrl(); entra();`) y **hasta hoy solo lo cargaba el autoarranque del mapa `multiverse`**.
+En cualquier otro mapa el invitado abría el enlace, podía construir… y no veía a nadie ni nadie le
+veía. Eso es peor que un error: **parece que funciona**.
+
+Lo tapa `data/snippets/invitacion-multi.json`, enganchado desde `mundo-autoarranque` —el único
+snippet que corre en **todos** los mapas, que es justo el requisito: se puede invitar a cualquiera de
+ellos, no solo a `multiverse`. Se engancha con `herramientas/parche_snp_invitacion_multi.py`
+(idempotente, por ancla), y `app.js` no se toca: es agnóstico y así sigue.
+
+**Dos disparadores, y ninguno más**, para no conectar a quien no lo pidió:
+
+1. la URL trae `?invita=` → me han invitado a **este** mapa;
+2. hay **relevo** fresco (`vf_multi_relevo` en sessionStorage, < 3 min) → venía jugando y acabo de
+   saltar de mundo con `game.multi.join(...)`. Ese relevo lo dejaba `multi-verse` y su comentario
+   decía que lo recogía `mundo-autoarranque`, **pero no lo recogía nadie**: saltar de mundo te dejaba
+   desconectado al otro lado. El relevo se consume siempre que se mira, fresco o rancio, o una
+   recarga de esa pestaña te reconectaría sola.
+
+Sin ninguno de los dos se rinde en silencio, así que en los mapas de siempre no cambia nada. Y va con
+`.catch()` y sin `await`, como `sesion-guardia`: que falle el multijugador no puede impedir entrar al
+Mundo.
+
+> ⚠️ **En desarrollo, el árbitro se arranca a mano y suele quedarse sin
+> `VOXELFORGE_SECRETO_SESION`.** Cuando le falta, `sesion.secreto()` **le improvisa uno volátil por
+> proceso**, distinto del que usa `server.py` ⇒ **ningún vale verifica** y el socket se cierra con
+> `secreto malo` en `multi/servidor.log`. Es exactamente la trampa que avisa la cabecera de este
+> documento, y no se nota: el enlace, el permiso y el cliente están todos bien. Arráncalo con el
+> mismo entorno que el 8500 (`set -a; . /root/voxelforge.env; set +a`). En producción esto no pasa:
+> las tres unidades comparten `/etc/voxelforge.env` a propósito.
+
 ## Cuotas
 
 Mapas y **bytes**, las dos **comprobadas antes de escribir** — es la única forma de que sirvan.
@@ -100,6 +139,38 @@ voxels vienen dispersos y un JSON de 4 KB puede pedir una rejilla de 3 GB.
 
 ⚠️ Los bytes se le apuntan **al dueño del mapa**, no a quien escribe: un mapa con la escritura
 abierta lo agranda cualquiera, y cobrárselo al visitante lo dejaría sin sitio en sus propios mapas.
+
+## Propiedad de los habitantes (REQ-ASSET1) — `servidor/autoria.py`
+
+Lo contrario que los mapas: aquí el dueño **viaja dentro del documento**, no en un registro lateral.
+Un mapa son **dos** ficheros que ya se tocan con cerrojo; un habitante es **uno** y ya se reescribe
+entero en cada guardado, así que meterlo dentro sale gratis y no puede desincronizarse.
+
+Tres estados, y «del mundo» es el **tercero**, no la ausencia de dueño:
+
+| | quién lo ve | quién lo escribe |
+|---|---|---|
+| `autor: "<uid>"` | sólo esa persona | sólo esa persona |
+| `compartido: true` | todos | su autor — que sea del mundo **no** lo hace de todos |
+| sin `autor` (heredado) | según `compartido` | sólo el dueño del servidor |
+
+⚠️ **El autor no se copia de lo que llega.** El editor manda el documento entero en cada guardado:
+hacerle caso a `doc.autor` sería regalar la autoría a quien mande un `curl`. Manda el fichero que hay
+en disco — el mismo cuidado que con `createdAt`.
+
+⚠️ **El id es el nombre en slug**, así que dos personas que llamen «casa» a su dibujo van al mismo
+fichero. Eso es un **409** («ponle otro nombre»), nunca una sobrescritura callada.
+
+⚠️ **El filtro va en el listado Y en `GET /api/habitantes/<id>`.** Sólo en el listado sería
+cosmética: bastaría con acertar el id. Es la regla 2 de arriba, otra vez.
+
+⚠️ **Heredado no quiere decir invisible.** 17 de los 26 que había están estampados dentro de mundos y
+snippets (`hab:seta`, `hab:mesa-x2`…): esconderlos abriría esos mapas **con agujeros**.
+`herramientas/adopta_habitantes.py` marca `compartido` en los que **alguien referencia** —calculado,
+no una lista a mano— y deja privados los dibujos sueltos.
+
+Guardián `tests/test_autoria_habitantes.js`, con **dos** cuentas (con una sola no se distingue «no ve
+lo ajeno» de «no ve nada»). Usa `VOXELFORGE_HABITANTES` para no ensuciar la galería del dueño.
 
 ## Integridad: «está en uso, no se borra»
 
@@ -155,6 +226,35 @@ Cuatro decisiones que cuesta caro deshacer:
 `stopImmediatePropagation()`. No hay `fn._orig` que guardar y `off()` es un `removeEventListener` ⇒
 el motor queda byte a byte. El estado vive en `game.guardia` y ⛔ nunca en el ámbito de la ejecución,
 o la segunda pasada no encontraría el manejador de la primera y los apilaría.
+
+## La chapa de identidad — `web/quien.js`
+
+Petición del dueño: «*hay que poner algo en el editor 2d/3d y básicamente en todas las pantallas,
+menos en las del mapa, para saber con qué usuario se está logueado o si es el dueño con el token de
+diseñador*». Es un fichero suelto que se incluye en las seis pantallas (`index`, `menu`, `mapas`,
+`panel`, `fotos`, `videos`), se trae su propio CSS y sólo lee `GET /api/yo`. Guardián
+`tests/test_chapa_identidad.js`. Tres cosas que cuesta caro romper:
+
+- ⛔ **`/map/<slug>` no lleva chapa; `/map` sí.** Los dos salen del **mismo** `index.html`
+  (`server.py`: `/map` y `/map/` → `mapas.html`, `/map/<algo>` → `index.html`), así que no basta con
+  no incluir el script: quien decide es una regex dentro de `quien.js`. `^/map(/|$)` — la primera
+  versión — apagaba la chapa en el selector de mundos. También se calla dentro de un iframe
+  (`window.top !== window.self`), o se vería flotando sobre las pantallas-escaparate del OSD.
+- **Dice CÓMO eres el dueño, no sólo que lo eres**: por eso `/api/yo` devuelve `via`
+  (`_via_dueno`, `server.py`) con `token` · `galleta` (modo diseño, F5.8) · `desarrollo`. El tercero
+  es el que engaña: sin `VOXELFORGE_TOKEN` configurado `_es_dueno()` le dice que sí a **cualquiera**,
+  y una chapa que pusiera «dueño» ahí haría creer que hay una sesión que no existe.
+- **Va DENTRO de la cabecera, no flotando.** Flotando abajo a la izquierda se comía un botón de la
+  paleta de herramientas del editor (`BUTTON.tool`, cazado con `elementsFromPoint`, que es la única
+  forma de verlo — en una captura no se nota). Cabecera flex → un hijo más con `margin-left:auto`;
+  cabecera de bloque → absoluta arriba a la derecha dentro de ella; sin cabecera (`menu.html`) →
+  flotando, que ahí el hueco está libre. El guardián comprueba los cinco puntos de la chapa contra
+  lo que haya debajo.
+
+⚠️ El enlace de «entrar» apunta a **`/menu.html`**, con extensión: `/menu` a secas es un 404 —
+`server.py` enruta `/panel`, `/map`, `/fotos` y `/videos`, pero la portada no tiene ruta corta (a
+quien no es dueño se la sirve `/`). Un enlace roto en la chapa no da error en ninguna parte: sólo no
+pasa nada al pulsarlo, y por eso el guardián lo pide y mira el código.
 
 ## ⚠️ Contestar no es parar
 

@@ -125,8 +125,37 @@ Y, por orden de lo que rinde por lo que cuesta:
 4. **C se descarta**: cuesta poco pero deja una obligación de acordarse para siempre, y esas se
    incumplen.
 
-⛔ **Nada de esto está implementado.** El punto 1 es una propuesta con coste medido; necesita el sí
-del dueño porque **recorta algo que él pidió** (entrar en modo diseño desde el navegador).
+---
+
+## ✅ DECISIÓN (2026-09-02) — el estudio se cierra así
+
+**Se adopta la recomendación, y se pone un candado para que no dependa de que nadie se acuerde.**
+
+1. **`snippet.crear_propio` no se le da a nadie que no sea el dueño**, y eso deja de ser una
+   costumbre: `sesion.FE_CODIGO_DE_USUARIO_DECIDIDO = False` (`servidor/sesion.py`) y
+   `panel._candado_fe` (`servidor/panel.py`) hacen que **el panel devuelva 400 con su motivo** si se
+   intenta dar por cualquiera de las tres puertas — los `permisos_mas` de una cuenta, un perfil
+   nuevo, o mover una cuenta a un perfil que ya lo llevara. El dueño queda exento **a propósito**:
+   el agujero no es que él tenga el permiso, es que lo tenga otro cuyo código él vaya a ejecutar.
+2. **El punto 1 de la recomendación (recortar `vf_disena`) NO se implementa**, y no por pereza:
+   recorta algo que el dueño pidió expresamente —entrar en modo diseño desde el navegador— y su
+   único beneficio era tapar un agujero que **el candado ya cierra por construcción**. Mientras
+   nadie más pueda publicar código, la galleta `vf_disena` no es explotable; el día que se levante
+   el candado, vuelve a serlo, y por eso queda escrito abajo como condición de salida.
+3. **A y D siguen siendo el camino** (A al abrir a internet, D a largo plazo). **C se descarta.**
+
+### Condición de salida — qué hace falta para poner el candado en `True`
+
+Es una línea, y por eso conviene que su precio esté escrito. **No se toca sin implementar antes una
+de estas**, y el commit que la toque tiene que decir cuál:
+
+- **A** · origen distinto para el código ajeno (necesita F7.5/F7.6: dominio y certificado comodín), **o**
+- **B recortado** · que `vf_disena` deje de valer para `POST /api/snippets` y `/api/panel/*`
+  (la comprobación que lo demuestra es la de la sección siguiente), **o**
+- **D** · lista cerrada en la cabecera del mundo en vez de JS.
+
+El guardián que lo sujeta es **`tests/test_permisos_api.js` §5**, que comprueba las tres puertas y
+además que el candado no sea un «di que no a todo» (`foto.subir` por el mismo camino sí pasa).
 
 ## Cómo comprobarlo cuando se decida
 

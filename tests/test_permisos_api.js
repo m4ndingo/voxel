@@ -77,6 +77,9 @@ const hijo = spawn('python3', [path.join(RAIZ, 'server.py'), String(PUERTO)], {
          VOXELFORGE_SECRETO_SESION: SECRETO,
          VOXELFORGE_USUARIOS: path.join(datosTmp, 'usuarios'),
          VOXELFORGE_PERFILES: path.join(datosTmp, 'perfiles'),
+         // El registro de mundos, también al temporal (§9b planta una ficha ahí). Sin esto, el
+         // test le mete al dueño un `zz-plantilla.json` en `data/mundos_meta/` del repo.
+         VOXELFORGE_MUNDOS_META: path.join(datosTmp, 'mundos_meta'),
          // ⚠️ El registro TAMBIÉN al temporal. En público se enciende solo (F7.3) y su ruta por
          // defecto es `data/registro/` DEL REPO: sin esta línea cada pasada de los tests le deja
          // al dueño un fichero de accesos falsos creciendo en su árbol de trabajo.
@@ -153,6 +156,31 @@ const hijo = spawn('python3', [path.join(RAIZ, 'server.py'), String(PUERTO)], {
     check(!(yoCuar.d.yo.permisos || []).includes('snippet.crear_propio'),
           '⚠️ «snippet.crear_propio» nace APAGADO para todos (F-E sin decidir)');
 
+    // ── El candado de F-E ─────────────────────────────────────────────────────────────────────
+    // Que NAZCA apagado (la línea de arriba) solo dice que nadie lo tiene HOY. Esto comprueba lo
+    // otro: que el dueño no puede DARLO ni por descuido ni a propósito, que es lo que convierte la
+    // recomendación de `docs/codigo-de-usuario.md` en algo que no hay que acordarse de cumplir.
+    // Las tres puertas: los `permisos_mas` de una cuenta, un perfil nuevo, y mover la cuenta a un
+    // perfil que ya lo llevase.
+    const porCuenta = await pide('POST', '/api/panel/cuenta',
+      { token: TOKEN, cuerpo: { uid: 'zz-jugador', permisos_mas: ['snippet.crear_propio'] } });
+    check(porCuenta.code === 400, `dárselo a una cuenta → ${porCuenta.code} (400, no 200)`);
+    check(/candado de F-E/.test((porCuenta.d && porCuenta.d.error) || ''),
+          'y dice que es el candado de F-E, no un «no existe» cualquiera');
+
+    const porPerfil = await pide('POST', '/api/panel/perfil',
+      { token: TOKEN, cuerpo: { nombre: 'zz-codigueros', permisos: ['multi.entrar', 'snippet.crear_propio'] } });
+    check(porPerfil.code === 400, `meterlo en un perfil nuevo → ${porPerfil.code}`);
+
+    const yoCuar2 = await pide('GET', '/api/yo', { cookie: CUAR });
+    check(!(((yoCuar2.d || {}).yo || {}).permisos || []).includes('snippet.crear_propio'),
+          'y después de los dos intentos la cuenta sigue sin el permiso');
+    // Que el candado no sea un «di que no a todo»: el mismo camino con otro permiso tiene que ir.
+    const otro = await pide('POST', '/api/panel/cuenta',
+      { token: TOKEN, cuerpo: { uid: 'zz-jugador', permisos_mas: ['foto.subir'] } });
+    check(otro.code === 200, `pero «foto.subir» por el mismo sitio sí → ${otro.code} (el caso prueba algo)`);
+    await pide('POST', '/api/panel/cuenta', { token: TOKEN, cuerpo: { uid: 'zz-jugador', permisos_mas: [] } });
+
     console.log('\n§6 la matriz entera, en las tres identidades');
     // Cada fila: [método, ruta, anónimo, cuarentena, dueño]. 401 = «entra»; 403 = «no puedes».
     // El dueño tiene que poder: un servidor donde el dueño tampoco puede es un servidor roto, y ese
@@ -217,6 +245,49 @@ const hijo = spawn('python3', [path.join(RAIZ, 'server.py'), String(PUERTO)], {
     const cruzado = await pide('POST', '/api/registro',
       { cuerpo: { nombre: 'zz-otro', clave: 'contrasena123' } });
     check(cruzado.code === 200 || cruzado.code === 400, 'sin Origin se pasa (curl y herramientas/ no lo mandan)');
+
+    console.log('\n§9b REQ-PLANT1 · la plantilla de un mapa se puede preguntar SIN ser el dueño');
+    // ⚠️ El fallo que trae esta sección (2026-09-03): la rama de `/api/mundos/<slug>/plantilla`
+    // usaba una `q` que se creaba 40 líneas MÁS ABAJO ⇒ `UnboundLocalError` ⇒ 500 y la conexión
+    // cerrada sin respuesta. Y no lo veía nadie, porque el `and` es perezoso: `_es_dueno()` iba
+    // primero y al dueño le devolvía 200 sin llegar a tocar `q`. Sólo reventaba con un JUGADOR,
+    // que es justo quien crea mapas desde la portada. El corredor `generador-mundo` da el `fetch`
+    // por perdido y se calla, así que el resultado era un mapa vacío y ni un error en pantalla.
+    //
+    // Por eso lo que se comprueba primero es que CONTESTE. Un `pide()` que rechaza (ECONNRESET) es
+    // exactamente el fallo, y sin este `catch` saldría como una excepción del test y no como rojo.
+    // ⛔ NO se llama a `/api/mundos/crear`: eso escribiría un `.json` + un `.vox` de 1,7 MB en
+    // `data/worlds/` DEL REPO en cada pasada (el registro sí va al temporal, los mundos no). Esta
+    // rama no abre el mundo — sólo lee el registro y el snippet —, así que la ficha se planta a
+    // mano en el `VOXELFORGE_MUNDOS_META` temporal y el test no deja nada detrás.
+    const alta2 = await pide('POST', '/api/registro', { cuerpo: { nombre: 'Zz Cartografo', clave: 'contrasena123' } });
+    const JUG = alta2.cookie;
+    await pide('POST', '/api/panel/cuenta', { cuerpo: { uid: 'zz-cartografo', perfil: 'jugador' }, token: TOKEN });
+    const slug = 'zz-plantilla';
+    fs.mkdirSync(path.join(datosTmp, 'mundos_meta'), { recursive: true });
+    fs.writeFileSync(path.join(datosTmp, 'mundos_meta', slug + '.json'), JSON.stringify({
+      slug, dueno: 'zz-cartografo', visibilidad: 'privado', escritura: 'dueno', codigo: '',
+      invitados: [], destacado: false, plantilla: 'construye-oceanos-y-playas', especial: '',
+      generado: false, creado: '2026-09-03T00:00:00',
+    }));
+    const rp = await pide('GET', `/api/mundos/${slug}/plantilla`, { cookie: JUG })
+      .catch((e) => ({ code: 0, err: String(e && e.message) }));
+    check(rp.code !== 0, 'el dueño del mapa recibe una RESPUESTA (no una conexión cortada) → ' +
+                         (rp.code || rp.err));
+    check(rp.code === 200 && rp.d && rp.d.generado === false && rp.d.plantilla === 'construye-oceanos-y-playas',
+          `…y dice qué plantilla y que está a medias → ${rp.code} generado=${rp.d && rp.d.generado}`);
+    check(!!(rp.d && rp.d.ficha && (rp.d.ficha.frases || []).length),
+          'con la ficha dentro, que es lo que pinta la pantalla de carga sin otra petición');
+    // Un extraño tampoco puede tumbar el proceso: 403, con respuesta.
+    const ajeno = await pide('GET', `/api/mundos/${slug}/plantilla`, { cookie: CUAR })
+      .catch((e) => ({ code: 0, err: String(e && e.message) }));
+    check(ajeno.code === 403, `y un mapa privado ajeno → ${ajeno.code || ajeno.err} (no revela la plantilla)`);
+    // Marcar «generado» es del dueño del mapa, y sin eso se volvería a generar en cada entrada.
+    const marca = await pide('POST', `/api/mundos/${slug}/generado`, { cuerpo: {}, cookie: JUG });
+    check(marca.code === 200, `POST /api/mundos/${slug}/generado · su dueño → ${marca.code}`);
+    const marcaAjena = await pide('POST', '/api/mundos/' + slug + '/generado', { cuerpo: {}, cookie: CUAR });
+    check(marcaAjena.code === 401 || marcaAjena.code === 403,
+          `…y un extraño no lo marca → ${marcaAjena.code}`);
 
     console.log('\n§10 la identidad NO se pega al socket (keep-alive)');
     // ⚠️ Todo lo de arriba abre una conexión por petición, y por eso no veía este fallo: el resto

@@ -33,8 +33,12 @@ ESCRITURAS = ('dueno', 'invitados', 'todos')
 
 # Lo que hereda un mundo que no tiene registro (los 33 de antes de F3.1, y cualquiera que aparezca
 # por un camino no previsto). Sin dueño ⇒ solo el dueño del servidor lo toca.
+# ⚠️ `generado: True` en los heredados es lo correcto, no un descuido: los 33 mapas que ya existían se
+# construyeron a mano y están terminados. Si el defecto fuera `False`, el asistente de REQ-PLANT1 los
+# tomaría por mundos a medias e intentaría regenerarlos — y generar empieza por `game.wipeMap()`.
 HEREDADO = {'dueno': None, 'visibilidad': 'privado', 'escritura': 'dueno',
-            'codigo': '', 'invitados': [], 'destacado': False, 'heredado': True}
+            'codigo': '', 'invitados': [], 'destacado': False, 'heredado': True,
+            'plantilla': '', 'especial': '', 'generado': True}
 
 
 def _ruta(slug):
@@ -89,10 +93,34 @@ def guarda(meta):
     return meta
 
 
-def crea(slug, uid, visibilidad='privado', escritura='dueno'):
+def crea(slug, uid, visibilidad='privado', escritura='dueno', plantilla='', especial=''):
+    """Registra un mapa recién creado.
+
+    `plantilla`/`especial` y `generado` son de REQ-PLANT1. El generador de un bioma es JS que corre en
+    el NAVEGADOR (los `construye-*` llaman a `game.*`), así que entre crear el mapa y tenerlo hecho hay
+    un viaje de ida y vuelta: el servidor no puede construirlo él.
+
+    `generado: False` es la marca de «esto está a medias», y es lo que cumple la orden del dueño de
+    **no dejarlo a medias**: si el jugador cierra la pestaña a mitad de la generación, al volver a
+    entrar el mapa sigue marcado y se genera otra vez. Sin la marca, un mundo interrumpido se quedaría
+    medio construido y no habría forma de distinguirlo de uno terminado.
+
+    Un mapa sin plantilla (el «mapa vacío») nace ya con `generado: True`: no hay nada que esperar.
+    """
     return guarda({'slug': slug, 'dueno': uid, 'visibilidad': visibilidad, 'escritura': escritura,
                    'codigo': '', 'invitados': [], 'destacado': False,
+                   'plantilla': plantilla or '', 'especial': especial or '',
+                   'generado': not (plantilla or especial),
                    'creado': time.strftime('%Y-%m-%dT%H:%M:%S')})
+
+
+def marca_generado(slug):
+    """El navegador avisa de que ya terminó de construir. Idempotente: reintentar no rompe nada."""
+    d = lee(slug)
+    if d.get('heredado'):
+        return d
+    d['generado'] = True
+    return guarda(d)
 
 
 def olvida(slug):

@@ -210,6 +210,48 @@ function dale(uid, permisos, extra = {}) {
     check(meta('zz-test-prop').dueno === 'zz-ana' && !!meta('zz-test-prop').creado,
           'y después de ocho PATCH el registro conserva dueño y fecha (se toca campo a campo)');
 
+    console.log('\n§8b F6.4 · el sitio de aparición lo mueve el DUEÑO del mapa, no quien construye');
+    // Construir y decidir dónde aparece TODO EL MUNDO no son lo mismo: con `escritura:todos`,
+    // cualquiera podía plantar el spawn dentro de la roca y dejar el mapa inservible sin romper nada.
+    const wf = path.join(RAIZ, 'data', 'worlds', 'zz-test-prop.json');
+    const spawnDe = () => { try { return JSON.stringify(JSON.parse(fs.readFileSync(wf, 'utf8')).spawn); }
+                            catch (e) { return '(ilegible)'; } };
+    const antesSpawn = spawnDe();
+    const cabBob = await pide('POST', '/api/mundo/cabecera?map=zz-test-prop',
+                              { cuerpo: { spawn: { x: 1, y: 2, z: 3 } }, cookie: BOB });
+    check(cabBob.code === 200 && cabBob.d.spawnIgnorado === true,
+          `bob, que sí construye, NO mueve el spawn → ${cabBob.code} spawnIgnorado=${cabBob.d.spawnIgnorado}`);
+    check(spawnDe() === antesSpawn, `…y en disco sigue el de antes ${antesSpawn}`);
+    const cabAna = await pide('POST', '/api/mundo/cabecera?map=zz-test-prop',
+                              { cuerpo: { spawn: { x: 1, y: 2, z: 3 } }, cookie: ANA });
+    check(cabAna.code === 200 && !cabAna.d.spawnIgnorado && /"x":1\b/.test(spawnDe()),
+          `la dueña sí lo mueve → ${cabAna.code} ${spawnDe()}`);
+    // ⚠️ LO QUE NO PUEDE PASAR: que negarle el spawn le quite a bob lo que sí es suyo. `mcScheduleSave`
+    // manda la cabecera ENTERA (spawn + estructuras + notas) desde cada navegador y cada vez, así que
+    // un 403 seco aquí dejaría a los invitados sin poder guardar nada. Se cae el campo, no el guardado.
+    const cabMixta = await pide('POST', '/api/mundo/cabecera?map=zz-test-prop',
+                                { cuerpo: { spawn: { x: 9, y: 9, z: 9 }, notes: { '1,1,1': 'zz-hola' } },
+                                  cookie: BOB });
+    check(cabMixta.code === 200 && cabMixta.d.spawnIgnorado === true && /"x":1\b/.test(spawnDe()) &&
+          fs.readFileSync(wf, 'utf8').includes('zz-hola'),
+          'y su nota SÍ se guarda en esa MISMA petición (se cae el campo, no el guardado)');
+
+    console.log('\n§8c F6.5 · el MANDO (echar y callar en el 8510) se lo lleva solo el dueño del mapa');
+    // Esta es la mitad de `server.py` de F6.5; la del árbitro la prueba `multi/probe_echa_calla.py`.
+    // ⛔ Lo que sostiene todo: el mando es OTRA cosa que el vale de invitación. El vale se COMPARTE
+    // por enlace, así que si echar se autorizara con él, bob echaría a ana de su propio mapa con el
+    // mismísimo enlace que ella le mandó. Aquí se comprueba que ni siquiera se lo dan.
+    const mandoAna = await pide('GET', '/api/mundos/zz-test-prop/mando', { cookie: ANA });
+    check(mandoAna.code === 200 && /^zz-test-prop\.[^.]*\.\d+\.[0-9a-f]+$/.test(mandoAna.d.mando || ''),
+          `la dueña lo pide y se lo dan → ${mandoAna.code}`, mandoAna.d.mando);
+    const mandoBob = await pide('GET', '/api/mundos/zz-test-prop/mando', { cookie: BOB });
+    check(mandoBob.code === 403,
+          `⛔ bob, que está invitado Y construye ahí, NO manda → ${mandoBob.code}`);
+    check((await pide('GET', '/api/mundos/zz-test-prop/mando')).code === 403,
+          'ni un anónimo, claro');
+    check((await pide('GET', '/api/mundos/zz-no-existe-nada/mando')).code === 404,
+          'y de un mapa que no existe no hay mando que dar (404, no un 200 vacío)');
+
     console.log('\n§9 los mundos HEREDADOS (los 33 de siempre) siguen cerrados para todos');
     check((await pide('GET', '/api/mundo?map=default', { cookie: BOB })).code === 404,
           'ana y bob no ven «default»: sin registro ⇒ privado y de solo lectura');

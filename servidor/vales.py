@@ -72,6 +72,49 @@ def vale_para(vale, slug):
     return bool(d) and d['slug'] == slug
 
 
+HORAS_MANDO = 12   # lo que dura un mando: una sesión larga, no un permiso permanente
+
+
+def emite_mando(slug, uid):
+    """F6.5 · `mando.<slug>.<uid>.<caduca>.firma` — «este que te habla es el dueño de ESTE mapa».
+
+    ⛔ **No es un vale, y no puede serlo.** El vale de entrada se COMPARTE: es un enlace que va por
+    WhatsApp. Si echar y callar se autorizaran con el vale, cualquier invitado de Ana podría echar a
+    Ana de su propio mapa con el mismo enlace que ella le mandó. Por eso el mando se firma con otro
+    propósito (`mando.` en vez de `vale.`) — un vale nunca se puede hacer pasar por un mando, ni al
+    revés, aunque los dos salgan del mismo secreto — y ⛔ **no viaja en ninguna URL**: se pide por
+    HTTP con la galleta de sesión (`GET /api/mundos/<slug>/mando`) y solo se lo dan al dueño.
+
+    Dura horas y no días porque no abre nada: si se pierde, se vuelve a pedir. Lo que sí hace es
+    seguir valiendo mientras el dueño juega, sin volver a preguntar en cada expulsión.
+    """
+    caduca = int(time.time()) + HORAS_MANDO * 3600
+    cuerpo = f'{slug}.{uid or ""}.{caduca}'
+    return f'{cuerpo}.{sesion._firma("mando." + cuerpo)}'
+
+
+def abre_mando(mando, slug):
+    """El uid que manda en `slug` según este mando, o None. None es «no manda», nunca «error»."""
+    if not mando or not isinstance(mando, str):
+        return None
+    trozos = mando.split('.')
+    if len(trozos) != 4:
+        return None
+    s, uid, caduca, firma = trozos
+    if not hmac.compare_digest(firma, sesion._firma(f'mando.{s}.{uid}.{caduca}')):
+        return None
+    # El slug va DENTRO de la firma y además se compara aquí: un mando sobre el mapa propio no
+    # puede echar a nadie del mapa de al lado. Misma propiedad que sostiene `vale_para`.
+    if s != slug:
+        return None
+    try:
+        if int(caduca) < time.time():
+            return None
+    except ValueError:
+        return None
+    return uid or None
+
+
 def de_la_peticion(ruta):
     """El `?invita=` de una URL, o ''. Aquí para que server.py y multi lo lean igual."""
     q = urllib.parse.parse_qs(urllib.parse.urlparse(ruta or '').query)

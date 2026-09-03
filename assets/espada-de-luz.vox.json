@@ -11,8 +11,7 @@
     "categoria": "herramienta",
     "herramienta": "pick",
     "icon": "📦",
-    "description": "",
-    "alias": "espada"
+    "description": ""
   },
   "voxels": {
     "15,7,0": "#344bb4",

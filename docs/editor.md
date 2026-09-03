@@ -20,7 +20,24 @@ por cara en ruta raster/BIG3D e iso; **2D Capas** (`drawVoxCell` en `drawEdit`) 
 real (`getTexFaces().faces[0]`, indexada col=x/row=y → encaja con la rejilla), con fallback a `voxFill`=color
 representativo si la textura aún no cargó). Las texturas usadas se
 **embeben** (`textures:{clave:{size,voxels}}`, `embeddedTextures`) en save/localStorage y se rehidratan
-con `ingestTextures` al cargar (modelo autocontenido). Vacío = sin entrada en el Map. Las dimensiones son
+con `ingestTextures` al cargar (modelo autocontenido).
+⚠️ **BUG-TEX1 — la copia embebida es un RESPALDO, no la fuente.** `embeddedTextures` (`app.js:2611`)
+solo guarda `size` y `voxels`: se deja `caras`, `atravesable`, `aislante` e `inamovible`. E
+`ingestTextures` (`app.js:4122`) mete esa copia coja en `texDefs`/`roomDataCache` **pisando al asset
+real**, así que en el Mundo la pieza sale con TODOS sus voxels (la flor: 696 quads en vez de 300).
+Y como el recorte vive en `localStorage['voxelforge:current']` (`localSnap`), `restore()` lo vuelve a
+inyectar en **cada** arranque ⇒ **el fallo sobrevive a recargar y no aparece en incógnito** — que es
+justo lo que despista al diagnosticarlo. Lo tapa el snippet **`texturas-embebidas`** (enganchado a
+`mundo-autoarranque` por `herramientas/parche_snp_texturas_embebidas.py`): si la clave tiene fuente
+propia (`asset:`/`hab:`) manda el fichero y la copia solo se usa si el fetch no trae nada; además
+repara la pestaña en marcha. `game.texturasEmbebidas.estado()/revisar()/off()`.
+⚠️ Reparar la caché **no basta**, y ahí hay dos carreras que hacían que al entrar se viera mal y solo
+se arreglara al romper un bloque: (1) refrescar antes de que haya chunks no refresca nada, y (2)
+`mcTablaFina` **no hornea** — cuando falta la geometría fina encarga `mcCalientaFina`, que es
+**asíncrona** (`mcFinoPend`, `app.js:7957`), y mallar en ese instante pinta el material como cubo
+proyectado, con todos sus voxels. Hay que esperar a las dos cosas antes de `mcMeshAll()`.
+⛔ Y **no** vale `mcRefreshSavedKey` aquí: rehace paleta y atlas, y con el mundo recién cargado deja
+la pieza **sin dibujar** (probado). Vacío = sin entrada en el Map. Las dimensiones son
 variables por modelo (`let SX,SY,SZ`): `setSize(x,y,z)` las fija y ajusta el slider/inputs;
 `resizeGrid(x,y,z)` redimensiona el objeto actual recortando voxels fuera. `rotXY` implementa la
 rotación 90° válida también para base rectangular (rot1/rot3 intercambian X/Y). El tamaño viaja en

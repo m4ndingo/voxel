@@ -16,7 +16,26 @@ const t = (n, c, extra) => {
   else { fail++; console.log('  FALLA  ' + n + (extra ? '   (' + extra + ')' : '')); }
 };
 
-const CODE = JSON.parse(fs.readFileSync('data/snippets/mundo-autoarranque.json', 'utf8')).code;
+const CODE_CRUDO = JSON.parse(fs.readFileSync('data/snippets/mundo-autoarranque.json', 'utf8')).code;
+
+// ⚠️ ESTE TEST ESTUVO MUERTO. El navegador compila el snippet con `new AsyncFunction(code)`, así que el
+// autoarranque puede usar `await` de nivel superior; aquí se compila con `new Function()` y el fichero
+// entero reventaba con «SyntaxError: await is only valid in async functions» ANTES de correr una sola
+// comprobación — o sea que el test decía «0 fallos» sin haber probado nada.
+//
+// Pasarlo a AsyncFunction no sirve: `await` suspende de verdad, `montar()` volvería antes de que el
+// snippet haya llamado a `game.bloques.define`, y hacerlo asíncrono obliga a envolver 3 100 líneas
+// llamadas desde bloques `{…}` de nivel superior.
+//
+// NO se borra código. Lo único que se toca es la palabra `await` delante de las llamadas que CARGAN
+// OTRO SNIPPET (`sesion-guardia`, `perf-mallado`, `miosd`, `texturas-embebidas`): las tres van en el
+// nivel superior y ninguna puede hacer nada aquí, porque `game.snippet` es un doble que resuelve al
+// vacío (no hay servidor del que bajarlos). La llamada se sigue haciendo; solo no se espera.
+// Nada de lo que mide este test —trepar, alPisar, idempotencia del envoltorio de mcUpdate— depende de
+// esos cuatro. Si aparece un `await` de nivel superior en OTRO sitio, `new Function` vuelve a lanzar el
+// SyntaxError y §0 lo canta en vez de que el fichero muera entero otra vez.
+let cargasSinEsperar = 0;
+const CODE = CODE_CRUDO.replace(/await (game\.snippet\()/g, (_, llamada) => { cargasSinEsperar++; return llamada; });
 
 // ── Mundo de juguete: una pared de escalera en z=11 y una placa suelta en el suelo ──────────────
 // La escalera es SOLIDA (esa fue la decision de diseno), asi que el jugador sube pegado a ella.
@@ -206,7 +225,12 @@ function montar(opciones) {
   };
   const original = global.mcUpdate;
 
-  const game = { tp: () => {}, toastHistory: [] };
+  // `snippet` es un doble que resuelve al vacío: el autoarranque carga otros cuatro snippets y aquí no
+  // hay servidor del que bajarlos. Sin él, la primera llamada revienta con TypeError y se lleva por
+  // delante todo el snippet (`game.snippet('sesion-guardia')` no va dentro de ningún try).
+  // `onKey` y compañía: el snippet liga atajos al cargarse, y sin doble revienta el snippet entero.
+  const game = { tp: () => {}, toastHistory: [], snippet: () => Promise.resolve(null),
+    onKey: () => {}, alVolverAlMundo: () => {}, osd: { define: () => {}, abrir: () => {}, alPulsar: () => {} } };
   global.game = game;
 
   const avisosConsola = [];
@@ -241,6 +265,21 @@ function montar(opciones) {
     },
     frames: (n, dt) => { for (let i = 0; i < n; i++) global.mcUpdate(dt || 1 / 60); }
   };
+}
+
+// ── 0. Que el snippet siga siendo ejecutable aquí ───────────────────────────────────────────────
+// Va PRIMERO a propósito: es la comprobación que faltaba el día que el test se murió en silencio.
+console.log('\nEl autoarranque se puede compilar sin navegador');
+{
+  t('las cargas de otros snippets dejan de esperarse', cargasSinEsperar >= 3, cargasSinEsperar + ' llamadas');
+  t('no se ha borrado nada del snippet',
+    CODE.length === CODE_CRUDO.length - cargasSinEsperar * 'await '.length,
+    CODE.length + ' de ' + CODE_CRUDO.length + ' B');
+  let err = null;
+  try { new Function(CODE); } catch (e) { err = e; }
+  t('y lo que queda compila con new Function()', !err,
+    err ? err.message + ' ← ¿hay un await de nivel superior fuera del preámbulo?' : '');
+  t('el snippet trae los comportamientos que este test mide', /game\.bloques\.define/.test(CODE));
 }
 
 // ── 1. Trepar ───────────────────────────────────────────────────────────────────────────────────

@@ -127,7 +127,11 @@ const IR = { waitUntil: 'load', timeout: 120000 };
 
   try {
     console.log('\n§1 en cuarentena: la página sabe quién eres y no destapa nada');
-    await p.goto(BASE + '/?noauto=1', IR);
+    // `/index.html` explícito y NO `/`: en modo público la raíz sirve la PORTADA a quien no es
+    // dueño (F5.1, `server.py:1442`), y allí no hay ni menú «⋯» ni `data-puede` — el test se
+    // quedaba sin encontrar nada que mirar. Lo que se vigila aquí es justo que el editor se pueda
+    // pedir a pelo y aun así no destape nada: el cliente esconde, el servidor prohíbe (§2).
+    await p.goto(BASE + '/index.html?noauto=1', IR);
     const puede1 = await p.evaluate(() => document.documentElement.dataset.puede);
     check(puede1 !== undefined, `<html data-puede> está puesto (${JSON.stringify(puede1)})`);
     check(!/snippet\.editar_sistema/.test(puede1 || ''), 'y NO trae snippet.editar_sistema');
@@ -181,7 +185,11 @@ const IR = { waitUntil: 'load', timeout: 120000 };
           'ahora Alt+C SÍ llega al editor ⇒ el test estaba apuntando a algo');
 
     dale(uid, ['snippet.editar_sistema', 'agente.editar', 'asset.subir', 'asset.borrar']);
-    await p.goto(BASE + '/?noauto=1', IR);
+    // `/index.html` explícito y NO `/`: en modo público la raíz sirve la PORTADA a quien no es
+    // dueño (F5.1, `server.py:1442`), y allí no hay ni menú «⋯» ni `data-puede` — el test se
+    // quedaba sin encontrar nada que mirar. Lo que se vigila aquí es justo que el editor se pueda
+    // pedir a pelo y aun así no destape nada: el cliente esconde, el servidor prohíbe (§2).
+    await p.goto(BASE + '/index.html?noauto=1', IR);
     const puede2 = await p.evaluate(() => document.documentElement.dataset.puede);
     check(/snippet\.editar_sistema/.test(puede2 || ''), `data-puede ya lo trae (${JSON.stringify(puede2)})`);
     check(await p.$eval('[data-tab="codigo"]', (e) => getComputedStyle(e).display) !== 'none',

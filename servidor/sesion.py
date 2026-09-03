@@ -65,6 +65,26 @@ PERMISOS = (
     'panel.perfiles',         # crear y editar perfiles: el permiso que reparte permisos
 )
 
+# ── ⛔ CANDADO F-E · el código de usuario sigue sin decidirse ────────────────────────────────────
+# `docs/codigo-de-usuario.md` cierra con una recomendación: **no conceder `snippet.crear_propio` a
+# nadie** hasta resolver el invariante del dueño («su cuenta no la puede robar un jugador que lance
+# un snippet»). Un snippet corre con `AsyncFunction` en NUESTRO MISMO ORIGEN, así que puede hacer
+# `fetch('/api/…')` y el navegador le adjunta solo la galleta de quien esté mirando: si un jugador
+# publicase código y el dueño entrase a su mapa, ese código actuaría COMO EL DUEÑO.
+#
+# Esto no se deja como costumbre a recordar, porque las costumbres se incumplen (es la misma
+# objeción que hunde la opción C en el estudio). Lo hace cumplir `servidor/panel.py`: mientras esto
+# valga False, el panel RECHAZA dar `snippet.crear_propio` a un perfil que no sea `dueno` o a los
+# `permisos_mas` de una cuenta. El dueño lo conserva porque el agujero no es que él tenga el
+# permiso, sino que lo tenga OTRO cuyo código él vaya a ejecutar.
+#
+# Se pone en True el día que se implemente una de las salidas del estudio (A: origen distinto para
+# el código ajeno · B recortado: que `vf_disena` no valga para las escrituras peligrosas · D: lista
+# cerrada en vez de JS). ⚠️ Cambiar esta línea SIN implementar ninguna es abrir el agujero: la
+# firma del commit que la toque tiene que decir cuál.
+FE_CODIGO_DE_USUARIO_DECIDIDO = False
+FE_PERMISO_BAJO_CANDADO = 'snippet.crear_propio'
+
 # Los perfiles de partida. Se escriben a disco la primera vez y a partir de ahí mandan los ficheros:
 # si el dueño edita `jugador` desde el panel, esto NO se lo vuelve a pisar.
 #
@@ -100,7 +120,12 @@ PERFILES_SEMILLA = {
     },
 }
 
-CUOTA_POR_DEFECTO = {'mapas': 5, 'bytes': 100 * 1024 * 1024, 'habitantes': 50, 'fotos': 200}
+# `mapa_lado` (REQ-PLANT1) es el lado MÁXIMO de mundo que esta cuenta puede pedir al crearlo. Está en
+# la cuota y no en una constante porque el dueño lo quiso ajustable: «128, pero que a nivel de
+# administracion pueda elegir el limite tambien desde perfiles». Los números que hay detrás: 128³ pesa
+# 1,3 MB y 512³ son 21 MB, así que con los 100 MB de cuota cuatro mapas grandes llenan a un usuario.
+CUOTA_POR_DEFECTO = {'mapas': 5, 'bytes': 100 * 1024 * 1024, 'habitantes': 50, 'fotos': 200,
+                     'mapa_lado': 128}
 
 
 # ── Escritura ───────────────────────────────────────────────────────────────────────────────────

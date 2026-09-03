@@ -10,6 +10,16 @@ comportamiento cuelga del **MATERIAL** (`hab:escalera`), **nunca del voxel**: es
 Minecraft (índice de paleta por voxel + comportamiento compartido por tipo). Un script por voxel
 serían **442 368** closures en un mundo 96×48×96.
 
+⚡ **`pideRemallado` malla el mundo UNA vez, y el orden es al revés de lo que parece** (2026-08-31):
+**restampa primero** y solo malla si `mc.blockLightMeshed` sigue siendo la misma referencia. Antes
+hacía `mcMeshAll(); mcRestampAll();` y `mcRestampAll` acaba con su **propio** `mcMeshAll()` — al
+arrancar siempre, así que el primer mallado (~2 s) se tiraba entero. ⛔ Si vuelves a poner el
+`mcMeshAll()` delante, vuelve el cuelgue de 9 s al entrar. Parche
+`herramientas/parche_snp_perf_remallado.py`; detalle →
+[`rendimiento-de-entrada.md`](rendimiento-de-entrada.md). Guardián `tests/test_perf_mallado.js`.
+**`mcBake` tenía el mismo defecto y se arregló igual** (`app.js`, `opts.difiereMalla`, 2026-09-02):
+otros 2,2 s. Es el único sitio de `app.js` que se tocó en todo esto.
+
 ⚠️ **Un material vive en UNO DE DOS SITIOS y hay que mirar los dos.** Solo un asset **16³ macizo**
 (`blockLike`, `app.js:4006`: `nvox >= 4096`, o sea hierba/roca) entra en `mc.grid`; cualquier cosa
 **con forma o huecos** — `escalera.json` son 160 voxels — se estampa como **estructura fina**
@@ -38,6 +48,9 @@ game.bloques.seguidores();   // quién persigue a quién, cuánto se ha ido del 
 game.bloques.recoger();      // todas a su ancla (botón de pánico); no les quita el cfg, siguen persiguiendo
 game.bloques.mirones();      // qué piezas están girando ahora y cuánto
 // tecla X (rayos-X): cada etiqueta lleva una cuarta línea con su comportamiento y sus giros X/Y/Z
+//   …incluido `alImpactar→cambiar antorcha-apagada (1/3)` — el modo, a qué cambia y por qué golpe
+//   va ESA celda (REQ-XR2). El hueco lo abre `app.js` (`mcXrayExtra`, app.js:16241) y lo rellena
+//   este snippet: el motor no sabe qué comportamientos existen. ⛔ NO se toca `app.js` para esto.
 game.bloques.roce(0.08);        // lo que se sigue patinando UNA VEZ FUERA del bloque deslizante
 ```
 
@@ -73,6 +86,65 @@ encadenada es una ejecución NUEVA del snippet y dos closures no se ven entre s�
 Los dos parches: `herramientas/parche_snp_romper_en_masa.py` (la puerta) y
 `herramientas/parche_snp_tnt_alromper.py` (la explosión).
 
+### `alImpactar` — qué pasa cuando algo CHOCA (REQ-IMPACTO1..4)
+
+No es un evento más: es un **despachador**, dice **qué** evento desencadena. Cuatro modos, y los tres
+primeros reutilizan eventos que ya existen, así que un snippet colgado de `alCoger` vale igual lo
+recojas andando o de un flechazo:
+
+```js
+game.bloques.define('asset:assets/farolillo-zen.vox.json', {
+  impactos: 3,                    // aguanta 3 flechazos; al 3º desencadena. Por defecto 1
+  alImpactar: 'romper',           // 'romper' · 'coger' · 'cambiar' · una función (JS a pelo)
+  alRomper(c){ toast('💥 roto de un ' + c.por); } });                      // c.por: 'impacto'
+
+game.bloques.define('asset:assets/antorcha.vox.json', {
+  impactos: 2, alImpactar: 'cambiar', cambiaPor: 'antorcha-apagada',       // REQ-IMPACTO4
+  alCambiar(c){ toast('🔥 apagada · ' + c.nuevo); } });                     // opcional
+game.bloques.cambiar(c, 'antorcha-apagada');        // …y a mano, desde tu propio alImpactar
+game.bloques.cambiar(x, y, z, 'antorcha-apagada');  // o por coordenadas: se averigua sola qué hay
+```
+
+**`c.por` dice QUIÉN lo disparó** (REQ-IMPACTO3), porque `alCoger`/`alRomper` los llaman varios y
+antes llegaban indistinguibles: `'cuerpo'` (te acercaste andando) · `'pico'` · `'impacto'` (con
+`info.fuente`, `golpe`, `de`, `punto`) · `'masa'` (un barrido, la TNT) · `'mano'` (`cambiar()`).
+
+**`persistente`** (REQ-IMPACTO2, por defecto `true`) decide si lo que se lleva por delante se va **del
+fichero** o **solo de la vista**: con `false` la celda va a la **capa volátil** (`mcPonVolatil`,
+`app.js:8152`), que apunta el id original y hace que quien guarde escriba **ése** — al recargar,
+vuelve. Dianas de práctica, cristales de un parkour, la fruta de un puzzle que se rejuega.
+
+⛔ **Las tres cosas que cuesta caro romper aquí**, y las tres tienen guardián:
+
+1. **`mcSetBlock` NO REMALLA** (`app.js:8105`). Escribe la celda y marca el guardado, y el chunk
+   sigue dibujando el bloque que ya no está: *«sale el toast y no desaparece»*. El pico no lo tenía
+   porque `mcBreak` remalla solo. Quien escriba celdas fuera del pico, **`mcRemeshAround`**.
+2. **`cambiar` pone ANTES de quitar**, o hay un frame con el agujero a la vista (el dueño lo cazó:
+   *«se ve un flash»*). Y ⛔ **`game.stamp` RECREA los objetos de `mc.structures`**: la referencia
+   de antes del estampado queda huérfana (`indexOf` → -1) y quitarla no quita nada — quedan las **dos
+   piezas apiladas**. La vieja se rebusca por `ox/oy/oz + clave` **después** de estampar.
+3. ⛔ **`mcResolveMat` no devuelve 0 para lo que no conoce: devuelve ROCA** (`app.js:21966`), así que
+   el `if (!id)` de rigor no salta nunca y la antorcha sale convertida en un cubo de piedra sin un
+   aviso. Se pregunta a **`game.addMaterial`**, que resuelve el nombre corto, da de alta si hace
+   falta y devuelve el id de verdad. (Y `setVoxel` con un material que aún no está en la paleta no lo
+   pone: lo **apunta** para cuando cargue, `mcMatPendiente` en `app.js:22164`.)
+
+⚠️ **`persistente:false` no vale para `cambiar` una ESTRUCTURA**: `game.stamp` acaba siempre en
+`mcFlushStamp` (`app.js:22238`) → `mcDirtyHeader()` + `mcScheduleSave()`, o sea que la pieza nueva se
+escribe en la cabecera quiera uno o no. En la **rejilla** sí vale. `info()` lo dice con esas palabras.
+
+⚠️ **`define()` tiene lista blanca**: un `alImpactar` que no sea `'romper'`/`'coger'`/`'cambiar'`/una
+función no es que no haga nada — **tumba el `define` entero** y el material se queda con lo que
+tuviera antes. Por eso avisa por consola, y por eso `'cambiar'` sin `cambiaPor` también avisa.
+
+El contador de golpes vive en **`mc._impactos`** indexado por clave+celda, ⛔ nunca en un closure
+(este snippet se reejecuta y curaría solo cualquier cristal a medio romper). Como la clave entra en
+el índice, al **cambiar** de material el contador de la pieza nueva empieza en 0 solo.
+
+Parches: `parche_snp_alimpactar.py`, `parche_snp_flecha_impacto.py`, `parche_snp_persistente.py`,
+`parche_snp_quien_lo_disparo.py`, `parche_snp_cambiar.py`. Guardianes: `tests/test_alimpactar.js`,
+`test_impacto_persistente.js`, `test_quien_lo_disparo.js`, `test_cambiar.js`.
+
 ### BUG-SNP4 · la misma casita tenía **dos claves**, y el comportamiento caía en una sola
 
 El síntoma del dueño (2026-08-31): «*no funciona bien el `alRomper`, por eso estuve cambiando entre
@@ -102,6 +174,34 @@ configuraciones distintas, el atajo se apaga y se busca como siempre. Índice `p
 De paso: `'castillo'` y `'tnt'` **a secas** valían para dos materiales (`hab:…` y `asset:…`) y ante la
 duda `define()` abortaba ⇒ en `/map/empty` **ninguno de los dos tenía comportamiento**, callado. Van
 con la clave entera; el nombre corto cubre la otra forma.
+
+### BUG-SNP8 · el nombre corto que promete la ficha (`espada`) no activaba nada
+
+Síntoma del dueño (2026-09-03): la ficha de `assets/espada-de-diamante.vox.json` anuncia tres nombres
+—`espada` (corto), `espada-de-diamante` (id) y «espada de diamante» (rótulo)— y el comportamiento
+solo se activaba con la clave entera.
+
+**Hay DOS resolvedores de nombres y solo uno sabía de alias.** El del motor, `mcClaveDeNombre`
+(`web/app.js:9308`), mira la paleta → `mcAssetsRegistry` (el índice cargado de `assets/index.json`,
+que es **donde vive el alias**) → y de último cae en `'hab:'+nombre`. El de este snippet,
+`resolver()`, se fabricaba el suyo partiendo la clave por `:` y `/`: de
+`asset:assets/espada-de-diamante.vox.json` sale `espada-de-diamante`, **jamás `espada`**. Así que la
+ficha decía la verdad para `setVoxel` y mentira para `game.bloques.define`.
+
+**El arreglo** (`herramientas/parche_snp_alias_bloques.py`): `resolver()` le pregunta al motor. Las
+dos condiciones son el arreglo entero:
+
+- Va **después** de los dos caminos de `cand` y **antes** de las pistas, así que clave exacta, nombre
+  corto único y nombre corto ambiguo se comportan exactamente como antes.
+- ⛔ **Solo se acepta si la clave está en la paleta del mundo.** `mcClaveDeNombre` contesta
+  `'hab:<lo que sea>'` a cualquier nombre que no conozca; darlo por bueno convertiría **cada errata
+  en una clave válida** y mataría en silencio los avisos de BUG-SNP1 y BUG-SNP2.
+
+⚠️ **Al tocar `resolver()`, ni un `}` en la columna 4** (ni en la 2): `tests/test_material_familia.js`
+extrae esa función **verbatim por texto** y la corta por el primer `\n  }\n`. Un `if (…) { … }` de
+varias líneas la parte en dos y el `vm` casca con «Unexpected end of input» — la misma trampa que
+`mcFineBoxHit` con `test_rayo_apuntado.js`. Por eso el `try` y el `if` van en una sola línea.
+Guardián propio: `tests/test_alias_bloques.js`.
 
 Todo vive en el snippet **`data/snippets/mundo-autoarranque.json`** (el JSON *es* la fuente; se edita
 con Alt+C o reempaquetando el `code`, como `base-npc-skills.json`). Claves del diseño:

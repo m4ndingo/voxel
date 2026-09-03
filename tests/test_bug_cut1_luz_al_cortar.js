@@ -56,7 +56,13 @@ const ok = (nom, cond, extra) => {
     // Se cava un pozo de 3×3×3 en terreno macizo, con cielo abierto encima: si el corte re-ilumina, las
     // celdas del pozo pasan de estar a oscuras (enterradas) a recibir el cielo entero.
     const X = 40, Z = 40;
-    const sy = mcSurfaceY(X + 1, Z + 1);            // primera celda de aire sobre el terreno
+    // ⚠️ /map/test es de todos: otras sondas cavan ahí y la columna (41,41) llegó a quedar VACÍA hasta
+    // el suelo (2026-09-02). Entonces mcSurfaceY devuelve -1, y0/y1 caen fuera del mundo, no se maciza
+    // nada y la celda medida sale a 15 — el test fallaba por el decorado, no por la luz. Si la columna
+    // está cavada se planta el bloque a media altura: al pozo le da igual dónde esté, con tal de que
+    // esté dentro (el macizado de abajo mira de y0-1 a y1+2).
+    let sy = mcSurfaceY(X + 1, Z + 1);              // primera celda de aire sobre el terreno
+    if (sy < 4 || sy + 1 >= mc.dim.y) sy = 8;
     const y1 = sy - 1, y0 = sy - 3;                 // tres capas de terreno macizo
     window._cut1 = { orig: [], X, Z, y0, y1 };
     for (let x = X - 1; x <= X + 3; x++) for (let z = Z - 1; z <= Z + 3; z++) for (let y = y0 - 1; y <= y1 + 2; y++) {

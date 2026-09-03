@@ -10,7 +10,7 @@ y se pinta con el color REAL de su material (la media de la cara superior de su 
 en color_de_material). El relieve se marca con luz rasante del noroeste — bajar el brillo con la
 altura apagaba todos los colores (las setas rojas de «lab» salian grises).
 """
-import array, base64, collections, json, os, re, struct, sys, time, zlib
+import array, base64, collections, json, os, re, struct, sys, time, urllib.parse, zlib
 
 try:                                         # server.py lo importa como paquete: `from servidor import mundos`
     from . import voxfmt                     # voxelworld-2: la rejilla vive en el .vox, no en el .json
@@ -232,7 +232,12 @@ def _analizar(mundo, nombre, archivo, mb, mtime, ruta=None):
         'spawn': mundo.get('spawn'),
         'top': [nombre_material(k) for k, _ in cuenta.most_common(4)],
         'mtime': mtime,
-        'thumb': 'data:image/png;base64,' + base64.b64encode(_png(W * ESCALA, H * ESCALA, filas)).decode(),
+        # F3.6 · el PNG se guarda en la CACHE, no en la fila que viaja. Antes iba como `data:` dentro
+        # del JSON del listado: con 33 mundos eran megas en una sola respuesta que el navegador no
+        # puede cachear ni pedir perezosamente, y con 300 mundos de usuarios el listado es inusable.
+        # Ahora cada miniatura es su propia URL (`/api/mundos/<slug>/thumb.png`), con ETag, y el
+        # navegador solo baja las que se ven. Ver `listar()` y `miniatura()`.
+        'png': base64.b64encode(_png(W * ESCALA, H * ESCALA, filas)).decode(),
     }
 
 # ---------------------------------------------------------------- cache + listado
@@ -242,12 +247,16 @@ def _de_cache(ruta, nombre, archivo):
     st = os.stat(ruta)
     # En voxelworld-2 el .json es de kilobytes y los bloques estan en el .vox hermano: el sello y el
     # tamano tienen que mirar los DOS, o poner un bloque no invalidaria la miniatura.
+    # El `v2:` de delante NO es decoracion: cambia la forma de la fila guardada (la miniatura pasa de
+    # `thumb` data-uri a `png` suelto, F3.6). Sin el, las caches viejas del disco seguirian dando por
+    # buenas filas sin `png` y `/api/mundos/<slug>/thumb.png` no tendria nada que servir. Asi caducan
+    # solas y se rehornean una vez.
     try:
         sv = os.stat(voxfmt.vox_path(ruta))
-        sello = f'{int(st.st_mtime)}:{st.st_size}:{int(sv.st_mtime)}:{sv.st_size}'
+        sello = f'v2:{int(st.st_mtime)}:{st.st_size}:{int(sv.st_mtime)}:{sv.st_size}'
         tam = st.st_size + sv.st_size
     except OSError:
-        sello = f'{int(st.st_mtime)}:{st.st_size}'
+        sello = f'v2:{int(st.st_mtime)}:{st.st_size}'
         tam = st.st_size
     fp = os.path.join(CACHE, (nombre or 'default') + '.json')
     guardado = _cargar(fp)
@@ -258,6 +267,9 @@ def _de_cache(ruta, nombre, archivo):
         return None
     fila = _analizar(mundo, nombre, archivo, tam / 1048576,
                      time.strftime('%Y-%m-%dT%H:%M', time.localtime(st.st_mtime)), ruta)
+    # El sello viaja DENTRO de la fila: es el ETag de la miniatura y la version que cuelga de su URL.
+    # Puesto aqui y no en `listar()` porque en un acierto de cache la fila sale del disco tal cual.
+    fila['sello'] = sello
     try:
         os.makedirs(CACHE, exist_ok=True)
         tmp = f'{fp}.tmp.{os.getpid()}'
@@ -269,8 +281,8 @@ def _de_cache(ruta, nombre, archivo):
     return fila
 
 
-def listar():
-    """[{nombre, dim, voxels, ..., thumb}] ordenado por fecha de modificacion (lo mas reciente primero)."""
+def _fuentes():
+    """[(ruta, nombre, archivo)] de todos los mundos: el sagrado y los de data/worlds/."""
     fuentes = []
     if os.path.exists(WORLDFILE):
         fuentes.append((WORLDFILE, 'default', 'mundo.json'))
@@ -278,21 +290,62 @@ def listar():
         for f in sorted(os.listdir(WORLDS)):
             if f.endswith('.json'):
                 fuentes.append((os.path.join(WORLDS, f), f[:-5], f))
+    return fuentes
+
+
+def listar():
+    """[{nombre, dim, voxels, ..., thumb}] ordenado por fecha de modificacion (lo mas reciente primero).
+
+    `thumb` es una URL, no un `data:`. F3.6: la miniatura se pide aparte (`/api/mundos/<slug>/thumb.png`)
+    para que el navegador la cachee, la pida perezosamente y el listado quepa en una respuesta pequena.
+    Lleva `?v=<sello>` colgando a proposito: cuando el mundo cambia, cambia la URL, y una miniatura vieja
+    no se queda pegada en la cache del navegador.
+    """
     filas = []
-    for ruta, nombre, archivo in fuentes:
+    for ruta, nombre, archivo in _fuentes():
         try:
             fila = _de_cache(ruta, nombre, archivo)
         except Exception:
             fila = None          # un mundo corrupto no debe tumbar el listado entero
-        if fila:
-            filas.append(fila)
+        if not fila:
+            continue
+        fila = dict(fila)
+        png = fila.pop('png', '')
+        sello = fila.pop('sello', '')
+        fila['thumb'] = ('/api/mundos/' + urllib.parse.quote(fila['nombre']) + '/thumb.png' +
+                         ('?v=' + urllib.parse.quote(sello) if sello else ''))
+        fila['thumbBytes'] = (len(png) * 3) // 4     # lo que pesa, sin bajarla: el panel de Salud (F9)
+        filas.append(fila)
     filas.sort(key=lambda r: r['mtime'], reverse=True)
     return filas
+
+
+def miniatura(nombre):
+    """(bytes_png, etag) de un mundo, o (None, '') si no existe o no se pudo hornear.
+
+    Sale de la MISMA cache que el listado (`data/_thumbs/<slug>.json`), asi que pedir la miniatura de un
+    mundo recien listado no vuelve a leer sus 21 MB de rejilla: es un fichero pequeno de disco.
+    """
+    nombre = (nombre or '').strip()
+    for ruta, n, archivo in _fuentes():
+        if n != nombre:
+            continue
+        try:
+            fila = _de_cache(ruta, n, archivo)
+        except Exception:
+            return None, ''
+        if not fila or not fila.get('png'):
+            return None, ''
+        try:
+            return base64.b64decode(fila['png']), fila.get('sello', '')
+        except Exception:
+            return None, ''
+    return None, ''
 
 
 if __name__ == '__main__':
     t0 = time.time()
     for r in listar():
         print(f"{r['nombre']:10} {r['dim']:12} {r['voxels']:>7} vox  {r['mb']:>5} MB  "
-              f"{len(r['thumb']) // 1024:>3} KB png  {','.join(r['top'])}")
+              f"{r['thumbBytes'] // 1024:>3} KB png  {','.join(r['top'])}")
     print(f'-- {time.time() - t0:.2f} s')

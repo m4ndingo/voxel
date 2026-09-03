@@ -30,8 +30,27 @@ Front **sin build ni dependencias** (HTML/CSS/JS vanilla). Backend mínimo en Py
 
 ```bash
 python3 server.py 8500              # sirve el sitio + API de habitantes (0.0.0.0:8500)
+python3 server.py --help            # banderas Y variables de entorno, con sus defectos
 #   (solo estático, sin guardar: python3 -m http.server 8500)
+
+# Con la llave del dueño y el resto de secretos, que viven FUERA del repo (600, en /root):
+set -a; . /root/voxelforge.env; set +a; nohup python3 server.py 8500 > /tmp/srv8500.log 2>&1 &
+# ⚠️ ese fichero trae VOXELFORGE_PUBLICO=1 ⇒ arranca en MODO PÚBLICO (escribir exige identidad,
+#    /data/ cerrado, topes y freno por IP, «/» pasa a ser el menú). Los tests y los
+#    parche_snp_*.py hacen POST anónimos y ahí reciben 401. Para tener la llave con las reglas
+#    de desarrollo, se vacía la variable en la propia línea:
+set -a; . /root/voxelforge.env; set +a; VOXELFORGE_PUBLICO= nohup python3 server.py 8500 > /tmp/srv8500.log 2>&1 &
+
+head -3 /tmp/srv8500.log        # el saludo dice el modo, si hay token y dónde va el registro
+curl -s localhost:8500/api/yo   # {"publico": true|false, …}
+pkill -f 'server.py 8500'       # pararlo
 ```
+
+⛔ **Sin `VOXELFORGE_TOKEN`, en desarrollo todo el mundo es el dueño.** La llave se pasa por
+`--token`, pero lo permanente es la variable: un `--token` se lee en `ps aux`.
+`--help` es la fuente de verdad de qué variables hay (`VOXELFORGE_SECRETO_SESION`,
+`VOXELFORGE_REGISTRO`, los topes de escritura…); un argumento que no entienda lo **dice** por
+`stderr` en vez de tragárselo, que era como un `--tokne` mal escrito dejaba el servidor sin llave.
 
 **API de habitantes** (`server.py`, almacén en `data/habitantes/<id>.json`, formato vox export):
 `GET /api/habitantes` (lista con metadatos), `GET /api/habitantes/<id>` (objeto completo),
@@ -58,6 +77,33 @@ superior de su textura (`color_de_material`, resuelve `tex:asset:…` y `tex:hab
 noroeste para el relieve. NO bajar el brillo con la altura: apaga todos los colores (las setas rojas de
 `lab` salían grises). En frío cuesta ~1 s (33 MB de JSON) ⇒ **cache en `data/_thumbs/<slug>.json`**
 invalidada por `mtime+tamaño` (en caliente, ~1 ms). Test: `node test_mapas.js`.
+
+**F3.6 · la miniatura NO viaja dentro del listado** (cambió el 2026-09-02). Iba como
+`data:image/png;base64,` en cada fila: una respuesta que el navegador no puede cachear, ni pedir
+perezosamente, ni partir — con 33 mundos ya eran megas. Ahora `fila.thumb` es **una URL**,
+`GET /api/mundos/<slug>/thumb.png?v=<sello>`, servida con **`ETag` + `max-age` largo** (el sello cuelga
+de la URL ⇒ ese contenido no cambia nunca; cuando el mundo cambia, cambia la URL). Dos cosas que cuestan
+caras si se tocan: el `v2:` del sello **caduca las caches viejas de disco** (las de antes no guardan el
+PNG suelto y `thumb.png` no tendría qué servir), y `end_headers` **solo se calla su `no-cache` si la
+respuesta trae `self._cache_propia`** — dos `Cache-Control` en la misma respuesta se juntan con comas y
+gana `no-cache`, así que sin esa puerta el `max-age` no cachearía nada y encima lo parecería.
+
+**Paginar es opcional**: `GET /api/mundos` a secas sigue devolviendo **la lista entera** (es lo que
+espera `mapas.html`, que busca y ordena en el navegador sin ir al servidor por cada tecla). Con
+`?desde=&cuantos=` devuelve el sobre `{total, desde, cuantos, mundos}` — el total no se deduce de una
+página. `cuantos` está topado a 100: sin tope, `?cuantos=999999` es pedir el listado entero fingiendo
+que se pagina. La miniatura respeta el **mismo** filtro de visibilidad que el listado
+(`mundos_meta.sale_en_listados`): si el mundo no sale para ti, su foto tampoco.
+
+**F6.5 · el MANDO** (`GET /api/mundos/<slug>/mando`, solo al dueño de ese mapa) es la credencial con
+la que se echa y se calla en el 8510. ⛔ **No es el vale de invitación y no puede serlo**: el vale
+viaja en la URL y se comparte a propósito, así que autorizar con él sería darle a cada invitado el
+poder de echar a quien le invitó. Los dos salen del mismo `VOXELFORGE_SECRETO_SESION` y lo único que
+los separa es el propósito dentro de la firma (`mando.` vs `vale.`, ver `servidor/vales.py`); el
+mando **no aparece en ninguna URL** y dura horas, no días. La existencia del mundo se mira **en el
+disco** y no con `mundos_meta.lee`, que para un slug inexistente devuelve una copia de `HEREDADO` y
+nunca nada falso — un `if not meta` ahí es código muerto que no lo parece. Guardianes:
+`tests/test_mundos_propiedad.js` §8c y `multi/probe_echa_calla.py`.
 
 **Snippets: el id no es el nombre** (`GET|POST /api/snippets`, `data/snippets/<id>.json`). El id es la
 identidad: el fichero, el argumento de `game.snippet('<id>')` y lo que el motor busca por su cuenta

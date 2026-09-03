@@ -30,7 +30,15 @@ function pide(metodo, ruta, cuerpo) {
     const datos = cuerpo === undefined ? null : Buffer.from(JSON.stringify(cuerpo), 'utf8');
     const r = http.request({
       host: '127.0.0.1', port: PUERTO, path: ruta, method: metodo,
-      headers: datos ? { 'Content-Type': 'application/json', 'Content-Length': datos.length } : {}
+      // ⚠️ Este test ESCRIBE (`POST /api/agentes` es del dueño), y quién es el dueño depende de cómo
+      // se arrancó el servidor: sin `VOXELFORGE_TOKEN` lo es todo el mundo (desarrollo), y con token
+      // —o en modo público— hay que traerlo. Sin la cabecera el POST recibe 401 y el test lo cuenta
+      // como fallo de la API, que es mentira: es el test sin identificarse.
+      //     export $(grep -h VOXELFORGE_TOKEN /root/voxelforge.env) && node correr_tests.js --node
+      headers: Object.assign(
+        datos ? { 'Content-Type': 'application/json', 'Content-Length': datos.length } : {},
+        (process.env.VOXELFORGE_TOKEN || '').trim()
+          ? { 'X-VoxelForge-Token': process.env.VOXELFORGE_TOKEN.trim() } : {})
     }, (rp) => {
       let b = ''; rp.setEncoding('utf8');
       rp.on('data', (c) => { b += c; });

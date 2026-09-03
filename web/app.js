@@ -1948,6 +1948,28 @@ async function apiHabitantes(){
   _habEnVuelo=fetch('/api/habitantes',{cache:'no-store'}).then(r=>r.json());
   try{ return await _habEnVuelo; } finally{ _habEnVuelo=null; }
 }
+// REQ-RED1 · SABER SI UN HABITANTE EXISTE **ANTES** DE PEDIRLO.
+// El índice son ~6 KB de METADATOS (id/nombre/tamaño, sin un solo voxel) y ya se baja durante la
+// carga. Sin él, cada clave `hab:` que en realidad es un asset —las que plantan a mano los snippets
+// de redstone: `antorcha-apagada`, `cable-on`, `piston-on`…— se llevaba un 404 por carga y por mapa.
+// Medido en /map/test: 11 de los 12 errores rojos de la consola eran exactamente eso.
+//
+// ⛔ Y NO se puede arreglar dándole la vuelta al orden (probar el asset primero y ahorrarse la
+// pregunta): `calamar`, `escalera` y `tejado` existen con el MISMO id como asset **y** como
+// habitante, y en una clave `hab:` manda el habitante. Invertir el orden cambiaría en silencio el
+// modelo que se ve en pantalla para esas tres piezas. Por eso la petición solo se salta cuando hay
+// PRUEBA POSITIVA de que ese habitante no está en la lista; si el índice no se pudo bajar, se prueba
+// a pelo como siempre y nunca se queda peor que antes.
+let _habIdsP=null;
+function mcHabIds(){
+  if(!_habIdsP) _habIdsP=apiHabitantes()
+    .then(l=>new Set((l||[]).map(h=>String(h.id))))
+    .catch(()=>null);
+  return _habIdsP;
+}
+// Guardar o borrar un habitante cambia la lista: el índice se rehace a la siguiente pregunta. Va
+// pegado a `refreshRosters()`, que es el embudo por el que pasan TODOS los altas y bajas.
+function mcOlvidaHabIds(){ _habIdsP=null; }
 // miniatura iso de un objeto voxel (usa renderIso con swap temporal de state.voxels)
 function drawThumb(cv, d){
   const saved=state.voxels, savedCaras=state.caras;
@@ -2595,7 +2617,7 @@ async function refreshHabitantesList(){
   });
 }
 // refresca los dos rosters laterales (habitantes ≠ bloque · habitaciones = bloque + assets)
-function refreshRosters(){ refreshHabitantesList(); loadRooms(); refreshTexturas(); }
+function refreshRosters(){ mcOlvidaHabIds(); refreshHabitantesList(); loadRooms(); refreshTexturas(); }
 
 // ===================== Persistencia =====================
 const LS='voxelforge:current';
@@ -2608,10 +2630,20 @@ let serverId=null;                 // id del habitante en el servidor (si el obj
 let serverKind=null;
 let loadedName=null;               // el rótulo que tenía al cargarlo: si cambia, Guardar pregunta (ver save())
 // Defs de las texturas realmente usadas => se embeben para un modelo autocontenido (render offline)
+// ⚠️ BUG-TEX1: `size` y `voxels` NO son el documento. Faltando `caras`, la copia dice «pinta TODAS
+// las caras» (la flor salía con sus 52 voxels enteros, 696 quads en vez de 300); y faltando
+// `atravesable` la pieza pasa de atravesable a maciza. Se copia lo que decide cómo se PINTA y cómo
+// se CHOCA, no solo la forma. La otra mitad del arreglo está en ingestTextures.
 function embeddedTextures(){
   const used=new Set(); for(const v of state.voxels.values()) if(isTex(v)) used.add(texKeyOf(v));
   if(!used.size) return undefined;
-  const t={}; for(const k of used){ const d=texDefs.get(k); if(d) t[k]={size:d.size, voxels:d.voxels}; } return t;
+  const t={}; for(const k of used){ const d=texDefs.get(k); if(!d) continue;
+    t[k]={size:d.size, voxels:d.voxels};
+    if(d.caras) t[k].caras=d.caras;
+    if(d.atravesable) t[k].atravesable=true;
+    if(d.aislante) t[k].aislante=true;
+    if(d.inamovible) t[k].inamovible=true;
+  } return t;
 }
 function currentVox(){
   const doc={format:'voxelforge-1', size:{x:SX,y:SY,z:SZ}, meta:state.meta, voxels:Object.fromEntries(state.voxels)};
@@ -4048,10 +4080,15 @@ async function getRoomData(key){
   const p=(async()=>{
     if(key.startsWith('hab:')){
       const habId = key.slice(4);
-      try{
-        const r = await fetch('/api/habitantes/' + habId, {cache:'no-store'});
-        if(r.ok) return await r.json();
-      }catch(e){}
+      // REQ-RED1 · si el índice dice que ese habitante NO existe, la petición sobra: iba a dar 404 y
+      // a caer igualmente al asset de abajo. Ver `mcHabIds()` para por qué no se invierte el orden.
+      const habIds = await mcHabIds();
+      if(!habIds || habIds.has(habId)){
+        try{
+          const r = await fetch('/api/habitantes/' + habId, {cache:'no-store'});
+          if(r.ok) return await r.json();
+        }catch(e){}
+      }
       // Fallback 2º: Si no está en usuario, buscar en assets del servidor
       const fileFromReg = typeof mcAssetsRegistry !== 'undefined' ? mcAssetsRegistry[habId] : null;
       const assetPath = fileFromReg || ('assets/' + habId + '.vox.json');
@@ -4119,10 +4156,23 @@ function invalidateTex(key){ texDefs.delete(key); texFaceCache.delete(key); texR
   for(const k in mc.structs) if(mcClaveBase(k)===key) delete mc.structs[k];
 }
 // Rehidrata texturas embebidas en un modelo cargado: pobla defs+caché+repr (render offline)
+// ⚠️ BUG-TEX1 — LA COPIA EMBEBIDA ES UN RESPALDO, NO LA FUENTE. Si la clave tiene fichero propio
+// (`asset:` / `hab:`), manda el fichero: la copia solo se usa si el servidor no devuelve nada, que
+// es el caso para el que se inventó (render offline). Antes pisaba al documento real, y como el
+// editor guarda su recorte en localStorage (`localSnap`) y `restore()` lo re-inyecta en CADA
+// arranque, una copia coja envenenaba la sesión entera y sobrevivía a recargar — invisible en
+// incógnito, que es lo que despista al diagnosticarlo. Detalle en docs/editor.md (BUG-TEX1).
 function ingestTextures(doc){
   if(!doc || !doc.textures) return;
   for(const [k,def] of Object.entries(doc.textures)){
-    const d={ size:texSize(def.size), voxels:def.voxels||{}, caras:def.caras||null };
+    const d={ size:texSize(def.size), voxels:def.voxels||{}, caras:def.caras||null,
+              atravesable:!!def.atravesable, aislante:!!def.aislante, inamovible:!!def.inamovible };
+    if(/^(asset:|hab:)/.test(k)){
+      if(texDefs.has(k) || roomDataCache.has(k)) continue;   // ya hay algo cargado: no lo pisa
+      roomDataCache.set(k, getRoomData(k).then(real =>
+        (real && real.voxels && Object.keys(real.voxels).length) ? real : d, () => d));
+      continue;                                              // texDefs/repr los puebla getTexDef
+    }
     texDefs.set(k,d); texReprCache.set(k, computeTexRepr(d));
     roomDataCache.set(k, Promise.resolve(d));
   }
@@ -4345,6 +4395,7 @@ $('#snip-split').onclick = snipToggleDividido;
 function snipTapaElMundo(){ return !$('#snip-modal').hidden && !document.body.classList.contains('snip-dividido'); }
 async function snipReload(){
   const list=$('#snip-list'); list.innerHTML='<p class="snip-empty">Cargando…</p>';
+  mcOlvidaSnippetIds();   // REQ-RED1: un alta o una baja del panel se ve en el acto, sin esperar al TTL
   try{ snips=await fetch('/api/snippets',{cache:'no-store'}).then(r=>r.json()); }
   catch(e){ list.innerHTML='<p class="snip-empty">No se pudo cargar.</p>'; return; }
   renderSnipList();
@@ -8581,6 +8632,9 @@ game.volatiles = {
 
   function queueTick(x, y, z) {
     if (!dentro(x, y, z)) return;
+    // Estímulo EXTERNO (una edición, no el propio paso del sim): desgobierna y da otros 5 s de
+    // cadencia normal — el agua que el jugador acaba de tocar nunca va a cámara lenta (PERF-AGUA1).
+    if (!inTick) { _fluidInquietaDesde = 0; _fluidGobernado = false; }
     var k = cl(x, y, z);
     queue.set(k, [x, y, z]);
   }
@@ -8740,6 +8794,17 @@ game.volatiles = {
   var _lastFluidRemesh = 0;
   var _lastFluidStep = 0;
   var _fluidPendingBox = null;
+  // PERF-AGUA1: hay agua que NUNCA se asienta (fuga + realimentación) y su cola mantiene
+  // ~11 pasos/s × re-mallado de la caja = ~44 mcMeshChunk/s para siempre, mire donde mire el
+  // jugador. Gobernador de cadencia: si la cola lleva >5 s sin vaciarse, es agua en bucle y
+  // pasa a 1 paso/s (validado en caliente: 123,9 → 144,2 fps en `default`). Se desgobierna
+  // en cuanto la cola toca 0 — o cuando entra un queueTick EXTERNO (una edición): el agua que
+  // el jugador acaba de tocar corre siempre a cadencia normal sus primeros 5 s.
+  var FLUID_GOB_UMBRAL_MS = 5000;
+  var FLUID_GOB_CADENCIA_MS = 1000;
+  var _fluidInquietaDesde = 0;
+  var _fluidGobernado = false;
+  var _fluidGobAvisado = false;
 
   function remeshChunks(bx0, bz0, bx1, bz1) {
     if (typeof mcRemeshChunksOnly === 'function') {
@@ -8765,8 +8830,21 @@ game.volatiles = {
   function tick(forzar) {
     if (inTick || (!queue.size && !_fluidPendingBox)) return;
     var now = performance.now();
-    // Cadencia natural de fluidos: procesar simulación cada ~100ms (10 ticks/segundo)
-    if (!forzar && queue.size > 0 && now - _lastFluidStep < 90 && !_fluidPendingBox) return;
+    if (!queue.size) { _fluidInquietaDesde = 0; _fluidGobernado = false; }
+    else if (!_fluidInquietaDesde) { _fluidInquietaDesde = now; }
+    else if (!_fluidGobernado && now - _fluidInquietaDesde > FLUID_GOB_UMBRAL_MS) {
+      _fluidGobernado = true;
+      if (!_fluidGobAvisado) {
+        _fluidGobAvisado = true;
+        console.warn('[fluidos] cola viva ' + (FLUID_GOB_UMBRAL_MS / 1000) + ' s sin vaciarse (' +
+          queue.size + ' celdas): agua en bucle, cadencia gobernada a ' +
+          (1000 / FLUID_GOB_CADENCIA_MS) + ' paso/s (PERF-AGUA1; game.fluidos.gobernado())');
+      }
+    }
+    // Cadencia natural de fluidos: procesar simulación cada ~100ms (10 ticks/segundo);
+    // gobernada (agua en bucle), 1 paso por segundo.
+    var cadencia = _fluidGobernado ? FLUID_GOB_CADENCIA_MS : 90;
+    if (!forzar && queue.size > 0 && now - _lastFluidStep < cadencia && !_fluidPendingBox) return;
 
     inTick = true;
     _lastFluidStep = now;
@@ -8874,6 +8952,7 @@ game.volatiles = {
     onBlockChange: onBlockChange,
     tick: tick,
     queueSize: function() { return queue.size; },
+    gobernado: function() { return _fluidGobernado; },
     // Reconstruye fluidLevels desde mc.grid al recargar el mundo.
     // Las claves con sufijo de nivel (hab:agua-3, hab:lava-5) codifican el nivel en el nombre.
     rebuild: function() {
@@ -13337,6 +13416,71 @@ function mcStuckShow(on){
     toast(w && w.motivo ? 'Atascado por '+w.motivo+' · pulsa U (o el botón) para salir'
                         : 'Atascado · pulsa U (o el botón) para salir', 4);
   }
+}
+// ── BUG-SPAWN1 · el spawn que se quedó viejo ───────────────────────────────────────────────────────
+// Los generadores de bioma (`construye-*`) levantan el relieve pero NO tocan `mc.spawn`, así que se
+// queda el que puso `wipeMap` antes de generar (el centro del mapa a y=GH+1). Ese punto se guarda en
+// el mundo y se REAPLICA al cargar, y por eso el fallo solo se ve al RECARGAR: en una playa el centro
+// suele caer DENTRO del relieve, muy por debajo de la superficie.
+//
+// MEDIDO en el mapa del dueño (`/map/playa`, spawn guardado {64,15,64}): la columna del centro es
+// roca (id 3) de y=1 a y=16, arena (id 14) de y=17 a y=20 y aire desde y=21. O sea que y=15 está
+// ENTERRADO en roca maciza — no bajo el agua, como se supuso al principio.
+//
+// ⛔ Y `mcUnstick` NO lo tapa, y ésta es la parte que cuesta cara: sube al PRIMER hueco de aire que
+// encuentra, no a la superficie. Si entre la roca y la arena hay una cavidad, la cavidad ES el primer
+// hueco, y ahí te deja — literalmente el síntoma que describió el dueño, «aparezco bajo el suelo de la
+// playa, entre el fondo y la arena en una cavidad». Y si el spawn cae en agua, el agua no colisiona,
+// así que `mcUnstick` contesta `true` sin mover nada y te quedas a remojo.
+//
+// Qué se corrige y qué NO. Se mueve solo a quien aparece en una celda donde NO SE PUEDE ESTAR DE PIE:
+// maciza (enterrado) o con fluido (a remojo). Eso no es un sitio que nadie eligiera. Un spawn en aire
+// con suelo debajo —una cueva, un sótano, dentro de una casa— es LEGÍTIMO y no se toca: corregir «todo
+// lo que esté bajo tierra» le movería la casa a quien la construyó ahí. Y cuando hay que mover, se va
+// a la SUPERFICIE seca de la columna (`mcPieSeco`), no al primer hueco: es la diferencia entre salir a
+// la arena y salir a la cavidad.
+// Y de PIES donde se está de pie EN SECO en esta columna: suelo pisable con dos celdas libres de
+// bloque Y de fluido encima (`mcCeldaFluida`, el mismo predicado que usa estampar). −1 si la columna
+// no lo tiene (mar abierto, o todo macizo).
+function mcPieSeco(x,z){
+  if(!mc.grid || !mcInside(x,0,z)) return -1;
+  for(let y=mc.dim.y-3; y>=0; y--){
+    if(!mcSolidWalk(x,y,z)) continue;
+    const p=y+1, c=y+2;
+    if(mcSolidWalk(x,p,z) || mcSolidWalk(x,c,z)) continue;
+    if(mcCeldaFluida(x,p,z) || mcCeldaFluida(x,c,z)) continue;   // bajo el agua no es «de pie»
+    return p;
+  }
+  return -1;
+}
+// Reubica el spawn (y al jugador) al seco más cercano, en espiral. El radio se recorre en anillos
+// para que en una isla salgas en SU playa y no en la otra punta del mapa.
+function mcSpawnSeguro(radio){
+  if(!mc.grid || !mc.spawn) return false;
+  const sx=mc.spawn.x|0, sz=mc.spawn.z|0, R=radio===undefined?48:radio;
+  // Se juzga el SPAWN GUARDADO, no dónde ha acabado el jugador: para cuando esto corre, `mcForceUnstick`
+  // ya puede haberlo subido a una cavidad, y entonces el sitio parecería bueno y el fichero seguiría
+  // con el punto malo dentro, listo para volver a fallar en la siguiente recarga.
+  const sy=mc.spawn.y|0;
+  // ¿Hace falta? Solo si en el spawn no se puede estar de pie: enterrado (maciza) o a remojo (fluido),
+  // mirando las dos celdas que ocupa el cuerpo, pies y cabeza.
+  const malo = mcSolidWalk(sx,sy,sz) || mcSolidWalk(sx,sy+1,sz) ||
+               mcCeldaFluida(sx,sy,sz) || mcCeldaFluida(sx,sy+1,sz);
+  if(!malo) return false;
+  for(let r=0;r<=R;r++){
+    for(let dx=-r;dx<=r;dx++) for(let dz=-r;dz<=r;dz++){
+      if(Math.max(Math.abs(dx),Math.abs(dz))!==r) continue;       // solo el borde del anillo
+      const x=sx+dx, z=sz+dz, y=mcPieSeco(x,z);
+      if(y<0) continue;
+      mc.spawn={x:x, y:y, z:z};
+      mc.pos=[x+0.5, y, z+0.5]; mc.vel=[0,0,0]; mc.onGround=true;
+      console.log('[spawn] el punto de aparición ('+sx+','+sy+','+sz+') no era un sitio donde estar de pie; '+
+                  'movido a la superficie en '+x+','+y+','+z+(r?' ('+r+' bloques de rodeo)':' (misma columna)'));
+      return true;
+    }
+  }
+  console.warn('[spawn] el punto de aparición no es pisable y no hay superficie seca en '+R+' bloques a la redonda; se deja como estaba');
+  return false;
 }
 // Desatasco «duro» (tecla U / game.unstick()): intenta subir; si no sale, teletransporta al spawn y sube ahí.
 function mcForceUnstick(){
@@ -21505,7 +21649,17 @@ function mcSerialize(){
 function mcStructuresDoc(){
   return mc.structures.filter(s=>!s.efimera).map(s=>({key:s.key, x:s.ox, y:s.oy, z:s.oz, rot:s.rot|0}));
 }
-function mcBake(doc){                          // hornea un mundo guardado a la rejilla densa + meshes
+// ⚡ PERF · `opts.difiereMalla` (2026-09-02). El `mcMeshAll()` de aquí abajo se TIRABA ENTERO al abrir un
+// mundo con estructuras: `mcRestampAll` acaba con su propio `mcMeshAll()` cuando la luz de bloque ha
+// cambiado (:16572), y al hornear SIEMPRE cambia, porque las instancias con `emitFinos` se apilan justo
+// después de mallar. Medido en /map/default: 2203 ms + 1979 ms, y los 2203 no servían para nada. Es el
+// mismo defecto que tenía `pideRemallado` en `mundo-autoarranque`, y se arregla igual — no hay que
+// adivinar si el restamp malló: `mcMeshAll` deja `mc.blockLightMeshed` en un array NUEVO cada vez
+// (:12264, `.slice()`), así que basta comparar la referencia.
+// Es OPT-IN y solo lo pasa `openWorld`, que tiene el cartel de carga puesto: mientras se restampa no hay
+// malla, y sin overlay (`game.reloadWorld`) eso sería un parpadeo de mundo vacío. Sin la opción, esta
+// función se comporta exactamente como antes.
+function mcBake(doc, opts){                   // hornea un mundo guardado a la rejilla densa + meshes
   if(mc.agents.size){ mcStopAgents('mapa recargado'); for(const a of mc.agents.values()) mcAgentFreeMesh(a); mc.agents.clear(); }   // otro mundo = otra rejilla
   const d=doc.dim||{}; mc.dim={x:(d.x|0)||96, y:(d.y|0)||40, z:(d.z|0)||96};
   mcClearStructures();
@@ -21543,13 +21697,31 @@ function mcBake(doc){                          // hornea un mundo guardado a la 
   // Tinte del cartel: va en su propio mapa por lo mismo que el giro — `notes` es "clave → TEXTO" en
   // todos los mundo.json escritos hasta hoy, y meterle un objeto dentro cambiaría el formato para todos.
   mc.noteTints={}; const dt=doc.noteTints; if(dt && typeof dt==='object') for(const k in dt){ const h=mcNoteTinteNorm(dt[k]); if(h) mc.noteTints[k]=h; }
-  mcMeshAll();
+  // Solo se difiere si además HAY estructuras: sin ellas nadie va a mallar detrás y el mundo se quedaría
+  // invisible. Se decide antes de mallar para que, sin la opción, todo esto quede igual que siempre.
+  // ⚠️ El filtro es EL MISMO `st && st.key` que usa el bucle de abajo, y tiene que seguir siéndolo: con
+  // `doc.structures.length` a secas, un mundo cuyas entradas no tuvieran `key` diferiría el mallado y luego
+  // caería en la rama «sin estructuras», que no malla a nadie ⇒ mundo negro.
+  const difiereMalla = !!(opts && opts.difiereMalla) && !!(doc.structures && doc.structures.some(st => st && st.key));
+  if(!difiereMalla) mcMeshAll();
   // re-hornear estructuras (malla fina) — apila las instancias y deja que mcRestampAll componga el atlas UNA vez
   // y malle todo (evita la carrera de estampar N a la vez, cada una recomponiendo el atlas). El render las dibuja
   // en cuanto están listas.
   for(const st of (doc.structures||[])){ if(st&&st.key)
     mc.structures.push({key:st.key, ox:st.x|0, oy:st.y|0, oz:st.z|0, rot:mcOriNorm(st.rot), colVbo:null, colCount:0, alphaVbo:null, alphaCount:0, texVbo:null, texCount:0, aabb:[st.x|0,st.y|0,st.z|0,st.x|0,st.y|0,st.z|0]}); }
-  if(mc.structures.length) mcRestampAll().then(mcForceUnstick);   // al terminar de mallar, sácalo si una sala cayó sobre el spawn (p.ej. escala grande la última vez)
+  if(mc.structures.length){
+    const luzAntes=mc.blockLightMeshed;
+    // Con .catch para que un fallo del re-horneado no salga como 'unhandled rejection' sin nombre, y sobre
+    // todo para que el terreno no se quede SIN MALLAR si el restamp revienta cuando se difirió.
+    mcRestampAll().then(()=>{
+      if(difiereMalla && mc.blockLightMeshed===luzAntes) mcMeshAll();   // el restamp no llegó a mallar el terreno
+      mcForceUnstick();                                                 // sácalo si una sala cayó sobre el spawn
+    },e=>{
+      console.warn('mcBake: falló el re-horneado de estructuras.', e);
+      if(difiereMalla) mcMeshAll();
+      mcForceUnstick();
+    });
+  }
   else mcForceUnstick();                                           // sin estructuras: desatasca inmediatamente sobre el terreno
 }
 function mcInvalidateAllAssets(){
@@ -22628,7 +22800,9 @@ async function openWorld(){
       : 'El mundo guardado está vacío: lo que haya lo pondrá su snippet…')); await mcYield();
     mcLoadPhase(hasVox ? 'Bake de '+nVox.toLocaleString('es')+' voxels guardados + mallado'
       : (doc && doc.fresh ? 'Generar terreno + mallado' : 'Bake de mundo vacío'));
-    if(hasVox) mcBake(doc);              // conserva lo construido
+    // difiereMalla: el mallado del terreno lo hace el restamp de las estructuras, que va a mallar igual.
+    // Aquí es seguro porque el overlay de carga tapa el mundo hasta el final de openWorld.
+    if(hasVox) mcBake(doc, {difiereMalla:true});    // conserva lo construido
     else if(doc && doc.fresh) { mcGenFlat(); mcMeshAll(); mcForceUnstick(); }   // mundo recién nacido (sin fichero) → terreno plano y desatasca
     else mcBake(doc || {voxels:{}});     // vacío GUARDADO (p.ej. wipeMap) → vacío total, sin voxels
     // Reconstruir fluidLevels desde las claves de bloque (hab:agua-3 → nivel 3) para que
@@ -22659,6 +22833,12 @@ async function openWorld(){
 
   // Desatasco instantáneo garantizado sobre el mundo completamente cargado
   mcForceUnstick();
+  // …y, si ese sitio es agua, a tierra seca (BUG-SPAWN1). Va DESPUÉS y no dentro de mcForceUnstick
+  // porque son dos preguntas distintas: aquél resuelve la COLISIÓN (estar dentro de algo macizo) y
+  // el agua no colisiona, así que para él un ahogado ya está bien. Aquí es el último punto de la
+  // carga en que el terreno del generador, sus fluidos (game.fluidos.rebuild) y el autoarranque ya
+  // están puestos: antes, la playa todavía no existe y no hay arena a la que subir.
+  mcSpawnSeguro();
 
   // El mundo ya está 100% horneado, inicializado y desatascado: quitamos carga e iniciamos bucle fluido a 60 FPS
   mcHideLoading();
@@ -22824,17 +23004,45 @@ const _mcSnippetCache = new Map();
 const _mcSnippetCacheAt = new Map();
 const MC_SNIPPET_TTL = 5000;
 function mcSnippetCachea(id, s){ _mcSnippetCache.set(id, s); _mcSnippetCacheAt.set(id, Date.now()); }
+// REQ-RED1 · UN SNIPPET QUE NO EXISTE NO SE PIDE.
+// `mundo-<mapa>` y `arranque-<mapa>` son OPCIONALES por diseño —la mayoría de los mapas no tienen el
+// suyo—, así que preguntar por ellos dejaba un 404 rojo en la consola en CADA carga, y era el último
+// que quedaba. El índice (`GET /api/snippets`, ~20 KB de metadatos: id, nombre y nº de líneas, sin
+// una sola línea de código) dice quién existe, y se comparte entre los ~15 snippets que pide el
+// autoarranque, así que se baja una vez.
+//
+// Caduca con el MISMO TTL que el caché de snippets, y por la misma razón que se le puso a aquél: un
+// snippet recién nacido —lo creas en el panel Código, o lo publica un `parche_snp_*.py` con la página
+// abierta— tiene que verse solo, sin recargar. Además `snipReload()` lo invalida en el acto, que es
+// por donde pasan todos los altas y bajas del panel. Si el índice no se puede bajar se pide a pelo:
+// nunca se queda peor que antes.
+let _mcSnipIdsP=null, _mcSnipIdsAt=0;
+function mcSnippetIds(){
+  if(!_mcSnipIdsP || Date.now()-_mcSnipIdsAt > MC_SNIPPET_TTL){
+    _mcSnipIdsAt = Date.now();
+    _mcSnipIdsP = fetch('/api/snippets',{cache:'no-store'})
+      .then(r=>r.ok?r.json():null)
+      .then(l=>Array.isArray(l)?new Set(l.map(s=>String(s.id))):null)
+      .catch(()=>null);
+  }
+  return _mcSnipIdsP;
+}
+function mcOlvidaSnippetIds(){ _mcSnipIdsP=null; }
 function mcPideSnippet(nombre){
   const id = String(nombre==null?'':nombre).trim();
   if(!id) return Promise.resolve(null);
   if(_mcSnippetCache.has(id) && Date.now() - (_mcSnippetCacheAt.get(id) || 0) < MC_SNIPPET_TTL)
     return Promise.resolve(_mcSnippetCache.get(id));
-  return fetch('/api/snippets/'+encodeURIComponent(id),{cache:'no-store'})
-    .then(r=>r.ok?r.json():null)
-    // Si la red falla se sigue con la copia vieja: caducar no es tirar lo unico que tenemos, y una
-    // intro a medio empezar no deberia morir porque una peticion se perdio.
-    .then(s => { if(s && s.code){ mcSnippetCachea(id, s); return s; } return _mcSnippetCache.get(id) || s; })
-    .catch(()=> _mcSnippetCache.get(id) || null);
+  return mcSnippetIds().then(ids => {
+    // «No está en el índice» es una respuesta de hace menos de MC_SNIPPET_TTL: se puede creer.
+    if(ids && !ids.has(id)) return _mcSnippetCache.get(id) || null;
+    return fetch('/api/snippets/'+encodeURIComponent(id),{cache:'no-store'})
+      .then(r=>r.ok?r.json():null)
+      // Si la red falla se sigue con la copia vieja: caducar no es tirar lo unico que tenemos, y una
+      // intro a medio empezar no deberia morir porque una peticion se perdio.
+      .then(s => { if(s && s.code){ mcSnippetCachea(id, s); return s; } return _mcSnippetCache.get(id) || s; })
+      .catch(()=> _mcSnippetCache.get(id) || null);
+  });
 }
 function mcIntroPrefetch(forzar){
   if(!forzar && !mcEsIntro()) return null;
@@ -23817,6 +24025,12 @@ game.resizeWorld=function(x,y,z){
 // game.unstick() = sácame de donde esté incrustado (equivale a la tecla U): sube por encima de lo que estorbe;
 // si no encuentra hueco, teletransporta al spawn. Útil si cargaste el mundo dentro de una estructura.
 game.unstick=function(){ if(!mc.active) return 'abre el Mundo primero'; mcForceUnstick(); return 'ok'; };
+// Hermano de game.unstick para el otro atasco: no «estoy metido en algo» sino «el PUNTO DE APARICIÓN
+// guardado no es un sitio donde estar de pie» (BUG-SPAWN1). Corre solo al terminar de cargar; a mano
+// sirve para arreglar un mapa ya guardado —mueve `mc.spawn`, y el siguiente guardado se lo lleva—.
+game.spawnSeguro=function(radio){ if(!mc.active) return 'abre el Mundo primero';
+  return mcSpawnSeguro(radio) ? 'spawn movido a la superficie; guarda el mapa para fijarlo'
+                              : 'el spawn ya era pisable'; };
 // game.atasco() = POR QUÉ estás atascado (REQ-DBG2). Mira dónde estás AHORA y devuelve quién te
 // atrapa, repartido en las tres cosas que pueden hacerlo: `terreno` (bloques de mc.grid, con su clave
 // y su celda), `piezas` (estructuras finas — ahí viven las piezas de los agentes articulados, y si el

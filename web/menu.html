@@ -4,6 +4,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="/favicon.ico">
 <link rel="stylesheet" href="/scrollbars.css">
+<script src="/quien.js" defer></script>   <!-- la chapa de identidad; se calla sola en /map/ -->
 <!-- F5.1 · LA PORTADA. En modo público `server.py` sirve ESTO en `/` a quien no sea el dueño, en vez
      del editor de objetos (`index.html`), que es lo que había hasta hoy y que a un visitante no le
      dice nada.
@@ -181,9 +182,14 @@ function pintaMenu() {
     h += '<a class="bot" href="/map/"><span class="ico">🗺</span><span class="txt">Explorar mundos' +
          '<small>Ver los ' + MUNDOS.length + ' que puedes abrir</small></span></a>';
   }
+  // ⚠️ Un ENLACE al asistente, no un botón que crea. Aquí había un `prompt()` que mandaba solo el
+  // nombre a `/api/mundos/crear`: sin plantilla, el mundo nace `generado:false` y nadie lo levanta
+  // después, así que el jugador aterrizaba en un mundo VACÍO creyendo que el juego estaba roto.
+  // Quien sabe crear un mundo es el asistente de `/map` (REQ-PLANT1), y es el único sitio donde se
+  // elige plantilla, tamaño, ambiente y efectos. `?nuevo=1` lo abre de entrada.
   if (puede('mundo.crear')) {
-    h += '<button class="bot" id="crear"><span class="ico">✚</span><span class="txt">Crear un mundo' +
-         '<small>Tuyo, y eliges quién entra</small></span></button>';
+    h += '<a class="bot" id="crear" href="/map?nuevo=1"><span class="ico">✚</span><span class="txt">Crear un mundo' +
+         '<small>Tuyo, y eliges quién entra</small></span></a>';
   }
   if (DUENO) {
     h += '<a class="bot" href="/index.html"><span class="ico">🧩</span><span class="txt">Editor de objetos' +
@@ -200,7 +206,7 @@ function pintaMenu() {
   // igualmente sería ofrecer un botón que solo sabe fallar.
   const mios = mundosMios();
   if (puede('multi.invitar') && mios.length) {
-    h += '<div class="tarjeta"><h2>Invitar a alguien</h2>' +
+    h += '<div class="tarjeta" id="invitar"><h2>Invitar a alguien</h2>' +
          '<p>Genera un enlace para tu mundo. Quien lo abra entra directo, sin registrarse.</p>' +
          '<div class="acciones">';
     for (const m of mios) {
@@ -229,8 +235,6 @@ function pintaMenu() {
   }
   $('#main').innerHTML = h;
 
-  const c = $('#crear');
-  if (c) c.onclick = creaMundo;
   document.querySelectorAll('[data-mapa]').forEach((a) => {
     a.addEventListener('click', () => {
       try { localStorage.setItem('vf_ultimo_mapa', a.getAttribute('data-mapa')); } catch (e) {}
@@ -301,16 +305,6 @@ async function invita(slug) {
   };
 }
 
-async function creaMundo() {
-  const nombre = prompt('¿Cómo se llama tu mundo?');
-  if (!nombre) return;
-  const { ok, d } = await pide('/api/mundos/crear', { method: 'POST', body: JSON.stringify({ nombre }) });
-  if (!ok) { alert(d.error || 'no se ha podido crear'); return; }
-  const slug = d.slug || d.nombre;
-  try { localStorage.setItem('vf_ultimo_mapa', slug); } catch (e) {}
-  location.href = d.url || ('/map/' + encodeURIComponent(slug));
-}
-
 // ── Entrar y registrarse ────────────────────────────────────────────────────────────────────────
 
 function pintaAcceso(modo) {
@@ -367,8 +361,25 @@ function pintaDisena() {
     ev.preventDefault();
     const { ok, d } = await pide('/api/disena', { method: 'POST', body: JSON.stringify({ token: $('#tk').value }) });
     if (!ok) { $('#errd').textContent = d.error || 'no ha podido ser'; return; }
-    location.reload();
+    // Al modo diseño se entra PARA DISEÑAR: se va al editor 2D/3D, no se recarga la portada.
+    // Un `location.reload()` aquí además rebotaba: recién ascendido a dueño, `/` deja de servir
+    // esta página (`server.py:1442`) y devolvía el editor por la puerta de atrás, sin que se
+    // entendiera por qué. Lo administrativo cuelga del menú «⋯» del propio editor.
+    location.href = '/index.html';
   };
+}
+
+// El editor 2D/3D enlaza aquí con `#crear` y `#invitar` para llevar a una sección concreta. El
+// navegador NO lo hace solo: cuando llega el `#` esta página todavía no ha pintado nada (el menú
+// sale de `GET /api/mundos`), así que el ancla apunta a un elemento que aún no existe y el salto se
+// pierde en silencio. Por eso se repite a mano al terminar de pintar.
+// Si la sección no está —no tienes el permiso, o no tienes ningún mundo tuyo que invitar— no se
+// hace nada: se queda en la portada, que es la respuesta honesta a «esto aquí no lo tienes».
+function enfocaAncla() {
+  const id = (location.hash || '').replace('#', '');
+  if (!id) return;
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ block: 'center' });
 }
 
 // ── Arranque ────────────────────────────────────────────────────────────────────────────────────
@@ -382,6 +393,7 @@ function pintaDisena() {
                                   : 'Entra para jugar, o crea una cuenta: es gratis y tarda diez segundos.';
   if (dentro) pintaMenu(); else pintaAcceso('entrar');
   pintaDisena();
+  enfocaAncla();
   $('#pie').innerHTML = PUBLICO ? '' : 'Servidor en <b>modo desarrollo</b>: aquí un anónimo tiene todos los permisos.';
 })();
 </script>
