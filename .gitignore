@@ -72,3 +72,7 @@ data/snippets/multi-*.json
 # `python3 multi/sincroniza.py instala`.
 data/snippets/mundo-multiverse.json
 herramientas/parche_snp_relevo_multi.py
+# Este planta en `mundo-autoarranque.json` el enganche que arranca el cliente cuando llegas por
+# invitación o por relevo. El enganche NOMBRA a `multi-verse` en sus comentarios, así que el
+# candado lo caza si se commitea: el parche se queda en el disco de esta máquina (2026-09-03).
+herramientas/parche_snp_invitacion_multi.py
